@@ -6,8 +6,8 @@ from yaml import safe_load
 from time import perf_counter
 
 class Activation(torch.nn.Module):
-    def forward(self, x):
-        return 0.5 * (1.0 + torch.erf(x / np.sqrt(2.0)))
+    def forward(self, x, THRESH=15):
+        return THRESH * 0.5 * (1.0 + torch.erf(x / np.sqrt(2.0)))
 
 class Network(nn.Module):
     def __init__(self, conf_file, sim_name, repo_root, **kwargs):
@@ -32,35 +32,46 @@ class Network(nn.Module):
                 self.Wab[i_pop][j_pop] = Wij
                 
         for i_pop in range(self.N_POP):
-            self.Wab[i_pop][i_pop].bias.data.fill_(self.Ja0[i_pop])
-        
-        # self.Wab = nn.Linear(self.Na[0], self.Na[0], bias=True, dtype=self.FLOAT)
-        # self.Wab.weight.data = self.initWeights(0, 0)
-        # self.Wab.bias.data.fill_(self.Ja0[0])
-        
-    def forward(self, rates):
-        
-        # net_input = torch.zeros(self.N_NEURON)
-        net_input = torch.randn(size=(self.N_NEURON, ), dtype=self.FLOAT) * self.VAR_FF[0]
-        # net_input = net_input + self.Wab(rates)
-        
-        # rates = rates * self.EXP_DT_TAU[0]
-        # # rates = rates + self.DT_TAU[0] * Activation()(net_input)
-        # rates = rates + self.DT_TAU[0] * nn.ReLU()(net_input)
+            self.Wab[i_pop][i_pop].bias.data.fill_(self.Ja0[i_pop])        
+
+    def update_rec_input(self, rates):
+        rec_input = torch.zeros((self.N_POP, self.N_NEURON))
         
         for i_pop in range(self.N_POP):
             for j_pop in range(self.N_POP):
-                net_input[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] += self.Wab[i_pop][j_pop](rates[self.csumNa[j_pop] : self.csumNa[j_pop + 1]])
-                
+                rec_input[i_pop] = rec_input[i_pop] + self.Wab[i_pop][j_pop](rates[self.csumNa[j_pop] : self.csumNa[j_pop + 1]])
+        
+        return rec_input
+    
+    def update_net_input(self, rec_input):
+        if self.VAR_FF[0] > 0:
+            net_input = torch.randn(size=(self.N_NEURON, ), dtype=self.FLOAT) * np.sqrt(self.VAR_FF[0])
+        else:
+            net_input = torch.zeros(self.N_NEURON)
+        
+        for i_pop in range(self.N_POP):
+            net_input = net_input + rec_input[i_pop]
+
+        return net_input
+    
+    def update_rates(self, rates, net_input):
         for i_pop in range(self.N_POP):
             rates[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = rates[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] * self.EXP_DT_TAU[i_pop]
-            rates[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = rates[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] + self.DT_TAU[i_pop] * nn.ReLU()(net_input[self.csumNa[i_pop] : self.csumNa[i_pop + 1]])
+            rates[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = rates[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] + self.DT_TAU[i_pop] * Activation()(net_input[self.csumNa[i_pop] : self.csumNa[i_pop + 1]])
+
+        return rates
+    
+    def forward(self, rates):
+        
+        rec_input = self.update_rec_input(rates)
+        net_input = self.update_net_input(rec_input)
+        rates = self.update_rates(rates, net_input)
         
         return rates
 
     def print_activity(self, step, rates):
         
-        times = np.round((step -self.N_STEADY) / self.N_STEPS * self.DURATION, 2)
+        times = np.round((step - self.N_STEADY) / self.N_STEPS * self.DURATION, 2)
         
         activity = []
 
@@ -147,7 +158,7 @@ class Network(nn.Module):
             theta = torch.arange(0, Na, dtype=self.FLOAT) * (2 * np.pi / Na)
             phi = torch.arange(0, Nb, dtype=self.FLOAT) * (2 * np.pi / Nb)
             
-            i, j = torch.meshgrid(torch.arange(Na), torch.arange(Nb))
+            i, j = torch.meshgrid(torch.arange(Na), torch.arange(Nb),indexing="ij")
             theta_diff = theta[i] - phi[j]
 
             if 'spec' in self.STRUCTURE[i_pop][j_pop]:
@@ -164,10 +175,13 @@ class Network(nn.Module):
             if self.VERBOSE:
                 print('All to all connectivity ')
             Cij = self.Jab[i_pop][j_pop] * Pij / Nb
-        
-        if "cos" in self.STRUCTURE[i_pop][j_pop]:
-            if self.VERBOSE:
-                print('with strong cosine structure')
+
+        if self.VERBOSE:
+            if "cos" in self.STRUCTURE[i_pop][j_pop]:
+                if "spec" in self.STRUCTURE[i_pop][j_pop]:
+                    print('with weak cosine structure')
+                else:
+                    print('with strong cosine structure')
             
         return Cij
     
@@ -217,7 +231,7 @@ class Network(nn.Module):
         # scaling recurrent weights Jab
         if self.VERBOSE:
             print("Jab", self.Jab)
-            
+        
         self.Jab = torch.tensor(self.Jab, dtype=self.FLOAT).reshape(self.N_POP, self.N_POP) * self.GAIN
         
         for i_pop in range(self.N_POP):
