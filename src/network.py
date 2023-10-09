@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch import nn
 from yaml import safe_load
+from time import perf_counter
 
 class Activation(torch.nn.Module):
     def forward(self, x):
@@ -23,7 +24,7 @@ class Network(nn.Module):
         
         # Create recurrent layer
         self.Wab = [[None]*self.N_POP for _ in range(self.N_POP)]
-        
+
         for i_pop in range(self.N_POP):
             for j_pop in range(self.N_POP):
                 Wij = nn.Linear(self.Na[i_pop], self.Na[j_pop], bias=(i_pop==j_pop), dtype=self.FLOAT)
@@ -57,19 +58,52 @@ class Network(nn.Module):
         
         return rates
 
+    def print_activity(self, step, rates):
+        
+        times = np.round((step -self.N_STEADY) / self.N_STEPS * self.DURATION, 2)
+        
+        activity = []
+
+        activity.append(np.round(torch.mean(rates[:self.csumNa[1]]).detach().numpy(), 2))
+        
+        if self.N_POP > 1:
+            activity.append(np.round(torch.mean(rates[self.csumNa[1]:self.csumNa[2]]).detach().numpy(), 2))
+
+        if self.N_POP > 2:
+            activity.append(np.round(torch.mean(rates[self.csumNa[2]:]).detach().numpy(), 2))
+            
+        print(
+            "times (s)",
+            np.round(times, 2),
+            "rates (Hz)",
+            activity,
+        )
+        
     def run(self):
         result = []
         # init rates
         hidden = self.initRates()
+ 
+        start = perf_counter()
         
         self.N_STEPS = int(self.DURATION / self.DT)
+        self.N_STEADY = int(self.T_STEADY / self.DT)
+        self.N_WINDOW = int(self.T_WINDOW / self.DT)
         
-        for _ in range(self.N_STEPS): 
+        for step in range(self.N_STEPS): 
             hidden = self.forward(hidden)
-            result.append(hidden.detach().numpy()[0])
-            
-        result = np.array(result).reshape((-1, self.N_NEURON))
 
+            if step % self.N_WINDOW == 0:
+                self.print_activity(step, hidden)
+            
+            result.append(hidden.detach().numpy())
+            
+        result = np.array(result)
+        
+        end = perf_counter()
+    
+        print("Elapsed (with compilation) = {}s".format((end - start)))
+        
         return result
     
     def loadConfig(self, conf_file, sim_name, repo_root, **kwargs):
@@ -115,6 +149,9 @@ class Network(nn.Module):
             
             i, j = torch.meshgrid(torch.arange(Na), torch.arange(Nb))
             theta_diff = theta[i] - phi[j]
+
+            if 'spec' in self.STRUCTURE[i_pop][j_pop]:
+                self.KAPPA[i_pop][j_pop] = self.KAPPA[i_pop][j_pop] / np.sqrt(self.Ka[j_pop])
             
             Pij = 1.0 + 2.0 * self.KAPPA[i_pop][j_pop] * torch.cos(theta_diff - self.PHASE)
             

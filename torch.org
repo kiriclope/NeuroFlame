@@ -1,6 +1,6 @@
 #+STARTUP: fold
 #+TITLE: RNN with pytorch
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session torch :kernel python3
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session torch :kernel torch
 
 * Notebook Settings
 #+begin_src ipython
@@ -14,262 +14,73 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
-: /home/leon/mambaforge/bin/python
-: <Figure size 600x370.82 with 0 Axes>
-:END:
+: /home/leon/mambaforge/envs/torch/bin/python
 
-* Single Fully Connected Hidden Layer
-**** imports
+* RNN with torch
+** Imports
 #+begin_src ipython
-  import numpy as np
-  import torch
-  from torch import nn
+  from src.network import Network
+  from src.plot_utils import plot_con
 #+end_src
 
 #+RESULTS:
-
-**** model
+** Model
 #+begin_src ipython
-  class Activation(torch.nn.Module):
-      def forward(self, x):
-          return 0.5 * (1 + torch.erf(x / np.sqrt(2.0)))
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  model = Network('config_EI.yml', 'bump', REPO_ROOT, VERBOSE=1, DURATION=2)
 #+end_src
 
 #+RESULTS:
-
-#+begin_src ipython
-  class AllToAllRNN(nn.Module):
-      def __init__(self, input_size, hidden_size, dt, tau):
-          super().__init__()
-          self.hidden_size = hidden_size
-          self.dt = dt / tau
-          self.exp_dt = np.exp(-dt/tau)
-
-          # Feedforward layer
-          if input_size>0:
-              self.i2h = nn.Linear(input_size, hidden_size, bias=False)
-              self.i2h.weight.data.fill_(1.0) # setting FF weights to 1 
-
-          # recurrent layer
-          self.h2h = nn.Linear(hidden_size, hidden_size, bias=True)
-          # add external input to bias
-          self.h2h.bias.data.fill_(14)  # Set bias to I0 for all neurons
-          # init weights
-          self.h2h.weight.data = self.initWeights(J0=-2.75, J1=0.4, PHASE=np.pi)
-
-      def forward(self, input, hidden):
-
-          noise = torch.randn(size=(1,self.hidden_size))
-
-          if input is not None:
-              net_input = self.i2h(input) + self.h2h(hidden)
-          else:
-              net_input = self.h2h(hidden) + noise
-
-          # hidden = nn.ReLU()(net_input)
-          # hidden = hidden * self.exp_dt + self.dt * nn.ReLU()(net_input)
-          hidden = hidden * self.exp_dt + self.dt * 15.0 * Activation()(net_input)
-          return hidden
-      
-      def initHidden(self):
-          return torch.zeros(1, self.hidden_size)
-
-      def initWeights(self, J0, J1, PHASE=np.pi):
-          N = self.hidden_size
-          theta = torch.arange(0, N, dtype=torch.float) * (2 * np.pi / N)
-          i, j = torch.meshgrid(torch.arange(N), torch.arange(N))
-          theta_diff = theta[i] - theta[j]
-          Wij = J0 * (1.0 + 2.0 * J1 * torch.cos(theta_diff - PHASE)) / N
-
-          return Wij
-
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  def plot_matrix(matrix):
-      plt.figure(figsize=(6,6))  # Adjust as needed.
-      plt.imshow(matrix, cmap='jet', interpolation='none')
-      plt.colorbar(label='Value')
-      plt.title('Matrix')
-      plt.show()
-      
-  # Assuming your matrix is called 'Wij'
-  plot_matrix(Wij.data.detach().numpy())  # Detach and convert to numpy for plotting
-
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/db1f7ff0236704a912c97651bb683129b5ae2682.png]]
-
-**** simulation
-#+begin_src ipython
-  input_size = 0
-  hidden_size = 1000
-  # Define your model
-  model = AllToAllRNN(input_size, hidden_size, dt=1, tau=10.0)
-
-  # Initialize hidden state
-  hidden = model.initHidden()
-
-  # Create an input tensor 
-  # input_tensor = torch.rand((1, input_size))  # dimensions are (batch_size, input_size)
-  input_tensor = None
-
-  rates = []
-  # Run the simulation
-  for _ in range(1000):  # Run for 100 steps
-      hidden = model(input_tensor, hidden)
-      rates.append(hidden.detach().numpy()[0])
-      
-  rates = np.array(rates)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  plt.imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=5)
-  plt.colorbar()
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/a884890b0f78269729e44477d714e86a56ada330.png]]
-
-* From src
-#+begin_src ipython
-from src.network import Network
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  REPO_ROOT = "/home/leon/Projects/torch"
-  model = Network('config_EI.yml', 'bump', REPO_ROOT, VERBOSE=1)
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-#+begin_src ipython
-  Wij = model.Wab[0][0].weight.data.detach().numpy()
-  plot_con(Wij)
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-: /home/leon/.local/lib/python3.10/site-packages/IPython/core/events.py:93: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
-:   func(*args, **kwargs)
-: /home/leon/.local/lib/python3.10/site-packages/IPython/core/pylabtools.py:152: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
-:   fig.canvas.print_figure(bytes_io, **kw)
-[[file:./.ob-jupyter/4b86b212078a8c2301cb8d0e7761865342e31480.png]]
-:END:
-:RESULTS:
-# [goto error]
-:END:
-
-: Loading config from /home/leon/Projects/torch/conf/config_EI.yml
+: Loading config from /home/leon/models/NeuroTorch/conf/config_EI.yml
 : Jab [1, -1.5, 1, -1]
 : Ja0 [0.5, 0.25]
 : Sparse random connectivity 
+: with strong cosine structure
 : Sparse random connectivity 
 : Sparse random connectivity 
 : Sparse random connectivity 
-:END:
+** Connectivity
+#+begin_src ipython
+  Cij = model.Wab[0][0].weight.data.detach().numpy()
+  plot_con(Cij)
+#+end_src
+
 #+RESULTS:
 :RESULTS:
-: /home/leon/.local/lib/python3.10/site-packages/IPython/core/events.py:93: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
+: /home/leon/mambaforge/envs/torch/lib/python3.10/site-packages/IPython/core/events.py:93: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
 :   func(*args, **kwargs)
-: /home/leon/.local/lib/python3.10/site-packages/IPython/core/pylabtools.py:152: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
+: /home/leon/mambaforge/envs/torch/lib/python3.10/site-packages/IPython/core/pylabtools.py:152: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
 :   fig.canvas.print_figure(bytes_io, **kw)
-[[file:./.ob-jupyter/aa149aec1a0d5d28cf86c680e8a17538536c1aad.png]]
+[[file:./.ob-jupyter/5809b9251f3cf1a43fd4b1b54b121c53d0b9cd72.png]]
 :END:
 
+** Simulation
 #+begin_src ipython
   rates = model.run()
 #+end_src
 
 #+RESULTS:
-: 2d2a0085-6634-4865-8932-aa3098717bc5
+: times (s) -1.0 rates (Hz) [0.56, 0.28]
+: times (s) -0.75 rates (Hz) [2.0, 2.28]
+: times (s) -0.5 rates (Hz) [2.05, 2.32]
+: times (s) -0.25 rates (Hz) [2.12, 2.4]
+: times (s) 0.0 rates (Hz) [2.16, 2.44]
+: times (s) 0.25 rates (Hz) [2.15, 2.43]
+: times (s) 0.5 rates (Hz) [2.16, 2.44]
+: times (s) 0.75 rates (Hz) [2.16, 2.44]
+: Elapsed (with compilation) = 9.703241745999549s
 
 #+RESULTS:
 
 #+begin_src ipython
-  plt.imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=20)
+  plt.imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=1)
   plt.colorbar()
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/013dea88d714fd39850cf3746ab47a642e760c14.png]]
+[[file:./.ob-jupyter/a57d8495af273a40a27923fbc2f4a556a36e2753.png]]
 
-#+begin_src ipython
-  def plot_con(Cij):
-      fig = plt.figure(figsize=(5, 5))
-      gs = fig.add_gridspec(
-          2,
-          2,
-          width_ratios=(4, 1),
-          height_ratios=(1, 4),
-          left=0.1,
-          right=0.9,
-          bottom=0.1,
-          top=0.9,
-          wspace=0.15,
-          hspace=0.15,
-      )
-      # Create the Axes.
-      ax = fig.add_subplot(gs[1, 0])
-      ax_histx = fig.add_subplot(gs[0, 0], sharex=ax)
-      ax_histy = fig.add_subplot(gs[1, 1], sharey=ax)
-      ax_xy = fig.add_subplot(gs[0, 1])
-
-      ax.imshow(Cij, cmap="jet", aspect=1)
-      ax.set_xlabel("Presynaptic")
-      ax.set_ylabel("Postsynaptic")
-
-      Kj = np.sum(Cij, axis=0)  # sum over pres
-      ax_histx.plot(Kj)
-      ax_histx.set_xticklabels([])
-      ax_histx.set_ylabel("$K_j$")
-
-      Ki = np.sum(Cij, axis=1)  # sum over pres
-      ax_histy.plot(Ki, np.arange(0, Ki.shape[0], 1))
-      ax_histy.set_yticklabels([])
-      ax_histy.set_xlabel("$K_i$")
-
-      con_profile(Cij, ax=ax_xy)
-
-def con_profile(Cij, ax=None):
-    diags = []
-    for i in range(int(Cij.shape[0] / 2)):
-        diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
-
-    diags = np.array(diags)
-    if ax is None:
-        plt.plot(diags)
-    else:
-        ax.plot(diags)
-        ax.set_xticklabels([])
-        # ax.set_yticklabels([])
-
-    plt.xlabel("Neuron #")
-    plt.ylabel("$P_{ij}$")
-    
-#+end_src
-
-#+RESULTS:
-
-
-#+RESULTS:
-:RESULTS:
-: /home/leon/.local/lib/python3.10/site-packages/IPython/core/events.py:93: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
-:   func(*args, **kwargs)
-: /home/leon/.local/lib/python3.10/site-packages/IPython/core/pylabtools.py:152: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
-:   fig.canvas.print_figure(bytes_io, **kw)
-[[file:./.ob-jupyter/fbced4dfa5b6c3caf7b3666d418d4364170d9a9f.png]]
-:END:
