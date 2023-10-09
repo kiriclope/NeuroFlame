@@ -1,0 +1,75 @@
+import numpy as np
+import torch
+from torch import nn
+
+class Activation(torch.nn.Module):
+    def forward(self, x):
+        return 0.5 * (1 + torch.erf(x / np.sqrt(2.0)))
+
+class Network(nn.Module):
+    def __init__(self, , conf_file, sim_name, repo_root, **kwargs):
+        super().__init__()
+        
+        # Loading configuration file 
+        conf_path = repo_root + '/conf/'+ conf_file
+        print('Loading config from', conf_path)
+        param = safe_load(open(conf_path, "r"))
+        
+        param["FILE_NAME"] = sim_name
+        param.update(kwargs)
+        
+        for k, v in param.items():
+            setattr(self, k, v)
+        
+        # Creating recurrent layer
+        self.Wab = []
+        for i_pop in range(self.N_POP):
+            for j_pop in range(self.N_POP):
+                Wij = nn.Linear(self.Na[i_pop], self.Na[j_pop], bias=(i_pop==j_pop))
+                Wij.weight.data = self.initWeights(J0=-2.75, J1=0.4, PHASE=np.pi)
+                
+                self.Wab.append(Wij)
+                
+        for i_pop in range(self.N_POP):            
+            self.Wab[i_pop, i_pop].bias.data.fill_(Iext[i_pop])  # Set bias to I0 for all neurons
+
+        self.i2j.weight.data = self.initWeights(J0=-2.75, J1=0.4, PHASE=np.pi)
+
+    def forward(self, input, hidden):
+
+        noise = torch.randn(size=(1,self.hidden_size))
+
+        if input is not None:
+            net_input = self.i2h(input) + self.h2h(hidden)
+        else:
+            net_input = self.h2h(hidden) + noise
+
+        # hidden = nn.ReLU()(net_input)
+        # hidden = hidden * self.exp_dt + self.dt * nn.ReLU()(net_input)
+        hidden = hidden * self.exp_dt + self.dt * 15.0 * Activation()(net_input)
+        return hidden
+
+    def initHidden(self):
+        return torch.zeros(1, self.hidden_size)
+
+    def initWeights(self, Wij):
+        
+        if 'cos' in self.STRUCTURE:
+            
+            theta = torch.arange(0, Wij.shape[0], dtype=torch.float) * (2 * np.pi / Wij.shape[0])            
+            phi = torch.arange(0, Wij.shape[1], dtype=torch.float) * (2 * np.pi / Wij.shape[1])
+            
+            i, j = torch.meshgrid(torch.arange(Wij.shape[0]), torch.arange(Wij.shape[1]))
+            theta_diff = theta[i] - phi[j]
+
+        if 'all2all' in self.CONNECTIVITY:
+            if 'cos' in self.STRUCTURE:
+                Cij = J0 * (1.0 + 2.0 * J1 * torch.cos(theta_diff - PHASE)) / Wij.shape[1]
+            else:
+                Cij = 1/ Wij.shape[1]
+        
+        # if 'sparse' in self.CONNECTIVITY:
+        #     if 'cos' in self.STRUCTURE:
+        #         Pij = ( 1.0 + 2.0 * torch.cos(theta_diff) )
+                
+        return Cij
