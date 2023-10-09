@@ -13,6 +13,7 @@ class Network(nn.Module):
     def __init__(self, conf_file, sim_name, repo_root, **kwargs):
         super().__init__()
         
+        
         # load parameters
         self.loadConfig(conf_file, sim_name, repo_root, **kwargs)
         
@@ -30,12 +31,13 @@ class Network(nn.Module):
                 Wij = nn.Linear(self.Na[i_pop], self.Na[j_pop], bias=(i_pop==j_pop), dtype=self.FLOAT)
                 Wij.weight.data = self.initWeights(i_pop, j_pop)
                 self.Wab[i_pop][j_pop] = Wij
+                self.Wab[i_pop][j_pop] = self.Wab[i_pop][j_pop].to(self.device)
                 
         for i_pop in range(self.N_POP):
-            self.Wab[i_pop][i_pop].bias.data.fill_(self.Ja0[i_pop])        
-
+            self.Wab[i_pop][i_pop].bias.data.fill_(self.Ja0[i_pop])
+        
     def update_rec_input(self, rates):
-        rec_input = torch.zeros((self.N_POP, self.N_NEURON))
+        rec_input = torch.zeros((self.N_POP, self.N_NEURON)).to(self.device)
         
         for i_pop in range(self.N_POP):
             for j_pop in range(self.N_POP):
@@ -48,10 +50,12 @@ class Network(nn.Module):
             net_input = torch.randn(size=(self.N_NEURON, ), dtype=self.FLOAT) * np.sqrt(self.VAR_FF[0])
         else:
             net_input = torch.zeros(self.N_NEURON)
+
+        net_input = net_input.to(self.device)
         
         for i_pop in range(self.N_POP):
             net_input = net_input + rec_input[i_pop]
-
+        
         return net_input
     
     def update_rates(self, rates, net_input):
@@ -75,13 +79,13 @@ class Network(nn.Module):
         
         activity = []
 
-        activity.append(np.round(torch.mean(rates[:self.csumNa[1]]).detach().numpy(), 2))
+        activity.append(np.round(torch.mean(rates[:self.csumNa[1]]).cpu().detach().numpy(), 2))
         
         if self.N_POP > 1:
-            activity.append(np.round(torch.mean(rates[self.csumNa[1]:self.csumNa[2]]).detach().numpy(), 2))
+            activity.append(np.round(torch.mean(rates[self.csumNa[1]:self.csumNa[2]]).cpu().detach().numpy(), 2))
 
         if self.N_POP > 2:
-            activity.append(np.round(torch.mean(rates[self.csumNa[2]:]).detach().numpy(), 2))
+            activity.append(np.round(torch.mean(rates[self.csumNa[2]:]).cpu().detach().numpy(), 2))
             
         print(
             "times (s)",
@@ -107,7 +111,7 @@ class Network(nn.Module):
             if step % self.N_WINDOW == 0:
                 self.print_activity(step, hidden)
             
-            result.append(hidden.detach().numpy())
+            result.append(hidden.cpu().detach().numpy())
             
         result = np.array(result)
         
@@ -131,7 +135,7 @@ class Network(nn.Module):
         
         self.DATA_PATH = repo_root + "/data/simul/"
         self.MAT_PATH = repo_root + "/data/matrix/"
-
+        
         if not os.path.exists(self.DATA_PATH):
             os.makedirs(self.DATA_PATH)
         
@@ -142,9 +146,11 @@ class Network(nn.Module):
             self.FLOAT = torch.float
         else:
             self.FLOAT = torch.float64
+            
+        self.device = torch.device(self.DEVICE)
         
     def initRates(self):
-        return torch.zeros(self.N_NEURON, dtype=self.FLOAT)
+        return torch.zeros(self.N_NEURON, dtype=self.FLOAT).to(self.device)
     
     def initWeights(self, i_pop, j_pop):
         
@@ -157,19 +163,22 @@ class Network(nn.Module):
         if 'cos' in self.STRUCTURE[i_pop][j_pop]:
             theta = torch.arange(0, Na, dtype=self.FLOAT) * (2 * np.pi / Na)
             phi = torch.arange(0, Nb, dtype=self.FLOAT) * (2 * np.pi / Nb)
+            theta, phi = theta.to(self.device), phi.to(self.device)
             
             i, j = torch.meshgrid(torch.arange(Na), torch.arange(Nb),indexing="ij")
+            i, j = i.to(self.device), j.to(self.device)
+            
             theta_diff = theta[i] - phi[j]
 
             if 'spec' in self.STRUCTURE[i_pop][j_pop]:
                 self.KAPPA[i_pop][j_pop] = self.KAPPA[i_pop][j_pop] / np.sqrt(self.Ka[j_pop])
             
-            Pij = 1.0 + 2.0 * self.KAPPA[i_pop][j_pop] * torch.cos(theta_diff - self.PHASE)
+            Pij = 1.0 + 2.0 * self.KAPPA[i_pop][j_pop] * torch.cos(theta_diff - self.PHASE).to(self.device)
             
         if 'sparse' in self.CONNECTIVITY:
             if self.VERBOSE:
                 print('Sparse random connectivity ')
-            Cij = self.Jab[i_pop][j_pop] * (torch.rand(Na, Nb) < Kb / Nb * Pij)
+            Cij = self.Jab[i_pop][j_pop] * (torch.rand(Na, Nb).to(self.device) < Kb / Nb * Pij)
             
         if 'all2all' in self.CONNECTIVITY:
             if self.VERBOSE:
@@ -236,7 +245,8 @@ class Network(nn.Module):
         
         for i_pop in range(self.N_POP):
             self.Jab[:, i_pop] = self.Jab[:, i_pop] / torch.sqrt(self.Ka[i_pop])
-        
+
+        self.Jab = self.Jab.to(self.device)
         # if self.VERBOSE:
         #     print("scaled Jab", self.Jab)
             
@@ -246,7 +256,9 @@ class Network(nn.Module):
             
         self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT) * self.GAIN
         self.Ja0 = self.Ja0 * torch.sqrt(self.Ka[0]) * self.M0
-
+        
+        self.Ja0 = self.Ja0.to(self.device)
+        
         # if self.VERBOSE:
         #     print("scaled Ja0", self.Ja0)
         
