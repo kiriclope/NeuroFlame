@@ -1,0 +1,1255 @@
+#+STARTUP: fold
+#+TITLE: RNN with pytorch
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session torch :kernel torch
+
+* Notebook Settings
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Helpers
+** Imports
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../')
+
+  import pandas as pd
+  from scipy.stats import circmean
+  
+  from src.network import Network
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump, circcvl
+#+end_src
+
+#+RESULTS:
+** Data
+#+begin_src ipython
+  def get_rates_ini_phi(name, ini_list, phi_list):
+    rates_list = []
+    for ini in ini_list:
+      for phi in phi_list:
+        rates = np.load(REPO_ROOT + '/data/simul/%s_ini_%d_phi_%d.npy' % (name, ini, phi))
+        rates_list.append(rates)
+
+    rates_list = np.array(rates_list).reshape(len(ini_list), len(phi_list), rates.shape[0], rates.shape[1])
+    print(rates_list.shape)
+    return rates_list  
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_rates_X(name, X_list, ini_list, phi_list, X_str='Ie'):
+    rates_list = []
+    for ini in ini_list:
+      for phi in phi_list:
+        for X in X_list:
+          rates = np.load(REPO_ROOT + '/data/simul/%s_%s_%.2f_ini_%d_phi_%d.npy' % (name, X_str, X, ini, phi))
+          rates_list.append(rates.astype('float32'))
+
+    rates_list = np.array(rates_list).reshape(len(ini_list), len(phi_list), len(X_list), rates.shape[0], rates.shape[1])
+    print(rates_list.shape)
+    return rates_list 
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_df_ini_phi(rates):
+      n_trials, n_phi, n_times, n_neurons = rates.shape
+
+      # Create indices
+      trials_ind, phi_ind, times_ind, neurons_ind = np.indices((n_trials, n_phi, n_times, n_neurons))
+
+      # Construct DataFrame
+      df = pd.DataFrame({
+          'trial': trials_ind.flatten(),
+          'phi': phi_ind.flatten(),
+          'neuron': neurons_ind.flatten(),
+          'time': times_ind.flatten(),
+          'rates': rates.flatten()
+      })
+
+      return df
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_df_X(rates, X_str='Ie'):
+      n_trials, n_phi, n_X, n_times, n_neurons = rates.shape
+
+      # Create indices
+      trials_ind, phi_ind, X_ind, times_ind, neurons_ind = np.indices((n_trials, n_phi, n_X, n_times, n_neurons))
+      
+      # Construct DataFrame
+      df = pd.DataFrame({
+          'trial': trials_ind.flatten(),
+          'phi': phi_ind.flatten(),
+          X_str : X_ind.flatten(),
+          'neuron': neurons_ind.flatten(),
+          'time': times_ind.flatten(),
+          'rates': rates.flatten()
+      })
+
+      return df
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def load_data_ini_phi(name, ini_list, phi_list):
+      rates = get_rates_ini_phi(name, ini_list, phi_list)
+      df = get_df_ini_phi(rates)
+      return df
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def load_data_X(name, X_list, ini_list, phi_list, X_str='Ie'):
+      rates = get_rates_X(name, X_list, ini_list, phi_list, X_str)
+      df = get_df_X(rates, X_str)
+      return df
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_code_ini_phi(df):
+      df_code = df.groupby(['time', 'trial', 'phi'] )['rates'].apply(decode_bump).reset_index()
+      df_code[['m0', 'm1', 'phase']] = pd.DataFrame(df_code['rates'].tolist(), index=df_code.index)
+      df_code = df_code.drop(columns=['rates'])
+
+      end_point = df_code[df_code.time==df_code.time.iloc[-1]]
+      end_point = end_point.drop(columns=['time'])
+      print(end_point.head())  
+      return df_code, end_point  
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_code_X(df, X_str='Ie'):
+      # Avoid creating new DataFrame by using .loc 
+      end_point_index = df[df.time==df.time.iloc[-1]].index
+      
+      end_point = df.loc[end_point_index].groupby(['trial', 'phi', X_str])['rates'].apply(decode_bump).reset_index()
+      end_point[['m0', 'm1', 'phase']] = pd.DataFrame(end_point['rates'].tolist(), index=end_point.index)
+
+      end_point.drop(columns=['rates'], inplace=True)
+
+      print(end_point.head())
+      return end_point
+
+  # def get_code_X(df, X_str='Ie'):
+  #     # df_code = df.groupby(['time', 'trial', 'phi', X_str] )['rates'].apply(decode_bump).reset_index()
+  #     # df_code[['m0', 'm1', 'phase']] = pd.DataFrame(df_code['rates'].tolist(), index=df_code.index)
+  #     # df_code = df_code.drop(columns=['rates'])
+
+  #     df_code = []
+  #     end_point = df[df.time==df.time.iloc[-1]]
+  #     end_point = end_point.drop(columns=['time'])
+
+  #     df_subset = end_point[['trial', 'phi', X_str, 'rates']]
+  #     end_point = df_subset.groupby(['trial', 'phi', X_str])['rates'].apply(decode_bump).reset_index()
+  #     end_point[['m0', 'm1', 'phase']] = pd.DataFrame(end_point['rates'].tolist(), index=end_point.index)
+  #     end_point = end_point.drop(columns=['rates'])
+  #     print(end_point.head())
+
+  #     return df_code, end_point  
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_precision(x):
+      return x - circmean(x)
+#+end_src
+
+#+RESULTS:
+
+** Simul
+
+#+begin_src ipython
+  import subprocess
+
+  def gpu_memory_usage_percentage():
+      total_mem_str = subprocess.check_output(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,nounits,noheader"])
+      used_mem_str = subprocess.check_output(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,nounits,noheader"])
+      
+      total_mem_list = map(float, total_mem_str.decode('utf-8').strip().split('\n'))
+      used_mem_list = map(float, used_mem_str.decode('utf-8').strip().split('\n'))
+
+      mem_percentage_list = [(used_mem / total_mem) * 100.0 for total_mem, used_mem in zip(total_mem_list, used_mem_list)]
+
+      return np.array(mem_percentage_list)
+
+  memory_percentages = gpu_memory_usage_percentage()
+
+  # The memory usage for each GPU is indexed from 0
+  for index, percentage in enumerate(memory_percentages):
+      print(f'GPU {index} Memory Usage: {percentage:.2f}%')
+
+#+end_src
+
+#+RESULTS:
+: GPU 0 Memory Usage: 0.08%
+: GPU 1 Memory Usage: 0.08%
+
+#+begin_src ipython
+  from time import sleep
+
+  def check_gpu(device):
+      memory_percentages = gpu_memory_usage_percentage()
+      if device == 'cuda:0':
+          if memory_percentages[0] > 75:
+              while memory_percentages[1] > 75:
+                  memory_percentages = gpu_memory_usage_percentage()
+                  sleep(10)
+              else:
+                  device='cuda:1'
+      else:
+          if memory_percentages[1] > 75:
+              while memory_percentages[0] > 75:
+                  memory_percentages = gpu_memory_usage_percentage()
+                  sleep(10)
+              else:
+                  device='cuda:0'
+                  
+      return device
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  device = check_gpu('cuda:0')
+  print(device)
+#+end_src
+
+#+RESULTS:
+: cuda:0
+
+#+begin_src ipython
+  # import multiprocessing
+  # if multiprocessing.get_start_method(allow_none=True) != 'spawn':
+  #   multiprocessing.set_start_method('spawn', force=True)
+  # from multiprocessing import Process
+
+  def run_ini_phi(name, ini_list, phi_list):
+      LOAD_MAT = 0
+      SAVE_MAT = 1
+
+      device = 'cuda:0'
+
+      df_list = []
+      for ini in ini_list:
+          for phi in phi_list:
+
+              print('##########################################')
+              print("trial", ini, "phi", phi)
+              print('##########################################')
+
+              model = Network('config_bump.yml', '%s_ini_%d_phi_%d' % (name, ini, phi),
+                              REPO_ROOT, LOAD_MAT=LOAD_MAT, SAVE_MAT=SAVE_MAT, DEVICE=device)
+
+              model.run()
+              # process = Process(target=model.run)
+              # process.start()
+              # process.join()
+              device = check_gpu(device)
+              
+              LOAD_MAT = 1
+              SAVE_MAT = 0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def run_X(name, X_list, ini_list, phi_list, X_str='Ie'):
+      LOAD_MAT = 0
+      SAVE_MAT = 1
+
+      device = 'cuda:0'
+
+      df_list = []
+      for ini in ini_list:
+          for phi in phi_list:
+              for X in X_list:
+
+                  print('##########################################')
+                  print("trial", ini, "phi", phi, X_str, X)
+                  print('##########################################')
+
+                  model = Network('config_bump.yml', '%s_%s_%.2f_ini_%d_phi_%d' % (name, X_str, X, ini, phi),
+                                  REPO_ROOT, LOAD_MAT=LOAD_MAT, SAVE_MAT=SAVE_MAT, DEVICE=device, Ja0=[X], PHI0=phi)
+                  model.run()
+                  device = check_gpu(device)
+
+              LOAD_MAT = 1
+              SAVE_MAT = 0
+
+#+end_src
+
+#+RESULTS:
+
+* Phase Space
+
+** Ie
+*** Parameters
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  Ie_list = np.linspace(10, 30, 11)
+  # Ie_list = [14]
+  print('Ie', Ie_list)
+  ini_list = np.arange(0, 50)
+  # ini_list = [0]
+  print('ini', ini_list)
+  # phi_list = np.linspace(0, 315, 8)
+  phi_list = [180]
+  print('phi', phi_list)
+#+end_src
+
+#+RESULTS:
+: Ie [10. 12. 14. 16. 18. 20. 22. 24. 26. 28. 30.]
+: ini [ 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23
+:  24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
+:  48 49]
+: phi [180]
+
+#+begin_src ipython
+  n_sim = len(Ie_list) * len(ini_list) * len(phi_list) 
+  total_seconds = n_sim * 2.4
+  hours = total_seconds // 3600  # number of hours
+  total_seconds %= 3600  # remaining seconds after hours are accounted for
+
+  minutes = total_seconds // 60  # number of minutes
+  seconds = total_seconds % 60  # remaining seconds after minutes are accounted for
+  print('n_sim', n_sim, 'Expected runtime', f"{hours}h {minutes}m {seconds}s")
+
+#+end_src
+
+#+RESULTS:
+: n_sim 550 Expected runtime 0.0h 22.0m 0.0s
+
+*** Simulation
+#+begin_src ipython :results none
+  name = 'bump'
+  run_X(name, Ie_list, ini_list, phi_list, X_str='Ie')
+#+end_src
+
+*** Analysis
+***** Load data
+
+#+begin_src ipython
+  df = load_data_X('bump', Ie_list, ini_list, phi_list)
+  print(df.head())
+#+end_src
+
+#+RESULTS:
+: (50, 1, 11, 3999, 1000)
+:    trial  phi  Ie  neuron  time     rates
+: 0      0    0   0       0     0  3.819337
+: 1      0    0   0       1     0  2.239994
+: 2      0    0   0       2     0  0.787764
+: 3      0    0   0       3     0  2.620689
+: 4      0    0   0       4     0  3.064431
+
+#+begin_src ipython
+  end_point = get_code_X(df, 'Ie')
+#+end_src
+
+#+RESULTS:
+:    trial  phi  Ie        m0        m1     phase
+: 0      0    0   0  4.735278  3.333369  2.817615
+: 1      0    0   1  5.304492  4.389674  3.380684
+: 2      0    0   2  5.876477  5.385289  3.289118
+: 3      0    0   3  6.400838  5.994339  3.113357
+: 4      0    0   4  6.923957  6.352475  3.133245
+
+***** Bifurcation
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  sns.lineplot(end_point, x='Ie', y='m0', ax=ax[0], legend=False)
+  ax[0].set_xlabel('FF Input')
+  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
+  # ax[0].set_xticks(np.linspace(0, len(Ie_list), 5), np.round(np.linspace(Ie_list[0], Ie_list[-1], 5), 2))
+  
+  sns.lineplot(end_point, x='Ie', y=end_point['m1']/end_point['m0'], ax=ax[1], legend=False) 
+  ax[1].set_ylabel('$\mathcal{F}_1 / \mathcal{F}_0$')
+  ax[1].set_xlabel('FF Input')
+  # ax[1].set_xticks(np.linspace(0, len(Ie_list)-1, 5), np.round(np.linspace(Ie_list[0], Ie_list[-1], 5), 2))
+
+  plt.show()
+#+end_src
+#+RESULTS:
+[[file:./.ob-jupyter/0f610273cd6ca60f02d056ee10e32a487d51d384.png]]
+
+***** Tuning Profile
+#+begin_src ipython
+  idx_off = 4
+  idx_on = 7
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  df_smooth = df.groupby(['time', 'trial', 'phi', 'Ie'])['rates'].apply(circcvl).reset_index()
+#+end_src
+
+#+RESULTS:
+: f8e8b007-0cb2-4361-b996-52715c496840
+
+#+begin_src ipython
+    endpoint = df_smooth[df_smooth.time==df_smooth.time.iloc[-1]]
+    endpoint = endpoint.drop(columns=['time'])
+#+end_src
+
+#+RESULTS:
+: ba1001f0-4519-4f79-b8be-2a036c327e22
+
+#+begin_src ipython
+  idx_off = 4
+  idx_on = 7
+
+  end0 = endpoint[end_point.Ie==idx_off].reset_index()
+  end1 = endpoint[end_point.Ie==idx_on].reset_index()
+
+  plt.plot(end0.rates[4])
+  plt.plot(end1.rates[4])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+: b9526958-5315-408c-9ac2-05fd109c5d7f
+
+***** Errors
+#+begin_src ipython
+  end_point['accuracy'] = (end_point.phase - end_point['phi'] / 180 * np.pi) % (2 * np.pi)
+  end_point['precision'] = end_point.groupby(['phi', 'Ie'], group_keys=False)['phase'].apply(get_precision)
+  
+  print(end_point.head())
+#+end_src
+
+#+RESULTS:
+:    trial  phi  Ie        m0        m1     phase  accuracy  precision
+: 0      0    0   0  4.735278  3.333369  2.817615  2.817615  -0.297498
+: 1      0    0   1  5.304492  4.389674  3.380684  3.380684   0.213992
+: 2      0    0   2  5.876477  5.385289  3.289118  3.289118   0.130761
+: 3      0    0   3  6.400838  5.994339  3.113357  3.113357  -0.018229
+: 4      0    0   4  6.923957  6.352475  3.133245  3.133245   0.003589
+
+#+begin_src ipython
+  fig, ax = plt.subplots()
+
+  sns.lineplot(end_point, x='Ie', y=end_point.precision.abs() * 180 / np.pi, legend=False, marker='o', ax=ax)
+  ax.set_xlabel('FF Input')
+  ax.set_ylabel('Diffusivity (°)')
+  # ax.set_xticks(np.linspace(0, len(Ie_list)-1, 5), np.round(np.linspace(Ie_list[0], Ie_list[-1], 5), 2))
+
+  ax1 = ax.twinx()
+  sns.lineplot(end_point, x='Ie', y=end_point['m1']/end_point['m0'], ax=ax1, legend=False, ls='--', color='k', alpha=0.5)
+  ax1.set_ylabel('$\mathcal{F}_1 / \mathcal{F}_0$')
+  
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/420ab2ceb67b9ed57107190d54508ddb5b55059e.png]]
+
+#+begin_src ipython
+  point = end_point[end_point.Ie==idx_off]
+  point_on = end_point[end_point.Ie==idx_on]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+
+  sns.histplot(data=point, x=point['phase']*180/np.pi, legend=False, lw=2, ax=ax[0], kde=False, bins=200, stat='density', color='b')
+  sns.histplot(data=point_on, x=point_on['phase']*180/np.pi, legend=False, lw=2, ax=ax[0], kde=False, bins=200, stat='density', color='r')
+  ax[0].set_xlabel('$\phi$(°)')
+  ax[0].set_ylabel('Density')
+  ax[0].set_xticks([0, 90, 180, 270, 360])
+
+  sns.histplot(data=point, x=point['accuracy']*180/np.pi, legend=False, lw=2, ax=ax[1], kde=False, bins=200, stat='density', color='b')
+  sns.histplot(data=point_on, x=point_on['accuracy']*180/np.pi, legend=False, lw=2, ax=ax[1], kde=False, bins=200, stat='density', color='r')
+  ax[1].set_xlabel('$\phi - \phi_{stim}$ (°)')
+  ax[1].set_ylabel('Density')
+  ax[1].set_xticks([0, 90, 180, 270, 360])
+
+  sns.histplot(data=point, x=point['precision']*180/np.pi, legend=False, ax=ax[2], bins='auto', kde=True, stat='density', element='step', alpha=0,color = 'b')
+  sns.histplot(data=point_on, x=point_on['precision']*180/np.pi, legend=False, ax=ax[2], bins='auto', kde=True, stat='density', element='step', alpha=0., color='r')
+  ax[2].set_xlabel('$\phi - <\phi>_{trials}$ (°)')
+  ax[2].set_ylabel('Density')
+  ax[2].set_xlim([-20, 20])
+
+  plt.show()  
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/2eb3e0db13301b7e675a3da8725a522ec3bf2393.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+
+** Sigma
+*** Parameters
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  sigma_list = np.linspace(0, 5, 11)
+  # Ie_list = [14]
+  print('sigma', sigma_list)
+  ini_list = np.arange(0, 10)
+  # ini_list = [0]
+  print('ini', ini_list)
+  # phi_list = np.linspace(0, 315, 8)
+  phi_list = [180]
+  print('phi', phi_list)
+#+end_src
+
+#+RESULTS:
+: sigma [0.  0.5 1.  1.5 2.  2.5 3.  3.5 4.  4.5 5. ]
+: ini [0 1 2 3 4 5 6 7 8 9]
+: phi [180]
+
+#+begin_src ipython
+  n_sim = len(sigma_list) * len(ini_list) * len(phi_list) 
+  total_seconds = n_sim * 2.4
+  hours = total_seconds // 3600  # number of hours
+  total_seconds %= 3600  # remaining seconds after hours are accounted for
+
+  minutes = total_seconds // 60  # number of minutes
+  seconds = total_seconds % 60  # remaining seconds after minutes are accounted for
+  print('n_sim', n_sim, 'Expected runtime', f"{hours}h {minutes}m {seconds}s")
+
+#+end_src
+
+#+RESULTS:
+: n_sim 110 Expected runtime 0.0h 4.0m 24.0s
+
+*** Simulations
+#+begin_src ipython
+  def run_loop_sigma(name, X_list, ini_list, phi_list, X_str='sigma'):
+      LOAD_MAT = 0
+      SAVE_MAT = 1
+
+      device = 'cuda:0'
+
+      df_list = []
+      for X in X_list:
+          for ini in ini_list:
+              for phi in phi_list:
+
+                  print('##########################################')
+                  print("trial", ini, "phi", phi, X_str, X)
+                  print('##########################################')
+
+                  model = Network('config_bump.yml', '%s_%s_%.2f_ini_%d_phi_%d' % (name, X_str, X, ini, phi),
+                                  REPO_ROOT, LOAD_MAT=LOAD_MAT, SAVE_MAT=SAVE_MAT, DEVICE=device, SIGMA=[X], PHI0=phi)
+                  model.run()
+                  device = check_gpu(device)
+                  
+                  # same matrix for each ini and phi
+                  LOAD_MAT = 1
+                  SAVE_MAT = 0
+
+          # generate matrix for each sigma
+          LOAD_MAT = 0
+          SAVE_MAT = 1
+
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  name = 'heter'
+  run_loop_sigma(name, sigma_list, ini_list, phi_list, X_str='sigma')
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  ##########################################
+  trial 0 phi 180 sigma 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 3.706095263827592s
+  ##########################################
+  trial 1 phi 180 sigma 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 2.004745732061565s
+  ##########################################
+  trial 2 phi 180 sigma 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.9759693406522274s
+  ##########################################
+  trial 3 phi 180 sigma 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.9771486618556082s
+  ##########################################
+  trial 4 phi 180 sigma 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.9786154082976282s
+  ##########################################
+  trial 5 phi 180 sigma 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.9937889873981476s
+  ##########################################
+  trial 6 phi 180 sigma 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.9887161985971034s
+  ##########################################
+  trial 7 phi 180 sigma 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.989290222991258s
+  ##########################################
+  trial 8 phi 180 sigma 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.9871464362367988s
+  ##########################################
+  trial 9 phi 180 sigma 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.9807335250079632s
+  ##########################################
+  trial 0 phi 180 sigma 0.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.50_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.986997317057103s
+  ##########################################
+  trial 1 phi 180 sigma 0.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.50_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.9873640318401158s
+  ##########################################
+  trial 2 phi 180 sigma 0.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.50_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.9870311110280454s
+  ##########################################
+  trial 3 phi 180 sigma 0.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.50_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.9925051419995725s
+  ##########################################
+  trial 4 phi 180 sigma 0.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.50_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.9934284817427397s
+  ##########################################
+  trial 5 phi 180 sigma 0.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.50_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.9943493362516165s
+  ##########################################
+  trial 6 phi 180 sigma 0.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.50_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.9943079832009971s
+  ##########################################
+  trial 7 phi 180 sigma 0.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.50_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.9966948293149471s
+  ##########################################
+  trial 8 phi 180 sigma 0.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.50_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.9978879769332707s
+  ##########################################
+  trial 9 phi 180 sigma 0.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_0.50_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.003540691919625s
+  ##########################################
+  trial 0 phi 180 sigma 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 2.0036728447303176s
+  ##########################################
+  trial 1 phi 180 sigma 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 2.0012159878388047s
+  ##########################################
+  trial 2 phi 180 sigma 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 2.0069687138311565s
+  ##########################################
+  trial 3 phi 180 sigma 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 2.015715102199465s
+  ##########################################
+  trial 4 phi 180 sigma 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 2.0076733478344977s
+  ##########################################
+  trial 5 phi 180 sigma 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 2.0073065259493887s
+  ##########################################
+  trial 6 phi 180 sigma 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 2.012617708183825s
+  ##########################################
+  trial 7 phi 180 sigma 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.013889107853174s
+  ##########################################
+  trial 8 phi 180 sigma 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.0259852041490376s
+  ##########################################
+  trial 9 phi 180 sigma 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.0422342466190457s
+  ##########################################
+  trial 0 phi 180 sigma 1.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.50_ini_0_phi_180.npy
+  Elapsed (with compilation) = 2.070405445061624s
+  ##########################################
+  trial 1 phi 180 sigma 1.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.50_ini_1_phi_180.npy
+  Elapsed (with compilation) = 2.079050999134779s
+  ##########################################
+  trial 2 phi 180 sigma 1.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.50_ini_2_phi_180.npy
+  Elapsed (with compilation) = 2.0436122063547373s
+  ##########################################
+  trial 3 phi 180 sigma 1.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.50_ini_3_phi_180.npy
+  Elapsed (with compilation) = 2.045554821845144s
+  ##########################################
+  trial 4 phi 180 sigma 1.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.50_ini_4_phi_180.npy
+  Elapsed (with compilation) = 2.0364030925557017s
+  ##########################################
+  trial 5 phi 180 sigma 1.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.50_ini_5_phi_180.npy
+  Elapsed (with compilation) = 2.0278159929439425s
+  ##########################################
+  trial 6 phi 180 sigma 1.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.50_ini_6_phi_180.npy
+  Elapsed (with compilation) = 2.0729289362207055s
+  ##########################################
+  trial 7 phi 180 sigma 1.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.50_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.0382737647742033s
+  ##########################################
+  trial 8 phi 180 sigma 1.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.50_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.0470440848730505s
+  ##########################################
+  trial 9 phi 180 sigma 1.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_1.50_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.039396998938173s
+  ##########################################
+  trial 0 phi 180 sigma 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 2.043255827855319s
+  ##########################################
+  trial 1 phi 180 sigma 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 2.083868032786995s
+  ##########################################
+  trial 2 phi 180 sigma 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 2.045988409779966s
+  ##########################################
+  trial 3 phi 180 sigma 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 2.0518657569773495s
+  ##########################################
+  trial 4 phi 180 sigma 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 2.0489028147421777s
+  ##########################################
+  trial 5 phi 180 sigma 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 2.041893872898072s
+  ##########################################
+  trial 6 phi 180 sigma 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 2.043040784075856s
+  ##########################################
+  trial 7 phi 180 sigma 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.09474679781124s
+  ##########################################
+  trial 8 phi 180 sigma 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.0612285416573286s
+  ##########################################
+  trial 9 phi 180 sigma 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.0496868640184402s
+  ##########################################
+  trial 0 phi 180 sigma 2.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.50_ini_0_phi_180.npy
+  Elapsed (with compilation) = 2.047691958025098s
+  ##########################################
+  trial 1 phi 180 sigma 2.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.50_ini_1_phi_180.npy
+  Elapsed (with compilation) = 2.052021676208824s
+  ##########################################
+  trial 2 phi 180 sigma 2.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.50_ini_2_phi_180.npy
+  Elapsed (with compilation) = 2.096929038874805s
+  ##########################################
+  trial 3 phi 180 sigma 2.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.50_ini_3_phi_180.npy
+  Elapsed (with compilation) = 2.0552568081766367s
+  ##########################################
+  trial 4 phi 180 sigma 2.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.50_ini_4_phi_180.npy
+  Elapsed (with compilation) = 2.0701593719422817s
+  ##########################################
+  trial 5 phi 180 sigma 2.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.50_ini_5_phi_180.npy
+  Elapsed (with compilation) = 2.056334197986871s
+  ##########################################
+  trial 6 phi 180 sigma 2.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.50_ini_6_phi_180.npy
+  Elapsed (with compilation) = 2.0594091950915754s
+  ##########################################
+  trial 7 phi 180 sigma 2.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.50_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.1083716270513833s
+  ##########################################
+  trial 8 phi 180 sigma 2.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.50_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.095094171818346s
+  ##########################################
+  trial 9 phi 180 sigma 2.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_2.50_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.080436212942004s
+  ##########################################
+  trial 0 phi 180 sigma 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 2.072196112945676s
+  ##########################################
+  trial 1 phi 180 sigma 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 2.077452750876546s
+  ##########################################
+  trial 2 phi 180 sigma 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 2.0756590059027076s
+  ##########################################
+  trial 3 phi 180 sigma 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 2.1200026981532574s
+  ##########################################
+  trial 4 phi 180 sigma 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 2.077276792842895s
+  ##########################################
+  trial 5 phi 180 sigma 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 2.088449908886105s
+  ##########################################
+  trial 6 phi 180 sigma 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 2.08377422997728s
+  ##########################################
+  trial 7 phi 180 sigma 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.0770612452179193s
+  ##########################################
+  trial 8 phi 180 sigma 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.121018572244793s
+  ##########################################
+  trial 9 phi 180 sigma 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.0829003360122442s
+  ##########################################
+  trial 0 phi 180 sigma 3.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.50_ini_0_phi_180.npy
+  Elapsed (with compilation) = 2.0839165248908103s
+  ##########################################
+  trial 1 phi 180 sigma 3.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.50_ini_1_phi_180.npy
+  Elapsed (with compilation) = 2.1091319252736866s
+  ##########################################
+  trial 2 phi 180 sigma 3.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.50_ini_2_phi_180.npy
+  Elapsed (with compilation) = 2.0862896759063005s
+  ##########################################
+  trial 3 phi 180 sigma 3.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.50_ini_3_phi_180.npy
+  Elapsed (with compilation) = 2.0871154628694057s
+  ##########################################
+  trial 4 phi 180 sigma 3.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.50_ini_4_phi_180.npy
+  Elapsed (with compilation) = 2.1333662043325603s
+  ##########################################
+  trial 5 phi 180 sigma 3.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.50_ini_5_phi_180.npy
+  Elapsed (with compilation) = 2.0941437296569347s
+  ##########################################
+  trial 6 phi 180 sigma 3.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.50_ini_6_phi_180.npy
+  Elapsed (with compilation) = 2.107733094599098s
+  ##########################################
+  trial 7 phi 180 sigma 3.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.50_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.098311245907098s
+  ##########################################
+  trial 8 phi 180 sigma 3.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.50_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.0973708988167346s
+  ##########################################
+  trial 9 phi 180 sigma 3.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_3.50_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.0940058170817792s
+  ##########################################
+  trial 0 phi 180 sigma 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 2.148769886698574s
+  ##########################################
+  trial 1 phi 180 sigma 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 2.100684472825378s
+  ##########################################
+  trial 2 phi 180 sigma 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 2.1205165828578174s
+  ##########################################
+  trial 3 phi 180 sigma 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 2.1088781780563295s
+  ##########################################
+  trial 4 phi 180 sigma 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 2.104647178668529s
+  ##########################################
+  trial 5 phi 180 sigma 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 2.157434872351587s
+  ##########################################
+  trial 6 phi 180 sigma 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 2.1144314319826663s
+  ##########################################
+  trial 7 phi 180 sigma 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.1145883589051664s
+  ##########################################
+  trial 8 phi 180 sigma 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.128075744025409s
+  ##########################################
+  trial 9 phi 180 sigma 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.1164353736676276s
+  ##########################################
+  trial 0 phi 180 sigma 4.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.50_ini_0_phi_180.npy
+  Elapsed (with compilation) = 2.116329737007618s
+  ##########################################
+  trial 1 phi 180 sigma 4.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.50_ini_1_phi_180.npy
+  Elapsed (with compilation) = 2.164459105115384s
+  ##########################################
+  trial 2 phi 180 sigma 4.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.50_ini_2_phi_180.npy
+  Elapsed (with compilation) = 2.1205780669115484s
+  ##########################################
+  trial 3 phi 180 sigma 4.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.50_ini_3_phi_180.npy
+  Elapsed (with compilation) = 2.1219522110186517s
+  ##########################################
+  trial 4 phi 180 sigma 4.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.50_ini_4_phi_180.npy
+  Elapsed (with compilation) = 2.133559370879084s
+  ##########################################
+  trial 5 phi 180 sigma 4.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.50_ini_5_phi_180.npy
+  Elapsed (with compilation) = 2.1337191183120012s
+  ##########################################
+  trial 6 phi 180 sigma 4.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.50_ini_6_phi_180.npy
+  Elapsed (with compilation) = 2.132406471297145s
+  ##########################################
+  trial 7 phi 180 sigma 4.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.50_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.17647922411561s
+  ##########################################
+  trial 8 phi 180 sigma 4.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.50_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.132402108050883s
+  ##########################################
+  trial 9 phi 180 sigma 4.5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_4.50_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.134536060038954s
+  ##########################################
+  trial 0 phi 180 sigma 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_5.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 2.1482448279857635s
+  ##########################################
+  trial 1 phi 180 sigma 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_5.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 2.1340096248313785s
+  ##########################################
+  trial 2 phi 180 sigma 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_5.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 2.1315816580317914s
+  ##########################################
+  trial 3 phi 180 sigma 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_5.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 2.187350371852517s
+  ##########################################
+  trial 4 phi 180 sigma 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_5.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 2.1380911581218243s
+  ##########################################
+  trial 5 phi 180 sigma 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_5.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 2.1488428562879562s
+  ##########################################
+  trial 6 phi 180 sigma 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_5.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 2.154112769290805s
+  ##########################################
+  trial 7 phi 180 sigma 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_5.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.1446198909543455s
+  ##########################################
+  trial 8 phi 180 sigma 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_5.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.1354573569260538s
+  ##########################################
+  trial 9 phi 180 sigma 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/heter_sigma_5.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.178793225903064s
+#+end_example

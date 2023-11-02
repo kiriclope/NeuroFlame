@@ -19,6 +19,55 @@
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
 
+#+begin_src ipython
+  import torch
+  import torch.nn as nn
+
+  class MyModel(nn.Module):
+      def __init__(self, hidden_size, noise_stddev, device='cpu'):
+          super(MyModel, self).__init__()
+          self.hidden_size = hidden_size
+          self.noise_stddev = noise_stddev
+          self.device = device
+          self.fc = nn.Linear(self.hidden_size, self.hidden_size, device=self.device)  # example layer
+
+      def forward(self, h):
+          noise = torch.randn_like(h, device=self.device) * self.noise_stddev
+          h = self.fc(h + noise)
+          return h
+
+      def run(self):
+          result = []
+          h = torch.zeros(self.hidden_size, device=self.device)
+
+          for t in range(10):
+              h = self.forward(h)
+              result.append(h.cpu().detach().numpy())
+          return result
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model = MyModel(100, 10)
+  result = model.run()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  result = np.array(result)
+  print(result.shape)
+  plt.plot(result.T)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (10, 100)
+| <matplotlib.lines.Line2D | at | 0x7fc75e911780> | <matplotlib.lines.Line2D | at | 0x7fc75e9117b0> | <matplotlib.lines.Line2D | at | 0x7fc75e9118a0> | <matplotlib.lines.Line2D | at | 0x7fc75e911990> | <matplotlib.lines.Line2D | at | 0x7fc75e911a80> | <matplotlib.lines.Line2D | at | 0x7fc75e911b70> | <matplotlib.lines.Line2D | at | 0x7fc75e911c60> | <matplotlib.lines.Line2D | at | 0x7fc75e911d50> | <matplotlib.lines.Line2D | at | 0x7fc75e911e40> | <matplotlib.lines.Line2D | at | 0x7fc75e911f30> |
+[[file:./.ob-jupyter/b00d8e86d22ddfbba28e6614acf5496369fd722b.png]]
+:END:
+
 * RNN with torch
 ** Imports
 #+begin_src ipython
@@ -27,10 +76,11 @@
 #+end_src
 
 #+RESULTS:
-** Model
+** Single Trial
+*** Model
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  model = Network('config_bump.yml', 'bump', REPO_ROOT, VERBOSE=1, DEVICE='cpu', FLOAT_PRECISION=32)
+  model = Network('config_bump.yml', 'bump', REPO_ROOT, VERBOSE=1, DEVICE='cuda', FLOAT_PRECISION=64, N_NEURON=1000)
 #+end_src
 
 #+RESULTS:
@@ -40,15 +90,58 @@
 : All to all connectivity 
 : with strong cosine structure
 
-** Connectivity
+*** Simulation
+#+begin_src ipython
+  rates = model.run()
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  times (s) 0.5 rates (Hz) [2.18]
+  STIM ON
+  times (s) 1.0 rates (Hz) [2.79]
+  STIM OFF
+  times (s) 1.5 rates (Hz) [6.19]
+  times (s) 2.0 rates (Hz) [5.89]
+  times (s) 2.5 rates (Hz) [5.9]
+  times (s) 3.0 rates (Hz) [5.87]
+  times (s) 3.5 rates (Hz) [5.87]
+  Elapsed (with compilation) = 2.097719988087192s
+#+end_example
+
+*** Analysis
+#+begin_src ipython
+  plt.plot(rates.T)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/b49b0c5c919708fdeaf67149dfb10bdf26573ce8.png]]
+
+#+begin_src ipython
+  plt.imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=10)
+  plt.colorbar()
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/cae1f3855c6b2020073037ec5aea04b82522dcfb.png]]
+#
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+*** Connectivity
 #+begin_src ipython
   print(model.Wab[0][0])
 #+end_src
 
 #+RESULTS:
-: Linear(in_features=1000, out_features=1000, bias=True)
+: Linear(in_features=10, out_features=10, bias=True)
 
-#+begin_src ipython 
+#+begin_src ipython
   Cij = model.Wab[0][0].weight.data.cpu().detach().numpy()
   plot_con(Cij)
 #+end_src
@@ -59,51 +152,107 @@
 :   func(*args, **kwargs)
 : /home/leon/mambaforge/envs/torch/lib/python3.10/site-packages/IPython/core/pylabtools.py:152: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
 :   fig.canvas.print_figure(bytes_io, **kw)
-[[file:./.ob-jupyter/fbced4dfa5b6c3caf7b3666d418d4364170d9a9f.png]]
+[[file:./.ob-jupyter/077039e05f7caf388e5f359493492f44cf394265.png]]
 :END:
 
-** Simulation
+** Multiple Trials
+*** Simulation
 #+begin_src ipython
-  rates = model.run()
+  ini_list = np.arange(0, 10)
+
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+
+  LOAD_MAT = 0
+  SAVE_MAT = 1
+
+  df_list = []
+  for ini in ini_list:
+      print('##########################################')
+      print("trial", ini)
+      print('##########################################')
+
+      model = Network('config_bump.yml', 'bump_ini_%d' % ini, REPO_ROOT, LOAD_MAT=LOAD_MAT, SAVE_MAT=SAVE_MAT, DEVICE='cuda')
+      rates = model.run()
+      df_list.append(rates)
+
+      LOAD_MAT = 1
+      SAVE_MAT = 0
+
 #+end_src
 
 #+RESULTS:
 #+begin_example
-  times (s) -1.0 rates (Hz) [0.74]
-  times (s) -0.5 rates (Hz) [5.74]
-  times (s) 0.0 rates (Hz) [5.89]
-  times (s) 0.5 rates (Hz) [5.87]
-  times (s) 1.0 rates (Hz) [5.89]
-  times (s) 1.5 rates (Hz) [5.88]
-  times (s) 2.0 rates (Hz) [5.87]
-  times (s) 2.5 rates (Hz) [5.85]
-  times (s) 3.0 rates (Hz) [5.88]
-  times (s) 3.5 rates (Hz) [5.87]
-  times (s) 4.0 rates (Hz) [5.9]
-  times (s) 4.5 rates (Hz) [5.86]
-  times (s) 5.0 rates (Hz) [5.87]
-  times (s) 5.5 rates (Hz) [5.9]
-  times (s) 6.0 rates (Hz) [5.87]
-  times (s) 6.5 rates (Hz) [5.89]
-  times (s) 7.0 rates (Hz) [5.88]
-  times (s) 7.5 rates (Hz) [5.89]
-  times (s) 8.0 rates (Hz) [5.87]
-  times (s) 8.5 rates (Hz) [5.9]
-  Elapsed (with compilation) = 2.69122190104099s
+  ##########################################
+  trial 0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Elapsed (with compilation) = 3.8995340650435537s
+  ##########################################
+  trial 1
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Elapsed (with compilation) = 3.898018902982585s
+  ##########################################
+  trial 2
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Elapsed (with compilation) = 4.6746181909693405s
+  ##########################################
+  trial 3
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Elapsed (with compilation) = 4.400970314978622s
+  ##########################################
+  trial 4
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Elapsed (with compilation) = 4.540518041001633s
+  ##########################################
+  trial 5
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Elapsed (with compilation) = 4.386725182994269s
+  ##########################################
+  trial 6
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Elapsed (with compilation) = 4.085181039059535s
+  ##########################################
+  trial 7
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Elapsed (with compilation) = 4.072200358961709s
+  ##########################################
+  trial 8
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Elapsed (with compilation) = 4.117001095903106s
+  ##########################################
+  trial 9
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Elapsed (with compilation) = 3.9683143210131675s
 #+end_example
 
-** Analysis
 #+begin_src ipython
-  plt.imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=10)
-  plt.colorbar()
+  df_list = np.array(df_list)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  print(df_list.shape)
+  from src.decode import decode_bump
+  m0 , m1, phi = decode_bump(df_list)
+#+end_src
+
+#+RESULTS:
+: (10, 10000, 1000)
+
+#+begin_src ipython
+  plt.plot(phi.T)
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7a813656dcc2dde27d235ccf6d5dd2e85c009e31.png]]
-#
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
+[[file:./.ob-jupyter/9f3a7f75f03aad691fa4781b1d32d665a0f40e54.png]]
