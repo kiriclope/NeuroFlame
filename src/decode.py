@@ -49,11 +49,11 @@ def circcvl(signal, windowSize=10, axis=-1):
     ndarray: Returns the smoothed signal after circular convolution.
     """
     
-    signal_copy = signal.copy()
-
+    # signal_copy = signal.copy()
+    
     if axis != -1 and signal.ndim != 1:
-        signal_copy = np.swapaxes(signal_copy, axis, -1)
-
+        signal_copy = np.swapaxes(signal, axis, -1)
+    
     ker = np.concatenate(
         (np.ones((windowSize,)), np.zeros((signal_copy.shape[-1] - windowSize,)))
         )

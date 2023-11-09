@@ -1,5 +1,6 @@
 import os
 import gc
+import time
 import numpy as np
 import torch
 from torch import nn
@@ -7,8 +8,10 @@ from yaml import safe_load
 from time import perf_counter
 import warnings
 
+from torch.distributions import MultivariateNormal
+
 warnings.filterwarnings("ignore")
-# torch.backends.cudnn.deterministic = False
+# torch.backends.cudnn.deterministic = True
 # torch.backends.cudnn.benchmark = False
 # torch.manual_seed(1)
 
@@ -27,8 +30,8 @@ warnings.filterwarnings("ignore")
 
 class Activation(torch.nn.Module):
     def forward(self, x, THRESH=15):
-        # return nn.ReLU()(x)
-        return THRESH * 0.5 * (1.0 + torch.erf(x / np.sqrt(2.0)))
+        return nn.ReLU()(x)
+        # return THRESH * 0.5 * (1.0 + torch.erf(x / np.sqrt(2.0)))
 
 class Network(nn.Module):
     def __init__(self, conf_file, sim_name, repo_root, **kwargs):
@@ -42,6 +45,13 @@ class Network(nn.Module):
 
         # scale parameters
         self.scaleParam()
+
+        if self.SEED !=0 :
+            torch.manual_seed(self.SEED)
+        
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed(self.SEED)
+                torch.cuda.manual_seed_all(self.SEED)  # For all GPUs
         
         # Create recurrent layer with nn.Linear
         self.Wab = [[None]*self.N_POP for _ in range(self.N_POP)]
@@ -52,12 +62,19 @@ class Network(nn.Module):
                 Wij.weight.data = self.initWeights(i_pop, j_pop)
                 self.Wab[i_pop][j_pop] = Wij
                 self.Wab[i_pop][j_pop] = self.Wab[i_pop][j_pop]
-
+        
         # Here we store the constant external input in the bias
         for i_pop in range(self.N_POP):
             self.Wab[i_pop][i_pop].bias.data.fill_(self.Ja0[i_pop])
 
-
+        
+        new_seed = int(time.time())
+        torch.manual_seed(new_seed)
+        
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(new_seed)
+            torch.cuda.manual_seed_all(new_seed)  # For all GPUs
+        
     def update_rec_input(self, rates):
         '''Dynamics of the recurrent inputs'''
         rec_input = torch.zeros((self.N_POP, self.N_NEURON), device=self.device)
@@ -211,11 +228,35 @@ class Network(nn.Module):
         Kb = self.Ka[j_pop]
         
         Pij = 1.0
+        
+        if 'lr' in self.STRUCTURE[i_pop][j_pop]:
+            
+            mean = torch.tensor([0.0, 0.0, 0.0, 0.0], device=self.device)
+            
+            # Define the covariance matrix
+            covariance = torch.tensor([[1.0, 0.0, 0.0, 0.0],
+                                       [0.0, 1.0, 0.0, 0.0],
+                                       [0.0, 0.0, 1.0, 0.0],
+                                       [0.0, 0.0, 0.0, 1.0],], device=self.device)
+            
+            multivariate_normal = MultivariateNormal(mean, covariance)
+            
+            self.ksi = multivariate_normal.sample((Nb,)).T
 
+            if self.VERBOSE:
+                print('ksi', self.ksi.shape)
+            
+            Pij = 1.0 + self.KAPPA[i_pop][j_pop] * (self.ksi[0] * self.ksi[0].T
+                                                    + self.ksi[1] * self.ksi[1].T) / torch.sqrt(self.Ka[j_pop])
+            Pij[Pij>1] = 1
+            Pij[Pij<0] = 0
+            
+            print('Pij', Pij.shape)
+            
         if 'cos' in self.STRUCTURE[i_pop][j_pop]:
             theta = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Na), dtype=self.FLOAT, device=self.device)
             phi = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Nb), dtype=self.FLOAT, device=self.device)
-
+            
             i, j = torch.meshgrid(torch.arange(Na, device=self.device), torch.arange(Nb, device=self.device), indexing="ij")
             
             theta_diff = theta[i] - phi[j]
@@ -228,6 +269,7 @@ class Network(nn.Module):
         if 'sparse' in self.CONNECTIVITY:
             if self.VERBOSE:
                 print('Sparse random connectivity ')
+            
             Cij = self.Jab[i_pop][j_pop] * (torch.rand(Na, Nb, device=self.device) < Kb / float(Nb) * Pij)
 
         if 'all2all' in self.CONNECTIVITY:
@@ -249,7 +291,9 @@ class Network(nn.Module):
                     print('with weak cosine structure, KAPPA %.2f' % self.KAPPA[i_pop][j_pop].cpu().detach().numpy())
                 else:
                     print('with strong cosine structure, KAPPA', self.KAPPA[i_pop][j_pop])
-
+            elif "lr" in self.STRUCTURE[i_pop][j_pop]:
+                print('with weak low rank structure, KAPPA %.2f' % self.KAPPA[i_pop][j_pop].cpu().detach().numpy())
+                
         return Cij
 
     def initConst(self):
@@ -277,15 +321,15 @@ class Network(nn.Module):
 
         if self.VERBOSE:
             print("DT", self.DT, "TAU", self.TAU)
-
+        
         # if self.VERBOSE:
         #     print("EXP_DT_TAU", self.EXP_DT_TAU, "DT_TAU", self.DT_TAU)
-
+        
         self.STRUCTURE = np.array(self.STRUCTURE).reshape(self.N_POP, self.N_POP)
         self.SIGMA = torch.tensor(self.SIGMA, dtype=self.FLOAT).view(self.N_POP, self.N_POP)
         self.KAPPA = torch.tensor(self.KAPPA, dtype=self.FLOAT).view(self.N_POP, self.N_POP)
         self.PHASE = self.PHASE * torch.pi / 180.0
-
+        
         # if self.VERBOSE:
         #     print(self.STRUCTURE)
         #     print(self.SIGMA)
@@ -298,7 +342,7 @@ class Network(nn.Module):
         # scaling recurrent weights Jab
         if self.VERBOSE:
             print("Jab", self.Jab)
-
+            
         self.Jab = torch.tensor(self.Jab, dtype=self.FLOAT, device=self.device).reshape(self.N_POP, self.N_POP) * self.GAIN
 
         for i_pop in range(self.N_POP):
@@ -313,7 +357,7 @@ class Network(nn.Module):
         
         self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device)
         self.Ja0 = self.Ja0 * torch.sqrt(self.Ka[0]) * self.M0
-
+        
         # if self.VERBOSE:
         #     print("scaled Ja0", self.Ja0)
 
@@ -340,8 +384,12 @@ class Network(nn.Module):
                 print("STIM ON")
             
             for i in range(self.N_POP):
-                self.Wab[i][i].bias.data = self.Ja0[i] + self.stimFunc(i)
-            
+                # self.Wab[i][i].bias.data = self.Ja0[i] + self.stimFunc(i)
+                if i==0:
+                    self.Wab[i][i].bias.data = self.Ja0[i] + self.ksi[0] * torch.sqrt(self.Ka[0]) * self.M0
+                else:
+                    self.Wab[i][i].bias.data = self.Ja0[i]
+                    
         if step == self.N_STIM_OFF and np.any(self.I0!=0):
             if self.VERBOSE:
                 print("STIM OFF")
