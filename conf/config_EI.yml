@@ -2,7 +2,9 @@
 # Simulation parameters
 ##########################################
 # output different prompts for debugging purpose
-VERBOSE: 0
+VERBOSE: 1
+
+DEVICE: cpu
 
 FLOAT_PRECISION: 64
 
@@ -14,18 +16,18 @@ DT: 0.001
 # total simulation time in s
 DURATION: 5.0
 # time to start saving simulation files
-T_STEADY: 1.0
+T_STEADY: 0.0
 # Saving to files every T_WINDOW
-T_WINDOW: .250
+T_WINDOW: .2500
 
 ##########################################
 # Parameters for the stimulus presentation
 ##########################################
 # stimulus as a cosine shape
 # time for stimulus onset in s 
-T_STIM_ON: 2.0
+T_STIM_ON: 1.0
 # time for stimulus offset in s 
-T_STIM_OFF: 2.5
+T_STIM_OFF: 2.0
 # amplitude of the 1st stimulus
 I0: [2.0, 0.0]
 # amplitude of the 2nd stimulus
@@ -44,9 +46,9 @@ DPHI: 0.25
 # number of populations
 N_POP: 2
 # number of neurons
-N_NEURON: 10000
+N_NEURON: 1000
 # number of average presynaptic input (set to 1 if all to all)
-K: 500.0
+K: 100.0
 # fraction of neuron in each population (must sum to 1)
 frac: [0.75, 0.25]
 
@@ -61,7 +63,7 @@ TF_TYPE: 1
 # set to 0 if instantaneous rates, 1 if exponentially decaying
 RATE_DYN: 1
 # rate time constants in s
-TAU: [0.02, 0.02]
+TAU: [0.04, 0.02]
 
 # Dynamics of the recurrent inputs
 # set to 0 if instantaneous, 1 if exponentially decaying
@@ -80,7 +82,7 @@ FF_DYN: 0
 # FF time constants in s
 TAU_FF: [0.003, 0.003]
 # Variance of the noise
-VAR_FF: [1.0, 1.0]
+VAR_FF: [0.1, 0.1]
 
 # Threshold dynamics
 # set to 0 constant thresholds, 1 to add adaptative thresholds
@@ -96,13 +98,13 @@ GAIN: 1.0
 # Synaptic strengths           
 Jab: [1.0, -1.5, 1, -1]
 # External inputs strengths
-Ja0: [0.5, 0.25]
+Ja0: [2.0, 1.0]
 # External rate
 M0: 1.0
 
 # To add an attentional switch
 # if BUMP_SWITCH[i] == 1 it sets Iext[i] to zero before stimulus presentation
-BUMP_SWITCH: [0, 0]
+BUMP_SWITCH: [1, 0]
 
 ########################
 # Plasticity
@@ -138,13 +140,16 @@ SEED: 0
 # any other string gives a sparse matrix,
 # Cij = 1 with proba Ka/Na, 0 otherwise
 
-CONNECTIVITY: 'sparse'
+CONNECTIVITY: 'all2all'
 # sets probabilities of connections' shape
 STRUCTURE: ['lr', 'None', 'None', 'None']
 # tuning of the recurrent connections
-KAPPA: [30.0, 0.0, 0.0, 0.0]
+KAPPA: [1.0, 0.0, 0.0, 0.0]
 # phase of the connectivity
 PHASE: 0.0
+
+# covariance
+LR_COV: 0.0
 
 # strength of the asymmetries if all to all
 SIGMA: [0.0, 0.0, 0.0, 0.0]

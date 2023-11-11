@@ -8,12 +8,11 @@ from yaml import safe_load
 from time import perf_counter
 import warnings
 
-from torch.distributions import MultivariateNormal
+from torch.distributions import Normal, MultivariateNormal
 
 warnings.filterwarnings("ignore")
 # torch.backends.cudnn.deterministic = True
 # torch.backends.cudnn.benchmark = False
-# torch.manual_seed(1)
 
 # class Activation(torch.nn.Module):
 #     def __init__(self, func_name='erf'):
@@ -54,19 +53,28 @@ class Network(nn.Module):
                 torch.cuda.manual_seed_all(self.SEED)  # For all GPUs
         
         # Create recurrent layer with nn.Linear
-        self.Wab = [[None]*self.N_POP for _ in range(self.N_POP)]
-
+        # self.Wab = np.array([[None]*self.N_POP for _ in range(self.N_POP)])
+        
+        self.Wab = nn.Linear(self.N_NEURON, self.N_NEURON, bias=True, dtype=self.FLOAT, device=self.device)
+        print(self.Wab)
+        
         for i_pop in range(self.N_POP):
             for j_pop in range(self.N_POP):
-                Wij = nn.Linear(self.Na[i_pop], self.Na[j_pop], bias=(i_pop==j_pop), dtype=self.FLOAT, device=self.device)
-                Wij.weight.data = self.initWeights(i_pop, j_pop)
-                self.Wab[i_pop][j_pop] = Wij
-                self.Wab[i_pop][j_pop] = self.Wab[i_pop][j_pop]
+                # Wij = nn.Linear(self.Na[i_pop], self.Na[j_pop], bias=(i_pop==j_pop),
+                #                 dtype=self.FLOAT, device=self.device)
+                
+                W0 = self.initWeights(i_pop, j_pop)
+                # Wij.weight.data = W0                
+                # self.Wab[i_pop, j_pop] = Wij
+                
+                self.Wab.weight.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
+                                     self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = W0
         
         # Here we store the constant external input in the bias
+        # print(self.Wab.bias.data.shape)
         for i_pop in range(self.N_POP):
-            self.Wab[i_pop][i_pop].bias.data.fill_(self.Ja0[i_pop])
-
+            # self.Wab[i_pop, i_pop].bias.data.fill_(self.Ja0[i_pop])        
+            self.Wab.bias.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1]].fill_(self.Ja0[i_pop])
         
         new_seed = int(time.time())
         torch.manual_seed(new_seed)
@@ -77,45 +85,50 @@ class Network(nn.Module):
         
     def update_rec_input(self, rates):
         '''Dynamics of the recurrent inputs'''
-        rec_input = torch.zeros((self.N_POP, self.N_NEURON), device=self.device)
-
-        for j_pop in range(self.N_POP):                
-            for i_pop in range(self.N_POP):
-                input = rec_input[j_pop][self.csumNa[i_pop] : self.csumNa[i_pop + 1]]
-                W = self.Wab[i_pop][j_pop](rates[self.csumNa[j_pop] : self.csumNa[j_pop + 1]])
-                rec_input[j_pop][self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = input + W 
-
+        # rec_input = torch.zeros((self.N_POP, self.N_NEURON), dtype=self.FLOAT, device=self.device)
+        
+        rec_input = self.Wab(rates)
+        
+        # for j_pop in range(self.N_POP):
+        #     for i_pop in range(self.N_POP):
+        #         r_pres = rates[self.csumNa[j_pop] : self.csumNa[j_pop + 1]]
+                
+        #         print('rate', r_pres.shape)
+        #         print(self.Wab[j_pop, i_pop])
+                
+        #         Wij = self.Wab[j_pop, i_pop](r_pres)
+        #         print('Wij', Wij.shape)
+                
+        #         rec_input[j_pop, self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = Wij
                 
         return rec_input
 
     def update_net_input(self, rec_input):
         '''Updating the net input into the neurons'''
 
-        net_input = torch.zeros(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        # net_input = torch.zeros(self.N_NEURON, dtype=self.FLOAT, device=self.device)
         
-        for  i_pop in range(self.N_POP):
-            if self.VAR_FF[i_pop] > 0:
-                net_input[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = torch.normal(mean=0,
-                                                                                      std=self.VAR_FF[i_pop],
-                                                                                      size=(self.Na[i_pop],),
-                                                                                      dtype=self.FLOAT,
-                                                                                      device=self.device)
+        noise = self.ff_normal.sample((self.N_NEURON,)).squeeze(0)
         
-        for i_pop in range(self.N_POP):
-            net_input = net_input + rec_input[i_pop]
+        # noise = []
+        # for i_pop in range(self.N_POP):
+        #     noise.append(self.ff_normal.sample((self.Na[i_pop],)))
         
+        net_input = noise + rec_input
+        
+        # for i_pop in range(self.N_POP):
+        #     net_input = net_input + rec_input[i_pop]
+            
         return net_input
-
+    
     def update_rates(self, rates, net_input):
         '''Dynamics of the rates'''
         # using array slices is faster than indices
         if self.RATE_DYN:
-            for i_pop in range(self.N_POP):
-                rates[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = rates[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] * self.EXP_DT_TAU[i_pop]
-                rates[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = rates[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] + self.DT_TAU[i_pop] * Activation()(net_input[self.csumNa[i_pop] : self.csumNa[i_pop + 1]])
+            rates = self.EXP_DT_TAU * rates + self.DT_TAU * Activation()(net_input)
         else:
             rates = Activation()(net_input)
-            
+        
         return rates
 
     def forward(self, rates):
@@ -125,18 +138,18 @@ class Network(nn.Module):
         rates = self.update_rates(rates, net_input)
 
         return rates
-
+    
     def print_activity(self, step, rates):
 
         times = np.round((step - self.N_STEADY) / self.N_STEPS * self.DURATION, 2)
-
+        
         activity = []
-
+        
         activity.append(np.round(torch.mean(rates[:self.csumNa[1]]).cpu().detach().numpy(), 2))
 
         if self.N_POP > 1:
             activity.append(np.round(torch.mean(rates[self.csumNa[1]:self.csumNa[2]]).cpu().detach().numpy(), 2))
-
+        
         if self.N_POP > 2:
             activity.append(np.round(torch.mean(rates[self.csumNa[2]:]).cpu().detach().numpy(), 2))
 
@@ -169,7 +182,7 @@ class Network(nn.Module):
                     if self.VERBOSE:
                         self.print_activity(step, hidden)
                 
-                result.append(hidden.cpu().detach().numpy())
+                    result.append(hidden.cpu().detach().numpy())
         
         result = np.array(result)
 
@@ -227,33 +240,37 @@ class Network(nn.Module):
         Nb = self.Na[j_pop]
         Kb = self.Ka[j_pop]
         
-        Pij = 1.0
+        Pij = torch.tensor(1.0, dtype=self.FLOAT, device=self.device)
         
-        if 'lr' in self.STRUCTURE[i_pop][j_pop]:
+        if 'lr' in self.STRUCTURE[i_pop, j_pop]:
             
-            mean = torch.tensor([0.0, 0.0, 0.0, 0.0], device=self.device)
+            mean = torch.tensor([0.0, 0.0], dtype=self.FLOAT, device=self.device)
             
             # Define the covariance matrix
-            covariance = torch.tensor([[1.0, 0.0, 0.0, 0.0],
-                                       [0.0, 1.0, 0.0, 0.0],
-                                       [0.0, 0.0, 1.0, 0.0],
-                                       [0.0, 0.0, 0.0, 1.0],], device=self.device)
-            
-            multivariate_normal = MultivariateNormal(mean, covariance)
-            
+            covariance = torch.tensor([[1.0, self.LR_COV],
+                                       [self.LR_COV, 1.0],], dtype=self.FLOAT, device=self.device)
+
+
+            multivariate_normal = MultivariateNormal(mean, covariance)            
             self.ksi = multivariate_normal.sample((Nb,)).T
+            
+            while torch.abs(self.ksi[0] @ self.ksi[1]) > .10:
+                multivariate_normal = MultivariateNormal(mean, covariance)            
+                self.ksi = multivariate_normal.sample((Nb,)).T
 
             if self.VERBOSE:
                 print('ksi', self.ksi.shape)
+                print('ksi . ksi1', self.ksi[0] @ self.ksi[1])
+                
+            Pij = 1.0 + self.KAPPA[i_pop, j_pop] * (torch.outer(self.ksi[0], self.ksi[0])
+                                                    + torch.outer(self.ksi[1], self.ksi[1])) / torch.sqrt(self.Ka[j_pop])
+            # Pij[Pij>1] = 1
+            # Pij[Pij<0] = 0
             
-            Pij = 1.0 + self.KAPPA[i_pop][j_pop] * (self.ksi[0] * self.ksi[0].T
-                                                    + self.ksi[1] * self.ksi[1].T) / torch.sqrt(self.Ka[j_pop])
-            Pij[Pij>1] = 1
-            Pij[Pij<0] = 0
+            if self.VERBOSE:
+                print('Pij', Pij.shape)
             
-            print('Pij', Pij.shape)
-            
-        if 'cos' in self.STRUCTURE[i_pop][j_pop]:
+        if 'cos' in self.STRUCTURE[i_pop, j_pop]:
             theta = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Na), dtype=self.FLOAT, device=self.device)
             phi = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Nb), dtype=self.FLOAT, device=self.device)
             
@@ -261,38 +278,38 @@ class Network(nn.Module):
             
             theta_diff = theta[i] - phi[j]
 
-            if 'spec' in self.STRUCTURE[i_pop][j_pop]:
-                self.KAPPA[i_pop][j_pop] = self.KAPPA[i_pop][j_pop] / torch.sqrt(self.Ka[j_pop])
-
-            Pij = 1.0 + 2.0 * self.KAPPA[i_pop][j_pop] * torch.cos(theta_diff - self.PHASE)
+            if 'spec' in self.STRUCTURE[i_pop, j_pop]:
+                self.KAPPA[i_pop, j_pop] = self.KAPPA[i_pop, j_pop] / torch.sqrt(Kb)
+                
+            Pij = 1.0 + 2.0 * self.KAPPA[i_pop, j_pop] * torch.cos(theta_diff - self.PHASE)
 
         if 'sparse' in self.CONNECTIVITY:
             if self.VERBOSE:
                 print('Sparse random connectivity ')
             
-            Cij = self.Jab[i_pop][j_pop] * (torch.rand(Na, Nb, device=self.device) < Kb / float(Nb) * Pij)
+            Cij = self.Jab[i_pop, j_pop] * (torch.rand(Na, Nb, device=self.device) < Kb / float(Nb) * Pij)
 
         if 'all2all' in self.CONNECTIVITY:
             if self.VERBOSE:
                 print('All to all connectivity ')
                 
-            Cij = self.Jab[i_pop][j_pop] * Pij / float(Nb)
-
-            if self.SIGMA[i_pop][j_pop] > 0.0:
+            Cij = self.Jab[i_pop, j_pop] * Pij / float(Nb)
+            
+            if self.SIGMA[i_pop, j_pop] > 0.0:
                 if self.VERBOSE:
-                    print('with heterogeneity, SIGMA', self.SIGMA[i_pop][j_pop])
+                    print('with heterogeneity, SIGMA', self.SIGMA[i_pop, j_pop])
                 
-                Hij = torch.normal(0, self.SIGMA[i_pop][j_pop], size=(Na, Nb), dtype=self.FLOAT, device=self.device)
+                Hij = torch.normal(0, self.SIGMA[i_pop, j_pop], size=(Na, Nb), dtype=self.FLOAT, device=self.device)
                 Cij = Cij + Hij / float(Nb)
                 
         if self.VERBOSE:
-            if "cos" in self.STRUCTURE[i_pop][j_pop]:
-                if "spec" in self.STRUCTURE[i_pop][j_pop]:
-                    print('with weak cosine structure, KAPPA %.2f' % self.KAPPA[i_pop][j_pop].cpu().detach().numpy())
+            if "cos" in self.STRUCTURE[i_pop, j_pop]:
+                if "spec" in self.STRUCTURE[i_pop, j_pop]:
+                    print('with weak cosine structure, KAPPA %.2f' % self.KAPPA[i_pop, j_pop].cpu().detach().numpy())
                 else:
-                    print('with strong cosine structure, KAPPA', self.KAPPA[i_pop][j_pop])
-            elif "lr" in self.STRUCTURE[i_pop][j_pop]:
-                print('with weak low rank structure, KAPPA %.2f' % self.KAPPA[i_pop][j_pop].cpu().detach().numpy())
+                    print('with strong cosine structure, KAPPA', self.KAPPA[i_pop, j_pop])
+            elif "lr" in self.STRUCTURE[i_pop, j_pop]:
+                print('with weak low rank structure, KAPPA %.2f' % self.KAPPA[i_pop, j_pop].cpu().detach().numpy())
                 
         return Cij
 
@@ -300,25 +317,41 @@ class Network(nn.Module):
         self.Na = []
         self.Ka = []
 
+        if 'all2all' in self.CONNECTIVITY:
+            self.K = 1.0
+        
         for i_pop in range(self.N_POP):
             self.Na.append(int(self.N_NEURON * self.frac[i_pop]))
             # self.Ka.append(self.K * const.frac[i_pop])
             self.Ka.append(self.K)
-
-        self.Na = torch.tensor(self.Na, dtype=torch.int)
-        self.Ka = torch.tensor(self.Ka, dtype=self.FLOAT)
+        
+        self.Na = torch.tensor(self.Na, dtype=torch.int, device=self.device)
+        self.Ka = torch.tensor(self.Ka, dtype=self.FLOAT, device=self.device)
         self.csumNa = torch.cat((torch.tensor([0]), torch.cumsum(self.Na, dim=0)))
-
+        
         if self.VERBOSE:
             print("Na", self.Na, "Ka", self.Ka, "csumNa", self.csumNa)
 
-        self.EXP_DT_TAU = []
-        self.DT_TAU = []
-
+        self.TAU = torch.tensor(self.TAU, dtype=self.FLOAT, device=self.device)
+        
+        self.EXP_DT_TAU = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        self.DT_TAU = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        
         for i_pop in range(self.N_POP):
-            self.EXP_DT_TAU.append(np.exp(-self.DT / self.TAU[i_pop]))
-            self.DT_TAU.append(self.DT / self.TAU[i_pop])
+            self.EXP_DT_TAU[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU[i_pop])
+            self.DT_TAU[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = self.DT / self.TAU[i_pop]
+        
+        # self.EXP_DT_TAU = []
+        # self.DT_TAU = []
+        
+        # for i_pop in range(self.N_POP):
+        #     self.EXP_DT_TAU.append(np.exp(-self.DT / self.TAU[i_pop]))
+        #     self.DT_TAU.append(self.DT / self.TAU[i_pop])
+        
+        # self.DT_TAU = torch.tensor(self.DT_TAU, dtype=self.FLOAT, device=self.device)
+        # self.EXP_DT_TAU = torch.tensor(self.EXP_DT_TAU, dtype=self.FLOAT, device=self.device)
 
+        
         if self.VERBOSE:
             print("DT", self.DT, "TAU", self.TAU)
         
@@ -326,9 +359,9 @@ class Network(nn.Module):
         #     print("EXP_DT_TAU", self.EXP_DT_TAU, "DT_TAU", self.DT_TAU)
         
         self.STRUCTURE = np.array(self.STRUCTURE).reshape(self.N_POP, self.N_POP)
-        self.SIGMA = torch.tensor(self.SIGMA, dtype=self.FLOAT).view(self.N_POP, self.N_POP)
-        self.KAPPA = torch.tensor(self.KAPPA, dtype=self.FLOAT).view(self.N_POP, self.N_POP)
-        self.PHASE = self.PHASE * torch.pi / 180.0
+        self.SIGMA = torch.tensor(self.SIGMA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
+        self.KAPPA = torch.tensor(self.KAPPA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
+        self.PHASE = torch.tensor(self.PHASE * torch.pi / 180.0, dtype=self.FLOAT, device=self.device)
         
         # if self.VERBOSE:
         #     print(self.STRUCTURE)
@@ -361,42 +394,49 @@ class Network(nn.Module):
         # if self.VERBOSE:
         #     print("scaled Ja0", self.Ja0)
 
-        for i_pop in range(self.N_POP):
-            self.VAR_FF[i_pop] = np.sqrt(self.VAR_FF[i_pop])
-            
+        self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
+        ff_mean = torch.tensor(0.0, dtype=self.FLOAT, device=self.device)
+        self.ff_normal = Normal(ff_mean, self.VAR_FF[0])
+        
     def update_stim(self, step):
         """Perturb the inputs based on the simulus parameters."""
-
+        
         if step == 0:
             for i in range(self.N_POP):
                 if self.BUMP_SWITCH[i]:
-                    self.Wab[i][i].bias.data.fill_(0.0)
+                    # self.Wab[i, i].bias.data.fill_(0.0)
+                    self.Wab.bias.data[self.csumNa[i]:self.csumNa[i+1]].fill_(0.0)
                 if self.K !=1 and self.BUMP_SWITCH[i]:
-                    self.Wab[i][i].bias.data.fill_(self.Ja0[i] / torch.sqrt(self.Ka[0]))
-
+                    # self.Wab[i, i].bias.data.fill_(self.Ja0[i] / torch.sqrt(self.Ka[0]))
+                    self.Wab.bias.data[self.csumNa[i]:self.csumNa[i+1]].fill_(self.Ja0[i] / torch.sqrt(self.Ka[0]))
+        
         if step == self.N_STIM_ON:
             for i in range(self.N_POP):
                 if self.BUMP_SWITCH[i]:
-                    self.Wab[i][i].bias.data.fill_(self.Ja0[i])
+                    # self.Wab[i, i].bias.data.fill_(self.Ja0[i])
+                    self.Wab.bias.data[self.csumNa[i]:self.csumNa[i+1]].fill_(self.Ja0[i])
         
         if step == self.N_STIM_ON and np.any(self.I0!=0):
             if self.VERBOSE:
                 print("STIM ON")
+
+            # self.Wab[0, 0].bias.data = self.Ja0[i] + self.ksi[0] * torch.sqrt(self.Ka[0]) * self.M0
+            if self.PHI0 == 0:
+                self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + self.ksi[0] * torch.sqrt(self.Ka[0]) * self.M0
+            if self.PHI0 == 180:
+                self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + self.ksi[1] * torch.sqrt(self.Ka[0]) * self.M0
             
-            for i in range(self.N_POP):
-                # self.Wab[i][i].bias.data = self.Ja0[i] + self.stimFunc(i)
-                if i==0:
-                    self.Wab[i][i].bias.data = self.Ja0[i] + self.ksi[0] * torch.sqrt(self.Ka[0]) * self.M0
-                else:
-                    self.Wab[i][i].bias.data = self.Ja0[i]
-                    
+            # for i in range(self.N_POP):
+            # self.Wab[i, i].bias.data = self.Ja0[i] + self.stimFunc(i)
+                
         if step == self.N_STIM_OFF and np.any(self.I0!=0):
             if self.VERBOSE:
                 print("STIM OFF")
+            self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0]
 
-            for i in range(self.N_POP):
-                self.Wab[i][i].bias.data.fill_(self.Ja0[i])
-
+            # for i in range(self.N_POP):
+            #     self.Wab[i, i].bias.data.fill_(self.Ja0[i])
+        
     def stimFunc(self, i_pop):
         """Stimulus shape"""
         theta = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(self.Na[i_pop]), dtype=self.FLOAT, device=self.device)
