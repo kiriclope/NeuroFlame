@@ -135,11 +135,11 @@
       df_code = df.groupby(['time', 'trial', 'phi'] )['rates'].apply(decode_bump).reset_index()
       df_code[['m0', 'm1', 'phase']] = pd.DataFrame(df_code['rates'].tolist(), index=df_code.index)
       df_code = df_code.drop(columns=['rates'])
-
+      
       end_point = df_code[df_code.time==df_code.time.iloc[-1]]
       end_point = end_point.drop(columns=['time'])
-      print(end_point.head())  
-      return df_code, end_point  
+      print(end_point.head())
+      return df_code, end_point
 #+end_src
 
 #+RESULTS:
@@ -210,8 +210,8 @@
 #+end_src
 
 #+RESULTS:
-: GPU 0 Memory Usage: 0.08%
-: GPU 1 Memory Usage: 0.08%
+: GPU 0 Memory Usage: 0.07%
+: GPU 1 Memory Usage: 0.07%
 
 #+begin_src ipython
   from time import sleep
@@ -267,7 +267,7 @@
               print('##########################################')
 
               model = Network('config_bump.yml', '%s_ini_%d_phi_%d' % (name, ini, phi),
-                              REPO_ROOT, LOAD_MAT=LOAD_MAT, SAVE_MAT=SAVE_MAT, DEVICE=device)
+                              REPO_ROOT, LOAD_MAT=LOAD_MAT, SAVE_MAT=SAVE_MAT, DEVICE=device, PHI0=phi)
 
               model.run()
               # process = Process(target=model.run)
@@ -314,10 +314,10 @@
 *** Parameters
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  Ie_list = np.linspace(10, 30, 11)
+  Ie_list = np.linspace(10, 20, 11)
   # Ie_list = [14]
   print('Ie', Ie_list)
-  ini_list = np.arange(0, 50)
+  ini_list = np.arange(0, 10)
   # ini_list = [0]
   print('ini', ini_list)
   # phi_list = np.linspace(0, 315, 8)
@@ -326,10 +326,8 @@
 #+end_src
 
 #+RESULTS:
-: Ie [10. 12. 14. 16. 18. 20. 22. 24. 26. 28. 30.]
-: ini [ 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23
-:  24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
-:  48 49]
+: Ie [10. 11. 12. 13. 14. 15. 16. 17. 18. 19. 20.]
+: ini [0 1 2 3 4 5 6 7 8 9]
 : phi [180]
 
 #+begin_src ipython
@@ -345,7 +343,7 @@
 #+end_src
 
 #+RESULTS:
-: n_sim 550 Expected runtime 0.0h 22.0m 0.0s
+: n_sim 110 Expected runtime 0.0h 4.0m 24.0s
 
 *** Simulation
 #+begin_src ipython :results none
@@ -353,6 +351,1770 @@
   run_X(name, Ie_list, ini_list, phi_list, X_str='Ie')
 #+end_src
 
+#+RESULTS:
+:RESULTS:
+#+begin_example
+  ##########################################
+  trial 0 phi 180 Ie 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_0.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 2.38555861543864s
+  ##########################################
+  trial 0 phi 180 Ie 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_1.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.8549491809681058s
+  ##########################################
+  trial 0 phi 180 Ie 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_2.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.8421973991207778s
+  ##########################################
+  trial 0 phi 180 Ie 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_3.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.8409297880716622s
+  ##########################################
+  trial 0 phi 180 Ie 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_4.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.8750801673159003s
+  ##########################################
+  trial 0 phi 180 Ie 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_5.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.874278764706105s
+  ##########################################
+  trial 0 phi 180 Ie 6.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_6.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.9120536409318447s
+  ##########################################
+  trial 0 phi 180 Ie 7.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_7.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.8108408669941127s
+  ##########################################
+  trial 0 phi 180 Ie 8.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_8.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.8030450870282948s
+  ##########################################
+  trial 0 phi 180 Ie 9.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_9.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.7977900099940598s
+  ##########################################
+  trial 0 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.803347690962255s
+  ##########################################
+  trial 1 phi 180 Ie 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_0.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.801764290779829s
+  ##########################################
+  trial 1 phi 180 Ie 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_1.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.8332398012280464s
+  ##########################################
+  trial 1 phi 180 Ie 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_2.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.8215081980451941s
+  ##########################################
+  trial 1 phi 180 Ie 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_3.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.8098169076256454s
+  ##########################################
+  trial 1 phi 180 Ie 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_4.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.7956668459810317s
+  ##########################################
+  trial 1 phi 180 Ie 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_5.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.8053984777070582s
+  ##########################################
+  trial 1 phi 180 Ie 6.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_6.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.8517980528995395s
+  ##########################################
+  trial 1 phi 180 Ie 7.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_7.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.80365043412894s
+  ##########################################
+  trial 1 phi 180 Ie 8.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_8.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.7851871480233967s
+  ##########################################
+  trial 1 phi 180 Ie 9.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_9.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.796483958605677s
+  ##########################################
+  trial 1 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.810166187118739s
+  ##########################################
+  trial 2 phi 180 Ie 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_0.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.811045188922435s
+  ##########################################
+  trial 2 phi 180 Ie 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_1.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.8269700990058482s
+  ##########################################
+  trial 2 phi 180 Ie 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_2.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.8199177789501846s
+  ##########################################
+  trial 2 phi 180 Ie 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_3.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.799485641065985s
+  ##########################################
+  trial 2 phi 180 Ie 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_4.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.7998762000352144s
+  ##########################################
+  trial 2 phi 180 Ie 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_5.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 2.0111625799909234s
+  ##########################################
+  trial 2 phi 180 Ie 6.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_6.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.841214339248836s
+  ##########################################
+  trial 2 phi 180 Ie 7.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_7.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.8118359707295895s
+  ##########################################
+  trial 2 phi 180 Ie 8.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_8.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.8100786739960313s
+  ##########################################
+  trial 2 phi 180 Ie 9.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_9.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.7805274962447584s
+  ##########################################
+  trial 2 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.7756647602654994s
+  ##########################################
+  trial 3 phi 180 Ie 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_0.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7908723461441696s
+  ##########################################
+  trial 3 phi 180 Ie 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_1.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7863791221752763s
+  ##########################################
+  trial 3 phi 180 Ie 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_2.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7952034869231284s
+  ##########################################
+  trial 3 phi 180 Ie 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_3.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.813472740817815s
+  ##########################################
+  trial 3 phi 180 Ie 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_4.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7927480922080576s
+  ##########################################
+  trial 3 phi 180 Ie 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_5.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.8027750281617045s
+  ##########################################
+  trial 3 phi 180 Ie 6.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_6.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.783323282841593s
+  ##########################################
+  trial 3 phi 180 Ie 7.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_7.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7958383201621473s
+  ##########################################
+  trial 3 phi 180 Ie 8.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_8.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7828488000668585s
+  ##########################################
+  trial 3 phi 180 Ie 9.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_9.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.781606176868081s
+  ##########################################
+  trial 3 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.787598995026201s
+  ##########################################
+  trial 4 phi 180 Ie 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_0.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7979337498545647s
+  ##########################################
+  trial 4 phi 180 Ie 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_1.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.792960425838828s
+  ##########################################
+  trial 4 phi 180 Ie 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_2.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7762322099879384s
+  ##########################################
+  trial 4 phi 180 Ie 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_3.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7881446769461036s
+  ##########################################
+  trial 4 phi 180 Ie 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_4.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7756102099083364s
+  ##########################################
+  trial 4 phi 180 Ie 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_5.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7752993968315423s
+  ##########################################
+  trial 4 phi 180 Ie 6.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_6.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7694521988742054s
+  ##########################################
+  trial 4 phi 180 Ie 7.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_7.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7735462258569896s
+  ##########################################
+  trial 4 phi 180 Ie 8.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_8.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.788309931755066s
+  ##########################################
+  trial 4 phi 180 Ie 9.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_9.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7677182601764798s
+  ##########################################
+  trial 4 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.791637232992798s
+  ##########################################
+  trial 5 phi 180 Ie 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_0.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.7997109261341393s
+  ##########################################
+  trial 5 phi 180 Ie 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_1.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.7743039466440678s
+  ##########################################
+  trial 5 phi 180 Ie 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_2.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.7897005081176758s
+  ##########################################
+  trial 5 phi 180 Ie 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_3.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.775345849338919s
+  ##########################################
+  trial 5 phi 180 Ie 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_4.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.7823584801517427s
+  ##########################################
+  trial 5 phi 180 Ie 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_5.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.777395918034017s
+  ##########################################
+  trial 5 phi 180 Ie 6.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_6.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.7662958377040923s
+  ##########################################
+  trial 5 phi 180 Ie 7.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_7.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.7715287092141807s
+  ##########################################
+  trial 5 phi 180 Ie 8.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_8.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.7728797812014818s
+  ##########################################
+  trial 5 phi 180 Ie 9.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_9.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.7724336269311607s
+  ##########################################
+  trial 5 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.7824178487062454s
+  ##########################################
+  trial 6 phi 180 Ie 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_0.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.781554841902107s
+  ##########################################
+  trial 6 phi 180 Ie 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_1.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.7785171722061932s
+  ##########################################
+  trial 6 phi 180 Ie 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_2.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.8095094710588455s
+  ##########################################
+  trial 6 phi 180 Ie 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_3.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.8353397785685956s
+  ##########################################
+  trial 6 phi 180 Ie 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_4.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.776217123027891s
+  ##########################################
+  trial 6 phi 180 Ie 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_5.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.7867479459382594s
+  ##########################################
+  trial 6 phi 180 Ie 6.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_6.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.7894268441013992s
+  ##########################################
+  trial 6 phi 180 Ie 7.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_7.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.7753820568323135s
+  ##########################################
+  trial 6 phi 180 Ie 8.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_8.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.7757790782488883s
+  ##########################################
+  trial 6 phi 180 Ie 9.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_9.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.8926091329194605s
+  ##########################################
+  trial 6 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.7821941548027098s
+  ##########################################
+  trial 7 phi 180 Ie 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_0.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.776524922810495s
+  ##########################################
+  trial 7 phi 180 Ie 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_1.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.7777712778188288s
+  ##########################################
+  trial 7 phi 180 Ie 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_2.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.7620598897337914s
+  ##########################################
+  trial 7 phi 180 Ie 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_3.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.7814110647886992s
+  ##########################################
+  trial 7 phi 180 Ie 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_4.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.7862498108297586s
+  ##########################################
+  trial 7 phi 180 Ie 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_5.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.7867910037748516s
+  ##########################################
+  trial 7 phi 180 Ie 6.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_6.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.7917556799948215s
+  ##########################################
+  trial 7 phi 180 Ie 7.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_7.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.7835618797689676s
+  ##########################################
+  trial 7 phi 180 Ie 8.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_8.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.8052622829563916s
+  ##########################################
+  trial 7 phi 180 Ie 9.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_9.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.7741621690802276s
+  ##########################################
+  trial 7 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.791317286901176s
+  ##########################################
+  trial 8 phi 180 Ie 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_0.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.779169674962759s
+  ##########################################
+  trial 8 phi 180 Ie 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_1.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.7845143820159137s
+  ##########################################
+  trial 8 phi 180 Ie 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_2.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.7818946931511164s
+  ##########################################
+  trial 8 phi 180 Ie 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_3.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.7863344522193074s
+  ##########################################
+  trial 8 phi 180 Ie 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_4.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.7872850950807333s
+  ##########################################
+  trial 8 phi 180 Ie 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_5.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.776953627821058s
+  ##########################################
+  trial 8 phi 180 Ie 6.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_6.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.776900628581643s
+  ##########################################
+  trial 8 phi 180 Ie 7.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_7.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.7728458307683468s
+  ##########################################
+  trial 8 phi 180 Ie 8.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_8.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.7871300531551242s
+  ##########################################
+  trial 8 phi 180 Ie 9.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_9.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.7899745227769017s
+  ##########################################
+  trial 8 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.7917051599361002s
+  ##########################################
+  trial 9 phi 180 Ie 0.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_0.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.775730446446687s
+  ##########################################
+  trial 9 phi 180 Ie 1.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_1.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.7960276920348406s
+  ##########################################
+  trial 9 phi 180 Ie 2.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_2.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.7970544747076929s
+  ##########################################
+  trial 9 phi 180 Ie 3.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_3.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.778976364992559s
+  ##########################################
+  trial 9 phi 180 Ie 4.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_4.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.7743528238497674s
+  ##########################################
+  trial 9 phi 180 Ie 5.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_5.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.7778151887468994s
+  ##########################################
+  trial 9 phi 180 Ie 6.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_6.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.7741066189482808s
+  ##########################################
+  trial 9 phi 180 Ie 7.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_7.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.7791838007979095s
+  ##########################################
+  trial 9 phi 180 Ie 8.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_8.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.7779564340598881s
+  ##########################################
+  trial 9 phi 180 Ie 9.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_9.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.7811141042038798s
+  ##########################################
+  trial 9 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.7796689998358488s##########################################
+  trial 0 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.8351973150856793s
+  ##########################################
+  trial 0 phi 180 Ie 11.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_11.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.7548468201421201s
+  ##########################################
+  trial 0 phi 180 Ie 12.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_12.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.7330947588197887s
+  ##########################################
+  trial 0 phi 180 Ie 13.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_13.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.7483090539462864s
+  ##########################################
+  trial 0 phi 180 Ie 14.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_14.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.74468057975173s
+  ##########################################
+  trial 0 phi 180 Ie 15.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_15.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.7418079152703285s
+  ##########################################
+  trial 0 phi 180 Ie 16.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_16.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.7428774549625814s
+  ##########################################
+  trial 0 phi 180 Ie 17.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_17.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.7468151459470391s
+  ##########################################
+  trial 0 phi 180 Ie 18.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_18.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.7365478142164648s
+  ##########################################
+  trial 0 phi 180 Ie 19.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_19.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.736182854976505s
+  ##########################################
+  trial 0 phi 180 Ie 20.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_20.00_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.751400088891387s
+  ##########################################
+  trial 1 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.763150260783732s
+  ##########################################
+  trial 1 phi 180 Ie 11.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_11.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.7641814351081848s
+  ##########################################
+  trial 1 phi 180 Ie 12.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_12.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.7382543310523033s
+  ##########################################
+  trial 1 phi 180 Ie 13.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_13.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.7641079630702734s
+  ##########################################
+  trial 1 phi 180 Ie 14.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_14.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.7350020902231336s
+  ##########################################
+  trial 1 phi 180 Ie 15.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_15.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.7621173961088061s
+  ##########################################
+  trial 1 phi 180 Ie 16.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_16.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.7364554000087082s
+  ##########################################
+  trial 1 phi 180 Ie 17.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_17.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.7526459000073373s
+  ##########################################
+  trial 1 phi 180 Ie 18.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_18.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.738530935253948s
+  ##########################################
+  trial 1 phi 180 Ie 19.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_19.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.7506384421139956s
+  ##########################################
+  trial 1 phi 180 Ie 20.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_20.00_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.7367651890963316s
+  ##########################################
+  trial 2 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.739040789194405s
+  ##########################################
+  trial 2 phi 180 Ie 11.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_11.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.7330037611536682s
+  ##########################################
+  trial 2 phi 180 Ie 12.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_12.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.7611513268202543s
+  ##########################################
+  trial 2 phi 180 Ie 13.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_13.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.7592301950789988s
+  ##########################################
+  trial 2 phi 180 Ie 14.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_14.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.7350385463796556s
+  ##########################################
+  trial 2 phi 180 Ie 15.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_15.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.7473072428256273s
+  ##########################################
+  trial 2 phi 180 Ie 16.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_16.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.7395071159116924s
+  ##########################################
+  trial 2 phi 180 Ie 17.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_17.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.7640821412205696s
+  ##########################################
+  trial 2 phi 180 Ie 18.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_18.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.7439722828567028s
+  ##########################################
+  trial 2 phi 180 Ie 19.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_19.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.716317927930504s
+  ##########################################
+  trial 2 phi 180 Ie 20.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_20.00_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.7214708179235458s
+  ##########################################
+  trial 3 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7155055780895054s
+  ##########################################
+  trial 3 phi 180 Ie 11.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_11.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7238268787041306s
+  ##########################################
+  trial 3 phi 180 Ie 12.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_12.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7218935349956155s
+  ##########################################
+  trial 3 phi 180 Ie 13.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_13.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7389025669544935s
+  ##########################################
+  trial 3 phi 180 Ie 14.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_14.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7471715603023767s
+  ##########################################
+  trial 3 phi 180 Ie 15.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_15.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7521630660630763s
+  ##########################################
+  trial 3 phi 180 Ie 16.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_16.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7385709257796407s
+  ##########################################
+  trial 3 phi 180 Ie 17.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_17.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7477818080224097s
+  ##########################################
+  trial 3 phi 180 Ie 18.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_18.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7296163490973413s
+  ##########################################
+  trial 3 phi 180 Ie 19.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_19.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7486069668084383s
+  ##########################################
+  trial 3 phi 180 Ie 20.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_20.00_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.7479652781039476s
+  ##########################################
+  trial 4 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7371978722512722s
+  ##########################################
+  trial 4 phi 180 Ie 11.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_11.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7252879347652197s
+  ##########################################
+  trial 4 phi 180 Ie 12.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_12.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7577313822694123s
+  ##########################################
+  trial 4 phi 180 Ie 13.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_13.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7590047572739422s
+  ##########################################
+  trial 4 phi 180 Ie 14.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_14.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7800766238942742s
+  ##########################################
+  trial 4 phi 180 Ie 15.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_15.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7705935570411384s
+  ##########################################
+  trial 4 phi 180 Ie 16.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_16.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.8184788599610329s
+  ##########################################
+  trial 4 phi 180 Ie 17.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_17.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.8048693723976612s
+  ##########################################
+  trial 4 phi 180 Ie 18.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_18.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.7743899221532047s
+  ##########################################
+  trial 4 phi 180 Ie 19.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_19.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.8765655397437513s
+  ##########################################
+  trial 4 phi 180 Ie 20.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_20.00_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.8482346977107227s
+  ##########################################
+  trial 5 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.8561985371634364s
+  ##########################################
+  trial 5 phi 180 Ie 11.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_11.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.816989017650485s
+  ##########################################
+  trial 5 phi 180 Ie 12.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_12.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.885211508255452s
+  ##########################################
+  trial 5 phi 180 Ie 13.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_13.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.8947088778950274s
+  ##########################################
+  trial 5 phi 180 Ie 14.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_14.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.8508423962630332s
+  ##########################################
+  trial 5 phi 180 Ie 15.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_15.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.8122926503419876s
+  ##########################################
+  trial 5 phi 180 Ie 16.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_16.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.8684883401729167s
+  ##########################################
+  trial 5 phi 180 Ie 17.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_17.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.8036486320197582s
+  ##########################################
+  trial 5 phi 180 Ie 18.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_18.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.8558064987882972s
+  ##########################################
+  trial 5 phi 180 Ie 19.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_19.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.8132059541530907s
+  ##########################################
+  trial 5 phi 180 Ie 20.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_20.00_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.8179588890634477s
+  ##########################################
+  trial 6 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.8526835930533707s
+  ##########################################
+  trial 6 phi 180 Ie 11.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_11.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.820456710178405s
+  ##########################################
+  trial 6 phi 180 Ie 12.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_12.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.9067517602816224s
+  ##########################################
+  trial 6 phi 180 Ie 13.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_13.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 2.7120176078751683s
+  ##########################################
+  trial 6 phi 180 Ie 14.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_14.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.9447196810506284s
+  ##########################################
+  trial 6 phi 180 Ie 15.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_15.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.826571498066187s
+  ##########################################
+  trial 6 phi 180 Ie 16.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_16.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.8731771190650761s
+  ##########################################
+  trial 6 phi 180 Ie 17.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_17.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.8577361847274005s
+  ##########################################
+  trial 6 phi 180 Ie 18.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_18.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.8626215690746903s
+  ##########################################
+  trial 6 phi 180 Ie 19.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_19.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.9125413289293647s
+  ##########################################
+  trial 6 phi 180 Ie 20.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_20.00_ini_6_phi_180.npy
+  Elapsed (with compilation) = 2.5067661767825484s
+  ##########################################
+  trial 7 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.8288700440898538s
+  ##########################################
+  trial 7 phi 180 Ie 11.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_11.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.500734195113182s
+  ##########################################
+  trial 7 phi 180 Ie 12.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_12.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.5042365109547973s
+  ##########################################
+  trial 7 phi 180 Ie 13.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_13.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.566064391285181s
+  ##########################################
+  trial 7 phi 180 Ie 14.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_14.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.5292255370877683s
+  ##########################################
+  trial 7 phi 180 Ie 15.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_15.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.5336844311095774s
+  ##########################################
+  trial 7 phi 180 Ie 16.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_16.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.506618826650083s
+  ##########################################
+  trial 7 phi 180 Ie 17.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_17.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.5131759317591786s
+  ##########################################
+  trial 7 phi 180 Ie 18.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_18.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.5542460228316486s
+  ##########################################
+  trial 7 phi 180 Ie 19.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_19.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.552109584212303s
+  ##########################################
+  trial 7 phi 180 Ie 20.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_20.00_ini_7_phi_180.npy
+  Elapsed (with compilation) = 2.5271727051585913s
+  ##########################################
+  trial 8 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.8415571418590844s
+  ##########################################
+  trial 8 phi 180 Ie 11.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_11.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.451552240177989s
+  ##########################################
+  trial 8 phi 180 Ie 12.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_12.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.523555980063975s
+  ##########################################
+  trial 8 phi 180 Ie 13.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_13.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.52599671902135s
+  ##########################################
+  trial 8 phi 180 Ie 14.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_14.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.565387095324695s
+  ##########################################
+  trial 8 phi 180 Ie 15.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_15.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.5383872808888555s
+  ##########################################
+  trial 8 phi 180 Ie 16.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_16.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.5499675711616874s
+  ##########################################
+  trial 8 phi 180 Ie 17.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_17.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.5347771267406642s
+  ##########################################
+  trial 8 phi 180 Ie 18.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_18.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.5244419728405774s
+  ##########################################
+  trial 8 phi 180 Ie 19.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_19.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.5164907569997013s
+  ##########################################
+  trial 8 phi 180 Ie 20.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_20.00_ini_8_phi_180.npy
+  Elapsed (with compilation) = 2.5284590926021338s
+  ##########################################
+  trial 9 phi 180 Ie 10.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_10.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.5268196524120867s
+  ##########################################
+  trial 9 phi 180 Ie 11.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_11.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.542936517857015s
+  ##########################################
+  trial 9 phi 180 Ie 12.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_12.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.5401770039461553s
+  ##########################################
+  trial 9 phi 180 Ie 13.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_13.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.536184427794069s
+  ##########################################
+  trial 9 phi 180 Ie 14.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_14.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.5629214108921587s
+  ##########################################
+  trial 9 phi 180 Ie 15.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_15.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.559437572956085s
+  ##########################################
+  trial 9 phi 180 Ie 16.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_16.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.5376466210000217s
+  ##########################################
+  trial 9 phi 180 Ie 17.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_17.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.5411837128922343s
+  ##########################################
+  trial 9 phi 180 Ie 18.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_18.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.5387118980288506s
+  ##########################################
+  trial 9 phi 180 Ie 19.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_19.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.550006782170385s
+  ##########################################
+  trial 9 phi 180 Ie 20.0
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump_Ie_20.00_ini_9_phi_180.npy
+  Elapsed (with compilation) = 2.548063945956528s
+#+end_example
+:END:
 *** Analysis
 ***** Load data
 
@@ -362,13 +2124,13 @@
 #+end_src
 
 #+RESULTS:
-: (50, 1, 11, 3999, 1000)
+: (10, 1, 11, 9, 1000)
 :    trial  phi  Ie  neuron  time     rates
-: 0      0    0   0       0     0  3.819337
-: 1      0    0   0       1     0  2.239994
-: 2      0    0   0       2     0  0.787764
-: 3      0    0   0       3     0  2.620689
-: 4      0    0   0       4     0  3.064431
+: 0      0    0   0       0     0  3.420683
+: 1      0    0   0       1     0  2.582892
+: 2      0    0   0       2     0  0.980584
+: 3      0    0   0       3     0  3.229243
+: 4      0    0   0       4     0  1.394306
 
 #+begin_src ipython
   end_point = get_code_X(df, 'Ie')
@@ -376,13 +2138,14 @@
 
 #+RESULTS:
 :    trial  phi  Ie        m0        m1     phase
-: 0      0    0   0  4.735278  3.333369  2.817615
-: 1      0    0   1  5.304492  4.389674  3.380684
-: 2      0    0   2  5.876477  5.385289  3.289118
-: 3      0    0   3  6.400838  5.994339  3.113357
-: 4      0    0   4  6.923957  6.352475  3.133245
+: 0      0    0   0  4.762374  3.565484 -2.947099
+: 1      0    0   1  5.074442  4.081473  2.978281
+: 2      0    0   2  5.350055  4.510930 -3.039672
+: 3      0    0   3  5.605951  5.099040 -2.958511
+: 4      0    0   4  5.893637  5.551303 -2.903556
 
 ***** Bifurcation
+
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
@@ -399,7 +2162,7 @@
   plt.show()
 #+end_src
 #+RESULTS:
-[[file:./.ob-jupyter/0f610273cd6ca60f02d056ee10e32a487d51d384.png]]
+[[file:./.ob-jupyter/024ab2d21d4b79c446d6593f79ff61c7f3688037.png]]
 
 ***** Tuning Profile
 #+begin_src ipython
@@ -414,34 +2177,31 @@
 #+end_src
 
 #+RESULTS:
-: f8e8b007-0cb2-4361-b996-52715c496840
 
 #+begin_src ipython
-    endpoint = df_smooth[df_smooth.time==df_smooth.time.iloc[-1]]
-    endpoint = endpoint.drop(columns=['time'])
+  endpoint = df_smooth[df_smooth.time==df_smooth.time.iloc[-1]]
+  endpoint = endpoint.drop(columns=['time'])
 #+end_src
 
 #+RESULTS:
-: ba1001f0-4519-4f79-b8be-2a036c327e22
 
 #+begin_src ipython
   idx_off = 4
-  idx_on = 7
+  idx_on = 10
 
-  end0 = endpoint[end_point.Ie==idx_off].reset_index()
-  end1 = endpoint[end_point.Ie==idx_on].reset_index()
-
+  end0 = endpoint[endpoint.Ie==idx_off].reset_index()
+  end1 = endpoint[endpoint.Ie==idx_on].reset_index()
   plt.plot(end0.rates[4])
   plt.plot(end1.rates[4])
   plt.show()
 #+end_src
 
 #+RESULTS:
-: b9526958-5315-408c-9ac2-05fd109c5d7f
+[[file:./.ob-jupyter/552cc4bf4aeca1d4522211eab7cbb9903fee8588.png]]
 
 ***** Errors
 #+begin_src ipython
-  end_point['accuracy'] = (end_point.phase - end_point['phi'] / 180 * np.pi) % (2 * np.pi)
+  end_point['accuracy'] = (end_point.phase - end_point['phi'] / 180 * np.pi) 
   end_point['precision'] = end_point.groupby(['phi', 'Ie'], group_keys=False)['phase'].apply(get_precision)
   
   print(end_point.head())
@@ -449,11 +2209,11 @@
 
 #+RESULTS:
 :    trial  phi  Ie        m0        m1     phase  accuracy  precision
-: 0      0    0   0  4.735278  3.333369  2.817615  2.817615  -0.297498
-: 1      0    0   1  5.304492  4.389674  3.380684  3.380684   0.213992
-: 2      0    0   2  5.876477  5.385289  3.289118  3.289118   0.130761
-: 3      0    0   3  6.400838  5.994339  3.113357  3.113357  -0.018229
-: 4      0    0   4  6.923957  6.352475  3.133245  3.133245   0.003589
+: 0      0    0   0  4.762374  3.565484 -2.947099 -2.947099  -6.048638
+: 1      0    0   1  5.074442  4.081473  2.978281  2.978281  -0.135883
+: 2      0    0   2  5.350055  4.510930 -3.039672 -3.039672  -6.204361
+: 3      0    0   3  5.605951  5.099040 -2.958511 -2.958511  -6.083589
+: 4      0    0   4  5.893637  5.551303 -2.903556 -2.903556  -6.082837
 
 #+begin_src ipython
   fig, ax = plt.subplots()
@@ -471,7 +2231,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/420ab2ceb67b9ed57107190d54508ddb5b55059e.png]]
+[[file:./.ob-jupyter/8700ee08618939a792d02ab7d5ad8b961df1a5f8.png]]
 
 #+begin_src ipython
   point = end_point[end_point.Ie==idx_off]
@@ -487,7 +2247,7 @@
   sns.histplot(data=point_on, x=point_on['phase']*180/np.pi, legend=False, lw=2, ax=ax[0], kde=False, bins=200, stat='density', color='r')
   ax[0].set_xlabel('$\phi$(°)')
   ax[0].set_ylabel('Density')
-  ax[0].set_xticks([0, 90, 180, 270, 360])
+  ax[0].set_xticks([-180, -90, 0, 90, 180], [0, 90, 180, 270, 360])
 
   sns.histplot(data=point, x=point['accuracy']*180/np.pi, legend=False, lw=2, ax=ax[1], kde=False, bins=200, stat='density', color='b')
   sns.histplot(data=point_on, x=point_on['accuracy']*180/np.pi, legend=False, lw=2, ax=ax[1], kde=False, bins=200, stat='density', color='r')
@@ -495,8 +2255,8 @@
   ax[1].set_ylabel('Density')
   ax[1].set_xticks([0, 90, 180, 270, 360])
 
-  sns.histplot(data=point, x=point['precision']*180/np.pi, legend=False, ax=ax[2], bins='auto', kde=True, stat='density', element='step', alpha=0,color = 'b')
-  sns.histplot(data=point_on, x=point_on['precision']*180/np.pi, legend=False, ax=ax[2], bins='auto', kde=True, stat='density', element='step', alpha=0., color='r')
+  sns.histplot(data=point, x=point['precision']*180/np.pi, legend=False, ax=ax[2], bins=200, kde=False, stat='density', element='step', alpha=0,color = 'b')
+  sns.histplot(data=point_on, x=point_on['precision']*180/np.pi, legend=False, ax=ax[2], bins=200, kde=False, stat='density', element='step', alpha=0., color='r')
   ax[2].set_xlabel('$\phi - <\phi>_{trials}$ (°)')
   ax[2].set_ylabel('Density')
   ax[2].set_xlim([-20, 20])
@@ -505,7 +2265,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2eb3e0db13301b7e675a3da8725a522ec3bf2393.png]]
+[[file:./.ob-jupyter/48fb45acd47cc2da793f874b9e4192fdf74face5.png]]
 
 #+begin_src ipython
 

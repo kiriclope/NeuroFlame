@@ -1,36 +1,21 @@
 import os
 import gc
-import time
 import numpy as np
-import torch
-from torch import nn
+
 from yaml import safe_load
 from time import perf_counter
-import warnings
 
+import torch
+from torch import nn
 from torch.distributions import Normal, MultivariateNormal
 
+from src.utils import set_seed, get_theta
+from src.activation import Activation
+from src.plasticity import STP_Model
+
+import warnings
 warnings.filterwarnings("ignore")
-# torch.backends.cudnn.deterministic = True
-# torch.backends.cudnn.benchmark = False
 
-# class Activation(torch.nn.Module):
-#     def __init__(self, func_name='erf'):
-#         super().__init__()
-#         self.func_name = func_name
-        
-#     def forward(self, x, THRESH=15):
-#         if self.func_name == 'erf':
-#             return THRESH * 0.5 / (1.0 + torch.erf(x / np.sqrt(2.0)))
-#         elif self.func_name == 'relu':
-#             return nn.ReLU()(x - THRESH)
-#         else:
-#             raise ValueError('Invalid function name')
-
-class Activation(torch.nn.Module):
-    def forward(self, x, THRESH=15):
-        return nn.ReLU()(x)
-        # return THRESH * 0.5 * (1.0 + torch.erf(x / np.sqrt(2.0)))
 
 class Network(nn.Module):
     def __init__(self, conf_file, sim_name, repo_root, **kwargs):
@@ -45,80 +30,47 @@ class Network(nn.Module):
         # scale parameters
         self.scaleParam()
 
-        if self.SEED !=0 :
-            torch.manual_seed(self.SEED)
+        # set seed for connectivity
+        set_seed(self.SEED)
         
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed(self.SEED)
-                torch.cuda.manual_seed_all(self.SEED)  # For all GPUs
-        
-        # Create recurrent layer with nn.Linear
-        # self.Wab = np.array([[None]*self.N_POP for _ in range(self.N_POP)])
+        # We define the recurrent network with nn.linear()
+        # In pytorch, y_j = \sum/{i=1}^{N} (x_i \cdot W/{ij}) + b_j
+        # so Wij means i presynaptic and j postsynaptic
         
         self.Wab = nn.Linear(self.N_NEURON, self.N_NEURON, bias=True, dtype=self.FLOAT, device=self.device)
         print(self.Wab)
-        
+                
         for i_pop in range(self.N_POP):
             for j_pop in range(self.N_POP):
-                # Wij = nn.Linear(self.Na[i_pop], self.Na[j_pop], bias=(i_pop==j_pop),
-                #                 dtype=self.FLOAT, device=self.device)
+                W0 = self.initWeights(j_pop, i_pop) # (pre, post)
                 
-                W0 = self.initWeights(i_pop, j_pop)
-                # Wij.weight.data = W0                
-                # self.Wab[i_pop, j_pop] = Wij
+                self.Wab.weight.data[self.csumNa[j_pop] : self.csumNa[j_pop + 1],
+                                     self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = W0
                 
-                self.Wab.weight.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
-                                     self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = W0
-        
         # Here we store the constant external input in the bias
-        # print(self.Wab.bias.data.shape)
         for i_pop in range(self.N_POP):
-            # self.Wab[i_pop, i_pop].bias.data.fill_(self.Ja0[i_pop])        
             self.Wab.bias.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1]].fill_(self.Ja0[i_pop])
         
-        new_seed = int(time.time())
-        torch.manual_seed(new_seed)
+        set_seed(0)
         
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(new_seed)
-            torch.cuda.manual_seed_all(new_seed)  # For all GPUs
         
     def update_rec_input(self, rates):
         '''Dynamics of the recurrent inputs'''
         # rec_input = torch.zeros((self.N_POP, self.N_NEURON), dtype=self.FLOAT, device=self.device)
-        
+
+        # y_j = \sum/{i=1}^{N} (x_i \cdot W/{ij}) + b_j
         rec_input = self.Wab(rates)
         
-        # for j_pop in range(self.N_POP):
-        #     for i_pop in range(self.N_POP):
-        #         r_pres = rates[self.csumNa[j_pop] : self.csumNa[j_pop + 1]]
-                
-        #         print('rate', r_pres.shape)
-        #         print(self.Wab[j_pop, i_pop])
-                
-        #         Wij = self.Wab[j_pop, i_pop](r_pres)
-        #         print('Wij', Wij.shape)
-                
-        #         rec_input[j_pop, self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = Wij
-                
+        # rec_inputs = self.EXP_DT_TAU * rates + self.DT_TAU * Activation()(net_input)
+        
         return rec_input
 
     def update_net_input(self, rec_input):
         '''Updating the net input into the neurons'''
-
-        # net_input = torch.zeros(self.N_NEURON, dtype=self.FLOAT, device=self.device)
         
-        noise = self.ff_normal.sample((self.N_NEURON,)).squeeze(0)
-        
-        # noise = []
-        # for i_pop in range(self.N_POP):
-        #     noise.append(self.ff_normal.sample((self.Na[i_pop],)))
-        
+        noise = self.ff_normal.sample((self.N_NEURON,))
         net_input = noise + rec_input
         
-        # for i_pop in range(self.N_POP):
-        #     net_input = net_input + rec_input[i_pop]
-            
         return net_input
     
     def update_rates(self, rates, net_input):
@@ -130,7 +82,7 @@ class Network(nn.Module):
             rates = Activation()(net_input)
         
         return rates
-
+    
     def forward(self, rates):
         '''This is the main function of the class'''
         rec_input = self.update_rec_input(rates)
@@ -172,20 +124,29 @@ class Network(nn.Module):
         self.N_WINDOW = int(self.T_WINDOW / self.DT)
         self.N_STIM_ON = int(self.T_STIM_ON / self.DT)
         self.N_STIM_OFF = int(self.T_STIM_OFF / self.DT)
+
+        with torch.no_grad():
         
-        for step in range(self.N_STEPS):
-            self.update_stim(step)
-            hidden = self.forward(hidden)
+            for step in range(self.N_STEPS + self.N_STEADY):
+                self.update_stim(step)
+                hidden = self.forward(hidden)
             
-            if step > self.N_STEADY:
-                if step % self.N_WINDOW == 0:
-                    if self.VERBOSE:
-                        self.print_activity(step, hidden)
-                
-                    result.append(hidden.cpu().detach().numpy())
+                if step >= self.N_STEADY+1:
+                    if step % self.N_WINDOW == 0:
+                        if self.VERBOSE:
+                            self.print_activity(step - self.N_STEADY, hidden)
+                        
+                        result.append(hidden.cpu().detach().numpy())
         
         result = np.array(result)
+        print('result', result.shape)
+        
+        # self.theta = get_theta(self.ksi[1].cpu(), self.ksi[0].cpu(), GM=1, IF_NORM=1)
+        # print(self.theta.shape)
 
+        # result = result[:, self.theta.argsort()]
+        # print('result', result.shape)
+        
         print('Saving rates to:', self.DATA_PATH + self.FILE_NAME + '.npy')
         np.save(self.DATA_PATH + self.FILE_NAME + '.npy', result)
         
@@ -228,14 +189,14 @@ class Network(nn.Module):
             self.FLOAT = torch.float
         else:
             self.FLOAT = torch.float64
-
+        
         self.device = torch.device(self.DEVICE)
-
+    
     def initRates(self):
         return torch.zeros(self.N_NEURON, dtype=self.FLOAT, device=self.device)
     
     def initWeights(self, i_pop, j_pop):
-
+        
         Na = self.Na[i_pop]
         Nb = self.Na[j_pop]
         Kb = self.Ka[j_pop]
@@ -250,20 +211,23 @@ class Network(nn.Module):
             covariance = torch.tensor([[1.0, self.LR_COV],
                                        [self.LR_COV, 1.0],], dtype=self.FLOAT, device=self.device)
 
-
-            multivariate_normal = MultivariateNormal(mean, covariance)            
+            
+            multivariate_normal = MultivariateNormal(mean, covariance)
             self.ksi = multivariate_normal.sample((Nb,)).T
             
-            while torch.abs(self.ksi[0] @ self.ksi[1]) > .10:
-                multivariate_normal = MultivariateNormal(mean, covariance)            
-                self.ksi = multivariate_normal.sample((Nb,)).T
-
+            # while torch.abs(self.ksi[0] @ self.ksi[1] - self.LR_COV) > .01:
+            #     multivariate_normal = MultivariateNormal(mean, covariance)            
+            #     self.ksi = multivariate_normal.sample((Nb,)).T
+            
             if self.VERBOSE:
                 print('ksi', self.ksi.shape)
-                print('ksi . ksi1', self.ksi[0] @ self.ksi[1])
-                
-            Pij = 1.0 + self.KAPPA[i_pop, j_pop] * (torch.outer(self.ksi[0], self.ksi[0])
-                                                    + torch.outer(self.ksi[1], self.ksi[1])) / torch.sqrt(self.Ka[j_pop])
+                print('ksi . ksi1', torch.cov(self.ksi))
+            
+            Pij = (1.0 + self.KAPPA[i_pop, j_pop]
+                   * (torch.outer(self.ksi[0], self.ksi[0])
+                      + torch.outer(self.ksi[1], self.ksi[1]))
+                   / torch.sqrt(self.Ka[j_pop]))
+            
             # Pij[Pij>1] = 1
             # Pij[Pij<0] = 0
             
@@ -271,23 +235,30 @@ class Network(nn.Module):
                 print('Pij', Pij.shape)
             
         if 'cos' in self.STRUCTURE[i_pop, j_pop]:
-            theta = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Na), dtype=self.FLOAT, device=self.device)
-            phi = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Nb), dtype=self.FLOAT, device=self.device)
+            theta = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Na),
+                                 dtype=self.FLOAT, device=self.device)
             
-            i, j = torch.meshgrid(torch.arange(Na, device=self.device), torch.arange(Nb, device=self.device), indexing="ij")
+            phi = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Nb),
+                               dtype=self.FLOAT, device=self.device)
+            
+            i, j = torch.meshgrid(torch.arange(Na, device=self.device),
+                                  torch.arange(Nb, device=self.device),
+                                  indexing="ij")
             
             theta_diff = theta[i] - phi[j]
-
+            
             if 'spec' in self.STRUCTURE[i_pop, j_pop]:
                 self.KAPPA[i_pop, j_pop] = self.KAPPA[i_pop, j_pop] / torch.sqrt(Kb)
                 
-            Pij = 1.0 + 2.0 * self.KAPPA[i_pop, j_pop] * torch.cos(theta_diff - self.PHASE)
+            Pij = (1.0 + 2.0 * self.KAPPA[i_pop, j_pop]
+                   * torch.cos(theta_diff - self.PHASE))
 
         if 'sparse' in self.CONNECTIVITY:
             if self.VERBOSE:
                 print('Sparse random connectivity ')
             
-            Cij = self.Jab[i_pop, j_pop] * (torch.rand(Na, Nb, device=self.device) < Kb / float(Nb) * Pij)
+            Cij = (self.Jab[i_pop, j_pop]
+                   * (torch.rand(Na, Nb, device=self.device) < Kb / float(Nb) * Pij))
 
         if 'all2all' in self.CONNECTIVITY:
             if self.VERBOSE:
@@ -299,7 +270,11 @@ class Network(nn.Module):
                 if self.VERBOSE:
                     print('with heterogeneity, SIGMA', self.SIGMA[i_pop, j_pop])
                 
-                Hij = torch.normal(0, self.SIGMA[i_pop, j_pop], size=(Na, Nb), dtype=self.FLOAT, device=self.device)
+                Hij = torch.normal(0, self.SIGMA[i_pop, j_pop],
+                                   size=(Na, Nb),
+                                   dtype=self.FLOAT,
+                                   device=self.device)
+                
                 Cij = Cij + Hij / float(Nb)
                 
         if self.VERBOSE:
@@ -322,12 +297,12 @@ class Network(nn.Module):
         
         for i_pop in range(self.N_POP):
             self.Na.append(int(self.N_NEURON * self.frac[i_pop]))
-            # self.Ka.append(self.K * const.frac[i_pop])
-            self.Ka.append(self.K)
+            self.Ka.append(self.K * self.frac[i_pop])
+            # self.Ka.append(self.K)
         
         self.Na = torch.tensor(self.Na, dtype=torch.int, device=self.device)
         self.Ka = torch.tensor(self.Ka, dtype=self.FLOAT, device=self.device)
-        self.csumNa = torch.cat((torch.tensor([0]), torch.cumsum(self.Na, dim=0)))
+        self.csumNa = torch.cat((torch.tensor([0], device=self.device), torch.cumsum(self.Na, dim=0)))
         
         if self.VERBOSE:
             print("Na", self.Na, "Ka", self.Ka, "csumNa", self.csumNa)
@@ -393,7 +368,7 @@ class Network(nn.Module):
         
         # if self.VERBOSE:
         #     print("scaled Ja0", self.Ja0)
-
+        
         self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
         ff_mean = torch.tensor(0.0, dtype=self.FLOAT, device=self.device)
         self.ff_normal = Normal(ff_mean, self.VAR_FF[0])
@@ -419,16 +394,20 @@ class Network(nn.Module):
         if step == self.N_STIM_ON and np.any(self.I0!=0):
             if self.VERBOSE:
                 print("STIM ON")
-
-            # self.Wab[0, 0].bias.data = self.Ja0[i] + self.ksi[0] * torch.sqrt(self.Ka[0]) * self.M0
-            if self.PHI0 == 0:
-                self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + self.ksi[0] * torch.sqrt(self.Ka[0]) * self.M0
-            if self.PHI0 == 180:
-                self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + self.ksi[1] * torch.sqrt(self.Ka[0]) * self.M0
             
-            # for i in range(self.N_POP):
-            # self.Wab[i, i].bias.data = self.Ja0[i] + self.stimFunc(i)
-                
+            self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + self.stimFunc(0)
+            
+            # if self.PHI0 == 0:
+            #     self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 + self.ksi[0] * self.I0[0] * self.M0)
+            # if self.PHI0 == 180:
+            #     self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 - self.ksi[0] * self.I0[0] * self.M0)
+            
+            # if self.PHI0 == 90:
+            #     self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 + self.ksi[1] * self.I0[0] * self.M0)
+            # if self.PHI0 == 270:
+            #     self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 - self.ksi[1] * self.I0[0] * self.M0)
+                            
+            
         if step == self.N_STIM_OFF and np.any(self.I0!=0):
             if self.VERBOSE:
                 print("STIM OFF")
@@ -440,4 +419,4 @@ class Network(nn.Module):
     def stimFunc(self, i_pop):
         """Stimulus shape"""
         theta = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(self.Na[i_pop]), dtype=self.FLOAT, device=self.device)
-        return self.I0[i_pop] * (1.0 + self.SIGMA0 * torch.cos(theta - self.PHI0 * torch.pi / 180.0)) * self.Ka[0] * self.M0
+        return self.I0[i_pop] * (1.0 + self.SIGMA0 * torch.cos(theta - self.PHI0 * torch.pi / 180.0)) * torch.sqrt(self.Ka[0]) * self.M0

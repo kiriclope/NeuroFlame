@@ -31,8 +31,8 @@ def decode_bump(signal, axis=-1):
         dft = np.swapaxes(dft, axis, -1)
     
     m1 = 2.0 * np.absolute(dft) / length
-    phi = np.arctan2(dft.imag, dft.real) % (2.0 * np.pi)
-
+    phi = np.arctan2(dft.imag, dft.real) 
+    
     return m0, m1, phi
 
 
@@ -49,7 +49,7 @@ def circcvl(signal, windowSize=10, axis=-1):
     ndarray: Returns the smoothed signal after circular convolution.
     """
     
-    # signal_copy = signal.copy()
+    signal_copy = signal
     
     if axis != -1 and signal.ndim != 1:
         signal_copy = np.swapaxes(signal, axis, -1)

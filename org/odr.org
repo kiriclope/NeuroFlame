@@ -1,0 +1,574 @@
+#+STARTUP: fold
+#+TITLE: RNN with pytorch
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session torch :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Helpers
+** Data
+#+begin_src ipython
+  def get_rates_ini_phi(name, ini_list, phi_list):
+    rates_list = []
+    for ini in ini_list:
+      for phi in phi_list:
+        rates = np.load(REPO_ROOT + '/data/simul/%s_ini_%d_phi_%d.npy' % (name, ini, phi))
+        rates_list.append(rates)
+
+    rates_list = np.array(rates_list).reshape(len(ini_list), len(phi_list), rates.shape[0], rates.shape[1])
+    print(rates_list.shape)
+    return rates_list  
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_df_ini_phi(rates):
+      n_trials, n_phi, n_times, n_neurons = rates.shape
+
+      # Create indices
+      trials_ind, phi_ind, times_ind, neurons_ind = np.indices((n_trials, n_phi, n_times, n_neurons))
+
+      # Construct DataFrame
+      df = pd.DataFrame({
+          'trial': trials_ind.flatten(),
+          'phi': phi_ind.flatten(),
+          'neuron': neurons_ind.flatten(),
+          'time': times_ind.flatten(),
+          'rates': rates.flatten()
+      })
+
+      return df
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def load_data_ini_phi(name, ini_list, phi_list):
+      rates = get_rates_ini_phi(name, ini_list, phi_list)
+      df = get_df_ini_phi(rates)
+      return df
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_code_ini_phi(df):
+      df_code = df.groupby(['time', 'trial', 'phi'] )['rates'].apply(decode_bump).reset_index()
+      df_code[['m0', 'm1', 'phase']] = pd.DataFrame(df_code['rates'].tolist(), index=df_code.index)
+      df_code = df_code.drop(columns=['rates'])
+      
+      end_point = df_code[df_code.time==df_code.time.iloc[-1]]
+      end_point = end_point.drop(columns=['time'])
+      print(end_point.head())  
+      return df_code, end_point  
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_precision(x):
+      return x - circmean(x)
+#+end_src
+
+#+RESULTS:
+
+** Simul
+
+#+begin_src ipython
+  def run_ini_phi(conf, name, ini_list, phi_list, **kwargs):
+      LOAD_MAT = 0
+      SAVE_MAT = 1
+
+      df_list = []
+      for ini in ini_list:
+          for phi in phi_list:
+
+              print('##########################################')
+              print("trial", ini, "phi", phi)
+              print('##########################################')
+              
+              model = Network('%s' % conf, '%s_ini_%d_phi_%d' % (name, ini, phi),
+                              REPO_ROOT, LOAD_MAT=LOAD_MAT, SAVE_MAT=SAVE_MAT, PHI0=phi, **kwargs)
+
+              model.run()
+
+              LOAD_MAT = 1
+              SAVE_MAT = 0
+#+end_src
+
+#+RESULTS:
+
+* Imports
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../')
+
+  import pandas as pd
+  from scipy.stats import circmean
+  
+  from src.network import Network
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump
+#+end_src
+
+#+RESULTS:
+
+* Single Trial
+** Model
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  conf_name = "config_bump.yml"
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  name = "odr_off"
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda')
+  rates_off = model.run()
+#+end_src
+
+#+RESULTS:
+: Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+: Linear(in_features=1000, out_features=1000, bias=True)
+: result (11, 1000)
+: Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_off.npy
+: Elapsed (with compilation) = 2.095081313047558s
+
+
+#+begin_src ipython
+  name = "odr_on"
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', Ja0=[24])
+  rates_on = model.run()
+#+end_src
+
+#+RESULTS:
+: Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+: Linear(in_features=1000, out_features=1000, bias=True)
+: result (9, 1000)
+: Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_on.npy
+: Elapsed (with compilation) = 1.7434517880901694s
+
+** Analysis
+
+#+begin_src ipython
+print(rates_off.shape)
+#+end_src
+
+#+RESULTS:
+: (11, 1000)
+
+#+begin_src ipython
+  width = 7
+  golden_ratio = (5**.5 - 1) / 2
+  fig, ax = plt.subplots(1, 2, figsize= [1.5*width, width * golden_ratio])
+  times = np.linspace(0, 5.5, rates_off.shape[0])
+
+  N_E = 1000
+  r_min = 0
+  r_max = 2 * np.max((np.mean(rates_off), np.mean(rates_on)))
+
+  im = ax[0].imshow(rates_off.T, aspect='auto', cmap='jet',vmin=0, vmax=r_max, extent=[times[0], times[-1], 0, N_E])
+
+  ax[0].set_xlabel('Time (s)')
+  ax[0].set_xticks([0, 1, 2, 3, 4, 5])
+  ax[0].set_ylabel('Prefered Location (°)')
+  ax[0].set_yticks([0, N_E/4, N_E/2, 3*N_E/4, N_E], [0, 90, 180, 270, 360])
+  ax[0].set_title('Control')
+
+  im = ax[1].imshow(rates_on.T, aspect='auto', cmap='jet',vmin=0, vmax=r_max, extent=[times[0], times[-1], 0, N_E])
+  ax[1].set_xlabel('Time (s)')
+  ax[1].set_xticks([0, 1, 2, 3, 4, 5])
+  # ax[1].set_ylabel('Prefered Location (°)')
+  ax[1].set_yticks([0, N_E/4, N_E/2, 3*N_E/4, N_E], [0, 90, 180, 270, 360])
+  ax[1].set_title('NB Stim')
+
+  cbar = plt.colorbar(im, ax=ax[1])
+  cbar.set_label("Firing Rate (Hz)")
+  # cbar.set_ticks([0,  , ])
+  plt.savefig('./neurons.svg', dpi=300)
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/acf1bb72daa3a122a3033fed7c583cdc9050cc32.png]]
+
+#+begin_src ipython
+  m0, m1, phi = decode_bump(rates_off[:, :N_E], axis=-1)  
+  m0_on, m1_on, phi_on = decode_bump(rates_on[:, :N_E], axis=-1) 
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=(2*width, height))
+
+  times = np.linspace(0, 5.5, m0.shape[0])
+  
+  ax[0].plot(times, m0)
+  ax[0].plot(times, m0_on)
+
+  ax[0].set_xlabel('Time (s)')
+  ax[0].set_ylabel('$\mathcal{F}^0$')
+  ax[0].set_xticks([0, 1, 2, 3, 4, 5])
+
+  ax[1].plot(times, m1 / m0)
+  ax[1].plot(times, m1_on / m0_on)
+
+  ax[1].set_xlabel('Time (s)')
+  ax[1].set_ylabel('$\mathcal{F}^1 / \mathcal{F}^0$')
+  ax[1].set_xticks([0, 1, 2, 3, 4, 5])
+
+  ax[2].plot(times, phi * 180 / np.pi)
+  ax[2].plot(times, phi_on * 180 / np.pi)
+
+  ax[2].set_xlabel('Time (s)')
+  ax[2].set_ylabel('$\phi$')
+  ax[2].set_yticks([-180, -90, 0, 90, 180], [0, 90, 180, 270, 360])
+  ax[2].set_xticks([0, 1, 2, 3, 4, 5])
+  plt.tight_layout()
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/c688a0a7da123abd4eec61a7f744102595343f75.png]]
+
+* Multiple Trials
+** Parameters
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  conf_name = "config_bump.yml"
+
+  ini_list = np.arange(0, 10)
+  phi_list = np.linspace(0, 315, 8)
+  phi_list = [180]
+#+end_src
+
+#+RESULTS:
+
+** Simulation
+
+#+begin_src ipython  
+  name = 'odr_off'
+  run_ini_phi(conf_name, name, ini_list, phi_list)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  ##########################################
+  trial 0 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_off_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.4836306548677385s
+  ##########################################
+  trial 1 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_off_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.2886161520145833s
+  ##########################################
+  trial 2 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_off_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.335299848113209s
+  ##########################################
+  trial 3 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_off_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.3041986981406808s
+  ##########################################
+  trial 4 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_off_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.3386855241842568s
+  ##########################################
+  trial 5 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_off_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.3371661873534322s
+  ##########################################
+  trial 6 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_off_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.312948692124337s
+  ##########################################
+  trial 7 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_off_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.3490651790052652s
+  ##########################################
+  trial 8 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_off_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.3433706709183753s
+  ##########################################
+  trial 9 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_off_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.2725091842003167s
+#+end_example
+
+#+begin_src ipython  
+  name = 'odr_on'
+  run_ini_phi(conf_name, name, ini_list, phi_list, Ja0=[24])
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  ##########################################
+  trial 0 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_on_ini_0_phi_180.npy
+  Elapsed (with compilation) = 1.2768435021862388s
+  ##########################################
+  trial 1 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_on_ini_1_phi_180.npy
+  Elapsed (with compilation) = 1.3017849391326308s
+  ##########################################
+  trial 2 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_on_ini_2_phi_180.npy
+  Elapsed (with compilation) = 1.2792632929049432s
+  ##########################################
+  trial 3 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_on_ini_3_phi_180.npy
+  Elapsed (with compilation) = 1.2886060997843742s
+  ##########################################
+  trial 4 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_on_ini_4_phi_180.npy
+  Elapsed (with compilation) = 1.28030748013407s
+  ##########################################
+  trial 5 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_on_ini_5_phi_180.npy
+  Elapsed (with compilation) = 1.3530014241114259s
+  ##########################################
+  trial 6 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_on_ini_6_phi_180.npy
+  Elapsed (with compilation) = 1.276399081107229s
+  ##########################################
+  trial 7 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_on_ini_7_phi_180.npy
+  Elapsed (with compilation) = 1.2950202329084277s
+  ##########################################
+  trial 8 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_on_ini_8_phi_180.npy
+  Elapsed (with compilation) = 1.2745935060083866s
+  ##########################################
+  trial 9 phi 180
+  ##########################################
+  Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
+  Linear(in_features=1000, out_features=1000, bias=True)
+  result (9, 1000)
+  Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_on_ini_9_phi_180.npy
+  Elapsed (with compilation) = 1.3170876889489591s
+#+end_example
+
+** Load data
+
+#+begin_src ipython
+  name = 'odr_off'
+  df = load_data_ini_phi(name, ini_list, phi_list)
+  print(df.head())
+  df_code, end_point = get_code_ini_phi(df)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  (10, 1, 9, 1000)
+     trial  phi  neuron  time     rates
+  0      0    0       0     0  1.707089
+  1      0    0       1     0  3.713505
+  2      0    0       2     0  0.994330
+  3      0    0       3     0  2.181002
+  4      0    0       4     0  2.698885
+      trial  phi        m0        m1     phase
+  80      0    0  5.869136  5.361500 -3.044626
+  81      1    0  5.872266  5.299327  2.957827
+  82      2    0  5.872890  5.357238  3.134171
+  83      3    0  5.909986  5.501513 -3.136507
+  84      4    0  5.872143  5.486720  2.869519
+#+end_example
+
+#+begin_src ipython
+  name = 'odr_on'
+  df_on = load_data_ini_phi(name, ini_list, phi_list)
+  print(df_on.head())
+  df_code_on, end_point_on = get_code_ini_phi(df_on)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  (10, 1, 9, 1000)
+     trial  phi  neuron  time     rates
+  0      0    0       0     0  1.606477
+  1      0    0       1     0  1.354397
+  2      0    0       2     0  2.813128
+  3      0    0       3     0  1.392115
+  4      0    0       4     0  1.877259
+      trial  phi        m0        m1     phase
+  80      0    0  8.416426  6.452906 -2.990060
+  81      1    0  8.368941  6.351976 -3.042745
+  82      2    0  8.376200  6.398486 -3.071749
+  83      3    0  8.376048  6.392311  3.043609
+  84      4    0  8.375221  6.409976  3.120710
+#+end_example
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+
+  # sns.lineplot(end_point, x='Ie', y='m0', ax=ax[0], legend=False, marker='o')
+  sns.lineplot(df_code, x='time', y=df_code['phase']*180/np.pi-90, ax=ax[0], legend=False, hue='trial', lw=2, alpha=0.2)
+  ax[0].set_xlabel('Time (s)')
+  ax[0].set_ylabel('Phase (°)')
+  
+  sns.histplot(data=end_point, x=end_point['phase']*180/np.pi, kde=False, bins='auto', stat='density', color='b', ax=ax[1])
+  ax[1].set_xlabel('Time (s)')
+  ax[1].set_ylabel('Phase (°)')
+
+  # sns.histplot(data=end_point, x=end_point['phase']*180/np.pi,kde=False, bins=10, stat='density', color='b')
+  # print(end_point.head())
+  theta = [np.cos(end_point['phase']-np.pi/2), np.sin(end_point['phase']-np.pi/2)]
+  ax[2].plot(theta[0], theta[1], 'o')
+  ax[2].set_xlim([-1.5, 1.5])
+  ax[2].set_ylim([-1.5, 1.5])
+
+  ax[2].set_xlabel('$ \\xi_S$')
+  ax[2].set_ylabel('$ \\xi_D$')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/b0879e1486eb5dcb4e1dc157683b8843df5fbb71.png]]
+
+#+begin_src ipython
+  end_point['accuracy'] = (end_point.phase - end_point['phi'] * np.pi / 180) % (2 * np.pi)
+  end_point['precision'] = end_point.groupby(['phi'], group_keys=False)['phase'].apply(get_precision)
+
+  end_point_on['accuracy'] = (end_point_on.phase - end_point_on['phi'] * np.pi / 180) % (2 * np.pi)
+  end_point_on['precision'] = end_point_on.groupby(['phi'], group_keys=False)['phase'].apply(get_precision)
+  
+  print(end_point.head())
+#+end_src
+
+#+RESULTS:
+:      trial  phi        m0        m1     phase  accuracy  precision
+: 100      0    0  5.886473  5.438541 -2.957225  3.325961  -6.190124
+: 101      1    0  5.876224  5.322580  3.091207  3.091207  -0.141692
+: 102      2    0  5.860040  5.483140 -2.801306  3.481879  -6.034205
+: 103      3    0  5.853337  5.344597 -2.880432  3.402754  -6.113330
+: 104      4    0  5.858063  5.442808 -3.140199  3.142986  -6.373098
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+  
+  sns.histplot(data=end_point, x=end_point['phase']*180/np.pi, legend=False, lw=2, ax=ax[0], kde=False, bins=100, stat='density', color='b')
+  sns.histplot(data=end_point_on, x=end_point_on['phase']*180/np.pi, legend=False, lw=2, ax=ax[0], kde=False, bins=100, stat='density', color='r')
+  ax[0].set_xlabel('$\phi$(°)')
+  ax[0].set_ylabel('Density')
+  ax[0].set_xticks([-180, -90 ,0, 90, 180], [0, 90, 180, 270, 360])
+
+  sns.histplot(data=end_point, x=end_point['accuracy']*180/np.pi, legend=False, lw=2, ax=ax[1], kde=False, bins=100, stat='density', color='b')
+  sns.histplot(data=end_point_on, x=end_point_on['accuracy']*180/np.pi, legend=False, lw=2, ax=ax[1], kde=False, bins=100, stat='density', color='r')
+  ax[1].set_xlabel('$\phi - \phi_{stim}$ (°)')
+  ax[1].set_ylabel('Density')
+  ax[1].set_xticks([0, 90, 180, 270, 360])
+
+  sns.histplot(data=end_point, x=end_point['precision']*180/np.pi, legend=False, ax=ax[2], bins=200, kde=False, stat='density', element='step', alpha=0,color = 'b')
+  sns.histplot(data=end_point_on, x=end_point_on['precision']*180/np.pi, legend=False, ax=ax[2], bins=200, kde=False, stat='density', element='step', alpha=0., color='r')
+  ax[2].set_xlabel('$\phi - <\phi>_{trials}$ (°)')
+  ax[2].set_ylabel('Density')
+  ax[2].set_xlim([-30, 30])
+
+  plt.show()  
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/0154c180f7eb99676b7c94f874bec8433e5569cf.png]]
+
+* 
+
+
