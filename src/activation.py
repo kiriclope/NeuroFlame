@@ -1,14 +1,15 @@
 import torch
 from torch import nn
-import numpy as np
 
 class Activation(nn.Module):
     def __init__(self):
         super().__init__()
         
-    def forward(self, x, THRESH=15):
-        return nn.ReLU()(x)
-        # return THRESH * 0.5 * (1.0 + torch.erf(x / torch.sqrt(torch.tensor(2.0))))
+    def forward(self, x, func_name='relu', thresh=15):
+        if func_name=='relu':
+            return nn.ReLU()(x)
+        else:
+            return thresh * 0.5 * (1.0 + torch.erf(x / torch.sqrt(torch.tensor(2.0))))
 
 # class Activation(nn.Module):
 #     def __init__(self, func_name='relu', thresh=0.0):

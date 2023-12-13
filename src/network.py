@@ -13,7 +13,7 @@ from src.activation import Activation
 from src.plasticity import STP_Model
 
 import warnings
-# warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore")
 
 
 class Network(nn.Module):
@@ -37,6 +37,9 @@ class Network(nn.Module):
         
         # in pytorch, Wij is i to j.
         self.Wab = nn.Linear(self.N_NEURON, self.N_NEURON, bias=True, dtype=self.FLOAT, device=self.device)
+        if self.IF_NMDA:
+            self.W_NMDA = nn.Linear(self.N_NEURON, self.Na[0], bias=False, dtype=self.FLOAT, device=self.device)
+            print(self.W_NMDA)
         
         for i_pop in range(self.N_POP):
             for j_pop in range(self.N_POP):
@@ -44,6 +47,10 @@ class Network(nn.Module):
                 
                 self.Wab.weight.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
                                      self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = W0
+
+                # if self.W_NMDA and i_pop==0:
+                #     self.W_NMDA.weight.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
+                #                             self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = W0
         
         # Here we store the constant external input in the bias
         for i_pop in range(self.N_POP):
@@ -52,30 +59,34 @@ class Network(nn.Module):
         # resets the seed
         set_seed(0)
         
-    def update_rec_input(self, rates, rec_input):
+    def update_rec_input(self, rates, rec_input, rec_NMDA):
         '''Dynamics of the recurrent inputs'''
 
+        A_u_x = 1.0
         if self.IF_STP:
             self.stp.markram_stp(rates)
             A_u_x = self.stp.A_u_x_stp
-        else:
-            A_u_x = 1.0
         
         if self.SYN_DYN:
             rec_input = self.EXP_DT_TAU_SYN * rec_input + self.DT_TAU_SYN * (self.Wab(A_u_x * rates))
+            # if self.IF_NMDA:
+            #     rec_NMDA = self.EXP_DT_TAU_NMDA * rec_NMDA + self.DT_TAU_NMDA * (self.W_NMDA(A_u_x * rates))                
         else:
             rec_input = self.Wab(A_u_x * rates)
         
-        return rec_input
+        return rec_input, rec_NMDA
     
-    def update_net_input(self, rec_input):
+    def update_net_input(self, rec_input, rec_NMDA):
         '''Updating the net input into the neurons'''
 
         noise = 0
         if self.VAR_FF[0]>0:
             noise = self.ff_normal.sample((self.N_NEURON,))
-        
+            
         net_input = noise + rec_input
+
+        # if self.IF_NMDA:
+        #     net_input += rec_NMDA
         
         return net_input
     
@@ -83,36 +94,36 @@ class Network(nn.Module):
         '''Dynamics of the rates'''
         # using array slices is faster than indices
         if self.RATE_DYN:
-            rates = self.EXP_DT_TAU * rates + self.DT_TAU * Activation()(net_input)
+            rates = self.EXP_DT_TAU * rates + self.DT_TAU * Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
         else:
-            rates = Activation()(net_input)
+            rates = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
         
         return rates
     
-    def forward(self, rates, rec_input):
+    def forward(self, rates, rec_input, rec_NMDA):
         '''This is the main function of the class'''
-        rec_input = self.update_rec_input(rates, rec_input)
-        net_input = self.update_net_input(rec_input)
+        rec_input, rec_NMDA = self.update_rec_input(rates, rec_input, rec_NMDA)
+        net_input = self.update_net_input(rec_input, rec_NMDA)
         rates = self.update_rates(rates, net_input)
         
-        return rates, rec_input
+        return rates, rec_input, rec_NMDA
     
     def run(self):
         start = perf_counter()
         
         result = []
-        rates, rec_input = self.initRates()        
+        rates, rec_input, rec_NMDA = self.initRates()        
         
         with torch.no_grad():
             for step in range(self.N_STEPS):
                 self.update_stim(step)
-                rates, rec_input = self.forward(rates, rec_input)
+                rates, rec_input, rec_NMDA = self.forward(rates, rec_input, rec_NMDA)
                 
                 if step > self.N_STEADY:
                     if step % self.N_WINDOW == 0:
                         if self.VERBOSE:
                             self.print_activity(step, rates)
-                        
+                    
                     result.append(rates.cpu().detach().numpy())
         
         result = np.array(result)
@@ -178,7 +189,9 @@ class Network(nn.Module):
     def initRates(self):
         rates = torch.zeros(self.N_NEURON, dtype=self.FLOAT, device=self.device)
         rec_input = torch.zeros(self.N_NEURON, dtype=self.FLOAT, device=self.device)
-        return rates, rec_input
+        rec_NMDA = torch.zeros(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        
+        return rates, rec_input, rec_NMDA
     
     def initWeights(self, i_pop, j_pop):
 
@@ -303,7 +316,15 @@ class Network(nn.Module):
         for i_pop in range(self.N_POP):
             self.EXP_DT_TAU_SYN[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU_SYN[i_pop])
             self.DT_TAU_SYN[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = self.DT / self.TAU_SYN[i_pop]
-        
+
+        self.TAU_NMDA = torch.tensor(self.TAU_NMDA, dtype=self.FLOAT, device=self.device)
+        self.EXP_DT_TAU_NMDA = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        self.DT_TAU_NMDA = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+
+        for i_pop in range(self.N_POP):
+            self.EXP_DT_TAU_NMDA[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU_NMDA[i_pop])
+            self.DT_TAU_NMDA[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = self.DT / self.TAU_NMDA[i_pop]
+            
         # if self.VERBOSE:
         #     print("EXP_DT_TAU", self.EXP_DT_TAU, "DT_TAU", self.DT_TAU)
 
@@ -318,7 +339,6 @@ class Network(nn.Module):
         #     print(self.KAPPA)
         #     print(self.PHASE)
 
-
     def scaleParam(self):
 
         # scaling recurrent weights Jab
@@ -329,7 +349,7 @@ class Network(nn.Module):
         
         for i_pop in range(self.N_POP):
             self.Jab[:, i_pop] = self.Jab[:, i_pop] / torch.sqrt(self.Ka[i_pop])
-
+        
         # if self.VERBOSE:
         #     print("scaled Jab", self.Jab)
         
@@ -345,7 +365,7 @@ class Network(nn.Module):
 
         self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
         ff_mean = torch.tensor(0.0, dtype=self.FLOAT, device=self.device)
-
+        
         if self.VAR_FF[0]>0:
             self.ff_normal = Normal(ff_mean, self.VAR_FF[0])
             

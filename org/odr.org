@@ -30,9 +30,9 @@
     for ini in ini_list:
       for phi in phi_list:
         rates = np.load(REPO_ROOT + '/data/simul/%s_ini_%d_phi_%d.npy' % (name, ini, phi))
-        rates_list.append(rates)
+        rates_list.append(rates[-1])
 
-    rates_list = np.array(rates_list).reshape(len(ini_list), len(phi_list), rates.shape[0], rates.shape[1])
+    rates_list = np.array(rates_list).reshape(len(ini_list), len(phi_list), 1, rates.shape[1])
     print(rates_list.shape)
     return rates_list  
 #+end_src
@@ -86,9 +86,12 @@
 
 #+begin_src ipython
   def get_precision(x):
-      cmean =  x - circmean(x)
-      cmean[cmean > np.pi/2] = np.nan
-      cmean[cmean < -np.pi/2] = np.nan   
+
+      cmean =  (x - circmean(x, low=-np.pi, high=np.pi)) % (2* np.pi) - np.pi
+
+      cmean[cmean > np.pi/2] -= np.pi
+      cmean[cmean < -np.pi/2] += np.pi
+      
       return cmean
 #+end_src
 
@@ -131,7 +134,7 @@
   
   from src.network import Network
   from src.plot_utils import plot_con
-  from src.decode import decode_bump
+  from src.decode import decode_bump, circcvl
 #+end_src
 
 #+RESULTS:
@@ -142,7 +145,7 @@
 #+begin_src ipython
   from src.activation import Activation
   x = np.arange(-5, 5, .1)
-  plt.plot(x, Activation()(x))
+  plt.plot(x, Activation()(x, func_name='erfc'))
   plt.show()
 #+end_src
 
@@ -165,9 +168,7 @@
 #+RESULTS:
 : Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
 : Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_off.npy
-: Elapsed (with compilation) = 3.3945585470064543s
-: /home/leon/mambaforge/envs/torch/lib/python3.10/site-packages/torch/distributed/distributed_c10d.py:283: UserWarning: torch.distributed.reduce_op is deprecated, please use torch.distributed.ReduceOp instead
-:   warnings.warn(
+: Elapsed (with compilation) = 2.5510746209765784s
 
 #+begin_src ipython
   name = "odr_on"
@@ -178,7 +179,7 @@
 #+RESULTS:
 : Loading config from /home/leon/models/NeuroTorch/conf/config_bump.yml
 : Saving rates to: /home/leon/models/NeuroTorch/data/simul/odr_on.npy
-: Elapsed (with compilation) = 3.8886125029966934s
+: Elapsed (with compilation) = 2.401103151991265s
 
 ** Analysis
 
@@ -216,7 +217,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/4ecae957bded036287c00a814a92b4a0c5eaeb83.png]]
+[[file:./.ob-jupyter/c4503b42a8ff4cd1915d39f093de229dc63f6c26.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_off[:, :N_E], axis=-1)  
@@ -229,7 +230,7 @@
   fig, ax = plt.subplots(1, 3, figsize=(2*width, height))
 
   times = np.linspace(0, 5.5, m0.shape[0])
-  
+
   ax[0].plot(times, m0)
   ax[0].plot(times, m0_on)
 
@@ -239,7 +240,7 @@
 
   ax[1].plot(times, m1 / m0)
   ax[1].plot(times, m1_on / m0_on)
-
+  
   ax[1].set_xlabel('Time (s)')
   ax[1].set_ylabel('$\mathcal{F}^1 / \mathcal{F}^0$')
   ax[1].set_xticks([0, 1, 2, 3, 4, 5])
@@ -256,7 +257,26 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/6818c716b62b5410352ff0d55f05399aec4c0c13.png]]
+[[file:./.ob-jupyter/eddf3c50f626629de707e77c662bcc19ba0be120.png]]
+
+#+begin_src ipython
+  smooth_off = circcvl(rates_off[-1, :N_E], windowSize=10, axis=-1)
+  smooth_on = circcvl(rates_on[-1, :N_E], windowSize=10, axis=-1)
+
+  theta = np.linspace(0, 360, rates_off.shape[-1])
+
+  plt.plot(theta, smooth_off , 'b', label='off')
+  plt.plot(theta, smooth_on, 'r', label='on')
+
+  plt.xlabel('Prefered Location (°)')
+  plt.ylabel('Rate (Hz)')
+  plt.legend(frameon=0, fontsize=12)
+  # plt.yticks([5, 10])
+  plt.xticks([0, 90, 180, 270, 360]);
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/0c58b2bf64092e0d8cbce798040e3b9bba5c46bc.png]]
 
 * Multiple Trials
 ** Parameters
@@ -265,7 +285,7 @@
   REPO_ROOT = "/home/leon/models/NeuroTorch"
   conf_name = "config_bump.yml"
   
-  ini_list = np.arange(0, 20)
+  ini_list = np.arange(0, 40)
   phi_list = np.linspace(0, 315, 8)
   # phi_list = [0]
 #+end_src
@@ -294,13 +314,21 @@
 #+end_src
 
 #+RESULTS:
-: (20, 8, 5999, 1000)
-:    trial  phi  neuron  time     rates
-: 0      0    0       0     0  1.800453
-: 1      0    0       1     0  1.639017
-: 2      0    0       2     0  2.176969
-: 3      0    0       3     0  1.300191
-: 4      0    0       4     0  1.484071
+#+begin_example
+  (40, 8, 1, 1000)
+     trial  phi  neuron  time      rates
+  0      0    0       0     0  12.105962
+  1      0    0       1     0  10.540872
+  2      0    0       2     0  11.492342
+  3      0    0       3     0  10.778220
+  4      0    0       4     0  11.553114
+     trial  phi        m0        m1     phase
+  0      0    0  5.882456  5.364737 -0.150344
+  1      0    1  5.887009  5.419986 -0.821025
+  2      0    2  5.866715  5.423908 -1.716648
+  3      0    3  5.855048  5.418223 -2.659048
+  4      0    4  5.873636  5.451312 -2.923793
+#+end_example
 
 #+begin_src ipython
   name = 'odr_on'
@@ -310,7 +338,21 @@
 #+end_src
 
 #+RESULTS:
-: 53f76248-95e9-4dbf-b49f-5eaeb6b4e0d6
+#+begin_example
+  (40, 8, 1, 1000)
+     trial  phi  neuron  time      rates
+  0      0    0       0     0  13.689384
+  1      0    0       1     0  14.078058
+  2      0    0       2     0  13.831233
+  3      0    0       3     0  14.907232
+  4      0    0       4     0  15.069688
+     trial  phi        m0        m1     phase
+  0      0    0  8.399162  6.316723 -0.201886
+  1      0    1  8.357736  6.483750 -0.823731
+  2      0    2  8.389528  6.455177 -1.649335
+  3      0    3  8.409077  6.283071 -2.213421
+  4      0    4  8.402844  6.413248  2.857764
+#+end_example
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -338,7 +380,7 @@
 #+end_src
 
 #+RESULTS:
-: 67e1fcde-50f1-46fe-9b70-9f45d50edc14
+[[file:./.ob-jupyter/42cad81c2a6a45c492399e70415e5037f86fccd8.png]]
 
 #+begin_src ipython
   end_point['accuracy'] = (end_point.phase - end_point['phi'] * np.pi / 180) % (2 * np.pi)
@@ -351,35 +393,45 @@
 #+end_src
 
 #+RESULTS:
-: f203668e-1ae9-48c4-836f-0857e2243618
+:    trial  phi        m0        m1     phase  accuracy  precision
+: 0      0    0  5.882456  5.364737 -0.150344  6.132841  -0.136295
+: 1      0    1  5.887009  5.419986 -0.821025  5.444707  -0.056539
+: 2      0    2  5.866715  5.423908 -1.716648  4.531631  -0.144570
+: 3      0    3  5.855048  5.418223 -2.659048  3.571778  -0.321298
+: 4      0    4  5.873636  5.451312 -2.923793  3.289579   0.228080
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
 
-  sns.histplot(data=end_point, x=end_point['phase']*180/np.pi, legend=False, lw=2, ax=ax[0], kde=False, bins='auto', stat='density', color='b')
-  sns.histplot(data=end_point_on, x=end_point_on['phase']*180/np.pi, legend=False, lw=2, ax=ax[0], kde=False, bins='auto', stat='density', color='r')
+  bins = 160
+  sns.histplot(data=end_point, x=end_point['phase']*180/np.pi, legend=False, lw=2, ax=ax[0], kde=False, bins=bins, stat='density', color='b')
+  sns.histplot(data=end_point_on, x=end_point_on['phase']*180/np.pi, legend=False, lw=2, ax=ax[0], kde=False, bins=bins, stat='density', color='r')
   ax[0].set_xlabel('$\phi$(°)')
   ax[0].set_ylabel('Density')
   ax[0].set_xticks([-180, -90 ,0, 90, 180], [0, 90, 180, 270, 360])
 
-  sns.histplot(data=end_point, x=end_point['accuracy']*180/np.pi, legend=False, lw=2, ax=ax[1], kde=False, bins='auto', stat='density', color='b')
-  sns.histplot(data=end_point_on, x=end_point_on['accuracy']*180/np.pi, legend=False, lw=2, ax=ax[1], kde=False, bins='auto', stat='density', color='r')
+  sns.histplot(data=end_point, x=end_point['accuracy']*180/np.pi, legend=False, lw=2, ax=ax[1], kde=False, bins=bins, stat='density', color='b')
+  sns.histplot(data=end_point_on, x=end_point_on['accuracy']*180/np.pi, legend=False, lw=2, ax=ax[1], kde=False, bins=bins, stat='density', color='r')
   ax[1].set_xlabel('$\phi - \phi_{stim}$ (°)')
   ax[1].set_ylabel('Density')
   ax[1].set_xticks([0, 90, 180, 270, 360])
 
-  sns.histplot(data=end_point, x=end_point['precision']*180/np.pi, legend=False, ax=ax[2], bins='auto', kde=True, stat='density', element='step', alpha=0,color = 'b')
-  sns.histplot(data=end_point_on, x=end_point_on['precision']*180/np.pi, legend=False, ax=ax[2], bins='auto', kde=True, stat='density', element='step', alpha=0., color='r')
+  bins = 16
+  sns.histplot(data=end_point, x=end_point['precision']*180/np.pi, legend=False, ax=ax[2], bins=bins, kde=True, stat='density', element='step', alpha=0,color = 'b')
+  sns.histplot(data=end_point_on, x=end_point_on['precision']*180/np.pi, legend=False, ax=ax[2], bins=bins, kde=True, stat='density', element='step', alpha=0., color='r')
   ax[2].set_xlabel('$\phi - <\phi>_{trials}$ (°)')
   ax[2].set_ylabel('Density')
-  # ax[2].set_xlim([-30, 30])
+  ax[2].set_xlim([-30, 30])
 
   plt.show()  
 #+end_src
 
 #+RESULTS:
-: ea289faa-08de-4d23-8945-45f493de7967
+[[file:./.ob-jupyter/5354f073f52d70fb5b2a6adc4413b5adfbcf6986.png]]
+
+#+RESULTS:
 
 #+begin_src ipython
 
 #+end_src
+
