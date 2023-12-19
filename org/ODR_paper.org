@@ -1,0 +1,58 @@
+#+STARTUP: fold
+#+TITLE: ODR
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session torch :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+The autoreload extension is already loaded. To reload it, use:
+  %reload_ext autoreload
+Python exe
+/home/leon/mambaforge/bin/python
+:END:
+
+* Imports
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../')
+
+  import pandas as pd
+  from scipy.stats import circmean
+  
+  from src.network import Network
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump, circcvl
+#+end_src
+
+* Figure 2
+
+#+begin_src ipython
+  
+  def figname(task, day):
+    return "JawsM15_sample_cross_temp_score_" + task + "_" + day + ".svg"
+
+  figlist = ['../figs/' + figname(task, day) for day in days for task in tasks]
+  print(figlist)
+
+  golden_ratio = (5**.5 - 1) / 2
+  width = 4.3
+  height = width * golden_ratio * 1.4
+  figsize = [width, height]
+  matplotlib.rcParams['lines.markersize'] = 5.5
+
+  create_grid(figlist, "fig_final.svg", dim=[3,2])
+
+  #+end_src
+
+

@@ -28,7 +28,7 @@ class Network(nn.Module):
 
         # scale parameters
         self.scaleParam()
-
+        
         if self.IF_STP:
             self.stp = STP_Model(self.N_NEURON, self.csumNa, self.DT, self.FLOAT, self.device)
         
@@ -39,7 +39,7 @@ class Network(nn.Module):
         self.Wab = nn.Linear(self.N_NEURON, self.N_NEURON, bias=True, dtype=self.FLOAT, device=self.device)
         if self.IF_NMDA:
             self.W_NMDA = nn.Linear(self.N_NEURON, self.Na[0], bias=False, dtype=self.FLOAT, device=self.device)
-            print(self.W_NMDA)
+            # print(self.W_NMDA)
         
         for i_pop in range(self.N_POP):
             for j_pop in range(self.N_POP):
@@ -51,7 +51,7 @@ class Network(nn.Module):
                 # if self.W_NMDA and i_pop==0:
                 #     self.W_NMDA.weight.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
                 #                             self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = W0
-        
+        del W0
         # Here we store the constant external input in the bias
         for i_pop in range(self.N_POP):
             self.Wab.bias.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1]].fill_(self.Ja0[i_pop])
@@ -61,13 +61,14 @@ class Network(nn.Module):
         
     def update_rec_input(self, rates, rec_input, rec_NMDA):
         '''Dynamics of the recurrent inputs'''
-
+        
         A_u_x = 1.0
         if self.IF_STP:
             self.stp.markram_stp(rates)
             A_u_x = self.stp.A_u_x_stp
         
         if self.SYN_DYN:
+            # This also implies dynamics of the feedforward inputs
             rec_input = self.EXP_DT_TAU_SYN * rec_input + self.DT_TAU_SYN * (self.Wab(A_u_x * rates))
             # if self.IF_NMDA:
             #     rec_NMDA = self.EXP_DT_TAU_NMDA * rec_NMDA + self.DT_TAU_NMDA * (self.W_NMDA(A_u_x * rates))                
@@ -123,17 +124,24 @@ class Network(nn.Module):
                     if step % self.N_WINDOW == 0:
                         if self.VERBOSE:
                             self.print_activity(step, rates)
+                            
+                    if self.REC_LAST_ONLY==0:                    
+                        result.append(rates.cpu().detach().numpy())
                     
-                    result.append(rates.cpu().detach().numpy())
-        
+        if self.REC_LAST_ONLY:                    
+            result.append(rates.cpu().detach().numpy())
+            
         result = np.array(result)
-        
-        print('Saving rates to:', self.DATA_PATH + self.FILE_NAME + '.npy')
+
+        if self.VERBOSE:
+            print('Saving rates to:', self.DATA_PATH + self.FILE_NAME + '.npy')
+            
         np.save(self.DATA_PATH + self.FILE_NAME + '.npy', result)
 
         clear_cache()
         end = perf_counter()
-        print("Elapsed (with compilation) = {}s".format((end - start)))
+        if self.VERBOSE:
+            print("Elapsed (with compilation) = {}s".format((end - start)))
         
         return result
 
@@ -161,7 +169,8 @@ class Network(nn.Module):
     def loadConfig(self, conf_file, sim_name, repo_root, **kwargs):
         # Loading configuration file
         conf_path = repo_root + '/conf/'+ conf_file
-        print('Loading config from', conf_path)
+        # if self.VERBOSE:
+        #     print('Loading config from', conf_path)
         param = safe_load(open(conf_path, "r"))
 
         param["FILE_NAME"] = sim_name
@@ -234,33 +243,40 @@ class Network(nn.Module):
             phi = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Nb), dtype=self.FLOAT, device=self.device)
 
             i, j = torch.meshgrid(torch.arange(Na, device=self.device), torch.arange(Nb, device=self.device), indexing="ij")
-
+            
             theta_diff = theta[i] - phi[j]
-
+            
             if 'spec' in self.STRUCTURE[i_pop, j_pop]:
                 self.KAPPA[i_pop, j_pop] = self.KAPPA[i_pop, j_pop] / torch.sqrt(Kb)
-
+                
             Pij = 1.0 + 2.0 * self.KAPPA[i_pop, j_pop] * torch.cos(theta_diff - self.PHASE)
 
+            del theta
+            del phi
+            del theta_diff
+            
         if 'sparse' in self.CONNECTIVITY:
             if self.VERBOSE:
                 print('Sparse random connectivity ')
 
             Cij = self.Jab[i_pop, j_pop] * (torch.rand(Na, Nb, device=self.device) < Kb / float(Nb) * Pij)
-
+            del Pij
+            
         if 'all2all' in self.CONNECTIVITY:
             if self.VERBOSE:
                 print('All to all connectivity ')
 
             Cij = self.Jab[i_pop, j_pop] * Pij / float(Nb)
-
+            del Pij
+            
             if self.SIGMA[i_pop, j_pop] > 0.0:
                 if self.VERBOSE:
                     print('with heterogeneity, SIGMA', self.SIGMA[i_pop, j_pop])
 
                 Hij = torch.normal(0, self.SIGMA[i_pop, j_pop], size=(Na, Nb), dtype=self.FLOAT, device=self.device)
-                Cij = Cij + Hij / float(Nb)
-
+                Cij = Cij + Hij / torch.sqrt(torch.tensor(Nb, device=self.device, dtype=self.FLOAT))
+                del Hij
+                
         if self.VERBOSE:
             if "cos" in self.STRUCTURE[i_pop, j_pop]:
                 if "spec" in self.STRUCTURE[i_pop, j_pop]:
@@ -269,7 +285,7 @@ class Network(nn.Module):
                     print('with strong cosine structure, KAPPA', self.KAPPA[i_pop, j_pop])
             elif "lr" in self.STRUCTURE[i_pop, j_pop]:
                 print('with weak low rank structure, KAPPA %.2f' % self.KAPPA[i_pop, j_pop].cpu().detach().numpy())
-
+        
         return Cij
 
     def initConst(self):
