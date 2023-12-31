@@ -31,30 +31,34 @@ class Network(nn.Module):
         
         if self.IF_STP:
             self.stp = STP_Model(self.N_NEURON, self.csumNa, self.DT, self.FLOAT, self.device)
+         
+        # initialize network
+        self.init_network()
         
+    def init_network(self):
         # set seed for Cij
         set_seed(self.SEED)
-        
+
         # in pytorch, Wij is i to j.
-        self.Wab = nn.Linear(self.N_NEURON, self.N_NEURON, bias=True, dtype=self.FLOAT, device=self.device)
+        self.Wab = nn.Linear(self.N_NEURON, self.N_NEURON, bias=False, dtype=self.FLOAT, device=self.device)
         if self.IF_NMDA:
             self.W_NMDA = nn.Linear(self.N_NEURON, self.Na[0], bias=False, dtype=self.FLOAT, device=self.device)
             # print(self.W_NMDA)
-        
+
         for i_pop in range(self.N_POP):
             for j_pop in range(self.N_POP):
                 W0 = self.initWeights(i_pop, j_pop)
-                
+
                 self.Wab.weight.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
-                                     self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = W0
+                                    self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = W0
 
                 # if self.W_NMDA and i_pop==0:
                 #     self.W_NMDA.weight.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
                 #                             self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = W0
         del W0
         # Here we store the constant external input in the bias
-        for i_pop in range(self.N_POP):
-            self.Wab.bias.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1]].fill_(self.Ja0[i_pop])
+        # for i_pop in range(self.N_POP):
+        #     self.Wab.bias.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1]].fill_(self.Ja0[i_pop])
         
         # resets the seed
         set_seed(0)
@@ -71,21 +75,21 @@ class Network(nn.Module):
             # This also implies dynamics of the feedforward inputs
             rec_input = self.EXP_DT_TAU_SYN * rec_input + self.DT_TAU_SYN * (self.Wab(A_u_x * rates))
             # if self.IF_NMDA:
-            #     rec_NMDA = self.EXP_DT_TAU_NMDA * rec_NMDA + self.DT_TAU_NMDA * (self.W_NMDA(A_u_x * rates))                
+            #     rec_NMDA = self.EXP_DT_TAU_NMDA * rec_NMDA + self.DT_TAU_NMDA * (self.W_NMDA(A_u_x * rates))
         else:
             rec_input = self.Wab(A_u_x * rates)
         
         return rec_input, rec_NMDA
     
-    def update_net_input(self, rec_input, rec_NMDA):
+    def update_net_input(self, rec_input, rec_NMDA, ff_input):
         '''Updating the net input into the neurons'''
-
+        
         noise = 0
         if self.VAR_FF[0]>0:
-            noise = self.ff_normal.sample((self.N_NEURON,))
+            noise = self.ff_normal.sample((self.N_BATCH, self.N_NEURON,))
             
-        net_input = noise + rec_input
-
+        net_input = ff_input + noise + rec_input
+        
         # if self.IF_NMDA:
         #     net_input += rec_NMDA
         
@@ -101,46 +105,73 @@ class Network(nn.Module):
         
         return rates
     
-    def forward(self, rates, rec_input, rec_NMDA):
+    def forward(self, rates, rec_input, rec_NMDA, ff_input):
         '''This is the main function of the class'''
         rec_input, rec_NMDA = self.update_rec_input(rates, rec_input, rec_NMDA)
-        net_input = self.update_net_input(rec_input, rec_NMDA)
+        net_input = self.update_net_input(rec_input, rec_NMDA, ff_input)
         rates = self.update_rates(rates, net_input)
         
         return rates, rec_input, rec_NMDA
     
-    def run(self):
-        start = perf_counter()
+    def run(self, Ja0_list=None, ini_list=None, phi_list=None, IF_DIST=0):
+        if self.VERBOSE:
+            start = perf_counter()
         
+        if phi_list is not None:
+            self.N_BATCH = len(ini_list) * len(phi_list)
+            if IF_DIST:
+                self.PHI1 = torch.tensor(phi_list, dtype=self.FLOAT, device=self.device).repeat_interleave(len(ini_list))
+                self.PHI1 = self.PHI1.unsqueeze(1).repeat(1, self.N_NEURON)
+            else:
+                self.PHI0 = torch.tensor(phi_list, dtype=self.FLOAT, device=self.device).repeat_interleave(len(ini_list))
+                self.PHI0 = self.PHI0.unsqueeze(1).repeat(1, self.N_NEURON)
+                
+        if Ja0_list is not None:
+            self.N_BATCH = len(ini_list) * len(Ja0_list) * len(phi_list)
+            self.Ja0 = torch.tensor(Ja0_list, dtype=self.FLOAT, device=self.device).repeat_interleave(len(ini_list) * len(phi_list))
+            self.Ja0 = self.Ja0.unsqueeze(1).repeat(1, self.N_NEURON)
+            self.Ja0 = self.Ja0.unsqueeze(0).repeat(self.N_POP, 1, 1)
+            
+            self.Ja0 = self.Ja0 * torch.sqrt(self.Ka[0]) * self.M0
+            # print(self.Ja0.shape)
+            
+            if IF_DIST:
+                self.PHI1 = torch.tensor(phi_list, dtype=self.FLOAT, device=self.device).repeat_interleave(len(ini_list) * len(Ja0_list))
+                self.PHI1 = self.PHI1.unsqueeze(1).repeat(1, self.N_NEURON)
+            else:
+                self.PHI0 = torch.tensor(phi_list, dtype=self.FLOAT, device=self.device).repeat_interleave(len(ini_list) * len(Ja0_list))
+                self.PHI0 = self.PHI0.unsqueeze(1).repeat(1, self.N_NEURON)
+            # print(self.PHI0.shape)
+            
         result = []
-        rates, rec_input, rec_NMDA = self.initRates()        
         
         with torch.no_grad():
+            rates, rec_input, rec_NMDA, self.ff_input = self.initRates()
             for step in range(self.N_STEPS):
                 self.update_stim(step)
-                rates, rec_input, rec_NMDA = self.forward(rates, rec_input, rec_NMDA)
+                rates, rec_input, rec_NMDA = self.forward(rates, rec_input, rec_NMDA, ff_input=self.ff_input)
                 
-                if step > self.N_STEADY:
+                if step >= self.N_STEADY:
                     if step % self.N_WINDOW == 0:
                         if self.VERBOSE:
                             self.print_activity(step, rates)
-                            
-                    if self.REC_LAST_ONLY==0:                    
+                    
+                    if self.REC_LAST_ONLY==0:
                         result.append(rates.cpu().detach().numpy())
                     
-        if self.REC_LAST_ONLY:                    
+        if self.REC_LAST_ONLY:
             result.append(rates.cpu().detach().numpy())
             
         result = np.array(result)
-
+        
         if self.VERBOSE:
-            print('Saving rates to:', self.DATA_PATH + self.FILE_NAME + '.npy')
-            
+            print('Saving rates to:', self.DATA_PATH + self.FILE_NAME + '.npy')            
         np.save(self.DATA_PATH + self.FILE_NAME + '.npy', result)
-
+        
         clear_cache()
-        end = perf_counter()
+        
         if self.VERBOSE:
+            end = perf_counter()
             print("Elapsed (with compilation) = {}s".format((end - start)))
         
         return result
@@ -196,11 +227,13 @@ class Network(nn.Module):
         self.device = torch.device(self.DEVICE)
 
     def initRates(self):
-        rates = torch.zeros(self.N_NEURON, dtype=self.FLOAT, device=self.device)
-        rec_input = torch.zeros(self.N_NEURON, dtype=self.FLOAT, device=self.device)
-        rec_NMDA = torch.zeros(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        rates = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        rec_input = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)        
+        # rec_NMDA = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        rec_NMDA = 0
+        ff_input = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)
         
-        return rates, rec_input, rec_NMDA
+        return rates, rec_input, rec_NMDA, ff_input
     
     def initWeights(self, i_pop, j_pop):
 
@@ -293,8 +326,11 @@ class Network(nn.Module):
         self.N_STEPS = int(self.DURATION / self.DT) + self.N_STEADY
         self.N_WINDOW = int(self.T_WINDOW / self.DT)
         
-        self.N_STIM_ON = int(self.T_STIM_ON / self.DT) + self.N_STEADY
-        self.N_STIM_OFF = int(self.T_STIM_OFF / self.DT) + self.N_STEADY
+        self.N_STIM_ON = int(self.T_STIM[0] / self.DT) + self.N_STEADY
+        self.N_STIM_OFF = int(self.T_STIM[1] / self.DT) + self.N_STEADY
+        
+        self.N_DIST_ON = int(self.T_DIST[0] / self.DT) + self.N_STEADY
+        self.N_DIST_OFF = int(self.T_DIST[1] / self.DT) + self.N_STEADY
         
         self.Na = []
         self.Ka = []
@@ -360,7 +396,7 @@ class Network(nn.Module):
         # scaling recurrent weights Jab
         if self.VERBOSE:
             print("Jab", self.Jab)
-
+        
         self.Jab = torch.tensor(self.Jab, dtype=self.FLOAT, device=self.device).reshape(self.N_POP, self.N_POP) * self.GAIN
         
         for i_pop in range(self.N_POP):
@@ -373,18 +409,23 @@ class Network(nn.Module):
         if self.VERBOSE:
             print("Ja0", self.Ja0)
 
-        self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device)
+        self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device)        
         self.Ja0 = self.Ja0 * torch.sqrt(self.Ka[0]) * self.M0
-
+        
         # if self.VERBOSE:
         #     print("scaled Ja0", self.Ja0)
-
+        
         self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
         ff_mean = torch.tensor(0.0, dtype=self.FLOAT, device=self.device)
         
-        if self.VAR_FF[0]>0:
-            self.ff_normal = Normal(ff_mean, self.VAR_FF[0])
+        if self.I1[1]>0:
+            self.dist_normal = Normal(self.I1[0], self.I1[1])
+        else:
+            self.dist_normal = 0
             
+        if self.VAR_FF[0]>0:
+            self.ff_normal = Normal(ff_mean, self.VAR_FF[0] * np.sqrt(self.DT))
+        
     def update_stim(self, step):
         """Perturb the inputs based on the simulus parameters."""
         
@@ -392,43 +433,59 @@ class Network(nn.Module):
             for i in range(self.N_POP):
                 if self.BUMP_SWITCH[i]:
                     # self.Wab[i, i].bias.data.fill_(0.0)
-                    self.Wab.bias.data[self.csumNa[i]:self.csumNa[i+1]].fill_(0.0)
-                if self.K !=1 and self.BUMP_SWITCH[i]:
+                    self.ff_input[:, self.csumNa[i]:self.csumNa[i+1]] = 0.0
+                # if self.K !=1 and self.BUMP_SWITCH[i]:
                     # self.Wab[i, i].bias.data.fill_(self.Ja0[i] / torch.sqrt(self.Ka[0]))
-                    self.Wab.bias.data[self.csumNa[i]:self.csumNa[i+1]].fill_(self.Ja0[i] / torch.sqrt(self.Ka[0]))
-        
-        if step == self.N_STIM_ON:
-            for i in range(self.N_POP):
-                if self.BUMP_SWITCH[i]:
-                    # self.Wab[i, i].bias.data.fill_(self.Ja0[i])
-                    self.Wab.bias.data[self.csumNa[i]:self.csumNa[i+1]].fill_(self.Ja0[i])
-        
-        if step == self.N_STIM_ON and np.any(self.I0!=0):
-            if self.VERBOSE:
-                print("STIM ON")
-            
-            self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + self.stimFunc(0)
-            
+                    # self.ff_input[:, self.csumNa[i]:self.csumNa[i+1]] = self.Ja0[i] / torch.sqrt(self.Ka[0])
+                else:
+                    self.ff_input[:, self.csumNa[i]:self.csumNa[i+1]] = self.Ja0[0]
+                    # print(self.ff_input[:10, :10])
+                    
+        if (step == self.N_STIM_ON) or (step == self.N_DIST_ON):
+            if np.any(self.I0!=0):
+                if self.VERBOSE:
+                    print("STIM ON")
+                    
+                if step == self.N_STIM_ON:
+                    self.ff_input[:, self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + self.stimFunc(0, 0)
+                else:
+                    self.ff_input[:, self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + self.stimFunc(0, 1)
+                
+                    # print(self.ff_input[:, 1])
+                
             # if self.PHI0 == 0:
-            #     self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 + self.ksi[0] * self.I0[0] * self.M0)
+            #     self.ff_input[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 + self.ksi[0] * self.I0[0] * self.M0)
             # if self.PHI0 == 180:
-            #     self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 - self.ksi[0] * self.I0[0] * self.M0)
+            #     self.ff_input[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 - self.ksi[0] * self.I0[0] * self.M0)
             
             # if self.PHI0 == 90:
-            #     self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 + self.ksi[1] * self.I0[0] * self.M0)
+            #     self.ff_input[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 + self.ksi[1] * self.I0[0] * self.M0)
             # if self.PHI0 == 270:
-            #     self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 - self.ksi[1] * self.I0[0] * self.M0)
+            #     self.ff_input[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 - self.ksi[1] * self.I0[0] * self.M0)
                             
             
-        if step == self.N_STIM_OFF and np.any(self.I0!=0):
-            if self.VERBOSE:
-                print("STIM OFF")
-            self.Wab.bias.data[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0]
+        if (step == self.N_STIM_OFF) or (step == self.N_DIST_OFF):
+            if np.any(self.I0!=0):
+                if self.VERBOSE:
+                    print("STIM OFF")
+                self.ff_input[:, self.csumNa[0]:self.csumNa[1]] = self.Ja0[0]
 
-            # for i in range(self.N_POP):
-            #     self.Wab[i, i].bias.data.fill_(self.Ja0[i])
+                # for i in range(self.N_POP):
+                #     self.Wab[i, i].bias.data.fill_(self.Ja0[i])
         
-    def stimFunc(self, i_pop):
+    def stimFunc(self, i_pop, STIM=0):
         """Stimulus shape"""
         theta = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(self.Na[i_pop]), dtype=self.FLOAT, device=self.device)
-        return self.I0[i_pop] * (1.0 + self.SIGMA0 * torch.cos(theta - self.PHI0 * torch.pi / 180.0)) * torch.sqrt(self.Ka[0]) * self.M0
+        theta = theta.repeat(self.N_BATCH, 1)  # shape is now (N_BATCH, N_NEURON)
+        
+        if STIM==0:
+            return self.I0[i_pop] * (1.0 + self.SIGMA0 * torch.cos(theta - self.PHI0 * torch.pi / 180.0)) * torch.sqrt(self.Ka[0]) * self.M0
+        
+        if self.I1[1]>0:
+            self.Amp = self.dist_normal.sample((self.N_BATCH, 1)).to(self.DEVICE)
+            return nn.ReLU()(self.Amp * (1.0 + self.SIGMA1 * torch.cos(theta - self.PHI1 * torch.pi / 180.0))) * torch.sqrt(self.Ka[0]) * self.M0
+        elif self.I1[0]>0:
+            self.Amp = self.I1[0]
+            return nn.ReLU()(self.Amp * (1.0 + self.SIGMA1 * torch.cos(theta - self.PHI1 * torch.pi / 180.0))) * torch.sqrt(self.Ka[0]) * self.M0
+        else:
+            return 0

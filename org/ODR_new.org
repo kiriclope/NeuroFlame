@@ -1,0 +1,682 @@
+#+STARTUP: fold
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_single :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  pal = [sns.color_palette("tab10")[0], sns.color_palette("tab10")[1]]
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Helpers
+** Data
+#+begin_src ipython
+  def get_df_X(rates, X_list, X_str='Ie'):
+      n_X, n_phi, n_trials, n_neurons = rates.shape
+
+      X_ind, phi_ind, trials_ind, neurons_ind = np.meshgrid(
+          np.arange(n_X),
+          np.arange(n_phi),
+          np.arange(n_trials),
+          np.arange(n_neurons),
+          indexing='ij'
+      )
+
+      # Construct DataFrame
+      df = pd.DataFrame({
+          X_str : X_ind.flatten() * (X_list[-1] - X_list[0]) / (X_list.shape[0] -1)+ X_list[0],
+          'phi': phi_ind.flatten(),
+          'trial': trials_ind.flatten(),
+          'neuron': neurons_ind.flatten(),          
+          'rates': rates.flatten()
+      })
+
+      return df
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_code_X(df, X_str='Ie'):
+      # Avoid creating new DataFrame by using .loc 
+      # end_point_index = df[df.time==df.time.iloc[-1]].index
+
+      end_point = df.groupby(['trial', 'phi', X_str])['rates'].apply(decode_bump).reset_index()
+      end_point[['m0', 'm1', 'phase']] = pd.DataFrame(end_point['rates'].tolist(), index=end_point.index)
+
+      end_point.drop(columns=['rates'], inplace=True)
+      
+      return end_point
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_precision(x):
+
+      cmean =  (x - circmean(x, axis=-1, low=-np.pi, high=np.pi)) % (2* np.pi) - np.pi
+
+      cmean[cmean > np.pi/2] -= np.pi
+      cmean[cmean < -np.pi/2] += np.pi
+
+      return cmean
+#+end_src
+
+#+RESULTS:
+
+* Imports
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../')
+
+  import pandas as pd
+  import torch.nn as nn
+  from time import perf_counter  
+  from scipy.stats import circmean
+
+  from src.network import Network
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump, circcvl
+#+end_src
+
+#+RESULTS:
+
+* Continuous ODR
+** Parameters
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  conf_name = "config_bump.yml"
+  name = "odr"
+#+end_src
+
+#+RESULTS:
+
+** FF Inputs
+*** Simulations
+
+#+begin_src ipython
+  start = perf_counter()  
+
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', PHI0=180, KAPPA=[0.45])
+
+  ini_list = np.arange(0, 100)
+  Ja0_list = np.linspace(10, 30, 21)
+  phi_list = np.linspace(0, 315, 8)
+  
+  rates = model.run(Ja0_list, ini_list, phi_list)
+  del model 
+  end = perf_counter()
+  print("Elapsed (with compilation) = {}s".format((end - start)))
+
+  print('rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([1, 16800, 1000])
+: torch.Size([16800, 1000])
+: Elapsed (with compilation) = 32.63275499502197s
+: rates (1, 16800, 1000)
+
+#+begin_src ipython
+  rates = rates.reshape(1, len(Ja0_list), len(phi_list), len(ini_list), -1)[0]
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (21, 8, 100, 1000)
+
+*** Analysis
+**** Load data
+
+#+begin_src ipython 
+    df = get_df_X(rates, Ja0_list, X_str='Ie')
+    end_point = get_code_X(df, 'Ie')
+    df_smooth = df.groupby(['trial', 'phi', 'Ie'])['rates'].apply(circcvl).reset_index()
+
+    end_point['accuracy'] = (end_point.phase - end_point['phi'] / 180 * np.pi) 
+    end_point['precision'] = end_point.groupby(['phi', 'Ie'], group_keys=False)['phase'].apply(get_precision) * 180 / np.pi
+#+end_src
+
+#+RESULTS:
+:    trial  phi    Ie        m0        m1     phase
+: 0      0    0  10.0  4.950654  5.362167  5.935663
+: 1      0    0  11.0  5.191123  5.836932  0.139667
+: 2      0    0  12.0  5.483468  6.310221  0.010002
+: 3      0    0  13.0  5.745232  6.482417  5.603917
+: 4      0    0  14.0  5.968487  6.862114  5.401908
+
+**** Tuning Profile
+
+#+begin_src ipython
+  idx_off = Ja0_list[0]
+  idx_on = Ja0_list[-1]
+  print('parameters', idx_off, idx_on)
+  N_E = 1000
+#+end_src
+
+#+RESULTS:
+: parameters 10.0 30.0
+
+#+begin_src ipython
+  df_point = end_point[end_point.Ie==idx_off]
+  df_point_on = end_point[end_point.Ie==idx_on]
+
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  sns.lineplot(end_point, x='Ie', y=end_point['m1']/end_point['m0'], ax=ax[0], legend=False, color='k')
+  sns.lineplot(end_point, x=idx_off, y=df_point['m1']/ df_point['m0'], ax=ax[0], legend=False, marker='o', ms=10, color=pal[0]) 
+  sns.lineplot(end_point, x=idx_on, y=df_point_on['m1'] / df_point_on['m0'], ax=ax[0], legend=False, marker='o', ms=10, color=pal[1])
+
+  ax[0].set_ylabel('$\mathcal{F}_1 / \mathcal{F}_0$')
+  ax[0].set_xlabel('FF Input (Hz)')
+  # ax[0].set_ylim([0.4, 1])
+
+  point = df_smooth[df_smooth.Ie==idx_off].reset_index()
+  m0, m1, phase = decode_bump(point.rates[0])
+  point = np.roll(point.rates[0], int(( phase / 2.0 / np.pi - 0.5) * point.rates[0].shape[0]))
+
+  point_on = df_smooth[df_smooth.Ie==idx_on].reset_index()  
+  m0, m1, phase = decode_bump(point_on.rates[0])
+  point_on = np.roll(point_on.rates[0], int((phase / 2.0 / np.pi - 0.5) * point_on.rates[0].shape[0]))
+
+  ax[1].plot(point, color=pal[0])
+  ax[1].plot(point_on, color=pal[1])
+  
+  ax[1].set_xticks([0, N_E/4, N_E/2, 3*N_E/4, N_E], [0, 90, 180, 270, 360])
+  ax[1].set_ylabel('Activity (Hz)')
+  ax[1].set_xlabel('Pref. Location (°)')
+
+  plt.savefig(name + '_tuning.svg', dpi=300)
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/bc8cae5eba360ba841a7628fc57a899dfc4b317f.png]]
+
+**** Diffusion
+
+#+begin_src ipython
+  point = end_point[end_point.Ie==idx_off]
+  point_on = end_point[end_point.Ie==idx_on]
+
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  sns.lineplot(end_point, x='Ie', y=end_point.precision**2 / 3.5, legend=False, marker='o', ax=ax[0], lw=5)
+
+  sns.lineplot(x=idx_off, y=point['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=10, color=pal[0])
+  sns.lineplot(x=idx_on, y=point_on['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=10, color=pal[1])
+
+  ax[0].set_xlabel('FF Input (Hz)')
+  ax[0].set_ylabel('Diffusivity (deg$^2$/s)')
+
+  ax1 = ax[0].twinx()
+  sns.lineplot(end_point, x='Ie', y=end_point['m1']/end_point['m0'], ax=ax1, legend=False, color='k', alpha=0.5, lw=5)
+
+  sns.lineplot(end_point, x=idx_off, y=point['m1']/point['m0'], legend=False, marker='o', ax=ax1, ms=10, color=pal[0])
+  sns.lineplot(end_point, x=idx_on, y=point_on['m1']/point_on['m0'], legend=False, marker='o', ax=ax1, ms=10, color=pal[1])
+
+  ax1.set_ylabel('$\mathcal{F}_1 / \mathcal{F}_0$')
+  ax1.spines['right'].set_visible(True)
+  # ax1.set_ylim([0.4, 1])
+
+  bins = 'auto'
+  sns.histplot(data=point, x=point['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0,color = pal[0])
+  sns.histplot(data=point_on, x=point_on['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0., color=pal[1])
+  ax[1].set_xlabel('Angular Deviation (°)')
+  ax[1].set_ylabel('Density')
+  # ax[1].set_xlim([-30, 30])
+
+  plt.savefig(name + '_diffusion.svg', dpi=300)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/2190f976961b13e38a824639ce84ff215e98d6a5.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+* Distracted 0DR
+** Parameters
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  conf_name = "config_bump.yml"
+  name = "dist_odr"
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  start = perf_counter()  
+
+  ini_list = np.arange(0, 1000)
+  phi_list = np.array([-45, -90, -180, 45, 90, 180])
+  Ja0_list = np.array([10, 30])
+  
+  I1 = [0.95, 0.0]
+  SIGMA1 = 0.25
+
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', PHI0=0, KAPPA=[0.45], I1=I1, SIGMA1=SIGMA1)
+  rates_dist = model.run(Ja0_list=Ja0_list, ini_list=ini_list, phi_list=phi_list, IF_DIST=1)
+
+  del model 
+  end = perf_counter()
+  print("Elapsed (with compilation) = {}s".format((end - start)))
+
+  print('rates', rates_dist.shape)
+#+end_src
+
+#+RESULTS:
+: Elapsed (with compilation) = 24.14461070508696s
+: rates (1, 12000, 1000)
+
+#+begin_src ipython
+  rates_dist = rates_dist.reshape(1, len(Ja0_list), len(phi_list), len(ini_list), -1)[0]
+  print(rates_dist.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 6, 1000, 1000)
+
+#+begin_src ipython 
+  df = get_df_X(rates_dist, Ja0_list, X_str='Ie')
+  df.phi[df.phi==3] = 0
+  df.phi[df.phi==4] = 1
+  df.phi[df.phi==5] = 2
+  # df.phi[df.phi==6] = 3
+
+  end_point = get_code_X(df, 'Ie')
+  df_smooth = df.groupby(['trial', 'phi', 'Ie'])['rates'].apply(circcvl).reset_index()
+
+  end_point['accuracy'] = end_point.phase 
+  end_point['precision'] = end_point.groupby(['phi', 'Ie'], group_keys=False)['phase'].apply(get_precision) * 180 / np.pi
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+    fig, ax = plt.subplots(1, 2, figsize=(1.5 * width, height))
+
+    sns.lineplot(end_point, x='phi', y=end_point['accuracy'].abs(), marker='o', ax=ax[0], err_style='bars', hue='Ie', legend=False, palette=pal)
+    ax[0].set_xticks([0, 1, 2], [45, 90, 180,])
+    ax[0].set_xlabel('Distance S1/S2 (°)')
+    ax[0].set_ylabel('Response Bias (°)')
+  
+    sns.lineplot(end_point, x='phi', y=end_point['precision'].abs(), marker='o', ax=ax[1], err_style='bars', hue='Ie', palette=pal)
+    ax[1].set_xticks([0, 1, 2], [45, 90, 180])
+    ax[1].set_xlabel('Distance S1/S2 (°)')
+    ax[1].set_ylabel('Response STD (°)')
+    ax[1].legend(fontsize='small', frameon=False, labels=['NB off', 'NB on'])
+
+    plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/8ddc38b1c218068db02e630941321c1b551e7271.png]]
+
+
+* Quenched ODR
+** Parameters
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  conf_name = "config_bump.yml"
+  name = "quenched_odr"
+#+end_src
+
+#+RESULTS:
+
+** Heterogeneity strength
+*** helpers
+
+#+begin_src ipython
+  def run_X(conf_name, name, X_list, ini_list, phi_list, X_str='Jab', device = 'cuda:0', **kwargs):
+      start = perf_counter()
+
+      rates = []
+      for X in X_list:
+          if X_str=='sigma':
+              model = Network(conf_name, '%s_%s_%.2f' % (name, X_str, X),
+                              REPO_ROOT, DEVICE=device, SIGMA=[X], **kwargs)
+          if X_str=='Jab':
+              model = Network(conf_name, '%s_%s_%.2f' % (name, X_str, X),
+                              REPO_ROOT, DEVICE=device, Jab=[-X], **kwargs)
+
+          rates.append(model.run(ini_list=ini_list, phi_list=phi_list))
+          del model
+
+      end = perf_counter()
+      print("Elapsed (with compilation) = {}s".format((end - start)))
+
+      return np.array(rates)
+#+end_src
+
+#+RESULTS:
+*** parameters
+
+#+begin_src ipython
+  ini_list = np.arange(0, 100)
+  sigma_list = np.linspace(0, 0.5, 21)
+  phi_list = np.linspace(0, 315, 8)
+ #+end_src
+
+#+RESULTS:
+*** simulation
+
+#+begin_src ipython
+  rates = run_X(conf_name, name, sigma_list, ini_list, phi_list, X_str='sigma', device = 'cuda')
+#+end_src
+
+#+RESULTS:
+: Elapsed (with compilation) = 53.540071496972814s
+
+#+begin_src ipython
+  rates = rates.reshape(len(sigma_list), len(phi_list), len(ini_list), -1)
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (21, 8, 100, 1000)
+
+*** Analysis
+***** Load data
+
+#+begin_src ipython
+  df = get_df_X(rates, sigma_list, X_str='sigma')
+  end_point = get_code_X(df, 'sigma')
+  df_smooth = df.groupby(['trial', 'phi', 'sigma'])['rates'].apply(circcvl).reset_index()
+  
+  end_point['accuracy'] = (end_point.phase - end_point['phi'] / 180 * np.pi) 
+  end_point['precision'] = end_point.groupby(['phi', 'sigma'], group_keys=False)['phase'].apply(get_precision) * 180 / np.pi
+#+end_src
+
+#+RESULTS:
+:    trial  phi  sigma        m0        m1     phase
+: 0      0    0  0.000  5.906811  5.552033  0.035216
+: 1      0    0  0.025  5.873354  5.415499  0.017824
+: 2      0    0  0.050  5.890404  5.483413  0.180568
+: 3      0    0  0.075  5.904797  5.488578  0.059955
+: 4      0    0  0.100  5.893902  5.434586  0.216849
+
+***** Tuning Profile
+
+#+begin_src ipython
+    idx_off = sigma_list[0]
+    idx_on = np.round(sigma_list[-1],2)
+    print('parameters', idx_off, idx_on)
+    N_E = 1000
+#+end_src
+
+#+RESULTS:
+: parameters 0.0 0.5
+
+#+begin_src ipython
+
+    df_point = end_point[end_point.sigma==idx_off]
+    df_point_on = end_point[end_point.sigma==idx_on]
+
+    fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+    sns.lineplot(end_point, x='sigma', y=end_point['m1']/end_point['m0'], ax=ax[0], legend=False, marker='o', color='k')
+    sns.lineplot(end_point, x=idx_off, y=df_point['m1']/ df_point['m0'], ax=ax[0], legend=False, marker='o', ms=10, color=pal[0]) 
+    sns.lineplot(end_point, x=idx_on, y=df_point_on['m1'] / df_point_on['m0'], ax=ax[0], legend=False, marker='o', ms=10, color=pal[1])
+
+    ax[0].set_ylabel('$\mathcal{F}_1 / \mathcal{F}_0$')
+    ax[0].set_xlabel('Heterogeneity Strength')
+    # ax[0].set_ylim([0.4, 1])
+
+    point = df_smooth[df_smooth.sigma==idx_off].reset_index()
+    m0, m1, phase = decode_bump(point.rates[4])
+    point = np.roll(point.rates[4], int(( phase / 2.0 / np.pi - 0.5) * point.rates[4].shape[0]))
+
+    point_on = df_smooth[df_smooth.sigma==idx_on].reset_index()  
+    m0, m1, phase = decode_bump(point_on.rates[4])
+    point_on = np.roll(point_on.rates[4], int((phase / 2.0 / np.pi - 0.5) * point_on.rates[4].shape[0]))
+
+    ax[1].plot(point, color=pal[0])
+    ax[1].plot(point_on, color=pal[1])
+
+    ax[1].set_xticks([0, N_E/4, N_E/2, 3*N_E/4, N_E], [0, 90, 180, 270, 360])
+    ax[1].set_ylabel('Activity (Hz)')
+    ax[1].set_xlabel('Pref. Location (°)')
+
+    plt.savefig(name + '_tuning_sigma.svg', dpi=300)
+
+    plt.show()
+#+end_src
+#+RESULTS:
+[[file:./.ob-jupyter/8992773b596d91b063486ada4a6a373c7b8fc5d6.png]]
+
+***** Diffusion
+
+#+begin_src ipython
+  point = end_point[end_point.sigma==idx_off]
+  point_on = end_point[end_point.sigma==idx_on]
+
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  sns.lineplot(end_point, x='sigma', y=end_point.precision**2 / 3.5, legend=False, marker='o', ax=ax[0])
+
+  sns.lineplot(x=idx_off, y=point['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=10, color=pal[0])
+  sns.lineplot(x=idx_on, y=point_on['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=10, color=pal[1])
+
+  ax[0].set_xlabel('Heterogeneity Strength')
+  ax[0].set_ylabel('Diffusivity (deg$^2$/s)')
+
+  #  ax1 = ax[0].twinx()
+  # sns.lineplot(end_point, x='sigma', y=end_point['m1']/end_point['m0'], ax=ax1, legend=False, color='k', alpha=0.25)
+
+  # sns.lineplot(end_point, x=idx_off, y=point['m1']/point['m0'], legend=False, marker='o', ax=ax1, ms=10, color=pal[0])
+  # sns.lineplot(end_point, x=idx_on, y=point_on['m1']/point_on['m0'], legend=False, marker='o', ax=ax1, ms=10, color=pal[1])
+
+  # ax1.set_ylabel('$\mathcal{F}_1 / \mathcal{F}_0$')
+  # ax1.spines['right'].set_visible(True)
+  # ax1.set_ylim([0.4, 1])
+
+  # point = df_smooth[df_smooth.sigma==idx_off].reset_index()
+  # m0, m1, phase = decode_bump(point.rates[4])
+  # point = np.roll(point.rates[4], int(( phase / 2.0 / np.pi - 0.5) * point.rates[4].shape[0]))
+
+  # point_on = df_smooth[df_smooth.sigma==idx_on].reset_index()  
+  # m0, m1, phase = decode_bump(point_on.rates[4])
+  # point_on = np.roll(point_on.rates[4], int((phase / 2.0 / np.pi - 0.5) * point_on.rates[4].shape[0]))
+
+  # ax[1].plot(point, color=pal[0])
+  # ax[1].plot(point_on, color=pal[1])
+
+  # ax[1].set_xticks([0, N_E/4, N_E/2, 3*N_E/4, N_E], [0, 90, 180, 270, 360])
+  # ax[1].set_ylabel('Firing Rate (Hz)')
+  # ax[1].set_xlabel('Pref. Location (°)')
+
+  # point = end_point[end_point.sigma==idx_off]
+  # point_on = end_point[end_point.sigma==idx_on]
+
+  bins = 'auto'
+  sns.histplot(data=point, x=point['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0, color = pal[0])
+  sns.histplot(data=point_on, x=point_on['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0., color=pal[1])
+  ax[1].set_xlabel('Angular Deviation (°)')
+  ax[1].set_ylabel('Density')
+  ax[1].set_xlim([-30, 30])
+
+  plt.savefig(name + '_diffusion_sigma.svg', dpi=300)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/5beef74edbb00ed74a61d2a9f8cec545e4f94660.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+** FF Inputs
+*** Parameters
+
+#+begin_src ipython
+  ini_list = np.arange(0, 10)
+  Ja0_list = np.linspace(10, 30, 21)
+  phi_list = np.linspace(0, 315, 100)
+#+end_src
+
+#+RESULTS:
+
+*** Simulations
+
+#+begin_src ipython
+  start = perf_counter()  
+
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', KAPPA=[0.45], SIGMA=[0.5])  
+  rates = model.run(Ja0_list, ini_list, phi_list)
+
+  end = perf_counter()
+  print("Elapsed (with compilation) = {}s".format((end - start)))
+
+  print('rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: Elapsed (with compilation) = 40.69704167591408s
+: rates (1, 21000, 1000)
+
+#+begin_src ipython
+  rates = rates.reshape(1, len(Ja0_list), len(phi_list), len(ini_list), -1)[0]
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (21, 100, 10, 1000)
+
+*** Analysis
+**** Load data
+
+#+begin_src ipython 
+  df = get_df_X(rates, Ja0_list, X_str='Ie')
+  end_point = get_code_X(df, 'Ie')
+  df_smooth = df.groupby(['trial', 'phi', 'Ie'])['rates'].apply(circcvl).reset_index()
+  end_point['accuracy'] = (end_point.phase - end_point['phi'] / 180 * np.pi) 
+  end_point['precision'] = end_point.groupby(['phi', 'Ie'], group_keys=False)['phase'].apply(get_precision) * 180 / np.pi
+#+end_src
+
+#+RESULTS:
+:    trial  phi    Ie        m0        m1     phase
+: 0      0    0  10.0  4.945570  4.097092  6.042003
+: 1      0    0  11.0  5.214228  4.447856  6.069216
+: 2      0    0  12.0  5.474170  4.715903  6.047337
+: 3      0    0  13.0  5.759289  4.951008  6.087818
+: 4      0    0  14.0  5.979881  5.047727  5.914833
+
+**** Tuning Profile
+
+#+begin_src ipython
+  idx_off = Ja0_list[0]
+  idx_on = Ja0_list[-1]
+  print('parameters', idx_off, idx_on)
+  N_E = 1000
+#+end_src
+
+#+RESULTS:
+: parameters 10.0 30.0
+
+#+begin_src ipython
+  df_point = end_point[end_point.Ie==idx_off]
+  df_point_on = end_point[end_point.Ie==idx_on]
+
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  sns.lineplot(end_point, x='Ie', y=end_point['m1']/end_point['m0'], ax=ax[0], legend=False, color='k')
+  sns.lineplot(end_point, x=idx_off, y=df_point['m1']/ df_point['m0'], ax=ax[0], legend=False, marker='o', ms=10, color=pal[0]) 
+  sns.lineplot(end_point, x=idx_on, y=df_point_on['m1'] / df_point_on['m0'], ax=ax[0], legend=False, marker='o', ms=10, color=pal[1])
+
+  ax[0].set_ylabel('$\mathcal{F}_1 / \mathcal{F}_0$')
+  ax[0].set_xlabel('FF Input (Hz)')
+  # ax[0].set_ylim([0.4, 1])
+
+  point = df_smooth[df_smooth.Ie==idx_off].reset_index()
+  m0, m1, phase = decode_bump(point.rates[0])
+  point = np.roll(point.rates[0], int(( phase / 2.0 / np.pi - 0.5) * point.rates[0].shape[0]))
+
+  point_on = df_smooth[df_smooth.Ie==idx_on].reset_index()  
+  m0, m1, phase = decode_bump(point_on.rates[0])
+  point_on = np.roll(point_on.rates[0], int((phase / 2.0 / np.pi - 0.5) * point_on.rates[0].shape[0]))
+
+  ax[1].plot(point, color=pal[0])
+  ax[1].plot(point_on, color=pal[1])
+  
+  ax[1].set_xticks([0, N_E/4, N_E/2, 3*N_E/4, N_E], [0, 90, 180, 270, 360])
+  ax[1].set_ylabel('Activity (Hz)')
+  ax[1].set_xlabel('Pref. Location (°)')
+
+  plt.savefig(name + '_tuning.svg', dpi=300)
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/6874a4dd6b97e0a5457913d20a710eae3df6ccae.png]]
+
+**** Diffusion
+#+begin_src ipython
+  point = end_point[end_point.Ie==idx_off]
+  point_on = end_point[end_point.Ie==idx_on]
+
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  sns.lineplot(end_point, x='Ie', y=end_point.precision**2 / 3.5, legend=False, marker='o', ax=ax[0], lw=5)
+
+  sns.lineplot(x=idx_off, y=point['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=10, color=pal[0])
+  sns.lineplot(x=idx_on, y=point_on['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=10, color=pal[1])
+
+  ax[0].set_xlabel('FF Input (Hz)')
+  ax[0].set_ylabel('Diffusivity (deg$^2$/s)')
+  ax[0].set_ylim([0, 10])
+  
+  ax1 = ax[0].twinx()
+  sns.lineplot(end_point, x='Ie', y=end_point['m1']/end_point['m0'], ax=ax1, legend=False, color='k', alpha=0.5, lw=5)
+
+  sns.lineplot(end_point, x=idx_off, y=point['m1']/point['m0'], legend=False, marker='o', ax=ax1, ms=10, color=pal[0])
+  sns.lineplot(end_point, x=idx_on, y=point_on['m1']/point_on['m0'], legend=False, marker='o', ax=ax1, ms=10, color=pal[1])
+
+  ax1.set_ylabel('$\mathcal{F}_1 / \mathcal{F}_0$')
+  ax1.spines['right'].set_visible(True)
+  # ax1.set_ylim([0.4, 1])
+
+  bins = 'auto'
+  sns.histplot(data=point, x=point['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0,color = pal[0])
+  sns.histplot(data=point_on, x=point_on['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0., color=pal[1])
+  ax[1].set_xlabel('Angular Deviation (°)')
+  ax[1].set_ylabel('Density')
+  # ax[1].set_xlim([-30, 30])
+
+  plt.savefig(name + '_diffusion.svg', dpi=300)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/0f1e5c44b06ac25a27b0201b02acefff0e827d21.png]]
+
+#+begin_src ipython
+
+#+end_src
+
