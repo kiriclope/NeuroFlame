@@ -10,9 +10,9 @@ class STP_Model():
          
         self.DT = DT
         
-        USE = torch.tensor([0.03/1000.0, 0.0], dtype=FLOAT, device=device)
+        USE = torch.tensor([0.03, 0.0], dtype=FLOAT, device=device)
         self.TAU_REC = torch.tensor([0.25, 0.10], dtype=FLOAT, device=device)
-        self.TAU_FAC = torch.tensor([0.55, 1.0], dtype=FLOAT, device=device)
+        self.TAU_FAC = torch.tensor([2.0, 1.0], dtype=FLOAT, device=device)
         
         self.USE = torch.ones(N_NEURON, dtype=FLOAT, device=device)
         self.DT_TAU_REC = torch.ones(N_NEURON, dtype=FLOAT, device=device)
@@ -44,3 +44,9 @@ class STP_Model():
         self.x_stp = self.x_stp - self.DT_TAU_REC * (self.x_stp - 1.0) - self.DT * self.x_stp * self.u_stp * rates
         self.u_stp = self.u_stp - self.DT_TAU_FAC * (self.u_stp - self.USE) + self.DT * self.USE * rates * (1.0 - self.u_stp)
         self.A_u_x_stp = self.u_stp * self.x_stp * self.IS_STP
+
+    def mato_stp(self, isi):
+        
+        self.u_stp = self.u_stp * torch.exp(-isi / self.TAU_FAC) + self.USE * (1.0 - self.u_stp * torch.exp(-isi / self.TAU_FAC))
+        self.x_stp = self.x_stp * (1.0 - self.u_stp) * torch.exp(-isi / self.TAU_REC) + 1.0 - torch.exp(-isi / self.TAU_REC)
+        self.A_u_x_stp = self.u_stp * self.x_stp

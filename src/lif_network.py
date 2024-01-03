@@ -16,7 +16,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-class Network(nn.Module):
+class LifNetwork(nn.Module):
     def __init__(self, conf_file, sim_name, repo_root, **kwargs):
         super().__init__()
         
@@ -52,121 +52,95 @@ class Network(nn.Module):
                 self.Wab.weight.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
                                     self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = W0
 
-                # if self.W_NMDA and i_pop==0:
-                #     self.W_NMDA.weight.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
-                #                             self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = W0
         del W0
-        # Here we store the constant external input in the bias
-        # for i_pop in range(self.N_POP):
-        #     self.Wab.bias.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1]].fill_(self.Ja0[i_pop])
         
         # resets the seed
         set_seed(0)
+    
+    def update_voltage(self, volt, net_input):
+        '''Dynamics of the membrane'''
+        volt = volt * self.EXP_DT_TAU + self.DT * net_input
+        return volt
+    
+    def update_spikes(self, step, volt):
+        ''' Spike update'''
+        spikes = volt>=self.V_THRESH
+        volt[spikes] = self.V_REST
         
-    def update_rec_input(self, rates, rec_input, rec_NMDA):
+        self.isi[spikes] = step - self.spike_time[spikes]
+        self.spike_time[spikes] = step
+        
+        if step >= self.N_STEADY:
+            self.spike_count[spikes] += 1
+        
+        return volt, spikes
+        
+    def update_rec_input(self, spikes, rec_input, rec_NMDA):
         '''Dynamics of the recurrent inputs'''
         
         A_u_x = 1.0
-        if self.IF_STP:            
-            self.stp.markram_stp(rates)
+        if self.IF_STP:
+            self.stp.mato_stp(self.isi * self.DT)
             A_u_x = self.stp.A_u_x_stp
         
         if self.SYN_DYN:
             # This also implies dynamics of the feedforward inputs
-            rec_input = self.EXP_DT_TAU_SYN * rec_input + self.DT_TAU_SYN * (self.Wab(A_u_x * rates))
-            # if self.IF_NMDA:
-            #     rec_NMDA = self.EXP_DT_TAU_NMDA * rec_NMDA + self.DT_TAU_NMDA * (self.W_NMDA(A_u_x * rates))
+            rec_input = self.EXP_DT_TAU_SYN * rec_input + self.DT_TAU_SYN * (self.Wab(A_u_x * spikes))
+            if self.IF_NMDA:
+                rec_NMDA = self.EXP_DT_TAU_NMDA * rec_NMDA + self.DT_TAU_NMDA * (self.Wab(A_u_x * spikes))
         else:
-            rec_input = self.Wab(A_u_x * rates)
+            rec_input = self.Wab(A_u_x * spikes)
         
         return rec_input, rec_NMDA
-    
+        
     def update_net_input(self, rec_input, rec_NMDA, ff_input):
         '''Updating the net input into the neurons'''
         
         noise = 0
         if self.VAR_FF[0]>0:
             noise = self.ff_normal.sample((self.N_BATCH, self.N_NEURON,))
-            
+        
         net_input = ff_input + noise + rec_input
         
-        # if self.IF_NMDA:
-        #     net_input += rec_NMDA
+        if self.IF_NMDA:
+            net_input += rec_NMDA
         
         return net_input
     
-    def update_rates(self, rates, net_input):
-        '''Dynamics of the rates'''
-        # using array slices is faster than indices
-        if self.RATE_DYN:
-            rates = self.EXP_DT_TAU * rates + self.DT_TAU * Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
-        else:
-            rates = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
+    def forward(self, step, volt, rec_input, rec_NMDA, ff_input):
         
-        return rates
-    
-    def forward(self, rates, rec_input, rec_NMDA, ff_input):
-        '''This is the main function of the class'''
-        rec_input, rec_NMDA = self.update_rec_input(rates, rec_input, rec_NMDA)
+        ff_input = self.update_stim(step, ff_input)
         net_input = self.update_net_input(rec_input, rec_NMDA, ff_input)
-        rates = self.update_rates(rates, net_input)
+        volt = self.update_voltage(volt, net_input)
+        volt, spikes = self.update_spikes(step, volt)
+        rec_input, rec_NMDA = self.update_rec_input(spikes, rec_input, rec_NMDA)
         
-        return rates, rec_input, rec_NMDA
+        return volt, rec_input, rec_NMDA, ff_input
     
-    def run(self, Ja0_list=None, ini_list=None, phi_list=None, IF_DIST=0):
+    def run(self):
         if self.VERBOSE:
             start = perf_counter()
-        
-        if phi_list is not None:
-            self.N_BATCH = len(ini_list) * len(phi_list)
-            if IF_DIST:                
-                self.PHI1 = torch.tensor(phi_list, dtype=self.FLOAT, device=self.device).repeat_interleave(len(ini_list))
-                self.PHI1 = self.PHI1.unsqueeze(1).repeat(1, self.N_NEURON)
-            else:
-                self.PHI0 = torch.tensor(phi_list, dtype=self.FLOAT, device=self.device).repeat_interleave(len(ini_list))
-                self.PHI0 = self.PHI0.unsqueeze(1).repeat(1, self.N_NEURON)
-                
-        if Ja0_list is not None:
-            self.N_BATCH = len(ini_list) * len(Ja0_list) * len(phi_list)
-            self.Ja0 = torch.tensor(Ja0_list, dtype=self.FLOAT, device=self.device).repeat_interleave(len(ini_list) * len(phi_list))
-            self.Ja0 = self.Ja0.unsqueeze(1).repeat(1, self.N_NEURON)
-            self.Ja0 = self.Ja0.unsqueeze(0).repeat(self.N_POP, 1, 1)
-            
-            self.Ja0 = self.Ja0 * torch.sqrt(self.Ka[0]) * self.M0
-            # print(self.Ja0.shape)
-            
-            if IF_DIST:
-                self.PHI1 = torch.tensor(phi_list, dtype=self.FLOAT, device=self.device).repeat_interleave(len(ini_list) * len(Ja0_list))
-                self.PHI1 = self.PHI1.unsqueeze(1).repeat(1, self.N_NEURON)
-            else:
-                self.PHI0 = torch.tensor(phi_list, dtype=self.FLOAT, device=self.device).repeat_interleave(len(ini_list) * len(Ja0_list))
-                self.PHI0 = self.PHI0.unsqueeze(1).repeat(1, self.N_NEURON)
-            # print(self.PHI0.shape)
             
         result = []
-        
         with torch.no_grad():
-            rates, rec_input, rec_NMDA, self.ff_input = self.initRates()
-            mv_rates = rates
-            
+            volt, rec_input, rec_NMDA, ff_input = self.initRates()
             for step in range(self.N_STEPS):
-                self.update_stim(step)
-                rates, rec_input, rec_NMDA = self.forward(rates, rec_input, rec_NMDA, ff_input=self.ff_input)
-
-                mv_rates += rates
+                volt, rec_input, rec_NMDA, ff_input = self.forward(step, volt, rec_input, rec_NMDA, ff_input)
                 
                 if step >= self.N_STEADY:
                     if step % self.N_WINDOW == 0:
+                        rates = self.spike_count / float(self.N_WINDOW)
+                        self.spike_count *= 0.0
+                        
                         if self.VERBOSE:
                             self.print_activity(step, rates)
-                            
+                    
                         if self.REC_LAST_ONLY==0:
-                            result.append(mv_rates.cpu().detach().numpy() / self.N_WINDOW)
-                            mv_rates = 0
-                            
+                            result.append(rates.cpu().detach().numpy())
+        
         if self.REC_LAST_ONLY:
             result.append(rates.cpu().detach().numpy())
-            
+        
         result = np.array(result)
         
         if self.VERBOSE:
@@ -232,13 +206,16 @@ class Network(nn.Module):
         self.device = torch.device(self.DEVICE)
 
     def initRates(self):
-        rates = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)
-        rec_input = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)        
-        # rec_NMDA = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        volt = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        rec_input = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        
         rec_NMDA = 0
+        if self.IF_NMDA:
+            rec_NMDA = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)
+
         ff_input = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)
         
-        return rates, rec_input, rec_NMDA, ff_input
+        return volt, rec_input, rec_NMDA, ff_input
     
     def initWeights(self, i_pop, j_pop):
 
@@ -279,10 +256,10 @@ class Network(nn.Module):
         if 'cos' in self.STRUCTURE[i_pop, j_pop]:
             theta = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Na), dtype=self.FLOAT, device=self.device)
             phi = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Nb), dtype=self.FLOAT, device=self.device)
+
+            i, j = torch.meshgrid(torch.arange(Na, device=self.device), torch.arange(Nb, device=self.device), indexing="ij")
             
-            i, j = torch.meshgrid(theta, phi, indexing="ij")
-            
-            theta_diff = i -j
+            theta_diff = theta[i] - phi[j]
             
             if 'spec' in self.STRUCTURE[i_pop, j_pop]:
                 self.KAPPA[i_pop, j_pop] = self.KAPPA[i_pop, j_pop] / torch.sqrt(Kb)
@@ -310,7 +287,7 @@ class Network(nn.Module):
             if self.SIGMA[i_pop, j_pop] > 0.0:
                 if self.VERBOSE:
                     print('with heterogeneity, SIGMA', self.SIGMA[i_pop, j_pop])
-                
+
                 Hij = torch.normal(0, self.SIGMA[i_pop, j_pop], size=(Na, Nb), dtype=self.FLOAT, device=self.device)
                 Cij = Cij + Hij / torch.sqrt(torch.tensor(Nb, device=self.device, dtype=self.FLOAT))
                 del Hij
@@ -327,6 +304,11 @@ class Network(nn.Module):
         return Cij
 
     def initConst(self):
+
+        self.isi = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=torch.int, device=self.device)
+        self.spike_time = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=torch.int, device=self.device)
+        self.spike_count = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=torch.int, device=self.device)
+        
         self.N_STEADY = int(self.T_STEADY / self.DT)
         self.N_STEPS = int(self.DURATION / self.DT) + self.N_STEADY
         self.N_WINDOW = int(self.T_WINDOW / self.DT)
@@ -339,15 +321,15 @@ class Network(nn.Module):
         
         self.Na = []
         self.Ka = []
-
+        
         if 'all2all' in self.CONNECTIVITY:
             self.K = 1.0
 
         for i_pop in range(self.N_POP):
             self.Na.append(int(self.N_NEURON * self.frac[i_pop]))
-            # self.Ka.append(self.K * const.frac[i_pop])
-            self.Ka.append(self.K)
-
+            self.Ka.append(self.K * const.frac[i_pop])
+            # self.Ka.append(self.K)
+            
         self.Na = torch.tensor(self.Na, dtype=torch.int, device=self.device)
         self.Ka = torch.tensor(self.Ka, dtype=self.FLOAT, device=self.device)
         self.csumNa = torch.cat((torch.tensor([0], device=self.device), torch.cumsum(self.Na, dim=0)))
@@ -405,7 +387,7 @@ class Network(nn.Module):
         self.Jab = torch.tensor(self.Jab, dtype=self.FLOAT, device=self.device).reshape(self.N_POP, self.N_POP) * self.GAIN
         
         for i_pop in range(self.N_POP):
-            self.Jab[:, i_pop] = self.Jab[:, i_pop] / torch.sqrt(self.Ka[i_pop])
+            self.Jab[:, i_pop] = self.Jab[:, i_pop] * torch.sqrt(self.Ka[0]) / self.Ka[i_pop] / self.TAU_SYN[i_pop] * (self.V_THRESH - self.V_REST)
         
         # if self.VERBOSE:
         #     print("scaled Jab", self.Jab)
@@ -415,7 +397,7 @@ class Network(nn.Module):
             print("Ja0", self.Ja0)
 
         self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device)        
-        self.Ja0 = self.Ja0 * torch.sqrt(self.Ka[0]) * self.M0
+        self.Ja0 = self.Ja0 * torch.sqrt(self.Ka[0]) * self.M0 * (self.V_THRESH - self.V_REST)
         
         # if self.VERBOSE:
         #     print("scaled Ja0", self.Ja0)
@@ -431,20 +413,15 @@ class Network(nn.Module):
         if self.VAR_FF[0]>0:
             self.ff_normal = Normal(ff_mean, self.VAR_FF[0] * np.sqrt(self.DT))
         
-    def update_stim(self, step):
+    def update_stim(self, step, ff_input):
         """Perturb the inputs based on the simulus parameters."""
         
         if step == 0:
             for i in range(self.N_POP):
                 if self.BUMP_SWITCH[i]:
-                    # self.Wab[i, i].bias.data.fill_(0.0)
-                    self.ff_input[:, self.csumNa[i]:self.csumNa[i+1]] = 0.0
-                # if self.K !=1 and self.BUMP_SWITCH[i]:
-                    # self.Wab[i, i].bias.data.fill_(self.Ja0[i] / torch.sqrt(self.Ka[0]))
-                    # self.ff_input[:, self.csumNa[i]:self.csumNa[i+1]] = self.Ja0[i] / torch.sqrt(self.Ka[0])
+                    ff_input[:, self.csumNa[i]:self.csumNa[i+1]] = 0.0
                 else:
-                    self.ff_input[:, self.csumNa[i]:self.csumNa[i+1]] = self.Ja0[0]
-                    # print(self.ff_input[:10, :10])
+                    ff_input[:, self.csumNa[i]:self.csumNa[i+1]] = self.Ja0[0]
                     
         if (step == self.N_STIM_ON) or (step == self.N_DIST_ON):
             if np.any(self.I0!=0):
@@ -452,31 +429,18 @@ class Network(nn.Module):
                     print("STIM ON")
                     
                 if step == self.N_STIM_ON:
-                    self.ff_input[:, self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + self.stimFunc(0, 0)
+                    ff_input[:, self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + self.stimFunc(0, 0)
                 else:
-                    self.ff_input[:, self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + self.stimFunc(0, 1)
-                
-                    # print(self.ff_input[:, 1])
-                
-            # if self.PHI0 == 0:
-            #     self.ff_input[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 + self.ksi[0] * self.I0[0] * self.M0)
-            # if self.PHI0 == 180:
-            #     self.ff_input[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 - self.ksi[0] * self.I0[0] * self.M0)
-            
-            # if self.PHI0 == 90:
-            #     self.ff_input[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 + self.ksi[1] * self.I0[0] * self.M0)
-            # if self.PHI0 == 270:
-            #     self.ff_input[self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] * (1.0 - self.ksi[1] * self.I0[0] * self.M0)
-                            
-            
+                    ff_input[:, self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + self.stimFunc(0, 1)
+
+                    
         if (step == self.N_STIM_OFF) or (step == self.N_DIST_OFF):
             if np.any(self.I0!=0):
                 if self.VERBOSE:
                     print("STIM OFF")
-                self.ff_input[:, self.csumNa[0]:self.csumNa[1]] = self.Ja0[0]
+                ff_input[:, self.csumNa[0]:self.csumNa[1]] = self.Ja0[0]
 
-                # for i in range(self.N_POP):
-                #     self.Wab[i, i].bias.data.fill_(self.Ja0[i])
+        return ff_input
         
     def stimFunc(self, i_pop, STIM=0):
         """Stimulus shape"""
@@ -488,11 +452,9 @@ class Network(nn.Module):
         
         if self.I1[1]>0:
             self.Amp = self.dist_normal.sample((self.N_BATCH, 1)).to(self.DEVICE)
-            # self.Amp = self.I1[1] * torch.rand((self.N_BATCH, 1)).to(self.DEVICE)
             return nn.ReLU()(self.Amp * (1.0 + self.SIGMA1 * torch.cos(theta - self.PHI1 * torch.pi / 180.0))) * torch.sqrt(self.Ka[0]) * self.M0
         elif self.I1[0]>0:
             self.Amp = self.I1[0]
             return nn.ReLU()(self.Amp * (1.0 + self.SIGMA1 * torch.cos(theta - self.PHI1 * torch.pi / 180.0))) * torch.sqrt(self.Ka[0]) * self.M0
         else:
             return 0
-        
