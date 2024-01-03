@@ -6,16 +6,20 @@ The network can have multiple neural populations, different connectivity profile
 For more info look at the config files in ./conf/.
 
 ## Installation
-Provide clear instructions on how to get your development environment running.
 ```bash
 pip install -r requirements.txt
 ```
+or alternatively,
+```bash
+conda install --file conda_requirements.txt
+```
+
 ## Usage
 Assuming the dependencies are installed, here is how to run the model (see notebooks folder or org folder for more doc)
 
 ```python
 # import the network class
-from src.model.network import Network
+from src.network import Network
 
 # initialize model
 model = Network(config_file_name, output_file_name, path_to_repo, **kwargs)
