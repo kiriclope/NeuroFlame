@@ -17,25 +17,31 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
-: <Figure size 700x432.624 with 0 Axes>
-:END:
 
 * Helpers
+#+begin_src ipython
+def convert_seconds(seconds):
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return h, m, s
+#+end_src
+
+#+RESULTS:
 
 #+begin_src ipython
   def get_df_X(rates, X_list, X_str='Ie'):
-      n_times, n_X, n_phi, n_trials, n_neurons = rates.shape
+      n_times, n_trials, n_phi, n_X, n_neurons = rates.shape
 
-      time_ind, X_ind, phi_ind, trials_ind, neurons_ind = np.meshgrid(
+      time_ind, trials_ind, phi_ind, X_ind, neurons_ind = np.meshgrid(
           np.arange(n_times),
-          np.arange(n_X),
-          np.arange(n_phi),
           np.arange(n_trials),
+          np.arange(n_phi),
+          np.arange(n_X),
           np.arange(n_neurons),
           indexing='ij'
       )
@@ -43,9 +49,9 @@
       # Construct DataFrame
       df = pd.DataFrame({
           'time': time_ind.flatten(),
-          X_str : X_ind.flatten() * (X_list[-1] - X_list[0]) / (X_list.shape[0] -1)+ X_list[0],
-          'phi': phi_ind.flatten(),
           'trial': trials_ind.flatten(),
+          'phi': phi_ind.flatten(),
+          X_str : X_ind.flatten() * np.round((X_list[-1] - X_list[0]) / (X_list.shape[0] -1), 5) + X_list[0],
           'neuron': neurons_ind.flatten(),
           'rates': rates.flatten()
       })
@@ -58,8 +64,6 @@
 
 #+begin_src ipython
   def get_code_X(df, X_str='Ie'):
-      # df_code_index = df[df.time==df.time.iloc[-1]].index
-      # df_code = df.loc[df_code_index].groupby(['trial', 'phi', X_str])['rates'].apply(decode_bump).reset_index()
 
       df_code = df.groupby(['time', 'trial', 'phi', X_str])['rates'].apply(decode_bump).reset_index()
       df_code[['m0', 'm1', 'phase']] = pd.DataFrame(df_code['rates'].tolist(), index=df_code.index)
@@ -83,6 +87,8 @@
       cmean =  (x - circmean(x, low=-np.pi, high=np.pi)) 
       cmean[cmean > np.pi] -= 2*np.pi
       cmean[cmean < -np.pi] += 2*np.pi
+      cmean[cmean>np.pi/6] = np.nan
+      cmean[cmean<-np.pi/6] = np.nan
       return cmean
 #+end_src
 
@@ -122,26 +128,27 @@
 #+begin_src ipython
   start = perf_counter()
   name = "odr_single"
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', PHI0=180, KAPPA=[0.45], Ja0=[10], REC_LAST_ONLY=0, N_BATCH=10)
-  
-  rates_off = model.run()
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', PHI0=180, KAPPA=[0.45], Ja0=[10], REC_LAST_ONLY=0)
+
+  ini_list = np.arange(0, 10)
+  rates = model.run(ini_list=ini_list)
 
   end = perf_counter()
-  print("Elapsed (with compilation) = {}s".format((end - start)))
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
   print('rates', rates_off.shape)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 1.8406168660148978s
+: Elapsed (with compilation) = 1.3473523049615324s
 : rates (20, 10, 1000)
 
 #+begin_src ipython
-  rates = rates_off[:, np.newaxis, np.newaxis]
+  rates = rates[..., np.newaxis, np.newaxis]
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (20, 1, 1, 10, 1000)
+: (20, 10, 1000, 1, 1)
 
 #+begin_src ipython 
   df = get_df_X(rates, np.array([0,1]), X_str='Ie')
@@ -150,12 +157,12 @@
 #+end_src
 
 #+RESULTS:
-:    time   Ie  phi  trial  neuron         rates
-: 0     0  0.0    0      0       0  4.470349e-09
-: 1     0  0.0    0      0       1  0.000000e+00
-: 2     0  0.0    0      0       2  3.510399e-04
-: 3     0  0.0    0      0       3  2.097187e-03
-: 4     0  0.0    0      0       4  1.701250e-03
+:    time  trial  phi   Ie  neuron         rates
+: 0     0      0    0  0.0       0  2.313770e-08
+: 1     0      0    1  0.0       0  2.992987e-03
+: 2     0      0    2  0.0       0  1.167576e-03
+: 3     0      0    3  0.0       0  1.333970e-03
+: 4     0      0    4  0.0       0  3.000000e-03
 
 #+begin_src ipython  
   df_code = get_code_X(df, 'Ie')
@@ -164,12 +171,12 @@
 #+end_src
 
 #+RESULTS:
-:    time  trial  phi   Ie        m0        m1     phase
-: 0     0      0    0  0.0  0.001480  0.000029  2.664474
-: 1     0      1    0  0.0  0.001579  0.000061 -0.783700
-: 2     0      2    0  0.0  0.001469  0.000046  2.497345
-: 3     0      3    0  0.0  0.001482  0.000063 -0.508249
-: 4     0      4    0  0.0  0.001418  0.000025  0.941348
+:    time  trial  phi   Ie            m0            m1  phase
+: 0     0      0    0  0.0  2.313770e-08  4.627540e-08    0.0
+: 1     0      0    1  0.0  2.992987e-03  5.985974e-03    0.0
+: 2     0      0    2  0.0  1.167576e-03  2.335151e-03    0.0
+: 3     0      0    3  0.0  1.333970e-03  2.667940e-03    0.0
+: 4     0      0    4  0.0  3.000000e-03  6.000000e-03    0.0
 
 #+begin_src ipython
   sns.lineplot(df_code, x='time', y='phase', hue='trial', legend=False, alpha=0.25)
@@ -177,7 +184,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/a23a62f4b4057be99127f730e8c3209449f146cb.png]]
+[[file:./.ob-jupyter/951afe83514befc03a5f22e3dc5cfac803d7a7f1.png]]
 
 ** FF Inputs
 *** Simulation
@@ -191,25 +198,35 @@
   Ja0_list = np.linspace(10, 30, 21)
   phi_list = np.linspace(0, 315, 8)
 
-  rates = model.run(Ja0_list, ini_list, phi_list)
+  rates = model.run(ini_list, phi_list, Ja0_list)
   del model 
   end = perf_counter()
-  print("Elapsed (with compilation) = {}s".format((end - start)))
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
   print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 42.202381459996104s
-: rates (1, 21000, 1000)
+:RESULTS:
+# [goto error]
+: [0;31m---------------------------------------------------------------------------[0m
+: [0;31mNameError[0m                                 Traceback (most recent call last)
+: Cell [0;32mIn[448], line 12[0m
+: [1;32m     10[0m [38;5;28;01mdel[39;00m model 
+: [1;32m     11[0m end [38;5;241m=[39m perf_counter()
+: [0;32m---> 12[0m [38;5;28mprint[39m([38;5;124m"[39m[38;5;124mElapsed (with compilation) = [39m[38;5;132;01m{}[39;00m[38;5;124ms[39m[38;5;124m"[39m, [38;5;28;43mself[39;49m[38;5;241m.[39mformat((end [38;5;241m-[39m start)))
+: [1;32m     14[0m [38;5;28mprint[39m([38;5;124m'[39m[38;5;124mrates[39m[38;5;124m'[39m, rates[38;5;241m.[39mshape)
+: 
+: [0;31mNameError[0m: name 'self' is not defined
+:END:
 
 #+begin_src ipython
-  rates = rates.reshape(rates.shape[0], len(Ja0_list), len(phi_list), len(ini_list), -1)
+  rates = rates.reshape(rates.shape[0], len(ini_list), len(phi_list), len(Ja0_list), -1)
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (1, 21, 8, 125, 1000)
+: (1, 125, 8, 21, 1000)
 
 *** Analysis
 **** Load data
@@ -220,40 +237,41 @@
 #+end_src
 
 #+RESULTS:
-:    time    Ie  phi  trial  neuron      rates
-: 0     0  10.0    0      0       0   1.231878
-: 1     0  10.0    0      0       1  10.714149
-: 2     0  10.0    0      0       2  10.654802
-: 3     0  10.0    0      0       3   5.718123
-: 4     0  10.0    0      0       4   6.623776
+:    time  trial  phi    Ie  neuron      rates
+: 0     0      0    0  10.0       0   9.067467
+: 1     0      0    0  10.0       1  10.098180
+: 2     0      0    0  10.0       2  10.349462
+: 3     0      0    0  10.0       3   7.906910
+: 4     0      0    0  10.0       4   7.308694
 
 #+begin_src ipython
-  df_code = get_code_X(df, 'Ie')
+  end_point = get_code_X(df, 'Ie')
   print(df_code.head())
 #+end_src
 
 #+RESULTS:
 :    time  trial  phi    Ie        m0        m1     phase
-: 0     0      0    0  10.0  5.559349  0.148661  0.236311
-: 1     0      0    0  11.0  5.838894  0.290337  0.886999
-: 2     0      0    0  12.0  6.022574  0.218099 -1.296303
-: 3     0      0    0  13.0  6.157717  0.095093  1.001293
-: 4     0      0    0  14.0  6.450458  0.059714 -1.758707
+: 0     0      0    0  10.0  4.745538  3.379152 -0.226161
+: 1     0      0    0  11.0  5.059214  4.026405  0.004523
+: 2     0      0    0  12.0  5.332169  4.750391  0.008700
+: 3     0      0    0  13.0  5.617003  5.087596 -0.344964
+: 4     0      0    0  14.0  5.893910  5.436195 -0.334664
 
 #+begin_src ipython
-  sns.histplot(df_code, x='phase', alpha=0.25, bins=100)
+  sns.histplot(df_code, x=df_code.phase[df_code.Ie==20]*180/np.pi, bins=100)
+  plt.xticks([-180, -90, 0, 90, 180])
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/af5c1bc000ec880a7329466dfb5cbaac8ac59a3f.png]]
+[[file:./.ob-jupyter/0bf33f32e33311eed1224020af6ae307cd0042cd.png]]
 
 #+begin_src ipython 
-  df = get_df_X(rates, Ja0_list, X_str='Ie')
+  # df = get_df_X(rates, Ja0_list, X_str='Ie')
 
   df_smooth = df.groupby(['trial', 'phi', 'Ie'])['rates'].apply(circcvl).reset_index()
 
-  end_point = get_code_X(df, 'Ie')
+  # end_point = get_code_X(df, 'Ie')
 
   end_point['precision'] = end_point.groupby(['phi', 'Ie'], group_keys=False)['phase'].apply(get_precision) * 180 / np.pi
 
@@ -309,7 +327,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/93722bdeadcdcd2bbfa4e83ce727129f68129929.png]]
+[[file:./.ob-jupyter/9fcc2a00f5ebf27a2eb9c34edb00f7291d86999b.png]]
 
 **** Diffusion
 
@@ -353,7 +371,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/4c602f97fb79d3378e25ea5077a70c8bd9a828f2.png]]
+[[file:./.ob-jupyter/9f3e001f6d662aefd627b819784c24bb627bdc25.png]]
 
 #+begin_src ipython
 
@@ -375,7 +393,7 @@
 ** Single
 
 #+begin_src ipython
-  I1 = [1.0, 0.0]
+  I1 = [0.0, 0.0]
   PHI1 = 180+90
   SIGMA1 = 0.25
 #+end_src
@@ -385,30 +403,30 @@
 #+begin_src ipython
   start = perf_counter()
   name = "odr_off"
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', PHI0=180, PHI1=PHI1, KAPPA=[0.45], Ja0=[10], I1=I1, SIGMA1=SIGMA1, REC_LAST_ONLY=0, N_BATCH=1)
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', KAPPA=[0.4], Ja0=[10], REC_LAST_ONLY=0, N_BATCH=1, VAR_FF=[30000])
   rates_off = model.run()[:,0]
   end = perf_counter()
-  print("Elapsed (with compilation) = {}s".format((end - start)))
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
   print('rates', rates_off.shape)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 1.9909485620446503s
-: rates (5000, 1000)
+: Elapsed (with compilation) = 1.345799749949947s
+: rates (20, 1000)
 
 #+begin_src ipython
   start = perf_counter()
   name = "odr_on"
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', PHI0=180, PHI1=PHI1, KAPPA=[0.45], Ja0=[30], I1=I1, SIGMA1=SIGMA1, REC_LAST_ONLY=0, N_BATCH=1)
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', KAPPA=[0.4], Ja0=[30], REC_LAST_ONLY=0, N_BATCH=1, VAR_FF=[30000])
   rates_on = model.run()[:,0]
   end = perf_counter()
-  print("Elapsed (with compilation) = {}s".format((end - start)))
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
   print('rates', rates_on.shape)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 1.92481894697994s
-: rates (5000, 1000)
+: Elapsed (with compilation) = 1.3264346839860082s
+: rates (20, 1000)
 
 #+begin_src ipython
   width = 7
@@ -461,48 +479,48 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/d4afc9f70980e7da257ff53b47d64478d659f451.png]]
+[[file:./.ob-jupyter/285f39185fcf71f900471a22b99ab0e2052119fd.png]]
 
 ** Batch
 
 #+begin_src ipython
-  I1 = [0.0, 0.75] # mean, variance this truncated gaussian>0
-  SIGMA1 = .3 # tuning of the distractor
+  I1 = [0.5, 0.0] # mean, variance this truncated gaussian>0
+  SIGMA1 = 1.0 # tuning of the distractor
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
   start = perf_counter()  
-
-  ini_list = np.arange(0, 200) # list of initializations
+  
+  ini_list = np.arange(0, 1000) # list of initializations
   phi_list = np.array([-45, -90, -180, 45, 90, 180]) # list of distractors
   # phi_list = np.array([45, 90, 180])
   Ja0_list = np.array([10, 30]) # list of FF input strength
 
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', PHI0=0, KAPPA=[0.4], I1=I1, SIGMA1=SIGMA1)
-  rates_dist = model.run(Ja0_list=Ja0_list, ini_list=ini_list, phi_list=phi_list, IF_DIST=1)
-  
+  rates_dist = model.run(ini_list, phi_list, Ja0_list, IF_DIST=1)
+
   del model 
   end = perf_counter()
-  print("Elapsed (with compilation) = {}s".format((end - start)))
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
   print('rates', rates_dist.shape)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 5.867374184075743s
-: rates (1, 2400, 1000)
+: Elapsed (with compilation) = 0h 0m 22s
+: rates (1, 12000, 1000)
 
 #+begin_src ipython
-  rates_dist = rates_dist.reshape(1, len(Ja0_list), len(phi_list), len(ini_list), -1)
+  rates_dist = rates_dist.reshape(1, len(ini_list), len(phi_list), len(Ja0_list), -1)
   print(rates_dist.shape)
 #+end_src
 
 #+RESULTS:
-: (1, 2, 6, 200, 1000)
+: (1, 1000, 6, 2, 1000)
 
-#+begin_src ipython 
+#+begin_src ipython
   df = get_df_X(rates_dist, Ja0_list, X_str='Ie')
 
   end_point = get_code_X(df, 'Ie')
@@ -511,20 +529,21 @@
 
   # end_point[end_point.phase.abs()> 30 * np.pi /180] = np.nan
 
-  # end_point['accuracy'] = end_point.phase * 180 / np.pi
-  end_point['accuracy'] = end_point.groupby(['phi', 'Ie'], group_keys=False)['phase'].apply(get_accuracy) * 180 / np.pi
-
-  # end_point['precision'] = end_point.groupby(['phi', 'Ie'], group_keys=False)['phase'].apply(get_precision) * 180 / np.pi
-
-  # end_point['phase'][end_point.phase>np.pi] -= 2*np.pi
+  end_point['accuracy'] = end_point.phase * 180 / np.pi
   end_point['phase'] *= 180 / np.pi
+
+  end_point.accuracy[end_point.phi==3] *= -1
+  end_point.accuracy[end_point.phi==4] *= -1
+  end_point.accuracy[end_point.phi==5] *= -1
+  # end_point.phi[end_point.phi==6] = 3
+
   end_point.phi[end_point.phi==3] = 0
   end_point.phi[end_point.phi==4] = 1
   end_point.phi[end_point.phi==5] = 2
   # end_point.phi[end_point.phi==6] = 3
 
-  end_point[end_point.accuracy.abs()>30] = np.nan
-  end_point[end_point.precision.abs()>30] = np.nan
+  # end_point[end_point.accuracy.abs()>30] = np.nan
+  # end_point[end_point.precision.abs()>30] = np.nan
 #+end_src
 
 #+RESULTS:
@@ -553,12 +572,15 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5c328db8e50d3a7a916ecdb894967ca3c5c7a46b.png]]
+[[file:./.ob-jupyter/e2390313bf133b9d02066a89779560b06bd68a93.png]]
+
+#+RESULTS:
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2 * width, height))
-
+  
   sns.lineplot(end_point, x='phi', y=end_point['accuracy'], marker='o', ax=ax[0], err_style='bars', hue='Ie', legend=False, palette=pal, ms=12)
+
   ax[0].set_xticks([0, 1, 2], [45, 90, 180,])
   ax[0].set_xlabel('Distance S1/S2 (°)')
   ax[0].set_ylabel('Response Bias (°)')
@@ -574,11 +596,13 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/d6d56bf50c8e89b8eb73a9e353fefb565692a713.png]]
+[[file:./.ob-jupyter/d3d931dd3c5f7b6530d975baeaa8bd0f61e030d3.png]]
 
 #+begin_src ipython
 
 #+end_src
+
+#+RESULTS:
 
 * Quenched ODR
 ** Parameters
@@ -596,53 +620,55 @@
 #+begin_src ipython
   ini_list = np.arange(0, 10)
   phi_list = np.linspace(0, 315, 8)
+  print(phi_list)
 #+end_src
 
 #+RESULTS:
+: [  0.  45.  90. 135. 180. 225. 270. 315.]
 
 #+begin_src ipython
   start = perf_counter()  
-  
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', KAPPA=[0.4], SIGMA=[0.0], Ja0=[10], REC_LAST_ONLY=0)
+
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, KAPPA=[0.4], SIGMA=[0.0], Ja0=[10], REC_LAST_ONLY=0)
   rates = model.run(ini_list=ini_list, phi_list=phi_list)
 
   end = perf_counter()
-  print("Elapsed (with compilation) = {}s".format((end - start)))
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
   print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 2.096351145999506s
+: Elapsed (with compilation) = 0h 0m 1s
 : rates (20, 80, 1000)
 
 #+begin_src ipython
   start = perf_counter()  
-  
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', KAPPA=[0.4], SIGMA=[0.3], Ja0=[10], REC_LAST_ONLY=0)
+
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, KAPPA=[0.4], SIGMA=[0.25], Ja0=[10], REC_LAST_ONLY=0, SEED=0)
   rates_dist = model.run(ini_list=ini_list, phi_list=phi_list)
 
   end = perf_counter()
-  print("Elapsed (with compilation) = {}s".format((end - start)))
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
   print('rates', rates_dist.shape)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 2.1501136608421803s
+: Elapsed (with compilation) = 0h 0m 1s
 : rates (20, 80, 1000)
 
 #+begin_src ipython
-  rates = rates.reshape(rates.shape[0], len(phi_list), len(ini_list), -1)
+  rates = rates.reshape(rates.shape[0], len(ini_list), len(phi_list), -1)
   print(rates.shape)
 
-  rates_dist = rates_dist.reshape(rates_dist.shape[0], len(phi_list), len(ini_list), -1)
+  rates_dist = rates_dist.reshape(rates_dist.shape[0], len(ini_list), len(phi_list), -1)
   print(rates_dist.shape)
 #+end_src
 
 #+RESULTS:
-: (20, 8, 10, 1000)
-: (20, 8, 10, 1000)
+: (20, 10, 8, 1000)
+: (20, 10, 8, 1000)
 
 #+begin_src ipython
   m0, m1, phase = decode_bump(rates)
@@ -651,7 +677,7 @@
 #+end_src
 
 #+RESULTS:
-: (20, 8, 10)
+: (20, 10, 8)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height]) 
@@ -678,7 +704,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/8c1ad03c841f08360d55f23be463f3300649dde6.png]]
+[[file:./.ob-jupyter/931b17dab72027db84fac1494dc420be20f2fe99.png]]
 
 ** Heterogeneity strength
 *** helpers
@@ -687,50 +713,76 @@
   def run_X(conf_name, name, X_list, ini_list, phi_list, X_str='Jab', device = 'cuda:0', **kwargs):
       start = perf_counter()
 
-      rates = []
+      rates_sigma = []
       for X in X_list:
-          if X_str=='sigma':
+          rates = []
+          for real in real_list:
               model = Network(conf_name, '%s_%s_%.2f' % (name, X_str, X),
-                              REPO_ROOT, DEVICE=device, SIGMA=[X], **kwargs)
-          if X_str=='Jab':
-              model = Network(conf_name, '%s_%s_%.2f' % (name, X_str, X),
-                              REPO_ROOT, DEVICE=device, Jab=[-X], **kwargs)
+                              REPO_ROOT, DEVICE=device, SIGMA=[X], SEED=0, **kwargs)
 
-          rates.append(model.run(ini_list=ini_list, phi_list=phi_list))
-          del model
+              rates.append(model.run(ini_list=ini_list, phi_list=phi_list))
+              del model
+          rates_sigma.append(rates)
 
       end = perf_counter()
-      print("Elapsed (with compilation) = {}s".format((end - start)))
 
-      return np.array(rates)
+      print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))      
+
+      return np.array(rates_sigma)
 #+end_src
 
 #+RESULTS:
 *** parameters
 
 #+begin_src ipython
-  ini_list = np.arange(0, 250)
-  sigma_list = np.linspace(0, 0.3, 21)
+  sigma_list = np.linspace(0, 1, 11)
+  real_list = np.arange(0, 25)
+  
+  ini_list = np.arange(0, 10)
   phi_list = np.linspace(0, 315, 8)
+
+  print(sigma_list)
  #+end_src
 
 #+RESULTS:
+: [0.  0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1. ]
+
 *** simulation
 
 #+begin_src ipython
-  rates = run_X(conf_name, name, sigma_list, ini_list, phi_list, X_str='sigma', device = 'cuda')
-#+end_src
-
-#+RESULTS:
-: Elapsed (with compilation) = 98.78027569688857s
-
-#+begin_src ipython
-  rates = rates.reshape(1, len(sigma_list), len(phi_list), len(ini_list), -1)
+  rates = run_X(conf_name, name, sigma_list, ini_list, phi_list, X_str='sigma', device='cuda')
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (1, 21, 8, 250, 1000)
+: Elapsed (with compilation) = 0h 6m 28s
+: (11, 25, 1, 80, 1000)
+
+#+begin_src ipython
+  rates = np.moveaxis(rates, 0, -2)
+  rates = rates[:,0]
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (100, 21, 1, 1000)
+
+#+begin_src ipython  
+  rates = rates.reshape(rates.shape[0], len(ini_list), len(phi_list), len(sigma_list), -1)
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+: [0;31m---------------------------------------------------------------------------[0m
+: [0;31mValueError[0m                                Traceback (most recent call last)
+: Cell [0;32mIn[746], line 1[0m
+: [0;32m----> 1[0m rates [38;5;241m=[39m [43mrates[49m[38;5;241;43m.[39;49m[43mreshape[49m[43m([49m[43mrates[49m[38;5;241;43m.[39;49m[43mshape[49m[43m[[49m[38;5;241;43m0[39;49m[43m][49m[43m,[49m[43m [49m[38;5;28;43mlen[39;49m[43m([49m[43mini_list[49m[43m)[49m[43m,[49m[43m [49m[38;5;28;43mlen[39;49m[43m([49m[43mphi_list[49m[43m)[49m[43m,[49m[43m [49m[38;5;28;43mlen[39;49m[43m([49m[43msigma_list[49m[43m)[49m[43m,[49m[43m [49m[38;5;241;43m-[39;49m[38;5;241;43m1[39;49m[43m)[49m
+: [1;32m      2[0m [38;5;28mprint[39m(rates[38;5;241m.[39mshape)
+: 
+: [0;31mValueError[0m: cannot reshape array of size 2100000 into shape (100,100,8,11,newaxis)
+:END:
 
 *** Analysis
 ***** Load data
@@ -738,9 +790,9 @@
 #+begin_src ipython
   df = get_df_X(rates, sigma_list, X_str='sigma')
   end_point = get_code_X(df, 'sigma')
-  df_smooth = df.groupby(['trial', 'phi', 'sigma'])['rates'].apply(circcvl).reset_index()
+  df_smooth = df.groupby(['time', 'trial', 'phi', 'sigma'])['rates'].apply(circcvl).reset_index()
   
-  end_point['precision'] = end_point.groupby(['phi', 'sigma'], group_keys=False)['phase'].apply(get_precision) * 180 / np.pi
+  end_point['precision'] = end_point.groupby(['time', 'phi', 'sigma'], group_keys=False)['phase'].apply(get_precision) * 180 / np.pi
 #+end_src
 
 #+RESULTS:
@@ -748,17 +800,30 @@
 ***** Tuning Profile
 
 #+begin_src ipython
-    idx_off = sigma_list[0]
-    idx_on = np.round(sigma_list[-1],2)
+    idx_off = sigma_list[1]
+    idx_on = sigma_list[5]
     print('parameters', idx_off, idx_on)
     N_E = 1000
 #+end_src
 
 #+RESULTS:
-: parameters 0.0 0.3
+: parameters 0.1 0.5
 
 #+begin_src ipython
+  df_point = end_point[end_point.sigma==idx_off]
+  df_point_on = end_point[end_point.sigma==idx_on]
+  print(df_point_on.head())
+#+end_src
 
+#+RESULTS:
+:     time  trial  phi  sigma        m0        m1     phase  precision
+: 5      0      0    0    0.5  5.823681  3.369071  1.956437   2.293273
+: 16     0      0    1    0.5  5.824378  3.160698  1.816514  -0.249574
+: 27     0      0    2    0.5  5.840415  3.123927  1.691448 -11.021806
+: 38     0      0    3    0.5  5.866175  3.077265  1.844028  -1.311344
+: 49     0      0    4    0.5  5.880684  3.336417  1.883580   0.517090
+
+#+begin_src ipython
   df_point = end_point[end_point.sigma==idx_off]
   df_point_on = end_point[end_point.sigma==idx_on]
 
@@ -773,12 +838,12 @@
   # ax[0].set_ylim([0.4, 1])
 
   point = df_smooth[df_smooth.sigma==idx_off].reset_index()
-  m0, m1, phase = decode_bump(point.rates[4])
-  point = np.roll(point.rates[4], int(( phase / 2.0 / np.pi - 0.5) * point.rates[4].shape[0]))
-  
+  m0, m1, phase = decode_bump(point.rates[0])
+  point = np.roll(point.rates[0], int(( phase / 2.0 / np.pi - 0.5) * point.rates[0].shape[0]))
+
   point_on = df_smooth[df_smooth.sigma==idx_on].reset_index()  
-  m0, m1, phase = decode_bump(point_on.rates[4])
-  point_on = np.roll(point_on.rates[4], int((phase / 2.0 / np.pi - 0.5) * point_on.rates[4].shape[0]))
+  m0, m1, phase = decode_bump(point_on.rates[0])
+  point_on = np.roll(point_on.rates[0], int((phase / 2.0 / np.pi - 0.5) * point_on.rates[0].shape[0]))
 
   ax[1].plot(point, color=pal[2])
   ax[1].plot(point_on, color=pal[3])
@@ -793,66 +858,65 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/6d99d7e5f65669387940797790fb4a001ab32594.png]]
+[[file:./.ob-jupyter/eb51611ae52f5d5e50be90b42fb22a0a830326fa.png]]
 
 ***** Diffusion
 
 #+begin_src ipython
-  point = end_point[end_point.sigma==idx_off]
-  point_on = end_point[end_point.sigma==idx_on]
+    point = end_point[end_point.sigma==idx_off]
+    point_on = end_point[end_point.sigma==idx_on]
 
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+    fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
-  sns.lineplot(end_point, x='sigma', y=end_point.precision**2 / 3.5, legend=False, ax=ax[0])
+    sns.lineplot(end_point, x='sigma', y=end_point.precision**2 / 3.5, legend=False, ax=ax[0])
 
-  sns.lineplot(x=idx_off, y=point['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=12, color=pal[2])
-  sns.lineplot(x=idx_on, y=point_on['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=12, color=pal[3])
+    sns.lineplot(x=idx_off, y=point['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=12, color=pal[2])
+    sns.lineplot(x=idx_on, y=point_on['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=12, color=pal[3])
 
-  ax[0].set_xlabel('Heterogeneity Strength')
-  ax[0].set_ylabel('Diffusivity (deg$^2$/s)')
+    ax[0].set_xlabel('Heterogeneity Strength')
+    ax[0].set_ylabel('Diffusivity (deg$^2$/s)')
+    ax[0].set_ylim([0, 60])
+    #  ax1 = ax[0].twinx()
+    # sns.lineplot(end_point, x='sigma', y=end_point['m1']/end_point['m0'], ax=ax1, legend=False, color='k', alpha=0.25)
 
-  #  ax1 = ax[0].twinx()
-  # sns.lineplot(end_point, x='sigma', y=end_point['m1']/end_point['m0'], ax=ax1, legend=False, color='k', alpha=0.25)
+    # sns.lineplot(end_point, x=idx_off, y=point['m1']/point['m0'], legend=False, marker='o', ax=ax1, ms=12, color=pal[0])
+    # sns.lineplot(end_point, x=idx_on, y=point_on['m1']/point_on['m0'], legend=False, marker='o', ax=ax1, ms=12, color=pal[1])
 
-  # sns.lineplot(end_point, x=idx_off, y=point['m1']/point['m0'], legend=False, marker='o', ax=ax1, ms=12, color=pal[0])
-  # sns.lineplot(end_point, x=idx_on, y=point_on['m1']/point_on['m0'], legend=False, marker='o', ax=ax1, ms=12, color=pal[1])
+    # ax1.set_ylabel('$\mathcal{F}_1 / \mathcal{F}_0$')
+    # ax1.spines['right'].set_visible(True)
+    # ax1.set_ylim([0.4, 1])
 
-  # ax1.set_ylabel('$\mathcal{F}_1 / \mathcal{F}_0$')
-  # ax1.spines['right'].set_visible(True)
-  # ax1.set_ylim([0.4, 1])
+    # point = df_smooth[df_smooth.sigma==idx_off].reset_index()
+    # m0, m1, phase = decode_bump(point.rates[4])
+    # point = np.roll(point.rates[4], int(( phase / 2.0 / np.pi - 0.5) * point.rates[4].shape[0]))
 
-  # point = df_smooth[df_smooth.sigma==idx_off].reset_index()
-  # m0, m1, phase = decode_bump(point.rates[4])
-  # point = np.roll(point.rates[4], int(( phase / 2.0 / np.pi - 0.5) * point.rates[4].shape[0]))
+    # point_on = df_smooth[df_smooth.sigma==idx_on].reset_index()  
+    # m0, m1, phase = decode_bump(point_on.rates[4])
+    # point_on = np.roll(point_on.rates[4], int((phase / 2.0 / np.pi - 0.5) * point_on.rates[4].shape[0]))
 
-  # point_on = df_smooth[df_smooth.sigma==idx_on].reset_index()  
-  # m0, m1, phase = decode_bump(point_on.rates[4])
-  # point_on = np.roll(point_on.rates[4], int((phase / 2.0 / np.pi - 0.5) * point_on.rates[4].shape[0]))
+    # ax[1].plot(point, color=pal[0])
+    # ax[1].plot(point_on, color=pal[1])
 
-  # ax[1].plot(point, color=pal[0])
-  # ax[1].plot(point_on, color=pal[1])
+    # ax[1].set_xticks([0, N_E/4, N_E/2, 3*N_E/4, N_E], [0, 90, 180, 270, 360])
+    # ax[1].set_ylabel('Firing Rate (Hz)')
+    # ax[1].set_xlabel('Pref. Location (°)')
 
-  # ax[1].set_xticks([0, N_E/4, N_E/2, 3*N_E/4, N_E], [0, 90, 180, 270, 360])
-  # ax[1].set_ylabel('Firing Rate (Hz)')
-  # ax[1].set_xlabel('Pref. Location (°)')
+    # point = end_point[end_point.sigma==idx_off]
+    # point_on = end_point[end_point.sigma==idx_on]
 
-  # point = end_point[end_point.sigma==idx_off]
-  # point_on = end_point[end_point.sigma==idx_on]
+    bins = 'auto'
+    sns.histplot(data=point, x=point['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0, color = pal[2])
+    sns.histplot(data=point_on, x=point_on['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0., color=pal[3])
+    ax[1].set_xlabel('Endpoint Deviation (°)')
+    ax[1].set_ylabel('Density')
+    # ax[1].set_xlim([-30, 30])
 
-  bins = 'auto'
-  sns.histplot(data=point, x=point['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0, color = pal[2])
-  sns.histplot(data=point_on, x=point_on['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0., color=pal[3])
-  ax[1].set_xlabel('Endpoint Deviation (°)')
-  ax[1].set_ylabel('Density')
-  ax[1].set_xlim([-30, 30])
-
-  plt.savefig(name + '_diffusion_sigma.svg', dpi=300)
-  plt.show()
+    plt.savefig(name + '_diffusion_sigma.svg', dpi=300)
+    plt.show()
 #+end_src
 
-
 #+RESULTS:
-[[file:./.ob-jupyter/ad7fa88971ceb1d8b172228c2dccc7e21646a1b2.png]]
+[[file:./.ob-jupyter/a4698e6e9c2739670aea1e72229f282219a30ddd.png]]
 
 #+begin_src ipython
 
@@ -864,9 +928,9 @@
 *** Parameters
 
 #+begin_src ipython
-  ini_list = np.arange(0, 10)
+  ini_list = np.arange(0, 100)
   Ja0_list = np.linspace(10, 30, 21)
-  phi_list = np.linspace(0, 315, 100)
+  phi_list = np.linspace(0, 315, 8)
 #+end_src
 
 #+RESULTS:
@@ -876,26 +940,26 @@
 #+begin_src ipython
   start = perf_counter()  
 
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', KAPPA=[0.4], SIGMA=[0.3])  
-  rates = model.run(Ja0_list, ini_list, phi_list)
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', KAPPA=[0.4], SIGMA=[0.25], SEED=0)
+  rates = model.run(ini_list, phi_list, Ja0_list)
 
   end = perf_counter()
-  print("Elapsed (with compilation) = {}s".format((end - start)))
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
   print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 42.51040408806875s
-: rates (1, 21000, 1000)
+: Elapsed (with compilation) = 0h 0m 45s
+: rates (1, 16800, 1000)
 
 #+begin_src ipython
-  rates = rates.reshape(1, len(Ja0_list), len(phi_list), len(ini_list), -1)
+  rates = rates.reshape(1, len(ini_list), len(phi_list), len(Ja0_list), -1)
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (1, 21, 100, 10, 1000)
+: (1, 100, 8, 21, 1000)
 
 *** Analysis
 **** Load data
@@ -957,7 +1021,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/10fc89e604a48bfb5f8ca56f8775175a82a41c7b.png]]
+[[file:./.ob-jupyter/1517c3f215dcba21da098dac7713ce166f3e15e9.png]]
 
 **** Diffusion
 
@@ -974,11 +1038,11 @@
 
   ax[0].set_xlabel('FF Input (Hz)')
   ax[0].set_ylabel('Diffusivity (deg$^2$/s)')
-  ax[0].set_ylim([0, 10])
+  # ax[0].set_ylim([0, 10])
 
   ax1 = ax[0].twinx()
   sns.lineplot(end_point, x='Ie', y=end_point['m1']/end_point['m0'], ax=ax1, legend=False, color='k', alpha=0.5, lw=5)
-  
+
   sns.lineplot(end_point, x=idx_off, y=point['m1']/point['m0'], legend=False, marker='o', ax=ax1, ms=12, color=pal[0])
   sns.lineplot(end_point, x=idx_on, y=point_on['m1']/point_on['m0'], legend=False, marker='o', ax=ax1, ms=12, color=pal[1])
 
@@ -998,7 +1062,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e96c86302e2e6ff04f786be7d8a16d6ea9a3a6fb.png]]
+[[file:./.ob-jupyter/c0e6502a1773b57fae847c3da90b2cda798c063e.png]]
 
 #+begin_src ipython
 
