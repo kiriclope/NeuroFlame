@@ -17,10 +17,13 @@
 #+end_src
 
 #+RESULTS:
+:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
+: <Figure size 700x432.624 with 0 Axes>
+:END:
 
 * Helpers
 #+begin_src ipython
@@ -135,7 +138,7 @@ def convert_seconds(seconds):
 
   end = perf_counter()
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
-  print('rates', rates_off.shape)
+  print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
@@ -466,7 +469,7 @@ def convert_seconds(seconds):
 ** Batch
 
 #+begin_src ipython
-  I1 = np.array([0.1, 1.0])/2 # mean, variance this truncated gaussian>0
+  I1 = np.array([0.05, 0.75]) # mean, variance this truncated gaussian>0
   SIGMA1 = 1.0 # tuning of the distractor
 #+end_src
 
@@ -480,7 +483,7 @@ def convert_seconds(seconds):
   # phi_list = np.array([45, 90, 180])
   Ja0_list = np.array([10, 30]) # list of FF input strength
 
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', PHI0=0, KAPPA=[0.4], I1=I1, SIGMA1=SIGMA1)
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', PHI0=0, KAPPA=[0.4], I1=I1, SIGMA1=SIGMA1, SEED=0)
   rates_dist = model.run(ini_list, phi_list, Ja0_list, IF_DIST=1)
 
   del model 
@@ -491,7 +494,7 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 22s
+: Elapsed (with compilation) = 0h 0m 45s
 : rates (1, 12000, 1000)
 
 #+begin_src ipython
@@ -507,7 +510,7 @@ def convert_seconds(seconds):
 
   end_point = get_code_X(df, 'Ie')
 
-  end_point[end_point.phase.abs()*180/np.pi>45] = np.nan
+  end_point[end_point.phase.abs()*180/np.pi>30] = np.nan
 
   end_point['precision'] = end_point.groupby(['phi', 'Ie'], group_keys=False)['phase'].apply(get_precision) * 180 / np.pi
 
@@ -556,7 +559,7 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/24018c5fc4d397a0c1fdf6c498de8156dbb56d64.png]]
+[[file:./.ob-jupyter/bf0aa85d485644dd65d45cafdc3c2740bc55ebd0.png]]
 
 #+RESULTS:
 #+begin_src ipython
@@ -579,7 +582,7 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/68a86edaf12781e24288436c40d1405d88e917d5.png]]
+[[file:./.ob-jupyter/caf04129884201910130ad5ce86364a7ba199a82.png]]
 
 #+begin_src ipython
 

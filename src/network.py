@@ -134,7 +134,7 @@ class Network(nn.Module):
             self.Je0 = self.Je0.reshape(-1, 1)
         else:
             self.Je0 = self.Ja0[0]
-            
+    
     def run(self, ini_list=[1], phi_list=[1], Ja0_list=[1], IF_DIST=0):
         if self.VERBOSE:
             start = perf_counter()
