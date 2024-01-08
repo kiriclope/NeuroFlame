@@ -35,7 +35,7 @@ class Network(nn.Module):
         # initialize network
         self.init_network()
 
-        self.exp_dist = Exponential(torch.tensor([self.I1[0]], dtype=self.FLOAT, device=self.device))
+        # self.exp_dist = Exponential(torch.tensor([self.I1[0]], dtype=self.FLOAT, device=self.device))
         
     def init_network(self):
         # set seed for Cij

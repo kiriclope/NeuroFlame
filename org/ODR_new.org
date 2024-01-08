@@ -87,8 +87,8 @@ def convert_seconds(seconds):
       cmean =  (x - circmean(x, low=-np.pi, high=np.pi)) 
       cmean[cmean > np.pi] -= 2*np.pi
       cmean[cmean < -np.pi] += 2*np.pi
-      cmean[cmean>np.pi/6] = np.nan
-      cmean[cmean<-np.pi/6] = np.nan
+      # cmean[cmean>np.pi/4] = np.nan
+      # cmean[cmean<-np.pi/4] = np.nan
       return cmean
 #+end_src
 
@@ -194,9 +194,9 @@ def convert_seconds(seconds):
 
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', KAPPA=[0.4], REC_LAST_ONLY=1)
 
-  ini_list = np.arange(0, 125)
+  ini_list = np.arange(0, 1000)
   Ja0_list = np.linspace(10, 30, 21)
-  phi_list = np.linspace(0, 315, 8)
+  phi_list = np.linspace(0, 315, 1)
 
   rates = model.run(ini_list, phi_list, Ja0_list)
   del model 
@@ -207,18 +207,8 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-: [0;31m---------------------------------------------------------------------------[0m
-: [0;31mNameError[0m                                 Traceback (most recent call last)
-: Cell [0;32mIn[448], line 12[0m
-: [1;32m     10[0m [38;5;28;01mdel[39;00m model 
-: [1;32m     11[0m end [38;5;241m=[39m perf_counter()
-: [0;32m---> 12[0m [38;5;28mprint[39m([38;5;124m"[39m[38;5;124mElapsed (with compilation) = [39m[38;5;132;01m{}[39;00m[38;5;124ms[39m[38;5;124m"[39m, [38;5;28;43mself[39;49m[38;5;241m.[39mformat((end [38;5;241m-[39m start)))
-: [1;32m     14[0m [38;5;28mprint[39m([38;5;124m'[39m[38;5;124mrates[39m[38;5;124m'[39m, rates[38;5;241m.[39mshape)
-: 
-: [0;31mNameError[0m: name 'self' is not defined
-:END:
+: Elapsed (with compilation) = 0h 0m 38s
+: rates (1, 21000, 1000)
 
 #+begin_src ipython
   rates = rates.reshape(rates.shape[0], len(ini_list), len(phi_list), len(Ja0_list), -1)
@@ -226,7 +216,7 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-: (1, 125, 8, 21, 1000)
+: (1, 1000, 1, 21, 1000)
 
 *** Analysis
 **** Load data
@@ -237,34 +227,26 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-:    time  trial  phi    Ie  neuron      rates
-: 0     0      0    0  10.0       0   9.067467
-: 1     0      0    0  10.0       1  10.098180
-: 2     0      0    0  10.0       2  10.349462
-: 3     0      0    0  10.0       3   7.906910
-: 4     0      0    0  10.0       4   7.308694
+:    time  trial  phi    Ie  neuron     rates
+: 0     0      0    0  10.0       0  1.939703
+: 1     0      0    0  10.0       1  2.264766
+: 2     0      0    0  10.0       2  1.681601
+: 3     0      0    0  10.0       3  2.723600
+: 4     0      0    0  10.0       4  1.038938
 
 #+begin_src ipython
   end_point = get_code_X(df, 'Ie')
-  print(df_code.head())
+  # print(df_code.head())
 #+end_src
 
-#+RESULTS:
-:    time  trial  phi    Ie        m0        m1     phase
-: 0     0      0    0  10.0  4.745538  3.379152 -0.226161
-: 1     0      0    0  11.0  5.059214  4.026405  0.004523
-: 2     0      0    0  12.0  5.332169  4.750391  0.008700
-: 3     0      0    0  13.0  5.617003  5.087596 -0.344964
-: 4     0      0    0  14.0  5.893910  5.436195 -0.334664
-
 #+begin_src ipython
-  sns.histplot(df_code, x=df_code.phase[df_code.Ie==20]*180/np.pi, bins=100)
+  sns.histplot(end_point, x=end_point.phase[end_point.Ie==20]*180/np.pi, bins=100)
   plt.xticks([-180, -90, 0, 90, 180])
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/0bf33f32e33311eed1224020af6ae307cd0042cd.png]]
+[[file:./.ob-jupyter/47032627536a8c510c3cceb2ad31834a65d9de5b.png]]
 
 #+begin_src ipython 
   # df = get_df_X(rates, Ja0_list, X_str='Ie')
@@ -273,7 +255,7 @@ def convert_seconds(seconds):
 
   # end_point = get_code_X(df, 'Ie')
 
-  end_point['precision'] = end_point.groupby(['phi', 'Ie'], group_keys=False)['phase'].apply(get_precision) * 180 / np.pi
+  end_point['precision'] = end_point.groupby(['Ie'], group_keys=False)['phase'].apply(get_precision) * 180 / np.pi
 
   end_point['phase'] *= 180 / np.pi
 #+end_src
@@ -283,14 +265,14 @@ def convert_seconds(seconds):
 **** Tuning Profile
 
 #+begin_src ipython
-  idx_off = Ja0_list[6]
-  idx_on = Ja0_list[-7]
+  idx_off = Ja0_list[0]
+  idx_on = Ja0_list[-1]
   print('parameters', idx_off, idx_on)
   N_E = 1000
 #+end_src
 
 #+RESULTS:
-: parameters 16.0 24.0
+: parameters 10.0 30.0
 
 #+begin_src ipython
   df_point = end_point[end_point.Ie==idx_off]
@@ -327,7 +309,7 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/9fcc2a00f5ebf27a2eb9c34edb00f7291d86999b.png]]
+[[file:./.ob-jupyter/d1dfd8a2b0c20ab1099f0aff935130d6777fbc4c.png]]
 
 **** Diffusion
 
@@ -371,7 +353,7 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/9f3e001f6d662aefd627b819784c24bb627bdc25.png]]
+[[file:./.ob-jupyter/8f0ef4aabf1917040d4b5c85bc448bf4ed7b8687.png]]
 
 #+begin_src ipython
 
@@ -484,7 +466,7 @@ def convert_seconds(seconds):
 ** Batch
 
 #+begin_src ipython
-  I1 = [0.5, 0.0] # mean, variance this truncated gaussian>0
+  I1 = np.array([0.1, 1.0])/2 # mean, variance this truncated gaussian>0
   SIGMA1 = 1.0 # tuning of the distractor
 #+end_src
 
@@ -524,6 +506,8 @@ def convert_seconds(seconds):
   df = get_df_X(rates_dist, Ja0_list, X_str='Ie')
 
   end_point = get_code_X(df, 'Ie')
+
+  end_point[end_point.phase.abs()*180/np.pi>45] = np.nan
 
   end_point['precision'] = end_point.groupby(['phi', 'Ie'], group_keys=False)['phase'].apply(get_precision) * 180 / np.pi
 
@@ -572,10 +556,9 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e2390313bf133b9d02066a89779560b06bd68a93.png]]
+[[file:./.ob-jupyter/24018c5fc4d397a0c1fdf6c498de8156dbb56d64.png]]
 
 #+RESULTS:
-
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2 * width, height))
   
@@ -596,7 +579,7 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/d3d931dd3c5f7b6530d975baeaa8bd0f61e030d3.png]]
+[[file:./.ob-jupyter/68a86edaf12781e24288436c40d1405d88e917d5.png]]
 
 #+begin_src ipython
 
@@ -735,37 +718,37 @@ def convert_seconds(seconds):
 *** parameters
 
 #+begin_src ipython
-  sigma_list = np.linspace(0, 1, 11)
-  real_list = np.arange(0, 25)
+  sigma_list = np.linspace(0, .5, 11)
+  real_list = np.arange(0, 1)
   
-  ini_list = np.arange(0, 10)
+  ini_list = np.arange(0, 125)
   phi_list = np.linspace(0, 315, 8)
 
   print(sigma_list)
  #+end_src
 
 #+RESULTS:
-: [0.  0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1. ]
+: [0.   0.05 0.1  0.15 0.2  0.25 0.3  0.35 0.4  0.45 0.5 ]
 
 *** simulation
 
 #+begin_src ipython
-  rates = run_X(conf_name, name, sigma_list, ini_list, phi_list, X_str='sigma', device='cuda')
-  print(rates.shape)
+  rates_sigma = run_X(conf_name, name, sigma_list, ini_list, phi_list, X_str='sigma', device='cuda')
+  print(rates_sigma.shape)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 6m 28s
-: (11, 25, 1, 80, 1000)
+: Elapsed (with compilation) = 0h 0m 51s
+: (11, 1, 1, 1000, 1000)
 
 #+begin_src ipython
-  rates = np.moveaxis(rates, 0, -2)
+  rates = np.moveaxis(rates_sigma, 0, -2)
   rates = rates[:,0]
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (100, 21, 1, 1000)
+: (1, 1000, 11, 1000)
 
 #+begin_src ipython  
   rates = rates.reshape(rates.shape[0], len(ini_list), len(phi_list), len(sigma_list), -1)
@@ -773,26 +756,22 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-: [0;31m---------------------------------------------------------------------------[0m
-: [0;31mValueError[0m                                Traceback (most recent call last)
-: Cell [0;32mIn[746], line 1[0m
-: [0;32m----> 1[0m rates [38;5;241m=[39m [43mrates[49m[38;5;241;43m.[39;49m[43mreshape[49m[43m([49m[43mrates[49m[38;5;241;43m.[39;49m[43mshape[49m[43m[[49m[38;5;241;43m0[39;49m[43m][49m[43m,[49m[43m [49m[38;5;28;43mlen[39;49m[43m([49m[43mini_list[49m[43m)[49m[43m,[49m[43m [49m[38;5;28;43mlen[39;49m[43m([49m[43mphi_list[49m[43m)[49m[43m,[49m[43m [49m[38;5;28;43mlen[39;49m[43m([49m[43msigma_list[49m[43m)[49m[43m,[49m[43m [49m[38;5;241;43m-[39;49m[38;5;241;43m1[39;49m[43m)[49m
-: [1;32m      2[0m [38;5;28mprint[39m(rates[38;5;241m.[39mshape)
-: 
-: [0;31mValueError[0m: cannot reshape array of size 2100000 into shape (100,100,8,11,newaxis)
-:END:
+: (1, 125, 8, 11, 1000)
 
 *** Analysis
 ***** Load data
 
 #+begin_src ipython
-  df = get_df_X(rates, sigma_list, X_str='sigma')
-  end_point = get_code_X(df, 'sigma')
-  df_smooth = df.groupby(['time', 'trial', 'phi', 'sigma'])['rates'].apply(circcvl).reset_index()
-  
+    df = get_df_X(rates, sigma_list, X_str='sigma')
+    end_point = get_code_X(df, 'sigma')
+    #  df_smooth = df.groupby(['time', 'trial', 'phi', 'sigma'])['rates'].apply(circcvl).reset_index()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython  
   end_point['precision'] = end_point.groupby(['time', 'phi', 'sigma'], group_keys=False)['phase'].apply(get_precision) * 180 / np.pi
+  # end_point['precision'] = end_point.groupby(['trial', 'phi'])['precision'].reset_index()
 #+end_src
 
 #+RESULTS:
@@ -800,28 +779,21 @@ def convert_seconds(seconds):
 ***** Tuning Profile
 
 #+begin_src ipython
-    idx_off = sigma_list[1]
-    idx_on = sigma_list[5]
+  end_point['mse'] = end_point.precision**2
+  end = end_point.groupby(['time', 'sigma']).mean().reset_index()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+    idx_off = sigma_list[0]
+    idx_on = sigma_list[-1]
     print('parameters', idx_off, idx_on)
     N_E = 1000
 #+end_src
 
 #+RESULTS:
-: parameters 0.1 0.5
-
-#+begin_src ipython
-  df_point = end_point[end_point.sigma==idx_off]
-  df_point_on = end_point[end_point.sigma==idx_on]
-  print(df_point_on.head())
-#+end_src
-
-#+RESULTS:
-:     time  trial  phi  sigma        m0        m1     phase  precision
-: 5      0      0    0    0.5  5.823681  3.369071  1.956437   2.293273
-: 16     0      0    1    0.5  5.824378  3.160698  1.816514  -0.249574
-: 27     0      0    2    0.5  5.840415  3.123927  1.691448 -11.021806
-: 38     0      0    3    0.5  5.866175  3.077265  1.844028  -1.311344
-: 49     0      0    4    0.5  5.880684  3.336417  1.883580   0.517090
+: parameters 0.0 0.5
 
 #+begin_src ipython
   df_point = end_point[end_point.sigma==idx_off]
@@ -858,65 +830,90 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/eb51611ae52f5d5e50be90b42fb22a0a830326fa.png]]
+:RESULTS:
+# [goto error]
+#+begin_example
+  [0;31m---------------------------------------------------------------------------[0m
+  [0;31mAttributeError[0m                            Traceback (most recent call last)
+  [0;32m/tmp/ipykernel_322144/2947162115.py[0m in [0;36m?[0;34m()[0m
+  [1;32m     10[0m [0max[0m[0;34m[[0m[0;36m0[0m[0;34m][0m[0;34m.[0m[0mset_ylabel[0m[0;34m([0m[0;34m'$\mathcal{F}_1 / \mathcal{F}_0$'[0m[0;34m)[0m[0;34m[0m[0;34m[0m[0m
+  [1;32m     11[0m [0max[0m[0;34m[[0m[0;36m0[0m[0;34m][0m[0;34m.[0m[0mset_xlabel[0m[0;34m([0m[0;34m'Heterogeneity Strength'[0m[0;34m)[0m[0;34m[0m[0;34m[0m[0m
+  [1;32m     12[0m [0;31m# ax[0].set_ylim([0.4, 1])[0m[0;34m[0m[0;34m[0m[0m
+  [1;32m     13[0m [0;34m[0m[0m
+  [0;32m---> 14[0;31m [0mpoint[0m [0;34m=[0m [0mdf_smooth[0m[0;34m[[0m[0mdf_smooth[0m[0;34m.[0m[0msigma[0m[0;34m==[0m[0midx_off[0m[0;34m][0m[0;34m.[0m[0mreset_index[0m[0;34m([0m[0;34m)[0m[0;34m[0m[0;34m[0m[0m
+  [0m[1;32m     15[0m [0mm0[0m[0;34m,[0m [0mm1[0m[0;34m,[0m [0mphase[0m [0;34m=[0m [0mdecode_bump[0m[0;34m([0m[0mpoint[0m[0;34m.[0m[0mrates[0m[0;34m[[0m[0;36m0[0m[0;34m][0m[0;34m)[0m[0;34m[0m[0;34m[0m[0m
+  [1;32m     16[0m [0mpoint[0m [0;34m=[0m [0mnp[0m[0;34m.[0m[0mroll[0m[0;34m([0m[0mpoint[0m[0;34m.[0m[0mrates[0m[0;34m[[0m[0;36m0[0m[0;34m][0m[0;34m,[0m [0mint[0m[0;34m([0m[0;34m([0m [0mphase[0m [0;34m/[0m [0;36m2.0[0m [0;34m/[0m [0mnp[0m[0;34m.[0m[0mpi[0m [0;34m-[0m [0;36m0.5[0m[0;34m)[0m [0;34m*[0m [0mpoint[0m[0;34m.[0m[0mrates[0m[0;34m[[0m[0;36m0[0m[0;34m][0m[0;34m.[0m[0mshape[0m[0;34m[[0m[0;36m0[0m[0;34m][0m[0;34m)[0m[0;34m)[0m[0;34m[0m[0;34m[0m[0m
+  [1;32m     17[0m [0;34m[0m[0m
+
+  [0;32m~/mambaforge/envs/torch/lib/python3.10/site-packages/pandas/core/generic.py[0m in [0;36m?[0;34m(self, name)[0m
+  [1;32m   6200[0m             [0;32mand[0m [0mname[0m [0;32mnot[0m [0;32min[0m [0mself[0m[0;34m.[0m[0m_accessors[0m[0;34m[0m[0;34m[0m[0m
+  [1;32m   6201[0m             [0;32mand[0m [0mself[0m[0;34m.[0m[0m_info_axis[0m[0;34m.[0m[0m_can_hold_identifiers_and_holds_name[0m[0;34m([0m[0mname[0m[0;34m)[0m[0;34m[0m[0;34m[0m[0m
+  [1;32m   6202[0m         ):
+  [1;32m   6203[0m             [0;32mreturn[0m [0mself[0m[0;34m[[0m[0mname[0m[0;34m][0m[0;34m[0m[0;34m[0m[0m
+  [0;32m-> 6204[0;31m         [0;32mreturn[0m [0mobject[0m[0;34m.[0m[0m__getattribute__[0m[0;34m([0m[0mself[0m[0;34m,[0m [0mname[0m[0;34m)[0m[0;34m[0m[0;34m[0m[0m
+  [0m
+  [0;31mAttributeError[0m: 'DataFrame' object has no attribute 'sigma'
+#+end_example
+[[file:./.ob-jupyter/f38846c0f36e8a285b5c4240364866d37fe19fa4.png]]
+:END:
 
 ***** Diffusion
 
 #+begin_src ipython
-    point = end_point[end_point.sigma==idx_off]
-    point_on = end_point[end_point.sigma==idx_on]
+  point = end[end.sigma==idx_off]
+  point_on = end[end.sigma==idx_on]
 
-    fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
-    sns.lineplot(end_point, x='sigma', y=end_point.precision**2 / 3.5, legend=False, ax=ax[0])
+  sns.lineplot(end_point, x='sigma', y=end_point.precision**2 / 8.5, legend=False, ax=ax[0])
 
-    sns.lineplot(x=idx_off, y=point['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=12, color=pal[2])
-    sns.lineplot(x=idx_on, y=point_on['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=12, color=pal[3])
+  sns.lineplot(x=idx_off, y=point.mse / 8.5, legend=False, marker='o', ax=ax[0], ms=12, color=pal[2])
+  sns.lineplot(x=idx_on, y=point_on.mse / 8.5, legend=False, marker='o', ax=ax[0], ms=12, color=pal[3])
 
-    ax[0].set_xlabel('Heterogeneity Strength')
-    ax[0].set_ylabel('Diffusivity (deg$^2$/s)')
-    ax[0].set_ylim([0, 60])
-    #  ax1 = ax[0].twinx()
-    # sns.lineplot(end_point, x='sigma', y=end_point['m1']/end_point['m0'], ax=ax1, legend=False, color='k', alpha=0.25)
+  ax[0].set_xlabel('Heterogeneity Strength')
+  ax[0].set_ylabel('Diffusivity (deg$^2$/s)')
+  # ax[0].set_ylim([0, 60])
+  #  ax1 = ax[0].twinx()
+  # sns.lineplot(end_point, x='sigma', y=end_point['m1']/end_point['m0'], ax=ax1, legend=False, color='k', alpha=0.25)
 
-    # sns.lineplot(end_point, x=idx_off, y=point['m1']/point['m0'], legend=False, marker='o', ax=ax1, ms=12, color=pal[0])
-    # sns.lineplot(end_point, x=idx_on, y=point_on['m1']/point_on['m0'], legend=False, marker='o', ax=ax1, ms=12, color=pal[1])
+  # sns.lineplot(end_point, x=idx_off, y=point['m1']/point['m0'], legend=False, marker='o', ax=ax1, ms=12, color=pal[0])
+  # sns.lineplot(end_point, x=idx_on, y=point_on['m1']/point_on['m0'], legend=False, marker='o', ax=ax1, ms=12, color=pal[1])
 
-    # ax1.set_ylabel('$\mathcal{F}_1 / \mathcal{F}_0$')
-    # ax1.spines['right'].set_visible(True)
-    # ax1.set_ylim([0.4, 1])
+  # ax1.set_ylabel('$\mathcal{F}_1 / \mathcal{F}_0$')
+  # ax1.spines['right'].set_visible(True)
+  # ax1.set_ylim([0.4, 1])
 
-    # point = df_smooth[df_smooth.sigma==idx_off].reset_index()
-    # m0, m1, phase = decode_bump(point.rates[4])
-    # point = np.roll(point.rates[4], int(( phase / 2.0 / np.pi - 0.5) * point.rates[4].shape[0]))
+  # point = df_smooth[df_smooth.sigma==idx_off].reset_index()
+  # m0, m1, phase = decode_bump(point.rates[4])
+  # point = np.roll(point.rates[4], int(( phase / 2.0 / np.pi - 0.5) * point.rates[4].shape[0]))
 
-    # point_on = df_smooth[df_smooth.sigma==idx_on].reset_index()  
-    # m0, m1, phase = decode_bump(point_on.rates[4])
-    # point_on = np.roll(point_on.rates[4], int((phase / 2.0 / np.pi - 0.5) * point_on.rates[4].shape[0]))
+  # point_on = df_smooth[df_smooth.sigma==idx_on].reset_index()  
+  # m0, m1, phase = decode_bump(point_on.rates[4])
+  # point_on = np.roll(point_on.rates[4], int((phase / 2.0 / np.pi - 0.5) * point_on.rates[4].shape[0]))
 
-    # ax[1].plot(point, color=pal[0])
-    # ax[1].plot(point_on, color=pal[1])
+  # ax[1].plot(point, color=pal[0])
+  # ax[1].plot(point_on, color=pal[1])
 
-    # ax[1].set_xticks([0, N_E/4, N_E/2, 3*N_E/4, N_E], [0, 90, 180, 270, 360])
-    # ax[1].set_ylabel('Firing Rate (Hz)')
-    # ax[1].set_xlabel('Pref. Location (°)')
+  # ax[1].set_xticks([0, N_E/4, N_E/2, 3*N_E/4, N_E], [0, 90, 180, 270, 360])
+  # ax[1].set_ylabel('Firing Rate (Hz)')
+  # ax[1].set_xlabel('Pref. Location (°)')
 
-    # point = end_point[end_point.sigma==idx_off]
-    # point_on = end_point[end_point.sigma==idx_on]
+  point = end_point[end_point.sigma==idx_off]
+  point_on = end_point[end_point.sigma==idx_on]
 
-    bins = 'auto'
-    sns.histplot(data=point, x=point['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0, color = pal[2])
-    sns.histplot(data=point_on, x=point_on['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0., color=pal[3])
-    ax[1].set_xlabel('Endpoint Deviation (°)')
-    ax[1].set_ylabel('Density')
-    # ax[1].set_xlim([-30, 30])
+  bins = 'auto'
+  sns.histplot(data=point, x=point['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0, color = pal[2])
+  sns.histplot(data=point_on, x=point_on['precision'], legend=False, ax=ax[1], bins=bins, kde=True, stat='density', element='step', alpha=0., color=pal[3])
+  ax[1].set_xlabel('Endpoint Deviation (°)')
+  ax[1].set_ylabel('Density')
+  ax[1].set_xlim([-50, 50])
 
-    plt.savefig(name + '_diffusion_sigma.svg', dpi=300)
-    plt.show()
+  plt.savefig(name + '_diffusion_sigma.svg', dpi=300)
+  plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/a4698e6e9c2739670aea1e72229f282219a30ddd.png]]
+[[file:./.ob-jupyter/7c64303ee3f2b8fdfb37ceaa618b49d86a47483b.png]]
 
 #+begin_src ipython
 
@@ -928,7 +925,7 @@ def convert_seconds(seconds):
 *** Parameters
 
 #+begin_src ipython
-  ini_list = np.arange(0, 100)
+  ini_list = np.arange(0, 125)
   Ja0_list = np.linspace(10, 30, 21)
   phi_list = np.linspace(0, 315, 8)
 #+end_src
@@ -940,7 +937,7 @@ def convert_seconds(seconds):
 #+begin_src ipython
   start = perf_counter()  
 
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', KAPPA=[0.4], SIGMA=[0.25], SEED=0)
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', KAPPA=[0.4], SIGMA=[0.2], SEED=0)
   rates = model.run(ini_list, phi_list, Ja0_list)
 
   end = perf_counter()
@@ -950,8 +947,8 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 45s
-: rates (1, 16800, 1000)
+: Elapsed (with compilation) = 0h 1m 17s
+: rates (1, 21000, 1000)
 
 #+begin_src ipython
   rates = rates.reshape(1, len(ini_list), len(phi_list), len(Ja0_list), -1)
@@ -959,7 +956,7 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-: (1, 100, 8, 21, 1000)
+: (1, 125, 8, 21, 1000)
 
 *** Analysis
 **** Load data
@@ -974,17 +971,77 @@ def convert_seconds(seconds):
 
 #+RESULTS:
 
+#+begin_src ipython
+  end_point['mse'] = end_point.precision**2
+  end = end_point.groupby(['Ie']).mean().reset_index()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  print(end)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+        Ie  time  trial  phi        m0        m1     phase  accuracy  precision  \
+  0   10.0   0.0   62.0  3.5  4.785013  3.704310 -1.081088 -1.142174  -0.000021   
+  1   11.0   0.0   62.0  3.5  5.067910  4.232610 -1.074637 -1.135723   0.000113   
+  2   12.0   0.0   62.0  3.5  5.347546  4.698253 -1.067877 -1.128963   0.000006   
+  3   13.0   0.0   62.0  3.5  5.618010  5.078167 -1.070072 -1.131159  -0.000098   
+  4   14.0   0.0   62.0  3.5  5.885165  5.410830 -1.066088 -1.127174  -0.000016   
+  5   15.0   0.0   62.0  3.5  6.146102  5.683909 -1.068525 -1.129611   0.000042   
+  6   16.0   0.0   62.0  3.5  6.402475  5.910472 -1.071281 -1.132367  -0.000051   
+  7   17.0   0.0   62.0  3.5  6.655328  6.084272 -1.075677 -1.136764  -0.000064   
+  8   18.0   0.0   62.0  3.5  6.903082  6.216748 -1.079454 -1.140541  -0.000053   
+  9   19.0   0.0   62.0  3.5  7.150537  6.307030 -1.089318 -1.150405   0.000023   
+  10  20.0   0.0   62.0  3.5  7.393905  6.354116 -1.099493 -1.160580   0.000017   
+  11  21.0   0.0   62.0  3.5  7.638804  6.362433 -1.107546 -1.168632  -0.000025   
+  12  22.0   0.0   62.0  3.5  7.882992  6.324702 -1.116576 -1.177662  -0.000004   
+  13  23.0   0.0   62.0  3.5  8.127407  6.246563 -1.124971 -1.186058  -0.000048   
+  14  24.0   0.0   62.0  3.5  8.373670  6.127150 -1.135580 -1.196667   0.000095   
+  15  25.0   0.0   62.0  3.5  8.624002  5.962806 -1.139763 -1.200849   0.000023   
+  16  26.0   0.0   62.0  3.5  8.876877  5.760449 -1.152731 -1.213818   0.000002   
+  17  27.0   0.0   62.0  3.5  9.132929  5.503029 -1.155234 -1.216321   0.000081   
+  18  28.0   0.0   62.0  3.5  9.392111  5.206332 -1.160393 -1.221479   0.000007   
+  19  29.0   0.0   62.0  3.5  9.656911  4.858795 -1.164165 -1.225252   0.000088   
+  20  30.0   0.0   62.0  3.5  9.925751  4.457857 -1.162470 -1.223556  -0.000076   
+
+            mse  
+  0   12.264089  
+  1   10.660486  
+  2    9.139048  
+  3    8.298968  
+  4    6.711464  
+  5    6.645019  
+  6    6.341096  
+  7    5.671400  
+  8    5.303684  
+  9    5.421272  
+  10   5.488793  
+  11   5.456527  
+  12   5.475516  
+  13   5.378522  
+  14   6.049914  
+  15   6.501666  
+  16   6.891263  
+  17   7.177443  
+  18   7.017768  
+  19   7.910341  
+  20   8.570946  
+#+end_example
+
 **** Tuning Profile
 
 #+begin_src ipython
-  idx_off = Ja0_list[0]
+  idx_off = Ja0_list[8]
   idx_on = Ja0_list[-1]
   print('parameters', idx_off, idx_on)
   N_E = 1000
 #+end_src
 
 #+RESULTS:
-: parameters 10.0 30.0
+: parameters 18.0 30.0
 
 #+begin_src ipython
   df_point = end_point[end_point.Ie==idx_off]
@@ -1021,7 +1078,7 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/1517c3f215dcba21da098dac7713ce166f3e15e9.png]]
+[[file:./.ob-jupyter/17b084da2fcf4f9da9650208ca4d8f01f7b55b73.png]]
 
 **** Diffusion
 
@@ -1031,10 +1088,10 @@ def convert_seconds(seconds):
 
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
-  sns.lineplot(end_point, x='Ie', y=end_point.precision**2 / 3.5, legend=False, marker='o', ax=ax[0], lw=5)
+  sns.lineplot(end_point, x='Ie', y=end_point.precision**2 / 8.5, legend=False, marker='o', ax=ax[0], lw=5)
 
-  sns.lineplot(x=idx_off, y=point['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=12, color=pal[0])
-  sns.lineplot(x=idx_on, y=point_on['precision']**2 / 3.5, legend=False, marker='o', ax=ax[0], ms=12, color=pal[1])
+  sns.lineplot(x=idx_off, y=point['precision']**2 / 8.5, legend=False, marker='o', ax=ax[0], ms=12, color=pal[0])
+  sns.lineplot(x=idx_on, y=point_on['precision']**2 / 8.5, legend=False, marker='o', ax=ax[0], ms=12, color=pal[1])
 
   ax[0].set_xlabel('FF Input (Hz)')
   ax[0].set_ylabel('Diffusivity (deg$^2$/s)')
@@ -1062,7 +1119,7 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c0e6502a1773b57fae847c3da90b2cda798c063e.png]]
+[[file:./.ob-jupyter/df3b6da4baf4e41be100e192521eed8c3483bc93.png]]
 
 #+begin_src ipython
 
