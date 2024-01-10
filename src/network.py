@@ -147,13 +147,13 @@ class Network(nn.Module):
             rates, rec_input, rec_NMDA, ff_input = self.initialization()
             mv_rates = rates
 
-            for step in range(self.N_STEPS):
+            for step in range(self.N_STEPS+1):
                 ff_input = self.update_ff_input(step, ff_input)
                 rates, rec_input, rec_NMDA = self.forward(rates, rec_input, rec_NMDA, ff_input)
                 
                 mv_rates += rates
 
-                if step >= self.N_STEADY:
+                if step > self.N_STEADY+1:
                     if step % self.N_WINDOW == 0:
                         if self.VERBOSE:
                             self.print_activity(step, rates)
@@ -283,6 +283,9 @@ class Network(nn.Module):
                 self.KAPPA[i_pop, j_pop] = self.KAPPA[i_pop, j_pop] / torch.sqrt(Kb)
             
             Pij = 1.0 + 2.0 * self.KAPPA[i_pop, j_pop] * torch.cos(theta_diff - self.PHASE)
+
+            if self.WELLS[i_pop, j_pop] > 0.0:
+                Pij = Pij + self.WELLS[i_pop, j_pop] * torch.cos(8.0 * (theta_diff - self.PHASE))
             
             del theta_i
             del theta_j
@@ -291,7 +294,7 @@ class Network(nn.Module):
         if 'sparse' in self.CONNECTIVITY:
             if self.VERBOSE:
                 print('Sparse random connectivity ')
-
+            
             Cij = self.Jab[i_pop, j_pop] * (torch.rand(Na, Nb, device=self.device) < Kb / float(Nb) * Pij)
             del Pij
 
@@ -301,15 +304,16 @@ class Network(nn.Module):
 
             Cij = self.Jab[i_pop, j_pop] * Pij / float(Nb)
             del Pij
-
+            
             if self.SIGMA[i_pop, j_pop] > 0.0:
                 if self.VERBOSE:
                     print('with heterogeneity, SIGMA', self.SIGMA[i_pop, j_pop])
-
+                
                 Hij = self.SIGMA[i_pop, j_pop] * torch.randn((Na, Nb), dtype=self.FLOAT, device=self.device)
+                # Cij = Cij + Hij / torch.tensor(Nb, device=self.device, dtype=self.FLOAT)
                 Cij = Cij + Hij / torch.sqrt(torch.tensor(Nb, device=self.device, dtype=self.FLOAT))
                 del Hij
-
+        
         if self.VERBOSE:
             if "cos" in self.STRUCTURE[i_pop, j_pop]:
                 if "spec" in self.STRUCTURE[i_pop, j_pop]:
@@ -323,8 +327,8 @@ class Network(nn.Module):
 
     def initConst(self):
         self.N_STEADY = int(self.T_STEADY / self.DT)
-        self.N_STEPS = int(self.DURATION / self.DT) + self.N_STEADY
         self.N_WINDOW = int(self.T_WINDOW / self.DT)
+        self.N_STEPS = int(self.DURATION / self.DT) + self.N_STEADY + self.N_WINDOW
 
         self.N_STIM_ON = int(self.T_STIM[0] / self.DT) + self.N_STEADY
         self.N_STIM_OFF = int(self.T_STIM[1] / self.DT) + self.N_STEADY
@@ -337,7 +341,7 @@ class Network(nn.Module):
 
         if 'all2all' in self.CONNECTIVITY:
             self.K = 1.0
-
+        
         for i_pop in range(self.N_POP):
             self.Na.append(int(self.N_NEURON * self.frac[i_pop]))
             # self.Ka.append(self.K * const.frac[i_pop])
@@ -381,6 +385,7 @@ class Network(nn.Module):
         #     print("EXP_DT_TAU", self.EXP_DT_TAU, "DT_TAU", self.DT_TAU)
 
         self.STRUCTURE = np.array(self.STRUCTURE).reshape(self.N_POP, self.N_POP)
+        self.WELLS = torch.tensor(self.WELLS, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
         self.SIGMA = torch.tensor(self.SIGMA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
         self.KAPPA = torch.tensor(self.KAPPA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
         # self.PHASE = torch.tensor(self.PHASE * torch.pi / 180.0, dtype=self.FLOAT, device=self.device)
@@ -406,7 +411,7 @@ class Network(nn.Module):
 
         for i_pop in range(self.N_POP):
             self.Jab[:, i_pop] = self.Jab[:, i_pop] / torch.sqrt(self.Ka[i_pop])
-
+        
         # if self.VERBOSE:
         #     print("scaled Jab", self.Jab)
 
@@ -415,7 +420,7 @@ class Network(nn.Module):
             print("Ja0", self.Ja0)
 
         self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device)
-        self.Ja0 = self.Ja0 * torch.sqrt(self.Ka[0]) * self.M0
+        self.Ja0 = self.Ja0 * self.M0 # * torch.sqrt(self.Ka[0]) 
 
         # if self.VERBOSE:
         #     print("scaled Ja0", self.Ja0)
