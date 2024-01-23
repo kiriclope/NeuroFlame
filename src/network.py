@@ -147,21 +147,23 @@ class Network(nn.Module):
             rates, rec_input, rec_NMDA, ff_input = self.initialization()
             mv_rates = rates
 
-            for step in range(self.N_STEPS+1):
+            for step in range(self.N_STEPS):
                 ff_input = self.update_ff_input(step, ff_input)
                 rates, rec_input, rec_NMDA = self.forward(rates, rec_input, rec_NMDA, ff_input)
-                
                 mv_rates += rates
-
-                if step > self.N_STEADY+1:
+                
+                if step == self.N_STEADY-self.N_WINDOW-1:
+                    mv_rates *= 0.0
+                
+                if step >= self.N_STEADY:
                     if step % self.N_WINDOW == 0:
                         if self.VERBOSE:
                             self.print_activity(step, rates)
-
+                        
                         if self.REC_LAST_ONLY==0:
                             result.append(mv_rates.cpu().detach().numpy() / self.N_WINDOW)
                             mv_rates = 0
-
+        
         if self.REC_LAST_ONLY:
             result.append(rates.cpu().detach().numpy())
 
@@ -283,7 +285,7 @@ class Network(nn.Module):
                 self.KAPPA[i_pop, j_pop] = self.KAPPA[i_pop, j_pop] / torch.sqrt(Kb)
             
             Pij = 1.0 + 2.0 * self.KAPPA[i_pop, j_pop] * torch.cos(theta_diff - self.PHASE)
-
+            
             if self.WELLS[i_pop, j_pop] > 0.0:
                 Pij = Pij + self.WELLS[i_pop, j_pop] * torch.cos(8.0 * (theta_diff - self.PHASE))
             
@@ -329,7 +331,7 @@ class Network(nn.Module):
         self.N_STEADY = int(self.T_STEADY / self.DT)
         self.N_WINDOW = int(self.T_WINDOW / self.DT)
         self.N_STEPS = int(self.DURATION / self.DT) + self.N_STEADY + self.N_WINDOW
-
+        
         self.N_STIM_ON = int(self.T_STIM[0] / self.DT) + self.N_STEADY
         self.N_STIM_OFF = int(self.T_STIM[1] / self.DT) + self.N_STEADY
 

@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 
 def plot_con(Cij):
-    fig = plt.figure(figsize=(5, 5))
+    fig = plt.figure(figsize=(7, 7))
     
     gs = fig.add_gridspec(
         2,
@@ -24,9 +24,14 @@ def plot_con(Cij):
     ax_histy = fig.add_subplot(gs[1, 1], sharey=ax)
     ax_xy = fig.add_subplot(gs[0, 1])
 
-    ax.imshow(Cij, cmap="jet", aspect=1)
+    # fig, ax = plt.subplots(figsize=(7,7))
+    im = ax.imshow(Cij, cmap="jet", aspect=1)
     ax.set_xlabel("Presynaptic")
     ax.set_ylabel("Postsynaptic")
+    
+    # cbar = plt.colorbar(im, ax=ax)
+    # cbar.set_label("$J_{ij}$")
+    # cbar.set_ticks([0, 5, 10, 15])
 
     Kj = np.sum(Cij, axis=0)  # sum over pres
     ax_histx.plot(Kj)
