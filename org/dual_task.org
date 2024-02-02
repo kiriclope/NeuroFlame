@@ -1,0 +1,722 @@
+#+STARTUP: fold
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  pal = sns.color_palette("tab10")
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Helpers
+** Training
+*** split data
+
+#+begin_src ipython
+  def split_data(X, Y, train_perc=0.8, batch_size=32):
+
+    # Split the dataset into training and validation sets
+    train_size = int(train_perc * X.shape[0])
+
+    X_train = X[:train_size]
+    X_test = X[train_size:]
+
+    # X_train, X_mean, X_std = standard_scaler(X_train, IF_RETURN=1)
+    # X_test = (X_test - X_mean) / X_std
+
+    Y_train = Y[:train_size]    
+    Y_test = Y[train_size:]
+
+    # Y_train, Y_mean, Y_std = standard_scaler(Y_train, IF_RETURN=1)
+    # Y_test = (Y_test - Y_mean) / Y_std
+
+    # Create data sets
+    # train_dataset = TensorDataset(X_train_scaled, Y_train_scaled)
+    # val_dataset = TensorDataset(X_test_scaled, Y_test_scaled)
+
+    # print('X_train', X_train.shape, 'y_train', Y_train.shape)
+    train_dataset = TensorDataset(X_train, Y_train)
+
+    # print('X_test', X_test.shape, 'y_test', Y_test.shape)
+    val_dataset = TensorDataset(X_test, Y_test)
+
+    # Create data loaders
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False)
+
+    # sequence_length = 14  # or any other sequence length you want
+    # stride = 1  # or any other stride you want
+
+    # sliding_window_dataset = SlidingWindowDataset(X, sequence_length, stride)
+    # train_loader = torch.utils.data.DataLoader(sliding_window_dataset, batch_size=5, shuffle=True)
+    # val_loader = torch.utils.data.DataLoader(sliding_window_dataset, batch_size=5, shuffle=True)
+
+    return train_loader, val_loader
+#+end_src
+
+#+RESULTS:
+
+** Optimization
+
+#+begin_src ipython
+  def train(dataloader, model, loss_fn, optimizer):
+      size = len(dataloader.dataset)
+      device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+      model.train()
+      for batch, (X, y) in enumerate(dataloader):
+
+          X, y = X.to(device), y.to(device)
+
+          # Compute prediction error
+          pred = model(X)
+          loss = loss_fn(pred, y)
+          
+          # Backpropagation
+          loss.backward()
+          optimizer.step()
+          optimizer.zero_grad()
+
+      return loss
+#+end_src
+
+
+#+RESULTS:
+
+#+begin_src ipython
+  def test(dataloader, model, loss_fn):
+      size = len(dataloader.dataset)
+      num_batches = len(dataloader)
+
+      device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+      # Validation loop.
+      model.eval()
+      val_loss = 0.0
+      with torch.no_grad():
+          for data, targets in dataloader:
+              data, targets = data.to(device), targets.to(device)
+
+              outputs = model(data)
+              loss = loss_fn(outputs, targets)
+              val_loss += loss.item() * data.size(0)
+          val_loss /= size
+
+      return val_loss
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def run_optim(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100):
+
+    # scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.1, verbose=True)
+    # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+
+    # Training loop.
+    for epoch in range(num_epochs):
+        loss = train(train_loader, model, loss_fn, optimizer)
+        val_loss = test(val_loader, model, loss_fn)
+        scheduler.step(val_loss)
+
+        # if epoch % int(num_epochs  / 10) == 0:
+        print(f'Epoch {epoch+1}/{num_epochs}, Training Loss: {loss.item():.4f}, Validation Loss: {val_loss:.4f}')
+
+#+end_src
+
+#+RESULTS:
+
+** loss
+#+begin_src ipython
+  def correlation_loss(output, target):
+      # Subtract the mean of each vector
+      output_mean = output - torch.mean(output)
+      target_mean = target - torch.mean(target)
+    
+      # Compute the covariance between output and target
+      covariance = torch.mean(output_mean * target_mean)
+      
+      # Compute the standard deviations of the vectors
+      output_std = torch.std(output)
+      target_std = torch.std(target)
+    
+      # Calculate the Pearson correlation coefficient
+      correlation = covariance / (output_std * target_std)
+    
+      # Since we want to increase the correlation, we minimize its negative
+      loss = -correlation  # Maximizing correlation by minimizing its negative
+    
+      return loss
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+    import torch
+    import torch.nn as nn
+
+    def sign_constrained_loss(output, xi, target_sign):
+        dot_product = torch.dot(output.flatten(), xi.flatten())
+        if target_sign > 0:
+            loss = torch.relu(-dot_product)  # Encourages positive dot product
+        else:
+            loss = torch.relu(dot_product)   # Encourages negative dot product
+        return loss
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  import torch
+  import torch.nn.functional as F
+
+  def cosine_distance_loss(output, target):
+      # Normalize the vectors to unit length
+      output_norm = F.normalize(output, p=2, dim=1)
+      target_norm = F.normalize(target, p=2, dim=1)
+    
+      # Calculate the cosine similarity
+      cosine_similarity = torch.sum(output_norm * target_norm, dim=1)
+    
+      # Minimize the distance by maximizing the similarity
+      # Here you can subtract from 1 to get the distance since the similarity ranges from -1 to 1
+      loss = 1 - cosine_similarity
+    
+      # Taking the mean loss if batched
+      loss = torch.mean(loss)
+    
+      return loss
+#+end_src
+
+#+RESULTS:
+
+** Other
+#+begin_src ipython
+  def get_theta(a, b, GM=0, IF_NORM=0):
+
+      if GM:          
+          b = b - np.dot(b, a) / np.dot(a, a) * a
+
+      if IF_NORM:
+          u = a / np.linalg.norm(a)
+          v = b / np.linalg.norm(b)
+      else:
+          u=a
+          v=b
+
+      return np.arctan2(v, u)
+#+end_src
+
+#+RESULTS:
+
+
+#+begin_src ipython
+  import scipy.stats as stats
+
+  def plot_smooth(data, ax, color):
+      mean = data.mean(axis=0)  
+      ci = smooth.std(axis=0, ddof=1) * 1.96
+      
+      # Plot
+      ax.plot(mean, color=color)
+      ax.fill_between(range(data.shape[1]), mean - ci, mean + ci, alpha=0.25, color=color)
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+    def get_df_X(rates, X_list, X_str='Ie'):
+        n_times, n_trials, n_phi, n_X, n_neurons = rates.shape
+
+        time_ind, trials_ind, phi_ind, X_ind, neurons_ind = np.meshgrid(
+            np.arange(n_times),
+            np.arange(n_trials),
+            np.arange(n_phi),
+            np.arange(n_X),
+            np.arange(n_neurons),
+            indexing='ij'
+        )
+
+        # Construct DataFrame
+        df = pd.DataFrame({
+            'time': time_ind.flatten(),
+            'trial': trials_ind.flatten(),
+            'phi': phi_ind.flatten(),
+            X_str : X_ind.flatten() * np.round((X_list[-1] - X_list[0]) / (X_list.shape[0] -1), 5) + X_list[0],
+            'neuron': neurons_ind.flatten(),
+            'rates': rates.flatten()
+        })
+
+        return df
+
+#+end_src
+
+#+RESULTS:
+
+ #+begin_src ipython
+  def get_code_X(df, X_str='Ie'):
+
+      df_code = df.groupby(['time', 'trial', 'phi', X_str])['rates'].apply(decode_bump).reset_index()
+      df_code[['m0', 'm1', 'phase']] = pd.DataFrame(df_code['rates'].tolist(), index=df_code.index)
+      df_code.drop(columns=['rates'], inplace=True)
+      
+      return df_code
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_accuracy(x):
+      x[x > np.pi] -= 2*np.pi
+      return x.abs()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def gauss_function(x, sigma):
+      return np.exp(-(x**2 / (2 * sigma**2))) / np.sqrt(2 * np.pi * sigma**2)
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  from scipy.stats import norm
+
+  def gauss_fit(x, ax, color):
+      mu_, sigma_ = norm.fit(x.dropna())
+      x = np.linspace(-50, 50, 100)
+      ax.plot(x, gauss_function(x, sigma_), color=color)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def cutoff_dist(data):
+    std = np.std(data)
+    data[data.abs()>std * 1.96] = np.nan
+    return data
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  from scipy.stats.mstats import winsorize
+
+  def get_precision(x):
+      cmean =  (x - circmean(x, low=-np.pi, high=np.pi)) 
+      cmean[cmean > np.pi] -= 2*np.pi
+      cmean[cmean < -np.pi] += 2*np.pi
+      # cmean = cutoff_dist(cmean)
+
+      return cmean
+
+  def get_mse(x):
+      cmean =  (x - circmean(x, low=-np.pi, high=np.pi)) 
+      cmean[cmean > np.pi] -= 2*np.pi
+      cmean[cmean < -np.pi] += 2*np.pi
+      # cmean = cutoff_dist(cmean)
+      
+      return np.mean(cmean**2) * (180 / np.pi)**2 / 3.5
+  
+#+end_src
+
+#+RESULTS:
+
+* Imports
+
+#+begin_src ipython
+  import torch
+  import torch.nn as nn
+  import torch.optim as optim
+  from torch.utils.data import Dataset, TensorDataset, DataLoader
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../')
+
+  import pandas as pd
+  import torch.nn as nn
+  from time import perf_counter  
+  from scipy.stats import circmean
+
+  from src.network import Network
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump, circcvl
+#+end_src
+
+#+RESULTS:
+
+* Train RNN
+** Parameters
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  conf_name = "config_EI.yml"
+  name = "dual"
+#+end_src
+
+#+RESULTS:
+
+** Training
+
+#+begin_src ipython
+  start = perf_counter()
+  name = "dual_single"
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  import torch
+  model.N_BATCH = 40
+  
+  noise = torch.randn((model.N_BATCH, model.N_STEPS, model.N_NEURON), dtype=model.FLOAT, device=model.DEVICE) * model.VAR_FF[0]
+  ff_input = torch.zeros((model.N_BATCH, model.N_STEPS, model.N_NEURON), dtype=model.FLOAT, device=model.DEVICE) 
+  for i in range(2):
+      ff_input[..., model.csumNa[i]:model.csumNa[i+1]] = model.Ja0[i]
+
+  print(ff_input.shape)  
+#+end_src
+
+#+RESULTS:
+: torch.Size([40, 700, 1000])
+
+#+begin_src ipython
+  ff_input[:10] = model.init_ff_input(ff_input[:10], 0) + noise[:10]
+  ff_input[10:] = model.init_ff_input(ff_input[10:], 1) + noise[10:]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  # labels = torch.zeros((ff_input.shape[0]), device=model.device)
+  labels_A = model.xi[0].unsqueeze(0).expand(int(ff_input.shape[0]/2), -1)
+  labels_B = model.xi[1].unsqueeze(0).expand(int(ff_input.shape[0]/2), -1)
+  labels = torch.cat((labels_A, labels_B))
+  print(ff_input.shape, labels.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([40, 700, 1000]) torch.Size([40, 750])
+
+#+RESULTS:
+
+#+begin_src ipython
+  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+  batch_size = 10
+  train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
+  
+  learning_rate = 0.001
+  criterion = cosine_distance_loss
+  optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
+
+  num_epochs = 20
+  run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)  
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  Epoch 1/20, Training Loss: 0.7655, Validation Loss: 0.8734
+  Epoch 2/20, Training Loss: 0.7395, Validation Loss: 0.7985
+  Epoch 3/20, Training Loss: 0.6984, Validation Loss: 0.7633
+  Epoch 4/20, Training Loss: 0.6278, Validation Loss: 0.7396
+  Epoch 5/20, Training Loss: 0.6786, Validation Loss: 0.7715
+  Epoch 6/20, Training Loss: 0.6722, Validation Loss: 0.7592
+  Epoch 7/20, Training Loss: 0.5817, Validation Loss: 0.7651
+  Epoch 8/20, Training Loss: 0.5666, Validation Loss: 0.7886
+  Epoch 9/20, Training Loss: 0.5577, Validation Loss: 0.8038
+  Epoch 10/20, Training Loss: 0.6791, Validation Loss: 0.7987
+  Epoch 11/20, Training Loss: 0.7780, Validation Loss: 0.7642
+  Epoch 12/20, Training Loss: 0.6643, Validation Loss: 0.7317
+  Epoch 13/20, Training Loss: 0.6027, Validation Loss: 0.7219
+  Epoch 14/20, Training Loss: 0.6621, Validation Loss: 0.7340
+  Epoch 15/20, Training Loss: 0.6612, Validation Loss: 0.7359
+  Epoch 16/20, Training Loss: 0.5859, Validation Loss: 0.7403
+  Epoch 17/20, Training Loss: 0.5753, Validation Loss: 0.7568
+  Epoch 18/20, Training Loss: 0.7782, Validation Loss: 0.7726
+  Epoch 19/20, Training Loss: 0.5708, Validation Loss: 0.7545
+  Epoch 20/20, Training Loss: 0.6604, Validation Loss: 0.7491
+#+end_example
+
+*** Connectivity
+
+#+begin_src ipython
+  print(model.Wab)
+#+end_src
+
+#+RESULTS:
+: Linear(in_features=1000, out_features=1000, bias=False)
+
+#+begin_src ipython
+  Cij = model.Wab.weight.data.cpu().detach().numpy()
+  plot_con(Cij.T)
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/7f1eccf88985189ebd88f25e42d03972fa9339de.png]]
+
+* Single
+
+#+begin_src ipython
+  start = perf_counter()
+  name = "dual_single"
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=1, DEVICE='cuda')
+
+  # ini_list = np.arange(0, 25)
+  rates = model.forward(ff_input)
+
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+  print('rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  Na tensor([750, 250], device='cuda:0', dtype=torch.int32) Ka tensor([50., 50.], device='cuda:0') csumNa tensor([   0,  750, 1000], device='cuda:0')
+  Jab [1.0, -1.5, 1, -1]
+  Ja0 [2.0, 1.0]
+  ksi torch.Size([2, 750])
+  ksi . ksi1 tensor(-8.9995, device='cuda:0', grad_fn=<DotBackward0>)
+  Pij torch.Size([750, 750])
+  Sparse random connectivity 
+  with weak low rank structure, KAPPA 1.00
+  Sparse random connectivity 
+  Sparse random connectivity 
+  Sparse random connectivity 
+  times (s) 0.0 rates (Hz) [0.88, 2.91]
+  times (s) 0.43 rates (Hz) [1.95, 6.78]
+  times (s) 0.86 rates (Hz) [1.37, 6.23]
+  times (s) 1.29 rates (Hz) [1.51, 6.78]
+  times (s) 1.71 rates (Hz) [2.4, 9.46]
+  times (s) 2.14 rates (Hz) [3.53, 12.59]
+  times (s) 2.57 rates (Hz) [3.96, 16.92]
+  times (s) 3.0 rates (Hz) [31.18, 91.38]
+  times (s) 3.43 rates (Hz) [82.07, 356.13]
+  times (s) 3.86 rates (Hz) [31.92, 241.47]
+  times (s) 4.29 rates (Hz) [17.23, 100.91]
+  times (s) 4.71 rates (Hz) [21.25, 103.64]
+  times (s) 5.14 rates (Hz) [21.44, 96.07]
+  Elapsed (with compilation) = 0.1173263294622302s
+  Elapsed (with compilation) = 0h 0m 0s
+  rates torch.Size([40, 750])
+#+end_example
+#+RESULTS:
+
+* Rates
+
+#+begin_src ipython
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([40, 750])
+
+#+begin_src ipython
+  loss = cosine_distance_loss(rates, labels)
+  print(loss)  
+#+end_src
+
+#+RESULTS:
+: tensor(0.9980, device='cuda:0', grad_fn=<MeanBackward0>)
+
+#+begin_src ipython
+  print(model.KAPPA)
+#+end_src
+
+#+RESULTS:
+: tensor([[1., 0.],
+:         [0., 0.]], device='cuda:0')
+
+#+begin_src ipython
+  rates_single = rates[:, 0, :]
+  width = 7
+  golden_ratio = (5**.5 - 1) / 2
+  fig, ax = plt.subplots()
+
+  # times = np.linspace(0, 5, rates.shape[0])  
+  times = np.arange(0, 5.1, .1)
+
+  N_E = 7500
+  r_min = 0
+  r_max = 1.5 * np.mean(rates)
+  r_max=15
+
+  im = ax.imshow(rates_single.T, aspect='auto', cmap='jet',vmin=0, vmax=r_max, extent=[times[0], times[-1], 0, N_E])
+
+  ax.set_xlabel('Time (s)')
+  ax.set_xticks([0, 1, 2, 3, 4, 5])
+  ax.set_ylabel('Prefered Location (°)')
+  ax.set_yticks([0, N_E/4, N_E/2, 3*N_E/4, N_E], [0, 90, 180, 270, 360])
+  ax.set_xlim([0, 5])
+
+  ax.axvline(1, 0, 1000, ls='--', color='w', lw=2)
+  ax.axvline(1.5, 0, 1000, ls='--', color='w', lw=2)
+  ax.axvline(2.5, 0, 1000, ls='--', color='w', lw=2)
+  ax.axvline(3, 0, 1000, ls='--', color='w', lw=2)
+
+  cbar = plt.colorbar(im, ax=ax)
+  cbar.set_label("Activity (Hz)")
+  cbar.set_ticks([0, 5, 10, 15])
+  plt.savefig('./neurons.svg', dpi=300)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: IndexError                                Traceback (most recent call last)
+: Cell In[172], line 1
+: ----> 1 rates_single = rates[:, 0, :]
+:       2 width = 7
+:       3 golden_ratio = (5**.5 - 1) / 2
+: 
+: IndexError: too many indices for tensor of dimension 2
+:END:
+
+#+begin_src ipython
+  plt.hist(rates[-1, 0])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+#+begin_example
+  ---------------------------------------------------------------------------
+  TypeError                                 Traceback (most recent call last)
+  Cell In[174], line 1
+  ----> 1 plt.hist(rates[-1, 0])
+        2 plt.show()
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/pyplot.py:3224, in hist(x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, data, **kwargs)
+     3199 @_copy_docstring_and_deprecators(Axes.hist)
+     3200 def hist(
+     3201     x: ArrayLike | Sequence[ArrayLike],
+     (...)
+     3222     BarContainer | Polygon | list[BarContainer | Polygon],
+     3223 ]:
+  -> 3224     return gca().hist(
+     3225         x,
+     3226         bins=bins,
+     3227         range=range,
+     3228         density=density,
+     3229         weights=weights,
+     3230         cumulative=cumulative,
+     3231         bottom=bottom,
+     3232         histtype=histtype,
+     3233         align=align,
+     3234         orientation=orientation,
+     3235         rwidth=rwidth,
+     3236         log=log,
+     3237         color=color,
+     3238         label=label,
+     3239         stacked=stacked,
+     3240         **({"data": data} if data is not None else {}),
+     3241         **kwargs,
+     3242     )
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/__init__.py:1465, in _preprocess_data.<locals>.inner(ax, data, *args, **kwargs)
+     1462 @functools.wraps(func)
+     1463 def inner(ax, *args, data=None, **kwargs):
+     1464     if data is None:
+  -> 1465         return func(ax, *map(sanitize_sequence, args), **kwargs)
+     1467     bound = new_sig.bind(ax, *args, **kwargs)
+     1468     auto_label = (bound.arguments.get(label_namer)
+     1469                   or bound.kwargs.get(label_namer))
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_axes.py:6767, in Axes.hist(self, x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, **kwargs)
+     6764     stacked = True
+     6766 # Massage 'x' for processing.
+  -> 6767 x = cbook._reshape_2D(x, 'x')
+     6768 nx = len(x)  # number of datasets
+     6770 # Process unit information.  _process_unit_info sets the unit and
+     6771 # converts the first dataset; then we convert each following dataset
+     6772 # one at a time.
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/cbook.py:1394, in _reshape_2D(X, name)
+     1391         raise ValueError(f'{name} must have 2 or fewer dimensions')
+     1393 # Iterate over list of iterables.
+  -> 1394 if len(X) == 0:
+     1395     return [[]]
+     1397 result = []
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/_tensor.py:968, in Tensor.__len__(self)
+      966     return handle_torch_function(Tensor.__len__, (self,), self)
+      967 if self.dim() == 0:
+  --> 968     raise TypeError("len() of a 0-d tensor")
+      969 if torch._C._get_tracing_state():
+      970     warnings.warn(
+      971         "Using len to get tensor shape might cause the trace to be incorrect. "
+      972         "Recommended usage would be tensor.shape[0]. "
+     (...)
+      976         stacklevel=2,
+      977     )
+
+  TypeError: len() of a 0-d tensor
+#+end_example
+[[file:./.ob-jupyter/0e1531d8b70cc0a93f514d6e8d61d7bf1658a78c.png]]
+:END:
+
+#+begin_src ipython
+  ksi = model.ksi.cpu().detach().numpy()
+  idx = np.arange(0, len(ksi[0]))
+  # theta = sort_by_angle(idx, ksi[1], ksi[0])
+  # print(theta.shape)
+  theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=1)
+  # theta = np.arctan2(ksi[1], ksi[0])
+  index_order = theta.argsort()
+  # print(index_order)
+  rates_ordered = rates[:, 0, index_order]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=10)
+  plt.ylabel('Pref. Location (°)')
+  plt.xlabel('Time (au)')
+  plt.yticks(np.linspace(0, 7500, 5), np.linspace(0, 360, 5).astype(int))
+  plt.colorbar()
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/a2ee8fa12cabb142038bba1fe207f7ed74760478.png]]
+

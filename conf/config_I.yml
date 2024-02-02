@@ -3,40 +3,44 @@
 ###################################################
 # output different prompts for debugging purpose
 VERBOSE: 0
-DEVICE: cpu
-FLOAT_PRECISION: 64
-
+# device to be used cuda or cpu
+DEVICE: cuda
+# float precision
+FLOAT_PRECISION: 32
 # 1 to save the data to DATA_PATH
 SAVE_DATA: 1
 
 # Time step in s
 DT: 0.001
 # total simulation time in s
-DURATION: 5.0
+DURATION: 30.0
 # time to start saving simulation files
-T_STEADY: 0.0
+T_STEADY: 0.5
 # Saving to files every T_WINDOW
 T_WINDOW: .25
+
+# record only endpoint
+REC_LAST_ONLY: 0
 
 ##########################################
 # Parameters for the stimulus presentation
 ##########################################
 # stimulus as a cosine shape
 # time for stimulus onset in s 
-T_STIM_ON: 2.0
-# time for stimulus offset in s 
-T_STIM_OFF: 2.5
+T_STIM: [10.0, 10.5]
 # amplitude of the 1st stimulus
-I0: [1.0]
+I0: [0.0]
 # amplitude of the 2nd stimulus
-I1: [0.0]
-# I1: [0.05, 0.0]
-# Phase of the 1st stimulus
+T_DIST: [25, 30]
+# amplitude of the 2nd stimulus [mean, var]
+I1: [0.0, 0.0]
+
+# Phase of the stimuli
 PHI0: 180.0
-# Tuning of the 1st stimulus
+PHI1: 90.0
+# Tuning of the stimuli
 SIGMA0: 1.0
-# Phase difference between 1st/2nd stimuli
-DPHI: 0.25
+SIGMA1: 0.25
 
 ##########################################
 # Network parameters
@@ -44,9 +48,9 @@ DPHI: 0.25
 # number of populations
 N_POP: 1
 # number of neurons
-N_NEURON: 1000
+N_NEURON: 10000
 # number of average presynaptic input (set to 1 if all to all)
-K: 100.0
+K: 1000.0
 # fraction of neuron in each population (must sum to 1)
 frac: [1.0]
 
@@ -55,24 +59,24 @@ frac: [1.0]
 ##########################################
 # Transfert Function
 # set to 0 for threshold linear, 1 for sigmoid
-TF_TYPE: 1
+TF_TYPE: 'relu'
 
 # Dynamics of the rates
 # set to 0 if instantaneous rates, 1 if exponentially decaying
 RATE_DYN: 1
 # rate time constants
-TAU: [.020]
+TAU: [.020, 0.020]
 
 # Dynamics of the recurrent inputs
 # set to 0 if instantaneous, 1 if exponentially decaying
 SYN_DYN: 0
 # Synaptic time constants for each population
-TAU_SYN: [.002]
+TAU_SYN: [.004, 0.002]
 
 # Adding NMDA currents
 IF_NMDA: 0
 # NMDA time constants
-TAU_NMDA: [0.2]
+TAU_NMDA: [0.2, 0.2]
 
 # Feedforward inputs dynamics
 # set to 0 for instantaneous, 1 to exp decay, 2 adds gaussian noise
@@ -80,15 +84,14 @@ FF_DYN: 0
 # FF time constants
 TAU_FF: [4.]
 # Variance of the noise
-VAR_FF: [1.0]
-
+VAR_FF: [30000., 30000.]
 # Threshold dynamics
 # set to 0 constant thresholds, 1 to add adaptative thresholds
 THRESH_DYN: 0
 # threshold
-THRESH: [15.0]
+THRESH: [15.0, 15.0]
 # threshold time constants
-TAU_THRESH: [0.08]
+TAU_THRESH: [0.08, 0.08]
 
 # Network's gain
 GAIN: 1.0
@@ -96,34 +99,27 @@ GAIN: 1.0
 # Synaptic strengths           
 Jab: [-1.0]
 # External inputs strengths
-Ja0: [1.0]
+Ja0: [10.0]
 # External rate
 M0: 1.0
 
 # To add an attentional switch
 # if BUMP_SWITCH[i] == 1 it sets Iext[i] to zero before stimulus presentation
-BUMP_SWITCH: [1]
+BUMP_SWITCH: [0]
 
 ####################
 # Plasticity
 ####################
-# adds learning
-IF_LEARNING: 0
 # adds short term plasticity
 IF_STP: 0
 
 ##############
 # Connectivity
 ##############
-# load connectivity matrix
-LOAD_MAT: 0
-# save connectivity matrix
-SAVE_MAT: 1
-
 # seed for connectivity None or float
 SEED: 1
-# STRUCTURE can be 'all', 'all_cos', 'cos', 'spec_cos'
 
+# STRUCTURE can be 'all', 'all_cos', 'cos', 'spec_cos'
 # By default the matrix is a random sparse matrix
 # 'cos' gives a sparse matrix with strong cosine structure
 # 'spec_cos' gives a sparse matrix with weak cosine structure
@@ -132,14 +128,16 @@ SEED: 1
 
 # sets probabilities of connections' shape
 CONNECTIVITY: 'sparse'
-STRUCTURE: ['lr']
+STRUCTURE: ['None']
+
+# create uniformly distributed wells
+WELLS: [0.0]
 # strength of the asymmetries if all to all
 SIGMA: [0.0]
 # tuning of the recurrent connections
-KAPPA: [30.0]
+KAPPA: [4.5]
 # phase of the connectivity
 PHASE: 180.0
 
-# parameters for computing the mean field
-TOLERANCE: 1.e-12
-MAXITER: 100
+# covariance
+LR_COV: 0.0

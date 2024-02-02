@@ -21,6 +21,67 @@
 : /home/leon/mambaforge/envs/torch/bin/python
 
 * Helpers
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_theta(a, b, GM=0, IF_NORM=0):
+
+      if GM:          
+          b = b - np.dot(b, a) / np.dot(a, a) * a
+
+      if IF_NORM:
+          u = a / np.linalg.norm(a)
+          v = b / np.linalg.norm(b)
+      else:
+          u=a
+          v=b
+
+      return np.arctan2(v, u)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def normalize(v):
+      return v / np.linalg.norm(v)
+
+  def project(x, u):
+      return x * u
+  # return np.dot(x, u) * u
+
+  def sort_by_angle(x, u, v):
+      u_hat = normalize(u)
+      v_hat = normalize(v)
+
+      x_proj_u = project(x, u_hat)
+      x_proj_v = project(x, v_hat)
+      # x_proj = x_proj_u + x_proj_v
+      theta = np.arctan2(x_proj_v, x_proj_u) + np.pi
+
+      # cos_theta = np.dot(x_proj, u_hat) / np.linalg.norm(x_proj) * u_hat
+      # sin_theta = np.dot(x_proj, v_hat) / np.linalg.norm(x_proj) * v_hat
+      # theta = np.arctan2(sin_theta, cos_theta)
+
+      # Pair up each element of x with the corresponding angle
+      # x_angle_pairs = list(zip(x, theta))
+
+      # Sort based on the angle
+      # x_angle_pairs.sort(key=lambda pair: pair[1])
+
+      # Extract the sorted elements
+      # sorted_x = [pair[0] for pair in x_angle_pairs]
+
+      return theta
+#+end_src
+
 ** Data
 #+begin_src ipython
   def get_rates_ini_phi(name, ini_list, phi_list):
@@ -114,8 +175,8 @@
 #+end_src
 
 #+RESULTS:
-: GPU 0 Memory Usage: 0.07%
-: GPU 1 Memory Usage: 0.07%
+: GPU 0 Memory Usage: 4.55%
+: GPU 1 Memory Usage: 0.09%
 
 #+begin_src ipython
   from time import sleep
@@ -191,6 +252,7 @@
   sys.path.insert(0, '../')
 
   import pandas as pd
+  from time import perf_counter  
 
   from src.network import Network
   from src.plot_utils import plot_con
@@ -208,35 +270,18 @@
   
   for K in K_list:
       model = Network('config_EI.yml', 'bump', REPO_ROOT, VERBOSE=0, DEVICE='cuda', K=K)
-      rates = model.run()
+      rates = model.forward()
       rates_list.append(rates[-1])
 
 #+end_src
 
 #+RESULTS:
-#+begin_example
-  Loading config from /home/leon/models/NeuroTorch/conf/config_EI.yml
-  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump.npy
-  /home/leon/mambaforge/envs/torch/lib/python3.10/site-packages/torch/distributed/distributed_c10d.py:283: UserWarning: torch.distributed.reduce_op is deprecated, please use torch.distributed.ReduceOp instead
-    warnings.warn(
-  Elapsed (with compilation) = 41.60812636099581s
-  Loading config from /home/leon/models/NeuroTorch/conf/config_EI.yml
-  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump.npy
-  Elapsed (with compilation) = 41.962792610996985s
-  Loading config from /home/leon/models/NeuroTorch/conf/config_EI.yml
-  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump.npy
-  Elapsed (with compilation) = 41.16252508999605s
-  Loading config from /home/leon/models/NeuroTorch/conf/config_EI.yml
-  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump.npy
-  Elapsed (with compilation) = 22.2915489859879s
-  Loading config from /home/leon/models/NeuroTorch/conf/config_EI.yml
-  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump.npy
-  Elapsed (with compilation) = 22.371453304003808s
-#+end_example
 
 #+begin_src ipython
   rates = np.array(rates_list)
-  rates = rates[:, :16000]
+  print(rates.shape)
+  
+  rates = rates[:, 0, :30000]
   plt.plot(np.sqrt(K_list), np.mean(rates, axis=1) * np.sqrt(K_list), '-o')
   plt.xlabel('$\sqrt{K}$')
   plt.ylabel('$\sqrt{K}$ Rates')
@@ -244,7 +289,10 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/239a34be835391b44f5ca4c8dd4461fde6436ef4.png]]
+:RESULTS:
+: (5, 1, 40000)
+[[file:./.ob-jupyter/b35420db36675c36fc60577d727e89b0db284f51.png]]
+:END:
 
 ** Single Trial
 *** Model
@@ -252,130 +300,95 @@
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
   model = Network('config_EI.yml', 'bump', REPO_ROOT, VERBOSE=1, DEVICE='cuda:1', PHI0=180)
-  rates = model.run()
+  rates = model.forward()
 #+end_src
 
 #+RESULTS:
 #+begin_example
-  Loading config from /home/leon/models/NeuroTorch/conf/config_EI.yml
-  Na tensor([16000,  4000], device='cuda:1', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:1') csumNa tensor([    0, 16000, 20000], device='cuda:1')
+  Na tensor([15000,  5000], device='cuda:1', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:1') csumNa tensor([    0, 15000, 20000], device='cuda:1')
   Jab [1.0, -1.5, 1, -1]
   Ja0 [2.0, 1.0]
-  Linear(in_features=20000, out_features=16000, bias=False)
+  ksi torch.Size([2, 15000])
+  ksi . ksi1 tensor(26.2694, device='cuda:1', grad_fn=<DotBackward0>)
+  Pij torch.Size([15000, 15000])
   Sparse random connectivity 
-  with weak cosine structure, KAPPA 0.20
+  with weak low rank structure, KAPPA 5.00
   Sparse random connectivity 
   Sparse random connectivity 
   Sparse random connectivity 
-  times (s) 0.19 rates (Hz) [1.71, 2.77]
-  times (s) 0.38 rates (Hz) [1.71, 2.77]
-  times (s) 0.56 rates (Hz) [1.7, 2.77]
+  times (s) 0.0 rates (Hz) [0.0, 2.75]
+  times (s) 0.23 rates (Hz) [0.0, 2.82]
+  times (s) 0.47 rates (Hz) [0.0, 2.88]
+  times (s) 0.7 rates (Hz) [0.0, 2.86]
   STIM ON
-  times (s) 0.75 rates (Hz) [1.71, 2.77]
-  times (s) 0.94 rates (Hz) [1.71, 2.77]
-  times (s) 1.12 rates (Hz) [1.71, 2.77]
-  times (s) 1.31 rates (Hz) [1.7, 2.76]
+  times (s) 0.93 rates (Hz) [125.93, 2.75]
+  times (s) 1.16 rates (Hz) [100.35, 103.57]
+  times (s) 1.4 rates (Hz) [103.38, 107.94]
+  times (s) 1.63 rates (Hz) [108.05, 113.4]
   STIM OFF
-  times (s) 1.5 rates (Hz) [1.69, 2.75]
-  times (s) 1.69 rates (Hz) [1.7, 2.76]
-  times (s) 1.88 rates (Hz) [1.69, 2.74]
-  times (s) 2.06 rates (Hz) [1.69, 2.75]
-  Saving rates to: /home/leon/models/NeuroTorch/data/simul/bump.npy
-  Elapsed (with compilation) = 8.890360999997938s
+  times (s) 1.86 rates (Hz) [48.48, 117.73]
+  times (s) 2.09 rates (Hz) [24.15, 29.84]
+  times (s) 2.33 rates (Hz) [17.75, 22.38]
+  times (s) 2.56 rates (Hz) [13.3, 17.38]
+  times (s) 2.79 rates (Hz) [10.32, 13.68]
+  times (s) 3.02 rates (Hz) [8.24, 10.89]
+  STIM ON
+  times (s) 3.26 rates (Hz) [6.76, 9.31]
+  times (s) 3.49 rates (Hz) [5.86, 8.66]
+  times (s) 3.72 rates (Hz) [5.16, 7.47]
+  times (s) 3.95 rates (Hz) [4.67, 7.05]
+  STIM OFF
+  times (s) 4.19 rates (Hz) [4.37, 6.79]
+  times (s) 4.42 rates (Hz) [4.09, 6.52]
+  times (s) 4.65 rates (Hz) [3.94, 6.11]
+  times (s) 4.88 rates (Hz) [3.65, 5.94]
+  STIM ON
+  times (s) 5.12 rates (Hz) [3.66, 5.99]
+  times (s) 5.35 rates (Hz) [3.56, 6.09]
+  STIM OFF
+  times (s) 5.58 rates (Hz) [3.43, 5.76]
+  times (s) 5.81 rates (Hz) [3.19, 5.88]
+  times (s) 6.05 rates (Hz) [3.21, 5.43]
+  times (s) 6.28 rates (Hz) [3.11, 5.4]
+  times (s) 6.51 rates (Hz) [3.1, 5.61]
+  times (s) 6.74 rates (Hz) [3.03, 5.15]
+  times (s) 6.98 rates (Hz) [2.97, 5.36]
+  times (s) 7.21 rates (Hz) [3.0, 5.2]
+  times (s) 7.44 rates (Hz) [2.9, 5.24]
+  times (s) 7.67 rates (Hz) [2.89, 5.17]
+  times (s) 7.91 rates (Hz) [2.8, 5.26]
+  times (s) 8.14 rates (Hz) [2.76, 5.28]
+  times (s) 8.37 rates (Hz) [2.68, 5.24]
+  times (s) 8.6 rates (Hz) [2.64, 5.31]
+  times (s) 8.84 rates (Hz) [2.64, 5.04]
+  times (s) 9.07 rates (Hz) [2.65, 5.18]
+  times (s) 9.3 rates (Hz) [2.66, 5.09]
+  Elapsed (with compilation) = 21.75301519781351s
 #+end_example
 
 *** Analysis
 
 #+begin_src ipython
+  rates = rates[:, 0]
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (4999, 20000)
+: (41, 20000)
 
 #+begin_src ipython
-  r_max = np.max(rates.T[-1,:16000])
-  plt.imshow(rates.T[:16000], aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')  
+  print(rates.shape)
+  r_max = 5 # * np.max(rates[-1, :15000])
+  plt.imshow(rates.T[:15000], aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
   plt.colorbar()
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ddf37d896b98f728910f2ce6f2d295ff6a66c6c6.png]]
-
-#+begin_src ipython
-  m0, m1, phi = decode_bump(rates[:, :16000], axis=-1)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-plt.plot(phi * 180 / np.pi)
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/b5fada92a39d41e2fbeb16ed8500e8e308f9e506.png]]
-
-#+begin_src ipython  
-  plt.hist(rates[-1][:16000], bins=50)
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/fbb70ca70938697fd4a02d171bb24cd2738dcf12.png]]
-
-
-#+begin_src ipython
-  def get_theta(a, b, GM=0, IF_NORM=0):
-
-      if GM:          
-          b = b - np.dot(b, a) / np.dot(a, a) * a
-
-      if IF_NORM:
-          u = a / np.linalg.norm(a)
-          v = b / np.linalg.norm(b)
-      else:
-          u=a
-          v=b
-
-      return np.arctan2(v, u)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  def normalize(v):
-      return v / np.linalg.norm(v)
-
-  def project(x, u):
-      return x * u
-  # return np.dot(x, u) * u
-
-  def sort_by_angle(x, u, v):
-      u_hat = normalize(u)
-      v_hat = normalize(v)
-
-      x_proj_u = project(x, u_hat)
-      x_proj_v = project(x, v_hat)
-      # x_proj = x_proj_u + x_proj_v
-      theta = np.arctan2(x_proj_v, x_proj_u) + np.pi
-
-      # cos_theta = np.dot(x_proj, u_hat) / np.linalg.norm(x_proj) * u_hat
-      # sin_theta = np.dot(x_proj, v_hat) / np.linalg.norm(x_proj) * v_hat
-      # theta = np.arctan2(sin_theta, cos_theta)
-
-      # Pair up each element of x with the corresponding angle
-      # x_angle_pairs = list(zip(x, theta))
-
-      # Sort based on the angle
-      # x_angle_pairs.sort(key=lambda pair: pair[1])
-
-      # Extract the sorted elements
-      # sorted_x = [pair[0] for pair in x_angle_pairs]
-
-      return theta
-#+end_src
+:RESULTS:
+: (41, 20000)
+[[file:./.ob-jupyter/ee22e9ea1fbb69ddd196ef26ffadfa0391c94d14.png]]
+:END:
 
 #+RESULTS:
 
@@ -384,7 +397,7 @@ plt.show()
   idx = np.arange(0, len(ksi[0]))
   # theta = sort_by_angle(idx, ksi[1], ksi[0])
   # print(theta.shape)
-  theta = get_theta(ksi[1], ksi[0], GM=0, IF_NORM=0)
+  theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=1)
   # theta = np.arctan2(ksi[1], ksi[0])
   index_order = theta.argsort()
   # print(index_order)
@@ -392,74 +405,36 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-#+begin_example
-  [0;31m---------------------------------------------------------------------------[0m
-  [0;31mAttributeError[0m                            Traceback (most recent call last)
-  Cell [0;32mIn[19], line 1[0m
-  [0;32m----> 1[0m ksi [38;5;241m=[39m [43mmodel[49m[38;5;241;43m.[39;49m[43mksi[49m[38;5;241m.[39mcpu()[38;5;241m.[39mdetach()[38;5;241m.[39mnumpy()
-  [1;32m      2[0m idx [38;5;241m=[39m np[38;5;241m.[39marange([38;5;241m0[39m, [38;5;28mlen[39m(ksi[[38;5;241m0[39m]))
-  [1;32m      3[0m [38;5;66;03m# theta = sort_by_angle(idx, ksi[1], ksi[0])[39;00m
-  [1;32m      4[0m [38;5;66;03m# print(theta.shape)[39;00m
-
-  File [0;32m~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/nn/modules/module.py:1614[0m, in [0;36mModule.__getattr__[0;34m(self, name)[0m
-  [1;32m   1612[0m     [38;5;28;01mif[39;00m name [38;5;129;01min[39;00m modules:
-  [1;32m   1613[0m         [38;5;28;01mreturn[39;00m modules[name]
-  [0;32m-> 1614[0m [38;5;28;01mraise[39;00m [38;5;167;01mAttributeError[39;00m([38;5;124m"[39m[38;5;124m'[39m[38;5;132;01m{}[39;00m[38;5;124m'[39m[38;5;124m object has no attribute [39m[38;5;124m'[39m[38;5;132;01m{}[39;00m[38;5;124m'[39m[38;5;124m"[39m[38;5;241m.[39mformat(
-  [1;32m   1615[0m     [38;5;28mtype[39m([38;5;28mself[39m)[38;5;241m.[39m[38;5;18m__name__[39m, name))
-
-  [0;31mAttributeError[0m: 'Network' object has no attribute 'ksi'
-#+end_example
-:END:
 
 #+begin_src ipython
-  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=20)
+  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=2)
   plt.ylabel('Pref. Location (°)')
   plt.xlabel('Time (au)')
-  plt.yticks(np.linspace(0, 16000, 5), np.linspace(-180, 180, 5).astype(int))
+  plt.yticks(np.linspace(0, 15000, 5), np.linspace(0, 360, 5).astype(int))
   plt.colorbar()
   plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-: [0;31m---------------------------------------------------------------------------[0m
-: [0;31mNameError[0m                                 Traceback (most recent call last)
-: Cell [0;32mIn[20], line 1[0m
-: [0;32m----> 1[0m plt[38;5;241m.[39mimshow([43mrates_ordered[49m[38;5;241m.[39mT, aspect[38;5;241m=[39m[38;5;124m'[39m[38;5;124mauto[39m[38;5;124m'[39m, cmap[38;5;241m=[39m[38;5;124m'[39m[38;5;124mjet[39m[38;5;124m'[39m, vmin[38;5;241m=[39m[38;5;241m0[39m, vmax[38;5;241m=[39m[38;5;241m20[39m)
-: [1;32m      2[0m plt[38;5;241m.[39mylabel([38;5;124m'[39m[38;5;124mPref. Location (°)[39m[38;5;124m'[39m)
-: [1;32m      3[0m plt[38;5;241m.[39mxlabel([38;5;124m'[39m[38;5;124mTime (au)[39m[38;5;124m'[39m)
-: 
-: [0;31mNameError[0m: name 'rates_ordered' is not defined
-:END:
+[[file:./.ob-jupyter/e1d6f4e62523b316ff4cb3ef80039adb7fe794f3.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-: [0;31m---------------------------------------------------------------------------[0m
-: [0;31mNameError[0m                                 Traceback (most recent call last)
-: Cell [0;32mIn[21], line 1[0m
-: [0;32m----> 1[0m m0, m1, phi [38;5;241m=[39m decode_bump([43mrates_ordered[49m, axis[38;5;241m=[39m[38;5;241m-[39m[38;5;241m1[39m)
-: 
-: [0;31mNameError[0m: name 'rates_ordered' is not defined
-:END:
 
 #+begin_src ipython
-  plt.plot(phi * 180 / np.pi)
-  plt.yticks(np.linspace(-180, 180, 5).astype(int))
+  plt.plot((phi * 180 / np.pi))
+  plt.yticks(np.linspace(-180, 180, 5).astype(int), np.linspace(0, 360, 5).astype(int))  
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ed1c78c62cb066bd5be171964b2cbf864e6a5383.png]]
+[[file:./.ob-jupyter/6366479e14ecf5186128185083add8be90056d97.png]]
 
 *** Connectivity
+
 #+begin_src ipython
   print(model.Wab)
 #+end_src
@@ -477,105 +452,239 @@ plt.show()
 
 ** Multiple Trials
 *** Parameters
+
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  ini_list = np.arange(0, 20)
-  # phi_list = np.linspace(0, 315, 8)
-  phi_list = [0]
+  conf_name = "config_EI.yml"
+  name = "low_rank_ini"
 #+end_src
 
 #+RESULTS:
 
 *** Simulation
+
 #+begin_src ipython
-  name = 'lowR_ortho'
-  run_ini_phi('config_EI', name, ini_list, phi_list)
+  ini_list = np.arange(0, 10)
+
+  start = perf_counter()
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1')
+  rates = model.forward(ini_list=ini_list)
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+  print('rates', rates.shape)
+
 #+end_src
 
 #+RESULTS:
-: ##########################################
-: trial 0 phi 0
-: ##########################################
-: Loading config from /home/leon/models/NeuroTorch/conf/config_EI.yml
+: Elapsed (with compilation) = 0h 0m 5s
+: rates (5, 10, 20000)
 
-*** Load data
+*** Analysis
 
 #+begin_src ipython
-  df = load_data_ini_phi(name, ini_list, phi_list)
-  print(df.head())
+  ksi = model.ksi.cpu().detach().numpy()
+
+  idx = np.arange(0, len(ksi[0]))
+  theta = get_theta(ksi[1], ksi[0], GM=0, IF_NORM=0)
+
+  index_order = theta.argsort()
+  rates_ordered = rates[..., index_order]
+  print(rates_ordered.shape)
 #+end_src
 
 #+RESULTS:
-: b42e3783-fb10-43dc-9143-e8f37331779f
+: (5, 10, 15000)
 
 #+begin_src ipython
-  df_code, end_point = get_code_ini_phi(df)
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
 #+end_src
 
 #+RESULTS:
-: b4fe7edb-b1f5-46a8-9d0a-6eaf4cd7970c
+: (5, 10)
 
 #+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
-
-  # sns.lineplot(end_point, x='Ie', y='m0', ax=ax[0], legend=False, marker='o')
-  sns.lineplot(df_code, x='time', y=df_code['phase']*180/np.pi-90, ax=ax[0], legend=False, hue='trial', lw=2, alpha=0.2)
-  ax[0].set_xlabel('Time (s)')
-  ax[0].set_ylabel('Phase (°)')
-  
-  sns.histplot(data=end_point, x=end_point['phase']*180/np.pi, kde=False, bins='auto', stat='density', color='b', ax=ax[1])
-  ax[1].set_xlabel('Time (s)')
-  ax[1].set_ylabel('Phase (°)')
-
-  # sns.histplot(data=end_point, x=end_point['phase']*180/np.pi,kde=False, bins=10, stat='density', color='b')
-  # print(end_point.head())
-  theta = [np.cos(end_point['phase']-np.pi/2), np.sin(end_point['phase']-np.pi/2)]
-  ax[2].plot(theta[0], theta[1], 'o')
-  ax[2].set_xlim([-1.5, 1.5])
-  ax[2].set_ylim([-1.5, 1.5])
-
-  ax[2].set_xlabel('$ \\xi_S$')
-  ax[2].set_ylabel('$ \\xi_D$')
-
+  plt.plot(phi * 180 / np.pi + 180)
+  plt.ylim([0, 180])
   plt.show()
 #+end_src
 
 #+RESULTS:
-: cec12ac0-a33c-4ea2-8510-707cb09444c3
+[[file:./.ob-jupyter/5f375931193568f18b00b547b5035828b16cfba1.png]]
 
 #+begin_src ipython
-  end_point['accuracy'] = (end_point.phase - end_point['phi'] * np.pi / 180) % (2 * np.pi)
-  end_point['precision'] = end_point.groupby(['phi'], group_keys=False)['phase'].apply(get_precision)
- 
-  print(end_point.head())
+  plt.imshow(rates_ordered[:, 3].T, aspect='auto', cmap='jet', vmin=0, vmax=4)
+  plt.ylabel('Pref. Location (°)')
+  plt.xlabel('Time (au)')
+  plt.yticks(np.linspace(0, 15000, 5), np.linspace(-180, 180, 5).astype(int))
+  plt.colorbar()
+  plt.show()
 #+end_src
 
 #+RESULTS:
-: 5c10afb2-c6d0-4443-af15-27077858354f
+[[file:./.ob-jupyter/d2ebd4ef0a9298b1c230bdf8e9e58f4d520e19b8.png]]
 
 #+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
 
-  sns.histplot(data=point, x=point['phase']*180/np.pi, legend=False, lw=2, ax=ax[0], kde=False, bins=200, stat='density', color='b')
-  sns.histplot(data=point_on, x=point_on['phase']*180/np.pi, legend=False, lw=2, ax=ax[0], kde=False, bins=200, stat='density', color='r')
-  ax[0].set_xlabel('$\phi$(°)')
-  ax[0].set_ylabel('Density')
-  ax[0].set_xticks([0, 90, 180, 270, 360])
+#+end_src
 
-  sns.histplot(data=point, x=point['accuracy']*180/np.pi, legend=False, lw=2, ax=ax[1], kde=False, bins=200, stat='density', color='b')
-  sns.histplot(data=point_on, x=point_on['accuracy']*180/np.pi, legend=False, lw=2, ax=ax[1], kde=False, bins=200, stat='density', color='r')
-  ax[1].set_xlabel('$\phi - \phi_{stim}$ (°)')
-  ax[1].set_ylabel('Density')
-  ax[1].set_xticks([0, 90, 180, 270, 360])
+*** Realizations
 
-  sns.histplot(data=point, x=point['precision']*180/np.pi, legend=False, ax=ax[2], bins='auto', kde=True, stat='density', element='step', alpha=0,color = 'b')
-  sns.histplot(data=point_on, x=point_on['precision']*180/np.pi, legend=False, ax=ax[2], bins='auto', kde=True, stat='density', element='step', alpha=0., color='r')
-  ax[2].set_xlabel('$\phi - <\phi>_{trials}$ (°)')
-  ax[2].set_ylabel('Density')
-  ax[2].set_xlim([-20, 20])
+#+begin_src ipython
+  def run_X(conf_name, name, real_list, ini_list, device='cuda:0', **kwargs):
+      start = perf_counter()
 
-  plt.show()  
+      rates = []
+      ksi = []
+      for real in real_list:
+
+          model = Network(conf_name, '%s_real_%d' % (name, real),
+                          REPO_ROOT, DEVICE=device,  VERBOSE=0, SEED=0, **kwargs)
+
+          ksi.append(model.ksi.cpu().detach().numpy())
+          rates.append(model.forward(ini_list=ini_list))
+
+          del model
+
+      end = perf_counter()
+      
+      print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))      
+
+      return np.array(rates), np.array(ksi)
 #+end_src
 
 #+RESULTS:
-: 27f63b3f-5b19-4b0e-b7df-04ac1a83e666
+
+#+begin_src ipython
+  real_list = np.arange(0, 100)
+  ini_list = np.arange(0, 1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  rates, ksi = run_X(conf_name, name, real_list, ini_list, device='cuda:0')
+#+end_src
+
+#+RESULTS:
+: Elapsed (with compilation) = 0h 6m 21s
+
+#+begin_src ipython
+  print(rates.shape, ksi.shape)
+#+end_src
+
+#+RESULTS:
+: (100, 5, 1, 20000) (100, 2, 15000)
+
+#+begin_src ipython
+  rates_ordered = rates[..., :15000]
+  
+  for i in real_list:
+      idx = np.arange(0, len(ksi[i][0]))
+      theta = get_theta(ksi[i][1], ksi[i][0], GM=0, IF_NORM=0)
+
+      index_order = theta.argsort()
+      rates_ordered[i] = rates[i][..., index_order]
+  print(rates_ordered.shape)
+#+end_src
+
+n#+RESULTS:
+: (100, 5, 1, 15000)
+
+#+begin_src ipython
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  print(phi.shape)
+  plt.plot(phi[...,0].T)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (100, 5, 1)
+[[file:./.ob-jupyter/4b908ead2c411f541a47fa2b6914fd0f7c81568e.png]]
+:END:
+
+#+begin_src ipython
+  x = np.cos(phi)
+  y = np.sin(phi)
+
+  plt.plot(x[:, -1, 0], y[:, -1, 0], 'o')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+
+
+
+[[file:./.ob-jupyter/a1c853e229b8d473c2795a5628ac49657141c18c.png]]
+
+#+begin_src ipython
+  rates_ortho = rates.copy()
+#+end_src
+
+#+RESULTS:
+
+*** Behavior
+
+#+begin_src ipython
+  ini_list = np.arange(0, 10)
+  phi_list = np.array([-1, 1])
+
+  start = perf_counter()
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1')
+  rates = model.forward(ini_list=ini_list, phi_list=phi_list)
+  end = perf_counter()
+  
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+  print('rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: Elapsed (with compilation) = 0h 0m 39s
+: rates (41, 20, 20000)
+
+#+begin_src ipython
+  rates = rates.reshape(rates.shape[0], len(ini_list), len(phi_list), -1)
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (41, 10, 2, 20000)
+
+#+begin_src ipython
+  ksi = model.ksi.cpu().detach().numpy()
+  idx = np.arange(0, len(ksi[0]))
+  # theta = sort_by_angle(idx, ksi[1], ksi[0])
+  # print(theta.shape)
+  theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=1)
+  # theta = np.arctan2(ksi[1], ksi[0])
+  index_order = theta.argsort()
+  # print(index_order)
+  rates_ordered = rates[..., index_order]
+  print(rates_ordered.shape)
+#+end_src
+
+#+RESULTS:
+: (41, 10, 2, 15000)
+
+#+begin_src ipython
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (41, 10, 2)
+
+#+begin_src ipython
+  plt.plot(phi[..., 0] * 180/np.pi)
+  plt.plot(phi[..., 1] * 180/np.pi)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/f5f9d0940c0e022eb509cf351bb6356892c29235.png]]
