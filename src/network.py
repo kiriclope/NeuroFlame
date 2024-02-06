@@ -19,8 +19,12 @@ def update_con(Na, Nb, Kb, Jab, kappa, ksi, device):
     
     Pij = 1.0 + kappa * (torch.outer(ksi[0], ksi[0])
                          + torch.outer(ksi[1], ksi[1])) / torch.sqrt(Kb)
+
+    Pij[Pij>1] = 1
+    Pij[Pij<0] = 0
     
-    return Jab * (torch.rand(Na, Nb, device=device) < Kb / float(Nb) * Pij)
+    # return Jab * (torch.rand(Na, Nb, device=device) < Kb / float(Nb) * Pij)
+    return Jab * torch.bernoulli(Kb / float(Nb) * Pij)
 
 
 class Network(nn.Module):
@@ -35,32 +39,46 @@ class Network(nn.Module):
 
         # scale parameters
         self.scaleParam()
-
+        
         if self.IF_STP:
             self.stp = STP_Model(self.N_NEURON, self.csumNa, self.DT, self.FLOAT, self.device)
-        
+            
         # initialize network
         self.init_network()
         
+        self.U = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)), device=self.device, dtype=self.FLOAT))
+        # self.V = nn.Parameter(torch.randn((int(self.RANK), self.N_NEURON), device=self.device, dtype=self.FLOAT))
+        self.mask = torch.ones((self.N_NEURON, self.N_NEURON), device=self.device, dtype=self.FLOAT)
+        
+        for i_pop in range(self.N_POP):
+            for j_pop in range(self.N_POP):
+                if i_pop!=0 and j_pop!=0:
+                    self.mask[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
+                              self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = 0
         
     def init_network(self):
         # set seed for Cij
         set_seed(self.SEED)
         
         # in pytorch, Wij is i to j.
-        self.Wab = nn.Linear(self.N_NEURON, self.N_NEURON, bias=False, dtype=self.FLOAT, device=self.device)
+        # self.Wab = nn.Linear(self.N_NEURON, self.N_NEURON, bias=False, dtype=self.FLOAT, device=self.device)
+        self.Wab = torch.zeros((self.N_NEURON, self.N_NEURON), dtype=self.FLOAT, device=self.device)
         
         for i_pop in range(self.N_POP):
             for j_pop in range(self.N_POP):
                 
-                self.Wab.weight.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
-                                    self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = self.initWeights(i_pop, j_pop)
+                # self.Wab.weight.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
+                #                     self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = self.initWeights(i_pop, j_pop)
                 
-                # only train first pop
-                if i_pop!=0 or j_pop!=0:
-                    self.Wab.weight.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
-                                         self.csumNa[j_pop] : self.csumNa[j_pop + 1]].requires_grad_(False)
-                        
+                weights = self.initWeights(i_pop, j_pop)
+                
+                self.Wab[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
+                         self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = weights
+                
+        # only train first pop
+        # if i_pop==0 or j_pop==0:
+        # self.Wab.requires_grad_(True)
+        
         # resets the seed
         set_seed(0)
     
@@ -71,12 +89,22 @@ class Network(nn.Module):
         if self.IF_STP:
             self.stp.markram_stp(rates)
             A_u_x = self.stp.A_u_x_stp
+            
+        # lr = self.mask * self.KAPPA[0][0] * nn.ReLU()(1.0 + self.U @ self.U.T) / self.Na[0]
+        # hidden = (A_u_x * rates) @ (self.Wab.T + lr)
         
+        lr = self.mask * (1.0 + self.U @ self.U.T / torch.sqrt(self.Ka[0]))
+        hidden = (A_u_x * rates) @ (self.Wab.T * lr)
+        
+        # hidden = (A_u_x * rates) @ (self.Wab.T)
+
         if self.SYN_DYN:
-            rec_input = self.EXP_DT_TAU_SYN * rec_input + self.DT_TAU_SYN * (self.Wab(A_u_x * rates))
+            # rec_input = self.EXP_DT_TAU_SYN * rec_input + self.DT_TAU_SYN * (self.Wab(A_u_x * rates))
+            rec_input = self.EXP_DT_TAU_SYN * rec_input + self.DT_TAU_SYN * hidden
         else:
-            rec_input = self.Wab(A_u_x * rates)
-        
+            # rec_input = self.Wab(A_u_x * rates)
+            rec_input = hidden
+            
         return rec_input
     
     def update_rates(self, rates, ff_input, rec_input):
@@ -124,22 +152,37 @@ class Network(nn.Module):
         else:
             self.Je0 = self.Ja0[0]
     
-    def forward(self, ff_input, REC_LAST_ONLY=1):
+    def forward(self, ff_input=None, REC_LAST_ONLY=1):
         ''' ff_input is (N_BATCH, N_TIME, N_NEURONS)'''
         if self.VERBOSE:
             start = perf_counter()
-
+        
         result = []
+        if ff_input is None:
+            noise = torch.randn((self.N_BATCH, self.N_STEPS, self.N_NEURON), dtype=self.FLOAT, device=self.DEVICE) * self.VAR_FF[0]
+            ff_input = torch.zeros((self.N_BATCH, self.N_STEPS, self.N_NEURON), dtype=self.FLOAT, device=self.DEVICE)
+            for i in range(self.N_POP):
+                ff_input[..., self.csumNa[i]:self.csumNa[i+1]] = self.Ja0[i]
+
+            ff_input = ff_input + noise
+            del noise
+
         self.N_BATCH = ff_input.shape[0]
+
         # with torch.no_grad():
         # self.batch_loader(ini_list, phi_list, Ja0_list, IF_DIST)
         
         # train the probability of connection instead of the connections themselves
-        # self.KAPPA[0][0].requires_grad_(True)
         # Cij = update_con(self.Na[0], self.Na[0], self.Ka[0], self.Jab[0][0], self.KAPPA[0][0], self.ksi, device=self.device)
         
         # self.Wab.weight.data[self.csumNa[0] : self.csumNa[1],
         #                      self.csumNa[0] : self.csumNa[1]] = Cij
+        
+        # self.Wab[self.csumNa[0] : self.csumNa[1],
+        #          self.csumNa[0] : self.csumNa[1]] = Cij
+        
+        # self.Wab.weight.requires_grad_(False)
+        # self.Wab.weight.detach()
         
         rates, rec_input = self.initialization()
         rates = self.update_rates(rates, ff_input[:, 0], rec_input)
@@ -163,8 +206,8 @@ class Network(nn.Module):
         
         if REC_LAST_ONLY:
             result = rates[..., :self.Na[0]]
-        
-        # result = np.array(result)
+        else:
+            result = np.array(result)
         
         # if self.VERBOSE:
         # print('Saving rates to:', self.DATA_PATH + self.FILE_NAME + '.npy')
@@ -252,7 +295,7 @@ class Network(nn.Module):
                                        [self.LR_COV, 1.0],], dtype=self.FLOAT, device=self.device)
             
             multivariate_normal = MultivariateNormal(mean, covariance)
-            self.ksi = nn.Parameter(multivariate_normal.sample((Nb,)).T)
+            self.ksi = multivariate_normal.sample((Nb,)).T
             
             # while torch.abs(self.ksi[0] @ self.ksi[1]) > .10:
             #     multivariate_normal = MultivariateNormal(mean, covariance)
@@ -292,7 +335,8 @@ class Network(nn.Module):
                 print('Sparse random connectivity ')
             
             Cij = self.Jab[i_pop, j_pop] * (torch.rand(Na, Nb, device=self.device) < Kb / float(Nb) * Pij)
-            # Cij = (torch.rand(Na, Nb, device=self.device) < Kb / float(Nb) * Pij)
+            # Cij = self.Jab[i_pop, j_pop] * torch.bernoulli(Kb / float(Nb) * Pij)
+            
             del Pij
         
         if 'all2all' in self.CONNECTIVITY:
@@ -391,8 +435,8 @@ class Network(nn.Module):
         self.WELLS = torch.tensor(self.WELLS, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
         self.SIGMA = torch.tensor(self.SIGMA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
         self.KAPPA = torch.tensor(self.KAPPA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
-        # self.PHASE = torch.tensor(self.PHASE * torch.pi / 180.0, dtype=self.FLOAT, device=self.device)
-        self.PHASE = torch.pi
+        self.PHASE = torch.tensor(self.PHASE * torch.pi / 180.0, dtype=self.FLOAT, device=self.device)
+        # self.PHASE = torch.pi
         
         self.theta_list = []
         for _ in range(self.N_POP):
@@ -434,7 +478,7 @@ class Network(nn.Module):
             print("Ja0", self.Ja0)
         
         self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device)
-        self.Ja0 = self.Ja0 * self.M0 * torch.sqrt(self.Ka[0]) * self.GAIN
+        self.Ja0 = self.Ja0 * self.M0 * torch.sqrt(self.Ka[0]) 
         
         # if self.VERBOSE:
         #     print("scaled Ja0", self.Ja0)
@@ -442,6 +486,8 @@ class Network(nn.Module):
         self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
 
     def init_ff_input(self, ff_input, stim):
+        self.N_BATCH = 1
+          
         for step in range(self.N_STEPS):
             ff_input = self.update_ff_input(step, ff_input, stim)
             

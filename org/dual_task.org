@@ -73,27 +73,34 @@
 ** Optimization
 
 #+begin_src ipython
-  def train(dataloader, model, loss_fn, optimizer):
-      size = len(dataloader.dataset)
+  def train(dataloader, model, loss_fn, optimizer, penalty=None, lbd=1):
       device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
       model.train()
       for batch, (X, y) in enumerate(dataloader):
+          optimizer.zero_grad()
 
           X, y = X.to(device), y.to(device)
-
           # Compute prediction error
-          pred = model(X)
-          loss = loss_fn(pred, y)
-          
+          y_pred = model(X)
+          loss = loss_fn(y_pred, y)
+
+          if penalty is not None:
+              reg_loss = 0
+              for param in model.parameters():
+                  if penalty=='l1':
+                      reg_loss += torch.sum(torch.abs(param))
+                  else:
+                      reg_loss += torch.sum(torch.square(param))
+
+                  loss = loss + lbd * reg_loss
+
           # Backpropagation
           loss.backward()
           optimizer.step()
-          optimizer.zero_grad()
 
       return loss
 #+end_src
-
 
 #+RESULTS:
 
@@ -110,7 +117,7 @@
       with torch.no_grad():
           for data, targets in dataloader:
               data, targets = data.to(device), targets.to(device)
-
+              
               outputs = model(data)
               loss = loss_fn(outputs, targets)
               val_loss += loss.item() * data.size(0)
@@ -122,7 +129,7 @@
 #+RESULTS:
 
 #+begin_src ipython
-  def run_optim(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100):
+  def run_optim(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100, penalty=None, lbd=1):
 
     # scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.1, verbose=True)
@@ -133,10 +140,10 @@
 
     # Training loop.
     for epoch in range(num_epochs):
-        loss = train(train_loader, model, loss_fn, optimizer)
+        loss = train(train_loader, model, loss_fn, optimizer, penalty, lbd)
         val_loss = test(val_loader, model, loss_fn)
         scheduler.step(val_loss)
-
+        
         # if epoch % int(num_epochs  / 10) == 0:
         print(f'Epoch {epoch+1}/{num_epochs}, Training Loss: {loss.item():.4f}, Validation Loss: {val_loss:.4f}')
 
@@ -144,7 +151,8 @@
 
 #+RESULTS:
 
-** loss
+** Loss
+
 #+begin_src ipython
   def correlation_loss(output, target):
       # Subtract the mean of each vector
@@ -185,30 +193,27 @@
 #+RESULTS:
 
 #+begin_src ipython
-  import torch
-  import torch.nn.functional as F
-
-  def cosine_distance_loss(output, target):
-      # Normalize the vectors to unit length
-      output_norm = F.normalize(output, p=2, dim=1)
-      target_norm = F.normalize(target, p=2, dim=1)
-    
-      # Calculate the cosine similarity
-      cosine_similarity = torch.sum(output_norm * target_norm, dim=1)
-    
-      # Minimize the distance by maximizing the similarity
-      # Here you can subtract from 1 to get the distance since the similarity ranges from -1 to 1
-      loss = 1 - cosine_similarity
-    
-      # Taking the mean loss if batched
-      loss = torch.mean(loss)
-    
-      return loss
+  class CosineLoss(nn.Module):
+      def __init__(self):
+          super(CosineLoss, self).__init__()
+          self.cosine_similarity = nn.CosineSimilarity(dim=-1)
+          
+      def forward(self, input1, input2):
+          # Calculate cosine similarity
+          cosine_sim = self.cosine_similarity(input1, input2)
+          # Calculate the loss as 1 - cosine_similarity
+          loss = 1 - cosine_sim
+          # Return the mean loss over the batch
+          return loss.mean()
 #+end_src
 
 #+RESULTS:
 
+
+#+RESULTS:
+
 ** Other
+
 #+begin_src ipython
   def get_theta(a, b, GM=0, IF_NORM=0):
 
@@ -253,106 +258,6 @@
 
 #+RESULTS:
 
-#+begin_src ipython
-    def get_df_X(rates, X_list, X_str='Ie'):
-        n_times, n_trials, n_phi, n_X, n_neurons = rates.shape
-
-        time_ind, trials_ind, phi_ind, X_ind, neurons_ind = np.meshgrid(
-            np.arange(n_times),
-            np.arange(n_trials),
-            np.arange(n_phi),
-            np.arange(n_X),
-            np.arange(n_neurons),
-            indexing='ij'
-        )
-
-        # Construct DataFrame
-        df = pd.DataFrame({
-            'time': time_ind.flatten(),
-            'trial': trials_ind.flatten(),
-            'phi': phi_ind.flatten(),
-            X_str : X_ind.flatten() * np.round((X_list[-1] - X_list[0]) / (X_list.shape[0] -1), 5) + X_list[0],
-            'neuron': neurons_ind.flatten(),
-            'rates': rates.flatten()
-        })
-
-        return df
-
-#+end_src
-
-#+RESULTS:
-
- #+begin_src ipython
-  def get_code_X(df, X_str='Ie'):
-
-      df_code = df.groupby(['time', 'trial', 'phi', X_str])['rates'].apply(decode_bump).reset_index()
-      df_code[['m0', 'm1', 'phase']] = pd.DataFrame(df_code['rates'].tolist(), index=df_code.index)
-      df_code.drop(columns=['rates'], inplace=True)
-      
-      return df_code
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  def get_accuracy(x):
-      x[x > np.pi] -= 2*np.pi
-      return x.abs()
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  def gauss_function(x, sigma):
-      return np.exp(-(x**2 / (2 * sigma**2))) / np.sqrt(2 * np.pi * sigma**2)
-
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  from scipy.stats import norm
-
-  def gauss_fit(x, ax, color):
-      mu_, sigma_ = norm.fit(x.dropna())
-      x = np.linspace(-50, 50, 100)
-      ax.plot(x, gauss_function(x, sigma_), color=color)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  def cutoff_dist(data):
-    std = np.std(data)
-    data[data.abs()>std * 1.96] = np.nan
-    return data
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  from scipy.stats.mstats import winsorize
-
-  def get_precision(x):
-      cmean =  (x - circmean(x, low=-np.pi, high=np.pi)) 
-      cmean[cmean > np.pi] -= 2*np.pi
-      cmean[cmean < -np.pi] += 2*np.pi
-      # cmean = cutoff_dist(cmean)
-
-      return cmean
-
-  def get_mse(x):
-      cmean =  (x - circmean(x, low=-np.pi, high=np.pi)) 
-      cmean[cmean > np.pi] -= 2*np.pi
-      cmean[cmean < -np.pi] += 2*np.pi
-      # cmean = cutoff_dist(cmean)
-      
-      return np.mean(cmean**2) * (180 / np.pi)**2 / 3.5
-  
-#+end_src
-
-#+RESULTS:
-
 * Imports
 
 #+begin_src ipython
@@ -383,9 +288,9 @@
 * Train RNN
 ** Parameters
 
-#+begin_src ipython
+#+Begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  conf_name = "config_EI.yml"
+  conf_name = "config_I.yml"
   name = "dual"
 #+end_src
 
@@ -402,23 +307,40 @@
 #+RESULTS:
 
 #+begin_src ipython
+for name, param in model.named_parameters():
+    if param.requires_grad:
+        print(name, param.data)
+#+end_src
+
+#+RESULTS:
+: U tensor([[-0.6816,  1.0141],
+:         [ 0.9102, -0.2812],
+:         [-0.2934,  0.3176],
+:         ...,
+:         [ 1.3498,  1.5706],
+:         [-1.8183, -1.0473],
+:         [-0.7804,  0.6590]], device='cuda:0')
+
+#+begin_src ipython
   import torch
-  model.N_BATCH = 40
+  model.N_BATCH = 256
+  dum = model.N_BATCH // 2
   
   noise = torch.randn((model.N_BATCH, model.N_STEPS, model.N_NEURON), dtype=model.FLOAT, device=model.DEVICE) * model.VAR_FF[0]
-  ff_input = torch.zeros((model.N_BATCH, model.N_STEPS, model.N_NEURON), dtype=model.FLOAT, device=model.DEVICE) 
-  for i in range(2):
+  ff_input = torch.zeros((model.N_BATCH, model.N_STEPS, model.N_NEURON), dtype=model.FLOAT, device=model.DEVICE)
+
+  for i in range(model.N_POP):
       ff_input[..., model.csumNa[i]:model.csumNa[i+1]] = model.Ja0[i]
 
   print(ff_input.shape)  
 #+end_src
 
 #+RESULTS:
-: torch.Size([40, 700, 1000])
+: torch.Size([256, 700, 1000])
 
 #+begin_src ipython
-  ff_input[:10] = model.init_ff_input(ff_input[:10], 0) + noise[:10]
-  ff_input[10:] = model.init_ff_input(ff_input[10:], 1) + noise[10:]
+  ff_input[:dum] = model.init_ff_input(ff_input[:dum], 0) + noise[:dum]
+  ff_input[dum:] = model.init_ff_input(ff_input[dum:], 1) + noise[dum:]
 #+end_src
 
 #+RESULTS:
@@ -432,47 +354,201 @@
 #+end_src
 
 #+RESULTS:
-: torch.Size([40, 700, 1000]) torch.Size([40, 750])
+: torch.Size([256, 700, 1000]) torch.Size([256, 1000])
 
 #+RESULTS:
 
 #+begin_src ipython
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-  batch_size = 10
+  batch_size = 32
   train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
-  
-  learning_rate = 0.001
-  criterion = cosine_distance_loss
-  optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
 
-  num_epochs = 20
+  learning_rate = 0.1
+  criterion = CosineLoss()
+  optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+  # optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+
+  num_epochs = 100
   run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)  
 #+end_src
 
 #+RESULTS:
 #+begin_example
-  Epoch 1/20, Training Loss: 0.7655, Validation Loss: 0.8734
-  Epoch 2/20, Training Loss: 0.7395, Validation Loss: 0.7985
-  Epoch 3/20, Training Loss: 0.6984, Validation Loss: 0.7633
-  Epoch 4/20, Training Loss: 0.6278, Validation Loss: 0.7396
-  Epoch 5/20, Training Loss: 0.6786, Validation Loss: 0.7715
-  Epoch 6/20, Training Loss: 0.6722, Validation Loss: 0.7592
-  Epoch 7/20, Training Loss: 0.5817, Validation Loss: 0.7651
-  Epoch 8/20, Training Loss: 0.5666, Validation Loss: 0.7886
-  Epoch 9/20, Training Loss: 0.5577, Validation Loss: 0.8038
-  Epoch 10/20, Training Loss: 0.6791, Validation Loss: 0.7987
-  Epoch 11/20, Training Loss: 0.7780, Validation Loss: 0.7642
-  Epoch 12/20, Training Loss: 0.6643, Validation Loss: 0.7317
-  Epoch 13/20, Training Loss: 0.6027, Validation Loss: 0.7219
-  Epoch 14/20, Training Loss: 0.6621, Validation Loss: 0.7340
-  Epoch 15/20, Training Loss: 0.6612, Validation Loss: 0.7359
-  Epoch 16/20, Training Loss: 0.5859, Validation Loss: 0.7403
-  Epoch 17/20, Training Loss: 0.5753, Validation Loss: 0.7568
-  Epoch 18/20, Training Loss: 0.7782, Validation Loss: 0.7726
-  Epoch 19/20, Training Loss: 0.5708, Validation Loss: 0.7545
-  Epoch 20/20, Training Loss: 0.6604, Validation Loss: 0.7491
+  Epoch 1/100, Training Loss: 0.6451, Validation Loss: 0.7586
+  Epoch 2/100, Training Loss: 0.6694, Validation Loss: 0.7407
+  Epoch 3/100, Training Loss: 0.5663, Validation Loss: 0.7246
+  Epoch 4/100, Training Loss: 0.5785, Validation Loss: 0.7154
+  Epoch 5/100, Training Loss: 0.5548, Validation Loss: 0.7193
+  Epoch 6/100, Training Loss: 0.5693, Validation Loss: 0.7174
+  Epoch 7/100, Training Loss: 0.5690, Validation Loss: 0.7182
+  Epoch 8/100, Training Loss: 0.5838, Validation Loss: 0.7135
+  Epoch 9/100, Training Loss: 0.5434, Validation Loss: 0.7133
+  Epoch 10/100, Training Loss: 0.5623, Validation Loss: 0.7092
+  Epoch 11/100, Training Loss: 0.5975, Validation Loss: 0.7033
+  Epoch 12/100, Training Loss: 0.5611, Validation Loss: 0.7049
+  Epoch 13/100, Training Loss: 0.5930, Validation Loss: 0.6972
+  Epoch 14/100, Training Loss: 0.6110, Validation Loss: 0.6946
+  Epoch 15/100, Training Loss: 0.5401, Validation Loss: 0.6996
+  Epoch 16/100, Training Loss: 0.5568, Validation Loss: 0.7033
+  Epoch 17/100, Training Loss: 0.6267, Validation Loss: 0.6900
+  Epoch 18/100, Training Loss: 0.5730, Validation Loss: 0.6982
+  Epoch 19/100, Training Loss: 0.5026, Validation Loss: 0.6992
+  Epoch 20/100, Training Loss: 0.5536, Validation Loss: 0.7068
+  Epoch 21/100, Training Loss: 0.5669, Validation Loss: 0.6969
+  Epoch 22/100, Training Loss: 0.5889, Validation Loss: 0.6929
+  Epoch 23/100, Training Loss: 0.5329, Validation Loss: 0.7022
+  Epoch 24/100, Training Loss: 0.5495, Validation Loss: 0.6937
+  Epoch 25/100, Training Loss: 0.5864, Validation Loss: 0.6879
+  Epoch 26/100, Training Loss: 0.5856, Validation Loss: 0.6921
+  Epoch 27/100, Training Loss: 0.5660, Validation Loss: 0.6865
+  Epoch 28/100, Training Loss: 0.5336, Validation Loss: 0.6981
+  Epoch 29/100, Training Loss: 0.5663, Validation Loss: 0.6908
+  Epoch 30/100, Training Loss: 0.5480, Validation Loss: 0.6888
+  Epoch 31/100, Training Loss: 0.5302, Validation Loss: 0.6914
+  Epoch 32/100, Training Loss: 0.4947, Validation Loss: 0.6976
+  Epoch 33/100, Training Loss: 0.5832, Validation Loss: 0.6904
+  Epoch 34/100, Training Loss: 0.5642, Validation Loss: 0.6928
+  Epoch 35/100, Training Loss: 0.5273, Validation Loss: 0.6953
+  Epoch 36/100, Training Loss: 0.5491, Validation Loss: 0.6882
+  Epoch 37/100, Training Loss: 0.5824, Validation Loss: 0.6892
+  Epoch 00038: reducing learning rate of group 0 to 1.0000e-02.
+  Epoch 38/100, Training Loss: 0.5642, Validation Loss: 0.6972
+  Epoch 39/100, Training Loss: 0.5604, Validation Loss: 0.6869
+  Epoch 40/100, Training Loss: 0.5448, Validation Loss: 0.6841
+  Epoch 41/100, Training Loss: 0.5645, Validation Loss: 0.6879
+  Epoch 42/100, Training Loss: 0.5438, Validation Loss: 0.6876
+  Epoch 43/100, Training Loss: 0.5414, Validation Loss: 0.6874
+  Epoch 44/100, Training Loss: 0.5953, Validation Loss: 0.6866
+  Epoch 45/100, Training Loss: 0.5063, Validation Loss: 0.6865
+  Epoch 46/100, Training Loss: 0.5430, Validation Loss: 0.6884
+  Epoch 47/100, Training Loss: 0.5427, Validation Loss: 0.6901
+  Epoch 48/100, Training Loss: 0.5787, Validation Loss: 0.6861
+  Epoch 49/100, Training Loss: 0.5235, Validation Loss: 0.6891
+  Epoch 50/100, Training Loss: 0.5418, Validation Loss: 0.6902
+  Epoch 00051: reducing learning rate of group 0 to 1.0000e-03.
+  Epoch 51/100, Training Loss: 0.5600, Validation Loss: 0.6854
+  Epoch 52/100, Training Loss: 0.5410, Validation Loss: 0.6871
+  Epoch 53/100, Training Loss: 0.5575, Validation Loss: 0.6887
+  Epoch 54/100, Training Loss: 0.5609, Validation Loss: 0.6887
+  Epoch 55/100, Training Loss: 0.5379, Validation Loss: 0.6876
+  Epoch 56/100, Training Loss: 0.5412, Validation Loss: 0.6882
+  Epoch 57/100, Training Loss: 0.5251, Validation Loss: 0.6882
+  Epoch 58/100, Training Loss: 0.5757, Validation Loss: 0.6880
+  Epoch 59/100, Training Loss: 0.5230, Validation Loss: 0.6875
+  Epoch 60/100, Training Loss: 0.5059, Validation Loss: 0.6893
+  Epoch 61/100, Training Loss: 0.5796, Validation Loss: 0.6901
+  Epoch 00062: reducing learning rate of group 0 to 1.0000e-04.
+  Epoch 62/100, Training Loss: 0.5421, Validation Loss: 0.6879
+  Epoch 63/100, Training Loss: 0.5391, Validation Loss: 0.6879
+  Epoch 64/100, Training Loss: 0.5795, Validation Loss: 0.6880
+  Epoch 65/100, Training Loss: 0.5387, Validation Loss: 0.6881
+  Epoch 66/100, Training Loss: 0.5399, Validation Loss: 0.6882
+  Epoch 67/100, Training Loss: 0.5768, Validation Loss: 0.6884
+  Epoch 68/100, Training Loss: 0.5612, Validation Loss: 0.6885
+  Epoch 69/100, Training Loss: 0.5398, Validation Loss: 0.6884
+  Epoch 70/100, Training Loss: 0.5635, Validation Loss: 0.6884
+  Epoch 71/100, Training Loss: 0.5402, Validation Loss: 0.6884
+  Epoch 72/100, Training Loss: 0.5617, Validation Loss: 0.6884
+  Epoch 00073: reducing learning rate of group 0 to 1.0000e-05.
+  Epoch 73/100, Training Loss: 0.5759, Validation Loss: 0.6883
+  Epoch 74/100, Training Loss: 0.5400, Validation Loss: 0.6883
+  Epoch 75/100, Training Loss: 0.5413, Validation Loss: 0.6883
+  Epoch 76/100, Training Loss: 0.5577, Validation Loss: 0.6883
+  Epoch 77/100, Training Loss: 0.5254, Validation Loss: 0.6883
+  Epoch 78/100, Training Loss: 0.5569, Validation Loss: 0.6883
+  Epoch 79/100, Training Loss: 0.5598, Validation Loss: 0.6883
+  Epoch 80/100, Training Loss: 0.5595, Validation Loss: 0.6883
+  Epoch 81/100, Training Loss: 0.5958, Validation Loss: 0.6883
+  Epoch 82/100, Training Loss: 0.5391, Validation Loss: 0.6883
+  Epoch 83/100, Training Loss: 0.5398, Validation Loss: 0.6883
+  Epoch 00084: reducing learning rate of group 0 to 1.0000e-06.
+  Epoch 84/100, Training Loss: 0.5766, Validation Loss: 0.6883
+  Epoch 85/100, Training Loss: 0.5594, Validation Loss: 0.6883
+  Epoch 86/100, Training Loss: 0.6123, Validation Loss: 0.6883
+  Epoch 87/100, Training Loss: 0.5572, Validation Loss: 0.6883
+  Epoch 88/100, Training Loss: 0.5071, Validation Loss: 0.6883
+  Epoch 89/100, Training Loss: 0.5603, Validation Loss: 0.6883
+  Epoch 90/100, Training Loss: 0.6316, Validation Loss: 0.6883
+  Epoch 91/100, Training Loss: 0.5051, Validation Loss: 0.6883
+  Epoch 92/100, Training Loss: 0.5572, Validation Loss: 0.6883
+  Epoch 93/100, Training Loss: 0.5410, Validation Loss: 0.6883
+  Epoch 94/100, Training Loss: 0.5574, Validation Loss: 0.6883
+  Epoch 00095: reducing learning rate of group 0 to 1.0000e-07.  loss = 1 - CosineLoss()( model.U.T[0], model.U.T[1])
+  print(np.arccos(loss.cpu().detach().numpy()) * 180 / np.pi)
+
+  Epoch 95/100, Training Loss: 0.5422, Validation Loss: 0.6883
+  Epoch 96/100, Training Loss: 0.5230, Validation Loss: 0.6883
+  Epoch 97/100, Training Loss: 0.5572, Validation Loss: 0.6883
+  Epoch 98/100, Training Loss: 0.5420, Validation Loss: 0.6883
+  Epoch 99/100, Training Loss: 0.5405, Validation Loss: 0.6883
+  Epoch 100/100, Training Loss: 0.5422, Validation Loss: 0.6883
 #+end_example
+
+** Evaluation
+
+#+begin_src ipython
+  model.N_BATCH = 1  
+  rates = model.forward(REC_LAST_ONLY=0)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  overlap_1 = rates @ model.xi[0].cpu().detach().numpy() / 1000.0 
+  overlap_2 = rates @ model.xi[1].cpu().detach().numpy() / 1000.0
+  overlap = np.stack((overlap_1, overlap_2))[...,0]
+  print(overlap.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 13)
+
+#+begin_src ipython
+  loss = 1 - CosineLoss()( model.U.T[0], model.U.T[1])
+  angle = np.arccos(loss.cpu().detach().numpy()) * 180 / np.pi
+
+  plt.plot(overlap[0])
+  plt.plot(overlap[1])
+  plt.title('$\\alpha(U_1, U_2)=$ %.0f °' % angle)
+  plt.xlabel('step')
+  plt.ylabel('Overlap')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/22ee2e7a12c798dd3799acf674e81039c1499e31.png]]
+
+#+begin_src ipython
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (13, 1, 1000)
+
+#+begin_src ipython
+  plt.plot(np.mean(rates[:,0], -1))
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/72b4f5162521ffc9058cd8a9de7135f355e11ceb.png]]
+
+#+begin_src ipython
+  loss = 1 - CosineLoss()( model.xi[0], model.xi[1])
+  print(loss)
+#+end_src
+
+#+RESULTS:
+: tensor(0.0315, device='cuda:0')
+
+#+begin_src ipython
+  loss = 1 - CosineLoss()( model.U.T[0], model.U.T[1])
+  print(np.arccos(loss.cpu().detach().numpy()) * 180 / np.pi)
+#+end_src
+
+#+RESULTS:
+: 90.38890664562952
 
 *** Connectivity
 
@@ -481,62 +557,83 @@
 #+end_src
 
 #+RESULTS:
-: Linear(in_features=1000, out_features=1000, bias=False)
+: 0cc08367-56d2-4aa6-bff7-cd39a79b57ab
 
 #+begin_src ipython
-  Cij = model.Wab.weight.data.cpu().detach().numpy()
+  # Cij = model.Wab.weight.data.cpu().detach().numpy()
+  Cij = model.Wab.cpu().detach().numpy()
   plot_con(Cij.T)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7f1eccf88985189ebd88f25e42d03972fa9339de.png]]
+: 8d67eafc-ee75-4ba3-bd1f-bc3064742c01
 
 * Single
 
 #+begin_src ipython
-  start = perf_counter()
+  conf_name = "config_I.yml"
   name = "dual_single"
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=1, DEVICE='cuda')
-
-  # ini_list = np.arange(0, 25)
-  rates = model.forward(ff_input)
-
-  end = perf_counter()
-  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
-  print('rates', rates.shape)
+  rates = model.forward(REC_LAST_ONLY=0)
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+: Na tensor([1000], device='cuda:0', dtype=torch.int32) Ka tensor([1.], device='cuda:0') csumNa tensor([   0, 1000], device='cuda:0')
+: Jab [-2.75]
+: Ja0 [10.0]
+# [goto error]
 #+begin_example
-  Na tensor([750, 250], device='cuda:0', dtype=torch.int32) Ka tensor([50., 50.], device='cuda:0') csumNa tensor([   0,  750, 1000], device='cuda:0')
-  Jab [1.0, -1.5, 1, -1]
-  Ja0 [2.0, 1.0]
-  ksi torch.Size([2, 750])
-  ksi . ksi1 tensor(-8.9995, device='cuda:0', grad_fn=<DotBackward0>)
-  Pij torch.Size([750, 750])
-  Sparse random connectivity 
-  with weak low rank structure, KAPPA 1.00
-  Sparse random connectivity 
-  Sparse random connectivity 
-  Sparse random connectivity 
-  times (s) 0.0 rates (Hz) [0.88, 2.91]
-  times (s) 0.43 rates (Hz) [1.95, 6.78]
-  times (s) 0.86 rates (Hz) [1.37, 6.23]
-  times (s) 1.29 rates (Hz) [1.51, 6.78]
-  times (s) 1.71 rates (Hz) [2.4, 9.46]
-  times (s) 2.14 rates (Hz) [3.53, 12.59]
-  times (s) 2.57 rates (Hz) [3.96, 16.92]
-  times (s) 3.0 rates (Hz) [31.18, 91.38]
-  times (s) 3.43 rates (Hz) [82.07, 356.13]
-  times (s) 3.86 rates (Hz) [31.92, 241.47]
-  times (s) 4.29 rates (Hz) [17.23, 100.91]
-  times (s) 4.71 rates (Hz) [21.25, 103.64]
-  times (s) 5.14 rates (Hz) [21.44, 96.07]
-  Elapsed (with compilation) = 0.1173263294622302s
-  Elapsed (with compilation) = 0h 0m 0s
-  rates torch.Size([40, 750])
+  ---------------------------------------------------------------------------
+  OutOfMemoryError                          Traceback (most recent call last)
+  Cell In[48], line 3
+        1 conf_name = "config_bump.yml"
+        2 name = "dual_single"
+  ----> 3 model = Network(conf_name, name, REPO_ROOT, VERBOSE=1, DEVICE='cuda')
+        4 rates = model.forward(REC_LAST_ONLY=0)
+
+  File ~/models/NeuroTorch/org/../src/network.py:47, in Network.__init__(self, conf_file, sim_name, repo_root, **kwargs)
+       44     self.stp = STP_Model(self.N_NEURON, self.csumNa, self.DT, self.FLOAT, self.device)
+       46 # initialize network
+  ---> 47 self.init_network()
+       49 self.U = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)), device=self.device, dtype=self.FLOAT))
+       50 # self.V = nn.Parameter(torch.randn((int(self.RANK), self.N_NEURON), device=self.device, dtype=self.FLOAT))
+
+  File ~/models/NeuroTorch/org/../src/network.py:73, in Network.init_network(self)
+       67 for i_pop in range(self.N_POP):
+       68     for j_pop in range(self.N_POP):
+       69         
+       70         # self.Wab.weight.data[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
+       71         #                     self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = self.initWeights(i_pop, j_pop)
+  ---> 73         weights = self.initWeights(i_pop, j_pop)
+       75         self.Wab[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
+       76                  self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = weights
+       78 # only train first pop
+       79 # if i_pop==0 or j_pop==0:
+       80 # self.Wab.requires_grad_(True)
+       81 
+       82 # resets the seed
+
+  File ~/models/NeuroTorch/org/../src/network.py:319, in Network.initWeights(self, i_pop, j_pop)
+      316 if 'cos' in self.STRUCTURE[i_pop, j_pop]:
+      318     theta_i, theta_j = torch.meshgrid(self.theta_list[i_pop], self.theta_list[j_pop], indexing="ij")
+  --> 319     theta_diff = theta_i - theta_j
+      321     if 'spec' in self.STRUCTURE[i_pop, j_pop]:
+      322         self.KAPPA[i_pop, j_pop] = self.KAPPA[i_pop, j_pop] / torch.sqrt(Kb)
+
+  OutOfMemoryError: CUDA out of memory. Tried to allocate 20.00 MiB. GPU 0 has a total capacty of 23.50 GiB of which 6.19 MiB is free. Including non-PyTorch memory, this process has 23.46 GiB memory in use. Of the allocated memory 23.14 GiB is allocated by PyTorch, and 18.23 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF
 #+end_example
+:END:
 #+RESULTS:
+#+RESULTS:
+
+#+begin_src ipython
+  lr = model.U @ model.U.T
+  print(lr.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([1000, 1000])
 
 * Rates
 
@@ -545,7 +642,7 @@
 #+end_src
 
 #+RESULTS:
-: torch.Size([40, 750])
+: (13, 1, 750)
 
 #+begin_src ipython
   loss = cosine_distance_loss(rates, labels)
@@ -553,18 +650,42 @@
 #+end_src
 
 #+RESULTS:
-: tensor(0.9980, device='cuda:0', grad_fn=<MeanBackward0>)
+:RESULTS:
+# [goto error]
+#+begin_example
+  ---------------------------------------------------------------------------
+  AttributeError                            Traceback (most recent call last)
+  Cell In[134], line 1
+  ----> 1 loss = cosine_distance_loss(rates, labels)
+        2 print(loss)  
+
+  Cell In[35], line 6, in cosine_distance_loss(output, target)
+        4 def cosine_distance_loss(output, target):
+        5     # Normalize the vectors to unit length
+  ----> 6     output_norm = F.normalize(output, p=2, dim=1)
+        7     target_norm = F.normalize(target, p=2, dim=1)
+        9     # Calculate the cosine similarity
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/nn/functional.py:4719, in normalize(input, p, dim, eps, out)
+     4717     return handle_torch_function(normalize, (input, out), input, p=p, dim=dim, eps=eps, out=out)
+     4718 if out is None:
+  -> 4719     denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
+     4720     return input / denom
+     4721 else:
+
+  AttributeError: 'numpy.ndarray' object has no attribute 'norm'
+#+end_example
+:END:
 
 #+begin_src ipython
-  print(model.KAPPA)
+  print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: tensor([[1., 0.],
-:         [0., 0.]], device='cuda:0')
+: (13, 1, 750)
 
 #+begin_src ipython
-  rates_single = rates[:, 0, :]
+  rates_single = rates[:,0]
   width = 7
   golden_ratio = (5**.5 - 1) / 2
   fig, ax = plt.subplots()
@@ -572,10 +693,10 @@
   # times = np.linspace(0, 5, rates.shape[0])  
   times = np.arange(0, 5.1, .1)
 
-  N_E = 7500
+  N_E = 750
   r_min = 0
-  r_max = 1.5 * np.mean(rates)
-  r_max=15
+  r_max = 1.5 * np.mean(rates_single)
+  r_max = 15
 
   im = ax.imshow(rates_single.T, aspect='auto', cmap='jet',vmin=0, vmax=r_max, extent=[times[0], times[-1], 0, N_E])
 
@@ -598,125 +719,35 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-: ---------------------------------------------------------------------------
-: IndexError                                Traceback (most recent call last)
-: Cell In[172], line 1
-: ----> 1 rates_single = rates[:, 0, :]
-:       2 width = 7
-:       3 golden_ratio = (5**.5 - 1) / 2
-: 
-: IndexError: too many indices for tensor of dimension 2
-:END:
+[[file:./.ob-jupyter/f62ae3f665cd2ca8e53f81dd390fbe214fcb6486.png]]
 
 #+begin_src ipython
-  plt.hist(rates[-1, 0])
-  plt.show()
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-# [goto error]
-#+begin_example
-  ---------------------------------------------------------------------------
-  TypeError                                 Traceback (most recent call last)
-  Cell In[174], line 1
-  ----> 1 plt.hist(rates[-1, 0])
-        2 plt.show()
-
-  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/pyplot.py:3224, in hist(x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, data, **kwargs)
-     3199 @_copy_docstring_and_deprecators(Axes.hist)
-     3200 def hist(
-     3201     x: ArrayLike | Sequence[ArrayLike],
-     (...)
-     3222     BarContainer | Polygon | list[BarContainer | Polygon],
-     3223 ]:
-  -> 3224     return gca().hist(
-     3225         x,
-     3226         bins=bins,
-     3227         range=range,
-     3228         density=density,
-     3229         weights=weights,
-     3230         cumulative=cumulative,
-     3231         bottom=bottom,
-     3232         histtype=histtype,
-     3233         align=align,
-     3234         orientation=orientation,
-     3235         rwidth=rwidth,
-     3236         log=log,
-     3237         color=color,
-     3238         label=label,
-     3239         stacked=stacked,
-     3240         **({"data": data} if data is not None else {}),
-     3241         **kwargs,
-     3242     )
-
-  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/__init__.py:1465, in _preprocess_data.<locals>.inner(ax, data, *args, **kwargs)
-     1462 @functools.wraps(func)
-     1463 def inner(ax, *args, data=None, **kwargs):
-     1464     if data is None:
-  -> 1465         return func(ax, *map(sanitize_sequence, args), **kwargs)
-     1467     bound = new_sig.bind(ax, *args, **kwargs)
-     1468     auto_label = (bound.arguments.get(label_namer)
-     1469                   or bound.kwargs.get(label_namer))
-
-  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_axes.py:6767, in Axes.hist(self, x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, **kwargs)
-     6764     stacked = True
-     6766 # Massage 'x' for processing.
-  -> 6767 x = cbook._reshape_2D(x, 'x')
-     6768 nx = len(x)  # number of datasets
-     6770 # Process unit information.  _process_unit_info sets the unit and
-     6771 # converts the first dataset; then we convert each following dataset
-     6772 # one at a time.
-
-  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/cbook.py:1394, in _reshape_2D(X, name)
-     1391         raise ValueError(f'{name} must have 2 or fewer dimensions')
-     1393 # Iterate over list of iterables.
-  -> 1394 if len(X) == 0:
-     1395     return [[]]
-     1397 result = []
-
-  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/_tensor.py:968, in Tensor.__len__(self)
-      966     return handle_torch_function(Tensor.__len__, (self,), self)
-      967 if self.dim() == 0:
-  --> 968     raise TypeError("len() of a 0-d tensor")
-      969 if torch._C._get_tracing_state():
-      970     warnings.warn(
-      971         "Using len to get tensor shape might cause the trace to be incorrect. "
-      972         "Recommended usage would be tensor.shape[0]. "
-     (...)
-      976         stacklevel=2,
-      977     )
-
-  TypeError: len() of a 0-d tensor
-#+end_example
-[[file:./.ob-jupyter/0e1531d8b70cc0a93f514d6e8d61d7bf1658a78c.png]]
-:END:
-
-#+begin_src ipython
-  ksi = model.ksi.cpu().detach().numpy()
-  idx = np.arange(0, len(ksi[0]))
-  # theta = sort_by_angle(idx, ksi[1], ksi[0])
-  # print(theta.shape)
-  theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=1)
+  ksi = model.U.cpu().detach().numpy().T
+  print(ksi.shape)
+  
+  theta = get_theta(ksi[0][:750], ksi[1][:750], GM=0, IF_NORM=1)
   # theta = np.arctan2(ksi[1], ksi[0])
   index_order = theta.argsort()
-  # print(index_order)
+  print(index_order.shape)
   rates_ordered = rates[:, 0, index_order]
 #+end_src
 
 #+RESULTS:
+: (2, 1000)
+: (750,)
 
 #+begin_src ipython
-  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=10)
+  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=15)
   plt.ylabel('Pref. Location (°)')
   plt.xlabel('Time (au)')
-  plt.yticks(np.linspace(0, 7500, 5), np.linspace(0, 360, 5).astype(int))
+  plt.yticks(np.linspace(0, 700, 5), np.linspace(0, 360, 5).astype(int))
   plt.colorbar()
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/a2ee8fa12cabb142038bba1fe207f7ed74760478.png]]
+[[file:./.ob-jupyter/ec1385382d2471b5b636fa206df0a5a6d3e48e10.png]]
 
+#+begin_src ipython
+
+#+end_src
