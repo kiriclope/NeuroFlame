@@ -1,0 +1,872 @@
+#+STARTUP: fold
+#+TITLE: RNN with pytorch
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session torch :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+: <Figure size 700x432.624 with 0 Axes>
+:END:
+
+* Imports
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../')
+
+  import torch
+  import pandas as pd
+  from time import perf_counter  
+
+  from src.network import Network
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump
+#+end_src
+
+#+RESULTS:
+
+* Helpers
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_theta(a, b, GM=0, IF_NORM=0):
+
+      if GM:          
+          b = b - np.dot(b, a) / np.dot(a, a) * a
+
+      if IF_NORM:
+          u = a / np.linalg.norm(a)
+          v = b / np.linalg.norm(b)
+      else:
+          u=a
+          v=b
+
+      return np.arctan2(v, u)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def normalize(v):
+      return v / np.linalg.norm(v)
+
+  def project(x, u):
+      return x * u
+  # return np.dot(x, u) * u
+
+  def sort_by_angle(x, u, v):
+      u_hat = normalize(u)
+      v_hat = normalize(v)
+
+      x_proj_u = project(x, u_hat)
+      x_proj_v = project(x, v_hat)
+      # x_proj = x_proj_u + x_proj_v
+      theta = np.arctan2(x_proj_v, x_proj_u) + np.pi
+
+      # cos_theta = np.dot(x_proj, u_hat) / np.linalg.norm(x_proj) * u_hat
+      # sin_theta = np.dot(x_proj, v_hat) / np.linalg.norm(x_proj) * v_hat
+      # theta = np.arctan2(sin_theta, cos_theta)
+
+      # Pair up each element of x with the corresponding angle
+      # x_angle_pairs = list(zip(x, theta))
+
+      # Sort based on the angle
+      # x_angle_pairs.sort(key=lambda pair: pair[1])
+
+      # Extract the sorted elements
+      # sorted_x = [pair[0] for pair in x_angle_pairs]
+
+      return theta
+#+end_src
+
+#+RESULTS:
+
+** Data
+#+begin_src ipython
+  def get_rates_ini_phi(name, ini_list, phi_list):
+    rates_list = []
+    for ini in ini_list:
+      for phi in phi_list:
+        rates = np.load(REPO_ROOT + '/data/simul/%s_ini_%d_phi_%d.npy' % (name, ini, phi))
+        rates_list.append(rates)
+
+    rates_list = np.array(rates_list).reshape(len(ini_list), len(phi_list), rates.shape[0], rates.shape[1])
+    print(rates_list.shape)
+    return rates_list  
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_df_ini_phi(rates):
+      n_trials, n_phi, n_times, n_neurons = rates.shape
+
+      # Create indices
+      trials_ind, phi_ind, times_ind, neurons_ind = np.indices((n_trials, n_phi, n_times, n_neurons))
+
+      # Construct DataFrame
+      df = pd.DataFrame({
+          'trial': trials_ind.flatten(),
+          'phi': phi_ind.flatten(),
+          'neuron': neurons_ind.flatten(),
+          'time': times_ind.flatten(),
+          'rates': rates.flatten()
+      })
+
+      return df
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def load_data_ini_phi(name, ini_list, phi_list):
+      rates = get_rates_ini_phi(name, ini_list, phi_list)
+      df = get_df_ini_phi(rates)
+      return df
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_code_ini_phi(df):
+      df_code = df.groupby(['time', 'trial', 'phi'] )['rates'].apply(decode_bump).reset_index()
+      df_code[['m0', 'm1', 'phase']] = pd.DataFrame(df_code['rates'].tolist(), index=df_code.index)
+      df_code = df_code.drop(columns=['rates'])
+      
+      end_point = df_code[df_code.time==df_code.time.iloc[-1]]
+      end_point = end_point.drop(columns=['time'])
+      print(end_point.head())  
+      return df_code, end_point  
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_precision(x):
+      return x - circmean(x)
+#+end_src
+
+#+RESULTS:
+
+** Simul
+
+#+begin_src ipython
+  import subprocess
+
+  def gpu_memory_usage_percentage():
+      total_mem_str = subprocess.check_output(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,nounits,noheader"])
+      used_mem_str = subprocess.check_output(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,nounits,noheader"])
+      
+      total_mem_list = map(float, total_mem_str.decode('utf-8').strip().split('\n'))
+      used_mem_list = map(float, used_mem_str.decode('utf-8').strip().split('\n'))
+
+      mem_percentage_list = [(used_mem / total_mem) * 100.0 for total_mem, used_mem in zip(total_mem_list, used_mem_list)]
+
+      return np.array(mem_percentage_list)
+
+  memory_percentages = gpu_memory_usage_percentage()
+
+  # The memory usage for each GPU is indexed from 0
+  for index, percentage in enumerate(memory_percentages):
+      print(f'GPU {index} Memory Usage: {percentage:.2f}%')
+
+#+end_src
+
+#+RESULTS:
+: GPU 0 Memory Usage: 7.41%
+: GPU 1 Memory Usage: 0.09%
+
+#+begin_src ipython
+  from time import sleep
+
+  def check_gpu(device):
+      memory_percentages = gpu_memory_usage_percentage()
+      if device == 'cuda:0':
+          if memory_percentages[0] > 75:
+              while memory_percentages[1] > 75:
+                  memory_percentages = gpu_memory_usage_percentage()
+                  sleep(10)
+              else:
+                  device='cuda:1'
+      else:
+          if memory_percentages[1] > 75:
+              while memory_percentages[0] > 75:
+                  memory_percentages = gpu_memory_usage_percentage()
+                  sleep(10)
+              else:
+                  device='cuda:0'
+                  
+      return device
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  device = check_gpu('cuda:0')
+  print(device)
+#+end_src
+
+#+RESULTS:
+: cuda:0
+
+#+begin_src ipython
+  # import multiprocessing
+  # if multiprocessing.get_start_method(allow_none=True) != 'spawn':
+  #   multiprocessing.set_start_method('spawn', force=True)
+  # from multiprocessing import Process
+
+  def run_ini_phi(conf, name, ini_list, phi_list):
+      LOAD_MAT = 0
+      SAVE_MAT = 1
+
+      df_list = []
+      for ini in ini_list:
+          for phi in phi_list:
+
+              print('##########################################')
+              print("trial", ini, "phi", phi)
+              print('##########################################')
+
+              model = Network('%s.yml' % conf, '%s_ini_%d_phi_%d' % (name, ini, phi),
+                              REPO_ROOT, LOAD_MAT=LOAD_MAT, SAVE_MAT=SAVE_MAT, PHI0=phi)
+              
+              model.run()
+              # process = Process(target=model.run)
+              # process.start()
+              # process.join()
+              # device = check_gpu(device)
+
+              LOAD_MAT = 1
+              SAVE_MAT = 0
+#+end_src
+
+#+RESULTS:
+
+* RNN with torch
+** Connectivity
+
+#+begin_src ipython
+  from src.connectivity import Connectivity
+#+end_src
+
+#+RESULTS:
+
+*** ODR
+
+#+begin_src ipython
+  Cij = Connectivity(10000, 10000, 1000)('sparse', 'cosine', kappa=1.0, sigma=0, phase=0)
+#+end_src
+
+#+RESULTS:
+: strong cosine probability
+
+#+begin_src ipython
+  Cij = Cij.cpu().detach().numpy()
+  print(Cij.shape)
+#+end_src
+
+#+RESULTS:
+: (10000, 10000)
+
+#+begin_src ipython
+  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
+
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij, cmap='jet', aspect=1)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij, axis=0)  # sum over pres
+  ax2.plot(Kj)
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij, axis=1)  # sum over pres
+  ax3.plot(Kj)
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij.shape[0] / 2)):
+      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/dd3270e92b2424ee65552fc5a6dbb7b40e9b2ee0.png]]
+
+*** Dual Task
+
+#+begin_src ipython
+  Con = Connectivity(10000, 10000, 1000)
+  Cij = Con('sparse', 'lr', kappa=4, lr_mean=[0, 0], lr_cov=[[1, 0], [0, 1]])
+#+end_src
+
+#+RESULTS:
+: low rank probability
+
+#+begin_src ipython
+  Cij = Cij.cpu().detach().numpy()
+  print(Cij.shape)
+#+end_src
+
+#+RESULTS:
+: (1000, 1000)
+
+#+begin_src ipython
+  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
+
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij, cmap='jet', aspect=1)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij, axis=0)  # sum over pres
+  ax2.plot(Kj)
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij, axis=1)  # sum over pres
+  ax3.plot(Kj)
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij.shape[0] / 2)):
+      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/dbbf56eabd9bd8c75c6488e25f873faa54c99abc.png]]
+
+#+begin_src ipython
+  ksi = Con.ksi.cpu().detach().numpy()
+  print('ksi', ksi.shape)
+  idx = np.arange(0, len(ksi[0]))
+  # print(theta.shape)
+  theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=1)
+  theta = np.arctan2(ksi[1], ksi[0])
+  index_order = theta.argsort()
+  # print(index_order)
+  Cij_ordered = Cij[index_order][index_order]
+  print(Cij_ordered.shape)
+#+end_src
+
+#+RESULTS:
+: ksi (2, 1000)
+: (1000, 1000)
+
+#+begin_src ipython
+  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
+
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij_ordered, cmap='jet', aspect=1)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij_ordered, axis=0)  # sum over pres
+  ax2.plot(Kj)
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij_ordered, axis=1)  # sum over pres
+  ax3.plot(Kj)
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij_ordered.shape[0] / 2)):
+      diags.append(np.trace(Cij_ordered, offset=i) / Cij_ordered.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/b059f05089130c8d02b52421cc4af5359fc29ec8.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+** Stimuli
+
+#+begin_src ipython
+  from src.stimuli import Stimuli
+#+end_src
+
+#+RESULTS:
+
+*** ODR
+
+#+begin_src ipython
+  ff_input = Stimuli(task='odr', size=(1, 1000))(1, 1, 0).cpu().detach().numpy() 
+  print(ff_input.shape)
+  plt.plot(ff_input)
+  plt.xlabel('Neuron #')
+  plt.ylabel('Input Strength')
+  plt.title('ODR')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (1000,)
+[[file:./.ob-jupyter/f10bdc01e2a8555af8b2cba16bda2923182df89d.png]]
+:END:
+
+*** Dual Task
+
+#+begin_src ipython
+  xi = torch.randn((1000), device='cuda')
+  ff_input = Stimuli(task='dual', size=(1, 1000))(1, 1, xi).cpu().detach().numpy()
+  print(ff_input.shape)
+  plt.plot(ff_input)
+  plt.xlabel('Neuron #')
+  plt.ylabel('Input Strength')
+  plt.title('Dual Task')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (1000,)
+[[file:./.ob-jupyter/dabec26f24752a3e579c5e3b122ff9bd2380a1eb.png]]
+:END:
+
+** FF Inputs
+*** ODR
+
+#+begin_src ipython
+    REPO_ROOT = "/home/leon/models/NeuroTorch"
+    model = Network('config_EI.yml', 'test', REPO_ROOT, VERBOSE=1, DEVICE='cuda', TASK='odr',
+                    PROBA_TYPE=['cosine', '', '',''])
+#+end_src
+
+#+RESULTS:
+: Na tensor([7500, 2500], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  7500, 10000], device='cuda:0')
+: Jab [1.0, -1.5, 1, -1]
+: Ja0 [2.0, 1.0]
+: strong cosine probability
+: uniform probability
+: uniform probability
+: uniform probability
+
+#+begin_src ipython
+  ff_input = model.init_ff_input().cpu().detach().numpy()
+  print(ff_input.shape)
+#+end_src
+
+#+RESULTS:
+: task odr
+: torch.Size([7500])
+: (1, 660, 10000)
+
+#+begin_src ipython
+  plt.plot(ff_input[0, :, :5])
+  plt.plot(ff_input[0, :, -5:])
+  plt.xlabel('Step')
+  plt.ylabel('FF Input')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/dadc600fd164ef2760a59fd23911e004194f36bd.png]]
+
+#+begin_src ipython
+  plt.imshow(ff_input[0].T, cmap='jet', vmin=0, vmax=55, aspect='auto')
+  plt.xlabel('Step')
+  plt.ylabel('Neuron #')
+  plt.ylim([0, 7500])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/eaa8833382cfdb42c71a857da719aaed6b43a321.png]]
+
+*** Dual Task
+
+#+begin_src ipython
+    REPO_ROOT = "/home/leon/models/NeuroTorch"
+    model = Network('config_EI.yml', 'test', REPO_ROOT, VERBOSE=1, DEVICE='cuda', TASK='dual',
+                    PROBA_TYPE=['lr', '', '',''])
+#+end_src
+
+#+RESULTS:
+: Na tensor([7500, 2500], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  7500, 10000], device='cuda:0')
+: Jab [1.0, -1.5, 1, -1]
+: Ja0 [2.0, 1.0]
+: low rank probability
+: uniform probability
+: uniform probability
+: uniform probability
+
+#+begin_src ipython
+  ff_input = model.init_ff_input().cpu().detach().numpy()
+  print(ff_input.shape)
+#+end_src
+
+#+RESULTS:
+: task dual
+: (1, 660, 10000)
+
+#+begin_src ipython
+  plt.plot(ff_input[0, :, :5])
+  plt.plot(ff_input[0, :, -5:])
+  plt.xlabel('Step')
+  plt.ylabel('FF Input')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/5b20057e796609f7cdefa8103ae49120287bcd3f.png]]
+
+#+begin_src ipython
+  plt.imshow(ff_input[0].T, cmap='jet', vmin=0, vmax=55, aspect='auto')
+  plt.xlabel('Step')
+  plt.ylabel('Neuron #')
+  plt.ylim([0, 7500])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/6fbc8e4bc15d3e9dd5a4d1842506ea7e92458276.png]]
+
+#+begin_src ipython
+  ksi = model.PHI0.cpu().detach().numpy()
+  print(ksi.shape)
+  idx = np.arange(0, len(ksi[0]))
+  theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=1)
+  index_order = theta.argsort()
+  ff_ordered = ff_input[..., index_order]
+#+end_src
+
+#+RESULTS:
+: (2, 7500)
+
+#+begin_src ipython
+  plt.imshow(ff_ordered[0].T, cmap='jet', vmin=0, aspect='auto')
+  plt.xlabel('Step')
+  plt.ylabel('Pref Loc. (°)')
+  plt.yticks(np.linspace(0, 7500, 5), np.linspace(0, 360, 5).astype(int))
+  # plt.ylim([0, 10])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/a617e87c20b5c356b1960db422df34b0cc675028.png]]
+
+** Single Trial
+*** Model
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  model = Network('config_EI.yml', 'ord', REPO_ROOT, VERBOSE=1, DEVICE='cuda', TASK='dual',
+                  PROBA_TYPE=['lr', '', '', ''], KAPPA=[5,0,0,0])
+#+end_src
+
+#+RESULTS:
+: Na tensor([7500, 2500], device='cuda:0', dtype=torch.int32) Ka tensor([1000., 1000.], device='cuda:0') csumNa tensor([    0,  7500, 10000], device='cuda:0')
+: Jab [1.0, -1.5, 1, -1]
+: Ja0 [2.0, 1.0]
+: low rank probability
+: uniform probability
+: uniform probability
+: uniform probability
+
+**** Connectivity
+
+#+begin_src ipython
+  Cij = model.Wab.cpu().detach().numpy() 
+  print(Cij.shape)
+
+  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
+
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij, cmap='jet', aspect=1)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij, axis=0)  # sum over pres
+  ax2.set_title('$<K_j>= %d$' % np.mean(Kj))
+  ax2.plot(Kj)
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij, axis=1)  # sum over pres
+  ax3.set_title('$<K_i>= %d$' % np.mean(Ki))
+  ax3.plot(Kj)
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij.shape[0] / 2)):
+      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (10000, 10000)
+[[file:./.ob-jupyter/92299d24e4612f871da0bb7fbcd8229cb6bda32f.png]]
+:END:
+**** FF Inputs
+
+#+begin_src ipython
+  ff_input = model.ff_input.cpu().detach().numpy()
+  print(ff_input.shape)
+  
+  fig, ax = plt.subplots(1, 2)
+
+  ax[0].plot(ff_input[0, :, :5])
+  ax[0].plot(ff_input[0, :, -5:])
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('FF Input')
+
+  ax[1].imshow(ff_input[0].T, cmap='jet', vmin=0, aspect='auto')
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('Neuron #')
+  ax[1].set_ylim([0, 10000])
+  plt.show()
+#+end_src
+  
+#+RESULTS:
+:RESULTS:
+: (1, 660, 10000)
+[[file:./.ob-jupyter/41b92bbdbefec6771fa2309c2b9faccb4ac1e076.png]]
+:END:
+
+
+*** Dynamics
+
+#+begin_src ipython
+  rates = model.forward(REC_LAST_ONLY=0)[:, 0]
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  generating ff input
+  task dual
+  times (s) 0.0 rates (Hz) [0.0, 1.97]
+  times (s) 0.09 rates (Hz) [0.0, 1.93]
+  times (s) 0.18 rates (Hz) [0.0, 1.95]
+  times (s) 0.27 rates (Hz) [0.0, 1.96]
+  times (s) 0.36 rates (Hz) [0.0, 1.93]
+  times (s) 0.45 rates (Hz) [0.0, 1.96]
+  times (s) 0.55 rates (Hz) [0.0, 1.95]
+  times (s) 0.64 rates (Hz) [0.0, 1.96]
+  times (s) 0.73 rates (Hz) [0.0, 1.92]
+  times (s) 0.82 rates (Hz) [0.0, 1.94]
+  times (s) 0.91 rates (Hz) [66.41, 1.93]
+  times (s) 1.0 rates (Hz) [85.27, 68.96]
+  times (s) 1.09 rates (Hz) [58.67, 70.93]
+  times (s) 1.18 rates (Hz) [23.56, 43.81]
+  times (s) 1.27 rates (Hz) [4.22, 17.44]
+  times (s) 1.36 rates (Hz) [1.2, 7.52]
+  times (s) 1.45 rates (Hz) [0.72, 4.59]
+  times (s) 1.55 rates (Hz) [0.61, 3.5]
+  times (s) 1.64 rates (Hz) [0.61, 2.99]
+  times (s) 1.73 rates (Hz) [0.65, 2.75]
+  times (s) 1.82 rates (Hz) [0.32, 2.66]
+  times (s) 1.91 rates (Hz) [0.37, 2.45]
+  times (s) 2.0 rates (Hz) [0.44, 2.37]
+  times (s) 2.09 rates (Hz) [0.53, 2.38]
+  times (s) 2.18 rates (Hz) [0.67, 2.42]
+  times (s) 2.27 rates (Hz) [0.83, 2.55]
+  times (s) 2.36 rates (Hz) [1.01, 2.7]
+  times (s) 2.45 rates (Hz) [1.21, 2.86]
+  times (s) 2.55 rates (Hz) [1.42, 3.04]
+  times (s) 2.64 rates (Hz) [1.64, 3.26]
+  times (s) 2.73 rates (Hz) [1.83, 3.49]
+  times (s) 2.82 rates (Hz) [2.01, 3.68]
+  times (s) 2.91 rates (Hz) [2.13, 3.87]
+  times (s) 3.0 rates (Hz) [2.25, 4.02]
+  times (s) 3.09 rates (Hz) [2.32, 4.14]
+  times (s) 3.18 rates (Hz) [2.37, 4.2]
+  times (s) 3.27 rates (Hz) [2.41, 4.25]
+  times (s) 3.36 rates (Hz) [2.42, 4.33]
+  times (s) 3.45 rates (Hz) [2.41, 4.29]
+  times (s) 3.55 rates (Hz) [2.42, 4.32]
+  times (s) 3.64 rates (Hz) [2.42, 4.32]
+  times (s) 3.73 rates (Hz) [2.42, 4.31]
+  times (s) 3.82 rates (Hz) [2.4, 4.32]
+  times (s) 3.91 rates (Hz) [2.41, 4.31]
+  times (s) 4.0 rates (Hz) [2.41, 4.33]
+  times (s) 4.09 rates (Hz) [2.41, 4.31]
+  times (s) 4.18 rates (Hz) [2.39, 4.31]
+  times (s) 4.27 rates (Hz) [2.39, 4.32]
+  times (s) 4.36 rates (Hz) [2.4, 4.32]
+  times (s) 4.45 rates (Hz) [2.4, 4.29]
+  times (s) 4.55 rates (Hz) [2.4, 4.29]
+  times (s) 4.64 rates (Hz) [2.4, 4.31]
+  times (s) 4.73 rates (Hz) [2.4, 4.31]
+  times (s) 4.82 rates (Hz) [2.4, 4.3]
+  times (s) 4.91 rates (Hz) [2.4, 4.31]
+  times (s) 5.0 rates (Hz) [2.41, 4.32]
+  times (s) 5.09 rates (Hz) [2.39, 4.32]
+  times (s) 5.18 rates (Hz) [2.39, 4.32]
+  times (s) 5.27 rates (Hz) [2.39, 4.29]
+  times (s) 5.36 rates (Hz) [2.41, 4.34]
+  times (s) 5.45 rates (Hz) [2.4, 4.31]
+  Elapsed (with compilation) = 0.3518892554566264s
+  (61, 7500)
+#+end_example
+
+#+begin_src ipython
+  print(rates.shape)
+  r_max = 1.5 # * np.max(rates[-1, :15000])
+  plt.imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+  plt.colorbar()
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (61, 7500)
+[[file:./.ob-jupyter/fb1ad9f00492badb833153c5595449bf833fd4e0.png]]
+:END:
+
+#+RESULTS:
+
+**** dual
+
+#+begin_src ipython
+  ksi = model.PHI0.cpu().detach().numpy()
+  idx = np.arange(0, len(ksi[0]))
+  theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=1)
+  index_order = theta.argsort()
+  rates_ordered = rates[:, index_order]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=2)
+  plt.ylabel('Pref. Location (°)')
+  plt.xlabel('Time (au)')
+  plt.yticks(np.linspace(0, idx.shape[0], 5), np.linspace(0, 360, 5).astype(int))
+  plt.colorbar()
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/a630bf2ecd572f9e116f1592c2f693d564e6f5d6.png]]
+
+#+begin_src ipython
+  m0, m1, phi = decode_bump(rates, axis=-1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  plt.plot((phi * 180 / np.pi))
+  plt.yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))  
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/2d4bd62b2a158a64146f0c3a09c9462ccfa8a085.png]]
+
+** Balance
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  K_list = [500, 1000, 1500, 2000, 2500, 3000]
+  rates_list = []
+
+  for K in K_list:
+      model = Network('config_EI.yml', 'balance', REPO_ROOT, VERBOSE=0, DEVICE='cuda', K=K)
+      rates = model.forward()
+      rates_list.append(rates[0].cpu().detach().numpy())
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  rates = np.array(rates_list)
+  print(rates.shape)
+
+  # rates = rates[:, 0, :30000]
+  plt.plot(np.sqrt(K_list), np.mean(rates) * np.sqrt(K_list), '-o')
+  plt.xlabel('$\sqrt{K}$')
+  plt.ylabel('$\sqrt{K}$ Rates')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (6, 7500)
+[[file:./.ob-jupyter/ce5fc327fcafb03fc9925c132f01e5880947ffe4.png]]
+:END:
+
+#+begin_src ipython
+
+#+end_src

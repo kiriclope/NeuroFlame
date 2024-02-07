@@ -10,6 +10,7 @@ FLOAT_PRECISION: 32
 # 1 to save the data to DATA_PATH
 SAVE_DATA: 1
 
+N_BATCH: 1
 # Time step in s
 DT: 0.01
 # total simulation time in s
@@ -17,7 +18,7 @@ DURATION: 6.0
 # time to start saving simulation files
 T_STEADY: 0.5
 # Saving to files every T_WINDOW
-T_WINDOW: 0.5
+T_WINDOW: 0.1
 
 # record only endpoint
 REC_LAST_ONLY: 0
@@ -26,23 +27,17 @@ REC_LAST_ONLY: 0
 # Parameters for the stimulus presentation
 ##########################################
 # stimulus as a cosine shape
-# time for stimulus onset in s 
-T_STIM: [1.0, 2.0]
-# amplitude of the 1st stimulus
-I0: [0.01, 0.0]
-# amplitude of the 2nd stimulus
-T_DIST: [35, 45]
-# amplitude of the 2nd stimulus [mean, var]
-I1: [0.01, 0.0]
-T_CUE: [5.5, 6.0]
-T_TEST: [3.0, 5.0]
-
-# Phase of the stimuli
-PHI0: 1.0
-PHI1: 1.0
-# Tuning of the stimuli
-SIGMA0: 1.0
-SIGMA1: 0.25
+TASK: 'None'
+# time for stimuli onset in s 
+T_STIM_ON: [1.0]
+# time for stimuli offset in s 
+T_STIM_OFF: [2.0]
+# stimuli strengths
+I0: [.1, .1]
+# stimuli phases
+PHI0: [180.0]
+# stimuli tuning
+SIGMA0: [1.0]
 
 ##########################################
 # Network parameters
@@ -50,11 +45,11 @@ SIGMA1: 0.25
 # number of populations
 N_POP: 1
 # number of neurons
-N_NEURON: 1000
+N_NEURON: 10000
 # number of average presynaptic input (set to 1 if all to all)
-K: 100.0
+K: 500.0
 # fraction of neuron in each population (must sum to 1)
-frac: [1.0]
+frac: [1]
 
 ##########################################
 # Network Dynamic
@@ -73,33 +68,23 @@ TAU: [.020]
 # set to 0 if instantaneous, 1 if exponentially decaying
 SYN_DYN: 1
 # Synaptic time constants for each population
-TAU_SYN: [.4]
-
-# Adding NMDA currents
-IF_NMDA: 0
-# NMDA time constants
-TAU_NMDA: [0.2, 0.2]
+TAU_SYN: [0.4]
 
 # Feedforward inputs dynamics
-# set to 0 for instantaneous, 1 to exp decay, 2 adds gaussian noise
-FF_DYN: 2
 # FF time constants
 TAU_FF: [4.]
 # Variance of the noise
-VAR_FF: [1.0, 1.0]
+VAR_FF: [0.0, 0.0]
 # Threshold dynamics
 # set to 0 constant thresholds, 1 to add adaptative thresholds
 THRESH_DYN: 0
 # threshold
-THRESH: [15.0, 15.0]
+THRESH: [15.0]
 # threshold time constants
-TAU_THRESH: [1., 1.]
+TAU_THRESH: [1.0]
 
 # Network's gain
-GAIN: 1.5
-
-# Jab: [1., -1.35, 1.25, -2.0]
-# Ja0: [0.25, 0.175]
+GAIN: 1.0
 
 # Synaptic strengths           
 Jab: [-1.0]
@@ -110,7 +95,7 @@ M0: 1.0
 
 # To add an attentional switch
 # if BUMP_SWITCH[i] == 1 it sets Iext[i] to zero before stimulus presentation
-BUMP_SWITCH: [0]
+BUMP_SWITCH: [1]
 
 ####################
 # Plasticity
@@ -124,16 +109,18 @@ IF_STP: 0
 # seed for connectivity None or float
 SEED: 1
 
-# STRUCTURE can be 'all', 'all_cos', 'cos', 'spec_cos'
+# CON_TYPE is all2all or sparse
+# By default the matrix is a random sparse matrix
+# 'all2all' gives an all to all matrix
+# PROBA_TYPE can be 'cosine', 'cosine_spec' or 'lr'
 # By default the matrix is a random sparse matrix
 # 'cos' gives a sparse matrix with strong cosine structure
 # 'spec_cos' gives a sparse matrix with weak cosine structure
-# 'all' gives an all to all matrix
-# 'all_cos' gives an all to all with cosine shape
+# 'all2all' +'cos' gives an all to all with cosine shape
 
 # sets probabilities of connections' shape
-CONNECTIVITY: 'sparse'
-STRUCTURE: ['None']
+CON_TYPE: 'sparse'
+PROBA_TYPE: ['None', 'None', 'None', 'None']
 
 # create uniformly distributed wells
 WELLS: [0.0]
@@ -149,5 +136,5 @@ PHASE: 0.0
 ##########
 RANK: 2.0
 # covariance
-LR_COV: 0.0
-
+LR_MEAN: [0.0, 0.0]
+LR_COV: [[1.0, 0.0],[0.0, 1.0]]

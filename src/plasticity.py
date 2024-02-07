@@ -37,16 +37,16 @@ class STP_Model():
         
         self.x_stp = self.x_stp + (1.0 - self.x_stp) * self.DT_TAU_REC - self.DT * u_plus * self.x_stp * rates
         self.u_stp = self.u_stp - self.DT_TAU_FAC * self.u_stp + self.DT * self.USE * (1.0 - self.u_stp) * rates
-        self.A_u_x_stp = u_plus * self.x_stp * self.IS_STP
+        return u_plus * self.x_stp * self.IS_STP
         
     def hansel_stp(self, rates):
 
         self.x_stp = self.x_stp - self.DT_TAU_REC * (self.x_stp - 1.0) - self.DT * self.x_stp * self.u_stp * rates
         self.u_stp = self.u_stp - self.DT_TAU_FAC * (self.u_stp - self.USE) + self.DT * self.USE * rates * (1.0 - self.u_stp)
-        self.A_u_x_stp = self.u_stp * self.x_stp * self.IS_STP
+        return self.u_stp * self.x_stp * self.IS_STP
 
     def mato_stp(self, isi):
         
         self.u_stp = self.u_stp * torch.exp(-isi / self.TAU_FAC) + self.USE * (1.0 - self.u_stp * torch.exp(-isi / self.TAU_FAC))
         self.x_stp = self.x_stp * (1.0 - self.u_stp) * torch.exp(-isi / self.TAU_REC) + 1.0 - torch.exp(-isi / self.TAU_REC)
-        self.A_u_x_stp = self.u_stp * self.x_stp
+        return self.u_stp * self.x_stp
