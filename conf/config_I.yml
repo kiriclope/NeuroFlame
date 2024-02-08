@@ -2,7 +2,7 @@
 # Parameters 
 ###################################################
 # output different prompts for debugging purpose
-VERBOSE: 1
+VERBOSE: 0
 # device to be used cuda or cpu
 DEVICE: cuda
 # float precision
@@ -14,11 +14,11 @@ N_BATCH: 1
 # Time step in s
 DT: 0.01
 # total simulation time in s
-DURATION: 6.0
+DURATION: 12.0
 # time to start saving simulation files
 T_STEADY: 0.5
 # Saving to files every T_WINDOW
-T_WINDOW: 0.1
+T_WINDOW: 0.25
 
 # record only endpoint
 REC_LAST_ONLY: 0
@@ -27,17 +27,17 @@ REC_LAST_ONLY: 0
 # Parameters for the stimulus presentation
 ##########################################
 # stimulus as a cosine shape
-TASK: 'None'
+TASK: 'dual'
 # time for stimuli onset in s 
-T_STIM_ON: [1.0]
+T_STIM_ON: [1.0, 3.5]
 # time for stimuli offset in s 
-T_STIM_OFF: [2.0]
+T_STIM_OFF: [2.0, 4.5]
 # stimuli strengths
-I0: [.1, .1]
+I0: [1, 1]
 # stimuli phases
-PHI0: [180.0]
+PHI0: [180.0, 90.0]
 # stimuli tuning
-SIGMA0: [1.0]
+SIGMA0: [1.0, 1.0]
 
 ##########################################
 # Network parameters
@@ -45,9 +45,9 @@ SIGMA0: [1.0]
 # number of populations
 N_POP: 1
 # number of neurons
-N_NEURON: 10000
+N_NEURON: 1000
 # number of average presynaptic input (set to 1 if all to all)
-K: 500.0
+K: 100.0
 # fraction of neuron in each population (must sum to 1)
 frac: [1]
 
@@ -68,34 +68,28 @@ TAU: [.020]
 # set to 0 if instantaneous, 1 if exponentially decaying
 SYN_DYN: 1
 # Synaptic time constants for each population
-TAU_SYN: [0.4]
+TAU_SYN: [.2]
 
 # Feedforward inputs dynamics
-# FF time constants
-TAU_FF: [4.]
 # Variance of the noise
-VAR_FF: [0.0, 0.0]
-# Threshold dynamics
-# set to 0 constant thresholds, 1 to add adaptative thresholds
-THRESH_DYN: 0
+VAR_FF: [30]
+
 # threshold
 THRESH: [15.0]
-# threshold time constants
-TAU_THRESH: [1.0]
 
 # Network's gain
-GAIN: 1.0
+GAIN: 3.0
 
 # Synaptic strengths           
 Jab: [-1.0]
 # External inputs strengths
 Ja0: [1.0]
 # External rate
-M0: 1.0
+M0: 2.0
 
 # To add an attentional switch
 # if BUMP_SWITCH[i] == 1 it sets Iext[i] to zero before stimulus presentation
-BUMP_SWITCH: [1]
+BUMP_SWITCH: [1, 0]
 
 ####################
 # Plasticity
@@ -107,8 +101,7 @@ IF_STP: 0
 # Connectivity
 ##############
 # seed for connectivity None or float
-SEED: 1
-
+SEED: 0
 # CON_TYPE is all2all or sparse
 # By default the matrix is a random sparse matrix
 # 'all2all' gives an all to all matrix
@@ -120,14 +113,14 @@ SEED: 1
 
 # sets probabilities of connections' shape
 CON_TYPE: 'sparse'
-PROBA_TYPE: ['None', 'None', 'None', 'None']
+PROBA_TYPE: ['None']
 
 # create uniformly distributed wells
 WELLS: [0.0]
 # strength of the asymmetries if all to all
 SIGMA: [0.0]
 # tuning of the recurrent connections
-KAPPA: [1.0]
+KAPPA: [4.0]
 # phase of the connectivity
 PHASE: 0.0
 
@@ -135,6 +128,7 @@ PHASE: 0.0
 # Low rank
 ##########
 RANK: 2.0
-# covariance
+
+LR_TRAIN: 1
 LR_MEAN: [0.0, 0.0]
 LR_COV: [[1.0, 0.0],[0.0, 1.0]]

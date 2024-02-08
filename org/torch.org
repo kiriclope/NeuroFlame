@@ -15,13 +15,10 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
-: <Figure size 700x432.624 with 0 Axes>
-:END:
 
 * Imports
 
@@ -39,6 +36,56 @@
 #+end_src
 
 #+RESULTS:
+* Helpers
+
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_theta(a, b, GM=0, IF_NORM=0):
+
+      u, v = a, b
+
+      if GM:          
+          v = b - np.dot(b, a) / np.dot(a, a) * a
+          
+      if IF_NORM:
+          u = a / np.linalg.norm(a)
+          v = b / np.linalg.norm(b)
+
+      return np.arctan2(v, u)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_idx(model):
+      ksi = model.PHI0.cpu().detach().numpy()
+      # print(ksi.shape)
+
+      idx = np.arange(0, len(ksi[0]))
+      theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=1)
+
+      return theta.argsort()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_overlap(model, rates):
+      ksi = model.PHI0.cpu().detach().numpy()
+      return rates @ ksi.T / rates.shape[-1]
+  
+#+end_src
+
+#+RESULTS:
 
 * RNN with torch
 ** Single Trial
@@ -46,43 +93,11 @@
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  model = Network('config_EI.yml', 'dual', REPO_ROOT, VERBOSE=1, DEVICE='cuda')
+  model = Network('config_EI.yml', 'dual', REPO_ROOT, VERBOSE=0, DEVICE='cuda')
   rates = model.forward(REC_LAST_ONLY=0)[:,0]
 #+end_src
 
 #+RESULTS:
-#+begin_example
-  Na tensor([7500, 2500], device='cuda:0', dtype=torch.int32) Ka tensor([1000., 1000.], device='cuda:0') csumNa tensor([    0,  7500, 10000], device='cuda:0')
-  Jab [1.0, -1.5, 1, -1]
-  Ja0 [2.0, 1.0]
-  generating ff input
-  times (s) 0.0 rates (Hz) [0.0, 2.08]
-  times (s) 0.22 rates (Hz) [0.0, 2.03]
-  times (s) 0.44 rates (Hz) [0.0, 2.03]
-  times (s) 0.67 rates (Hz) [0.0, 2.04]
-  times (s) 0.89 rates (Hz) [14.28, 2.0]
-  times (s) 1.11 rates (Hz) [0.01, 2.03]
-  times (s) 1.33 rates (Hz) [2.05, 3.8]
-  times (s) 1.56 rates (Hz) [3.25, 5.26]
-  times (s) 1.78 rates (Hz) [2.87, 5.42]
-  times (s) 2.0 rates (Hz) [2.84, 4.9]
-  times (s) 2.22 rates (Hz) [2.91, 4.83]
-  times (s) 2.44 rates (Hz) [2.97, 5.04]
-  times (s) 2.67 rates (Hz) [2.97, 5.0]
-  times (s) 2.89 rates (Hz) [2.96, 4.97]
-  times (s) 3.11 rates (Hz) [3.05, 5.16]
-  times (s) 3.33 rates (Hz) [3.1, 5.17]
-  times (s) 3.56 rates (Hz) [3.16, 5.09]
-  times (s) 3.78 rates (Hz) [3.18, 5.16]
-  times (s) 4.0 rates (Hz) [3.23, 5.32]
-  times (s) 4.22 rates (Hz) [3.26, 5.3]
-  times (s) 4.44 rates (Hz) [3.37, 5.45]
-  times (s) 4.67 rates (Hz) [3.38, 5.3]
-  times (s) 4.89 rates (Hz) [3.48, 5.47]
-  times (s) 5.11 rates (Hz) [3.58, 5.67]
-  times (s) 5.33 rates (Hz) [3.57, 5.51]
-  Elapsed (with compilation) = 0.3473608111962676s
-#+end_example
 
 *** Dynamics
 
@@ -106,8 +121,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (1, 675, 10000)
-[[file:./.ob-jupyter/2022c78bd64831369b22610c6c49c3f4c1b0bdec.png]]
+: (1, 1275, 10000)
+[[file:./.ob-jupyter/1428fa56dd01a4a5c0537f01c60cefc7f60aff7a.png]]
 :END:
 
 #+begin_src ipython
@@ -121,28 +136,21 @@
 
 #+RESULTS:
 :RESULTS:
-: (25, 7500)
-[[file:./.ob-jupyter/60bf74695aa38b936dda31d58969bf038ffa8a82.png]]
+: (49, 7500)
+[[file:./.ob-jupyter/41808e1d1b27df792910f40456a02e8d1bf894c5.png]]
 :END:
 
 #+RESULTS:
 
 #+begin_src ipython
-  ksi = model.PHI0.cpu().detach().numpy()
-  print(ksi.shape)
-
-  idx = np.arange(0, len(ksi[0]))
-  theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=1)
-  
-  index_order = theta.argsort()
-  rates_ordered = rates[:, index_order]
+  idx = get_idx(model)
+  rates_ordered = rates[:, idx]
 #+end_src
 
 #+RESULTS:
-: (2, 7500)
 
 #+begin_src ipython
-  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=15)
   plt.ylabel('Pref. Location (°)')
   plt.xlabel('Time (au)')
   plt.yticks(np.linspace(0, 7500, 5), np.linspace(0, 360, 5).astype(int))
@@ -151,7 +159,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/bfa38c9e4f93c9414d54c31de02ef7da625b41b6.png]]
+[[file:./.ob-jupyter/25a184d7842ca43e4ac6b44fa7c791f5f9dbd541.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -166,9 +174,9 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7bc9f04d0838969d31bd3c084e5d068edd84c077.png]]
+[[file:./.ob-jupyter/6f1e4c4a64ed5f3e3c12d412356b3e90bef12b45.png]]
 
-** Multiple Trials
+** Multiple initializations
 *** Parameters
 
 #+begin_src ipython
@@ -183,7 +191,7 @@
 
 #+begin_src ipython  
   start = perf_counter()
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', N_BATCH=10)
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', N_BATCH=50)
   rates = model.forward(REC_LAST_ONLY=0)
   end = perf_counter()
 
@@ -193,24 +201,46 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 0s
-: rates (25, 10, 7500)
+: torch.Size([7500])
+: torch.Size([7500])
+: Elapsed (with compilation) = 0h 0m 3s
+: rates (49, 50, 7500)
 
-*** Analysis
+*** Results
 
 #+begin_src ipython
-  ksi = model.PHI0.cpu().detach().numpy()
-
-  idx = np.arange(0, len(ksi[0]))
-  theta = get_theta(ksi[1], ksi[0], GM=0, IF_NORM=0)
-
-  index_order = theta.argsort()
-  rates_ordered = rates[..., index_order]
+  idx = get_idx(model)  
+  rates_ordered = rates[..., idx]
   print(rates_ordered.shape)
 #+end_src
 
 #+RESULTS:
-: (25, 10, 7500)
+: (49, 50, 7500)
+
+#+begin_src ipython
+  overlap = get_overlap(model, rates)
+  print(overlap.shape)
+#+end_src
+
+#+RESULTS:
+: (49, 50, 2)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].plot(overlap[..., 0])
+  ax[0].set_ylabel('Overlap on $\\xi_1$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(overlap[..., 1])
+  ax[1].set_ylabel('Overlap on $\\xi_2$ (Hz)')
+  ax[1].set_xlabel('Step')
+  
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/46859e74f81559324f1ad13a7512f868429c3259.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -218,28 +248,61 @@
 #+end_src
 
 #+RESULTS:
-: (25, 10)
+: (49, 50)
 
 #+begin_src ipython
-  plt.plot(phi * 180 / np.pi)
-  # plt.ylim([0, 360])
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+ 
+  ax[0].plot(m0)
+  #ax[0].set_ylim([0, 360])
+  #ax[0].set_yticks([0, 90, 180, 270, 360])
+  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(m1)
+  # ax[1].set_ylim([0, 360])
+  # ax[1].set_yticks([0, 90, 180, 270, 360])
+  ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
+  ax[1].set_xlabel('Step')
+
+  ax[2].plot(phi * 180 / np.pi)
+  ax[2].set_ylim([0, 360])
+  ax[2].set_yticks([0, 90, 180, 270, 360])
+  ax[2].set_ylabel('Phase (°)')
+  ax[2].set_xlabel('Step')
+
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/edaae9b91c69006adbdd8d313c3024ee8b48dacb.png]]
+[[file:./.ob-jupyter/2bee5ec27a7b0ac302cf2d74aecd2060db01e53d.png]]
+
 
 #+begin_src ipython
   plt.imshow(rates_ordered[:, 3].T, aspect='auto', cmap='jet', vmin=0, vmax=4)
   plt.ylabel('Pref. Location (°)')
   plt.xlabel('Time (au)')
-  plt.yticks(np.linspace(0, rates_ordered.shape[-1], 5), np.linspace(-180, 180, 5).astype(int))
+  plt.yticks(np.linspace(0, rates_ordered.shape[-1], 5), np.linspace(0, 360, 5).astype(int))
   plt.colorbar()
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f32254b87f9fe4b05ec3445668140cea7e652b01.png]]
+[[file:./.ob-jupyter/f3a763acfb29be1a993f917065683ffd803b6e89.png]]
+
+#+begin_src ipython
+  x = m1[-1]/ m0[-1] * np.cos(phi[-1])
+  y = m1[-1] / m0[-1] * np.sin(phi[-1])
+
+  fig, ax = plt.subplots(figsize=(height, height))
+  ax.plot(x, y, 'o')
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/080220f3bb44442c078c62848532c1f9cde5902d.png]]
 
 #+begin_src ipython
 
@@ -247,11 +310,11 @@
 
 #+RESULTS:
 
-*** Realizations
-**** Helpers
+** Different Realizations
+*** Helpers
 
 #+begin_src ipython
-  def run_X(conf_name, name, real_list, n_ini, device='cuda:0', **kwargs):
+  def run_X(conf_name, name, real_list, n_ini, device='cuda', **kwargs):
       start = perf_counter()
 
       rates = []
@@ -275,7 +338,15 @@
 
 #+RESULTS:
 
-**** Parameters
+*** Parameters
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  conf_name = "config_EI.yml"
+  name = "low_rank_ini"
+#+end_src
+
+#+RESULTS:
 
 #+begin_src ipython
   real_list = np.arange(0, 100)
@@ -284,135 +355,433 @@
 
 #+RESULTS:
 
-**** Run
+*** Run
 
 #+begin_src ipython
   rates, ksi = run_X(conf_name, name, real_list, n_ini, device='cuda')
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 35s
-
-**** Results
+: Elapsed (with compilation) = 0h 1m 4s
 
 #+begin_src ipython
-  print(rates.shape, ksi.shape)
+  rates_cov, ksi_cov = run_X(conf_name, name, real_list, n_ini, device='cuda', LR_COV=[[1.0, 0.1], [0.1, 1.0]])
 #+end_src
 
 #+RESULTS:
-: (100, 1, 7500) (100, 2, 7500)
+: Elapsed (with compilation) = 0h 1m 4s
 
 #+begin_src ipython
-  rates_ordered = rates
-  
-  for i in real_list:
+  rates_var, ksi_var = run_X(conf_name, name, real_list, n_ini, device='cuda', LR_COV=[[1.0, 0.0], [0.0, 1.25]])
+#+end_src
+
+#+RESULTS:
+: Elapsed (with compilation) = 0h 1m 4s
+
+#+begin_src ipython
+  rates_covar, ksi_covar = run_X(conf_name, name, real_list, n_ini, device='cuda', LR_COV=[[1.0, 0.1], [0.1, 1.25]])
+#+end_src
+
+#+RESULTS:
+: Elapsed (with compilation) = 0h 1m 4s
+
+*** Results
+
+#+begin_src ipython
+  rates_ord = rates
+
+  for i in real_list:      
       idx = np.arange(0, len(ksi[i][0]))
       theta = get_theta(ksi[i][1], ksi[i][0], GM=0, IF_NORM=0)
 
       index_order = theta.argsort()
-      rates_ordered[i] = rates[i][..., index_order]
-  print(rates_ordered.shape)
+      rates_ord[i] = rates[i][..., index_order]
+  print(rates_ord.shape)
+
+  m0, m1, phi = decode_bump(rates_ord, axis=-1)  
 #+end_src
 
 #+RESULTS:
 : (100, 1, 7500)
 
 #+begin_src ipython
-  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  rates_ord_cov = np.zeros(rates.shape)
+
+  for i in real_list:      
+      idx = np.arange(0, len(ksi_cov[i][0]))
+      theta = get_theta(ksi_cov[i][1], ksi_cov[i][0], GM=0, IF_NORM=0)
+
+      index_order = theta.argsort()
+      rates_ord_cov[i] = rates_cov[i][..., index_order]
+
+  print(rates_ord_cov.shape)
+   
+  m0_cov, m1_cov, phi_cov = decode_bump(rates_ord_cov, axis=-1)
 #+end_src
 
 #+RESULTS:
+: (100, 1, 7500)
 
 #+begin_src ipython
-  print(phi.shape)
-  plt.hist(phi[..., 0].T * 180 / np.pi)
+  rates_ord_var = np.zeros(rates.shape)
+
+  for i in real_list:
+      idx = np.arange(0, len(ksi_var[i][0]))
+      theta = get_theta(ksi_var[i][1], ksi_var[i][0], GM=0, IF_NORM=0)
+      
+      index_order = theta.argsort()
+      rates_ord_var[i] = rates_var[i][..., index_order]
+
+  print(rates_ord_var.shape)
+
+  m0_var, m1_var, phi_var = decode_bump(rates_ord_var, axis=-1)
+#+end_src
+
+#+RESULTS:
+: (100, 1, 7500)
+
+#+begin_src ipython
+  rates_ord_covar = np.zeros(rates.shape)
+
+  for i in real_list:
+      idx = np.arange(0, len(ksi_covar[i][0]))
+      theta = get_theta(ksi_covar[i][1], ksi_covar[i][0], GM=0, IF_NORM=0)
+      
+      index_order = theta.argsort()
+      rates_ord_covar[i] = rates_covar[i][..., index_order]
+
+  print(rates_ord_var.shape)
+
+  m0_covar, m1_covar, phi_covar = decode_bump(rates_ord_covar, axis=-1)
+#+end_src
+
+#+RESULTS:
+: (100, 1, 7500)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 4, figsize=[4*height, height])
+
+  ax[0].hist(phi[..., 0].T * 180 / np.pi, density=True, bins=25)
+  ax[0].set_title('$\\xi_1 . \\xi_2 = 0$')
+  ax[0].set_xlim([0, 360])
+  ax[0].set_xticks([0, 90, 180, 270, 360])
+
+  ax[1].hist(phi_cov[..., 0].T * 180 / np.pi, density=True, bins=25)
+  ax[1].set_title('$\\xi_1 . \\xi_2 > 0$')
+  ax[1].set_xlim([0, 360])
+  ax[1].set_xticks([0, 90, 180, 270, 360])
+
+  ax[2].hist(phi_var[..., 0].T * 180 / np.pi, density=True, bins=25)
+  ax[2].set_title('$\delta\\xi_1^2 < \delta\\xi_2^2$')
+  ax[2].set_xlim([0, 360])
+  ax[2].set_xticks([0, 90, 180, 270, 360])
+
+  ax[3].hist(phi_covar[..., 0].T * 180 / np.pi, density=True, bins=25)
+  ax[3].set_title('$\delta\\xi_1^2 < \delta\\xi_2^2$')
+  ax[3].set_xlim([0, 360])
+  ax[3].set_xticks([0, 90, 180, 270, 360])
+  
   plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: (100, 1)
-[[file:./.ob-jupyter/65b9078fdc06d167c08fcb11832503ad9c6053b5.png]]
-:END:
+[[file:./.ob-jupyter/13b710a9f63db9f53fb1f103a2715702f375938e.png]]
 
 #+begin_src ipython
+  fig, ax = plt.subplots(1, 4, figsize=[4*height, height])
+
   x = m1[..., 0] / m0[..., 0] * np.cos(phi[..., 0])
   y = m1[...,0] / m0[..., 0] * np.sin(phi[..., 0])
 
   # x = np.cos(phi[..., 0])
   # y = np.sin(phi[..., 0])
 
-  plt.plot(x, y, 'o')
-  plt.xlim([-2, 2])
-  plt.ylim([-2, 2])
-  plt.show()
-#+end_src
+  ax[0].plot(x, y, 'o')
+  ax[0].set_xlim([-2, 2])
+  ax[0].set_ylim([-2, 2])
+  ax[0].set_title('$\\xi_1 . \\xi_2 = 0$')
 
-#+RESULTS:
-[[file:./.ob-jupyter/87b15b1a162f3ebd291be5b86a9d06a32b603801.png]]
+  x_cov = m1_cov[..., 0] / m0_cov[..., 0] * np.cos(phi_cov[..., 0])
+  y_cov = m1_cov[...,0] / m0_cov[..., 0] * np.sin(phi_cov[..., 0])
 
-#+begin_src ipython
-  rates_ortho = rates.copy()
-#+end_src
+  ax[1].plot(x_cov, y_cov, 'o')
+  ax[1].set_xlim([-2, 2])
+  ax[1].set_ylim([-2, 2]) 
+  ax[1].set_title('$\\xi_1 . \\xi_2 > 0$')
 
-#+RESULTS:
+  x_var = m1_var[..., 0] / m0_var[..., 0] * np.cos(phi_var[..., 0])
+  y_var = m1_var[...,0] / m0_var[..., 0] * np.sin(phi_var[..., 0])
 
-*** Behavior
+  ax[2].plot(x_var, y_var, 'o')
+  ax[2].set_xlim([-2, 2])
+  ax[2].set_ylim([-2, 2]) 
+  ax[2].set_title('$\delta\\xi_1^2 < \delta\\xi_2^2$')
 
-#+begin_src ipython
-  ini_list = np.arange(0, 10)
-  phi_list = np.array([-1, 1])
+  x_covar = m1_covar[..., 0] / m0_covar[..., 0] * np.cos(phi_covar[..., 0])
+  y_covar = m1_covar[...,0] / m0_covar[..., 0] * np.sin(phi_covar[..., 0])
 
-  start = perf_counter()
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1')
-  rates = model.forward(ini_list=ini_list, phi_list=phi_list)
-  end = perf_counter()
+  ax[3].plot(x_covar, y_covar, 'o')
+  ax[3].set_xlim([-2, 2])
+  ax[3].set_ylim([-2, 2]) 
+  ax[3].set_title('$\delta\\xi_1^2 < \delta\\xi_2^2 $ \n $\\xi_1 . \\xi_2 > 0$')
   
-  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
-  print('rates', rates.shape)
-#+end_src
-
-#+RESULTS:
-: Elapsed (with compilation) = 0h 0m 39s
-: rates (41, 20, 20000)
-
-#+begin_src ipython
-  rates = rates.reshape(rates.shape[0], len(ini_list), len(phi_list), -1)
-  print(rates.shape)
-#+end_src
-
-#+RESULTS:
-: (41, 10, 2, 20000)
-
-#+begin_src ipython
-  ksi = model.ksi.cpu().detach().numpy()
-  idx = np.arange(0, len(ksi[0]))
-  # theta = sort_by_angle(idx, ksi[1], ksi[0])
-  # print(theta.shape)
-  theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=1)
-  # theta = np.arctan2(ksi[1], ksi[0])
-  index_order = theta.argsort()
-  # print(index_order)
-  rates_ordered = rates[..., index_order]
-  print(rates_ordered.shape)
-#+end_src
-
-#+RESULTS:
-: (41, 10, 2, 15000)
-
-#+begin_src ipython
-  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
-  print(m0.shape)
-#+end_src
-
-#+RESULTS:
-: (41, 10, 2)
-
-#+begin_src ipython
-  plt.plot(phi[..., 0] * 180/np.pi)
-  plt.plot(phi[..., 1] * 180/np.pi)
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f5f9d0940c0e022eb509cf351bb6356892c29235.png]]
+[[file:./.ob-jupyter/d6f19a336953a4cd97edf78de229fb82bcceeab8.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+** Behavior
+*** Helpers
+
+#+begin_src ipython
+  def run_behavior(conf_name, name, cov_list, n_ini, device='cuda', **kwargs):
+      start = perf_counter()
+
+      rates = []
+      ksi = []
+      for cov in cov_list:
+
+          model = Network(conf_name, '%s_cov_%.3f' % (name, cov),
+                          REPO_ROOT, DEVICE=device,
+                          LR_COV = [[1.0, cov], [cov, 1.0]],
+                          VERBOSE=0, SEED=0, N_BATCH=n_ini, **kwargs)
+
+          model.I0[0] = 1
+          sample_A = model.init_ff_input()
+
+          model.I0[0] = 1
+          sample_B = model.init_ff_input()
+
+          ff_input = torch.cat((sample_A, sample_B))
+
+          ksi.append(model.PHI0.cpu().detach().numpy())
+          rates.append(model.forward(ff_input, REC_LAST_ONLY=0))
+
+          del model
+
+      end = perf_counter()
+
+      print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))      
+
+      return np.array(rates), np.array(ksi)
+#+end_src
+
+#+RESULTS:
+
+*** Parameters
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  conf_name = "config_EI.yml"
+  name = "low_rank_ini"
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  cov_list = np.linspace(0.025, 0, 10)
+  print(cov_list)
+  n_ini = 50
+#+end_src
+
+#+RESULTS:
+: [0.025      0.02222222 0.01944444 0.01666667 0.01388889 0.01111111
+:  0.00833333 0.00555556 0.00277778 0.        ]
+
+*** Run
+
+#+begin_src ipython
+  rates, ksi = run_behavior(conf_name, name, cov_list, n_ini, device='cuda')
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  [[1.0, 0.025], [0.025, 1.0]]
+  [[1.0, 0.022222222222222223], [0.022222222222222223, 1.0]]
+  [[1.0, 0.019444444444444445], [0.019444444444444445, 1.0]]
+  [[1.0, 0.01666666666666667], [0.01666666666666667, 1.0]]
+  [[1.0, 0.01388888888888889], [0.01388888888888889, 1.0]]
+  [[1.0, 0.011111111111111112], [0.011111111111111112, 1.0]]
+  [[1.0, 0.008333333333333335], [0.008333333333333335, 1.0]]
+  [[1.0, 0.005555555555555557], [0.005555555555555557, 1.0]]
+  [[1.0, 0.0027777777777777783], [0.0027777777777777783, 1.0]]
+  [[1.0, 0.0], [0.0, 1.0]]
+  Elapsed (with compilation) = 0h 0m 51s
+#+end_example
+
+#+begin_src ipython
+  print(rates.shape)
+  print(ksi.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 49, 100, 7500)
+: (10, 2, 7500)
+
+#+begin_src ipython
+  rates_ord = rates.copy()
+  overlap = []
+
+  for i in range(len(cov_list)):
+      idx = np.arange(len(ksi[i][0]))
+      theta = get_theta(ksi[i][0], ksi[i][1], GM=0, IF_NORM=0)
+
+      overlap.append(rates[i] @ ksi[i].T / rates.shape[-1])
+      
+      index_order = theta.argsort()
+      rates_ord[i] = rates[i][..., index_order]
+  print(rates_ord.shape)
+
+  overlap = np.array(overlap)
+  m0, m1, phi = decode_bump(rates_ord, axis=-1)
+#+end_src
+
+#+RESULTS:
+: (10, 49, 100, 7500)
+
+#+begin_src ipython
+  print(m0.shape)
+  print(overlap.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 49, 100)
+: (10, 49, 100, 2)
+
+#+begin_src ipython
+  x = m1 / m0 * np.cos(phi)
+  print(x.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 49, 100)
+
+#+begin_src ipython  
+  performance = np.mean(x[:,-1] >0, axis=-1) * 100
+  print(performance)
+  plt.plot(performance)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: [ 0.  0.  1.  7. 71. 16.  7.  2. 89. 77.]
+[[file:./.ob-jupyter/a858f9ac5c021e7a9c114fb9543a9d5ee14308a3.png]]
+:END:
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+**** single
+
+#+begin_src ipython
+  ini = -1
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].plot(overlap[ini, ..., 0])
+  ax[0].set_ylabel('Overlap on $\\xi_1$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(overlap[ini, ..., 1])
+  ax[1].set_ylabel('Overlap on $\\xi_2$ (Hz)')
+  ax[1].set_xlabel('Step')
+  
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/2f23900bf28538eeb7f3aa10227ed4556e8dc79d.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+ 
+  ax[0].plot(m0[ini])
+  #ax[0].set_ylim([0, 360])
+  #ax[0].set_yticks([0, 90, 180, 270, 360])
+  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(m1[ini])
+  # ax[1].set_ylim([0, 360])
+  # ax[1].set_yticks([0, 90, 180, 270, 360])
+  ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
+  ax[1].set_xlabel('Step')
+
+  ax[2].plot(phi[ini] * 180 / np.pi)
+  ax[2].set_ylim([0, 360])
+  ax[2].set_yticks([0, 90, 180, 270, 360])
+  ax[2].set_ylabel('Phase (°)')
+  ax[2].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/38d23665f60b5a00ab443805129a7337a9a4f818.png]]
+
+#+begin_src ipython
+  x = m1[ini, -1]/ m0[ini, -1] * np.cos(phi[ini, -1])
+  y = m1[ini, -1] / m0[ini, -1] * np.sin(phi[ini, -1])
+
+  fig, ax = plt.subplots(figsize=(height, height))
+  ax.plot(x, y, 'o')
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/0c69274474902e5676ca841698f522ccbc8983cd.png]]
+
+#+RESULTS:
+: 0.0
+
+#+begin_src ipython
+
+#+end_src
+
+*** o
+#+begin_src ipython
+  model.N_BATCH = 50
+  model.I0[0] = 1 
+  sample_A = model.init_ff_input()
+
+  model.I0[0] = 1
+  sample_B = model.init_ff_input()
+
+  ff_input = torch.cat((sample_A, sample_B))
+  print(ff_input.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[47], line 1
+: ----> 1 model.N_BATCH = 50
+:       2 model.I0[0] = 1 
+:       3 sample_A = model.init_ff_input()
+: 
+: NameError: name 'model' is not defined
+:END:
+
+#+begin_src ipython
+  rates = model.forward(ff_input, REC_LAST_ONLY=0)
+  ksi = model.PHI0.cpu().detach().numpy()
+#+end_src
+
+#+RESULTS:

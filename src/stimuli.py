@@ -10,7 +10,13 @@ class Stimuli():
         self.device = device
         
     def odrStim(self, strength, footprint, phase):
-        """Stimulus for the 8 target ODR"""
+        """
+        Stimulus for the 8 target ODR (cosine shape)
+        args:
+        float: strength: strength of the stimulus
+        float: footprint: footprint/tuning width of the stimulus
+        float: phase: location of the stimulus
+        """
         # Amp = self.I1[0]
         # if self.I1[1]>0:
         #     Amp = Amp + self.I1[1] * torch.randn((self.N_BATCH, 1), dtype=self.FLOAT, device=self.DEVICE)
@@ -20,8 +26,18 @@ class Stimuli():
         return strength * (1.0 + footprint * torch.cos(theta_list - phase * torch.pi / 180.0))
     
     def dualStim(self, strength, footprint, phase):
-        """Stimulus for the Dual Task"""
-        return   pow(-1, int(2*torch.rand((1,)))) *strength * (footprint * phase)
+        """
+        Stimulus for the Dual Task
+        args:
+        float: strength: strength of the stimulus
+        float: footprint: variance of the stimulus
+        float: phase: stimulus gaussian vector
+        """
+
+        # dum = (2 * torch.rand(self.size)).to(torch.int).to(self.device)
+        # return   pow(-1, dum) * strength * (footprint * phase)
+        
+        return strength * (footprint * phase)
     
     def forward(self, strength, footprint, phase):
         if self.task=='odr':

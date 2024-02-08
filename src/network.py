@@ -21,34 +21,46 @@ class Network(nn.Module):
     def __init__(self, conf_file, sim_name, repo_root, **kwargs):
         super().__init__()
 
-        # load parameters
+        # Load parameters from configuration file
         self.loadConfig(conf_file, sim_name, repo_root, **kwargs)
 
+        # Set seed for the connectivity/input vectors
         set_seed(self.SEED)
         
-        # compute constants (time steps, time constants, ...)
+        # Rescale some parameters (time steps, time constants, ...)
         self.initConst()
         
-        # rescale weights
+        # Rescale synaptic weights for balance state
         self.scaleParam()
         
-        # adds stp
+        # Add STP
         if self.IF_STP:
             self.stp = STP_Model(self.N_NEURON, self.csumNa, self.DT, self.FLOAT, self.device)
         
-        # initialize network connectivity
+        # Initialize network connectivity
         self.initWeights()
+
+        # Reset the seed
+        set_seed(0)
+
+        if self.LR_TRAIN:
+            self.U = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)), device=self.device, dtype=self.FLOAT))
+            self.mask = torch.ones((self.N_NEURON, self.N_NEURON), device=self.device, dtype=self.FLOAT)
         
-        # self.U = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)), device=self.device, dtype=self.FLOAT))
-        # self.mask = torch.ones((self.N_NEURON, self.N_NEURON), device=self.device, dtype=self.FLOAT)
-        
-        # for i_pop in range(self.N_POP):
-        #     for j_pop in range(self.N_POP):
-        #         if i_pop!=0 and j_pop!=0:
-        #             self.mask[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
-        #                       self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = 0
-        
+            for i_pop in range(self.N_POP):
+                for j_pop in range(self.N_POP):
+                    if i_pop!=0 and j_pop!=0:
+                        self.mask[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
+                                  self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = 0
+                        
+            self.linear = nn.Linear(self.Na[0], 1, device=self.device, dtype=self.FLOAT)
+          
     def initWeights(self):
+        '''
+        Initializes the connectivity matrix self.Wab.
+        Loops over (pre, post) blocks to create the full matrix.
+        Relies on class Connectivity from connetivity.py
+        '''
         # set seed for connectivity
         
         # in pytorch, Wij is i to j.
@@ -68,12 +80,10 @@ class Network(nn.Module):
                                                        lr_cov=self.LR_COV,
                                                        ksi=self.PHI0)
                 
-                self.Wab[self.csumNa[i_pop] : self.csumNa[i_pop + 1]
-                         , self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = self.Jab[i_pop][j_pop] * weights
+                self.Wab[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
+                         self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = self.Jab[i_pop][j_pop] * weights
                 
         del weights
-        # resets the seed
-        set_seed(0)
     
     def update_dynamics(self, rates, ff_input, rec_input):
         '''Updates the dynamics of the model at each timestep'''
@@ -82,18 +92,19 @@ class Network(nn.Module):
         A_u_x = 1.0
         if self.IF_STP:
             A_u_x = self.stp.markram_stp(rates)
-        
-        # lr = self.mask * (1.0 + self.U @ self.U.T / torch.sqrt(self.Ka[0]))
-        # hidden = (A_u_x * rates) @ (self.Wab.T * lr)
-        
-        hidden = (A_u_x * rates) @ self.Wab.T
+
+        if self.LR_TRAIN:
+            lr = self.mask * (1.0 + self.U @ self.U.T / torch.sqrt(self.Ka[0]))
+            hidden = (A_u_x * rates) @ (self.Wab.T * lr)
+        else:
+            hidden = (A_u_x * rates) @ self.Wab.T
         
         # update reccurent input
         if self.SYN_DYN:
             rec_input = self.EXP_DT_TAU_SYN * rec_input + self.DT_TAU_SYN * hidden
         else:
             rec_input = hidden
-            
+        
         # compute net input
         net_input = ff_input + rec_input
         
@@ -107,48 +118,60 @@ class Network(nn.Module):
     
     def forward(self, ff_input=None, REC_LAST_ONLY=1):
         '''
-        main method of the class
-        :param ff_input: float (N_BATCH, N_TIME, N_NEURONS)
-        :param REC_LAST_ONLY: bool
+        Main method of the Network class.
+        args:
+        :param ff_input: float (N_BATCH, N_TIME, N_NEURONS), ff inputs into the network.
+        :param REC_LAST_ONLY: bool, wether to record the last timestep only.
+        output:
+        :param output: float (N_BATCH, N_TIME or 1, N_NEURONS), rates of the neurons. 
         '''
         
         if self.VERBOSE:
             start = perf_counter()
         
-        result = []
+        output = []
         
-        # initialization
+        # Initialization (if  ff_input is None, ff_input is generated)
         rates, rec_input, self.ff_input = self.initialization(ff_input)
         
-        # moving average
+        # Dummy variable to compute the moving average of the rates
         mv_rates = 0
-        
+
+        # Temporal loop 
         for step in range(self.N_STEPS):
             rates, rec_input = self.update_dynamics(rates, self.ff_input[:, step], rec_input)
             mv_rates += rates
-            
+
+            # Needs that to start summing from 0
             if step == self.N_STEADY-self.N_WINDOW-1:
                 mv_rates *= 0.0
-            
+                
+            # Waits until N_STEADY
             if step >= self.N_STEADY:
+                # Then every N_WINDOW appends mv_rates to output
                 if step % self.N_WINDOW == 0:
                     if self.VERBOSE:
                         self.print_activity(step, rates)
                     
                     if REC_LAST_ONLY==0:
-                        result.append(mv_rates[..., :self.Na[0]].cpu().detach().numpy() / self.N_WINDOW)
+                        output.append(mv_rates[..., :self.Na[0]].cpu().detach().numpy() / self.N_WINDOW)
                     
                     # reset mv avg
                     mv_rates = 0
         
         if REC_LAST_ONLY:
-            result = rates[..., :self.Na[0]]
+            output = rates[..., :self.Na[0]]
         else:
-            result = np.array(result)
+            output = np.array(output)
         
+        if self.LR_TRAIN:
+            y_pred = self.linear(output)
+            
+            return torch.sigmoid(y_pred).squeeze(-1)
+            
         # if self.VERBOSE:
         # print('Saving rates to:', self.DATA_PATH + self.FILE_NAME + '.npy')
-        # np.save(self.DATA_PATH + self.FILE_NAME + '.npy', result)
+        # np.save(self.DATA_PATH + self.FILE_NAME + '.npy', output)
         
         # clear_cache()
         
@@ -156,7 +179,7 @@ class Network(nn.Module):
             end = perf_counter()
             print("Elapsed (with compilation) = {}s".format((end - start)))
         
-        return result
+        return output
     
     def print_activity(self, step, rates):
         
@@ -269,11 +292,13 @@ class Network(nn.Module):
             mean_ = torch.tensor(self.LR_MEAN, dtype=self.FLOAT, device=self.device)
             # Define the covariance matrix
             cov_ = torch.tensor(self.LR_COV, dtype=self.FLOAT, device=self.device)
-            
+            # print(self.LR_COV)
             multivariate_normal = MultivariateNormal(mean_, cov_)
             del mean_, cov_
             
             self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
+
+
             del multivariate_normal
             
     def scaleParam(self):
@@ -303,10 +328,10 @@ class Network(nn.Module):
         
         ff_input = torch.zeros(self.N_BATCH, self.N_STEPS, self.N_NEURON, dtype=self.FLOAT, device=self.device)
         noise = torch.randn((self.N_BATCH, self.N_STEPS, self.N_NEURON), dtype=self.FLOAT, device=self.device)
-
+        
         for i_pop in range(self.N_POP):
             noise[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = noise[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] * self.VAR_FF[i_pop]
-        
+
         for i in range(self.N_POP):
             ff_input[:, :self.N_STIM_ON[0], self.csumNa[i]:self.csumNa[i+1]] = self.Ja0[i] * (1-self.BUMP_SWITCH[i])
         
@@ -314,12 +339,16 @@ class Network(nn.Module):
             ff_input[:, self.N_STIM_ON[0]:, self.csumNa[i]:self.csumNa[i+1]] = self.Ja0[i]
         
         for i in range(len(self.N_STIM_ON)):
+            
+            size = (self.N_BATCH, self.N_STIM_OFF[i]-self.N_STIM_ON[i], self.Na[0])
+            if i==0:
+                dum = pow(-1, (2 * torch.rand(size)).to(torch.int).to(self.device))                
+                
+            stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[i])
+            
             ff_input[:, self.N_STIM_ON[i]:self.N_STIM_OFF[i],
-                     self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + Stimuli(self.TASK, (self.N_BATCH,
-                                                                                        self.N_STIM_OFF[i]-self.N_STIM_ON[i],
-                                                                                        self.Na[0]),
-                                                                            )(self.I0[i], self.SIGMA0[i], self.PHI0[i])
+                     self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + stimulus
         
-        return (ff_input + noise) * torch.sqrt(self.Ka[0]) * self.M0
-
-    
+        del stimulus
+                
+        return ff_input * torch.sqrt(self.Ka[0]) * self.M0 + noise
