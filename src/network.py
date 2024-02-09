@@ -39,22 +39,22 @@ class Network(nn.Module):
         
         # Initialize network connectivity
         self.initWeights()
-
-        # Reset the seed
-        set_seed(0)
-
+        
         if self.LR_TRAIN:
             self.U = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)), device=self.device, dtype=self.FLOAT))
-            self.mask = torch.ones((self.N_NEURON, self.N_NEURON), device=self.device, dtype=self.FLOAT)
-        
-            for i_pop in range(self.N_POP):
-                for j_pop in range(self.N_POP):
-                    if i_pop!=0 and j_pop!=0:
-                        self.mask[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
-                                  self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = 0
-                        
-            self.linear = nn.Linear(self.Na[0], 1, device=self.device, dtype=self.FLOAT)
-          
+            # self.V = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)), device=self.device, dtype=self.FLOAT))
+            self.mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device, dtype=self.FLOAT)
+            
+            self.mask[self.csumNa[0] : self.csumNa[1],
+                      self.csumNa[0] : self.csumNa[1]] = 1.0
+            
+            self.linear = nn.Linear(self.Na[0], 1, device=self.device, dtype=self.FLOAT, bias=False)
+            
+            self.lr_kappa = nn.Parameter(5 * torch.rand(1))
+            
+        # Reset the seed
+        set_seed(0)
+            
     def initWeights(self):
         '''
         Initializes the connectivity matrix self.Wab.
@@ -92,9 +92,9 @@ class Network(nn.Module):
         A_u_x = 1.0
         if self.IF_STP:
             A_u_x = self.stp.markram_stp(rates)
-
+        
         if self.LR_TRAIN:
-            lr = self.mask * (1.0 + self.U @ self.U.T / torch.sqrt(self.Ka[0]))
+            lr = 1.0 + self.lr_kappa * self.mask * (self.U @ self.U.T) / torch.sqrt(self.Ka[0])
             hidden = (A_u_x * rates) @ (self.Wab.T * lr)
         else:
             hidden = (A_u_x * rates) @ self.Wab.T
@@ -118,7 +118,7 @@ class Network(nn.Module):
     
     def forward(self, ff_input=None, REC_LAST_ONLY=1):
         '''
-        Main method of the Network class.
+        Main method of Network class, runs networks dynamics over set of timesteps and returns rates at each time point or just the last time point.
         args:
         :param ff_input: float (N_BATCH, N_TIME, N_NEURONS), ff inputs into the network.
         :param REC_LAST_ONLY: bool, wether to record the last timestep only.
@@ -141,7 +141,7 @@ class Network(nn.Module):
         for step in range(self.N_STEPS):
             rates, rec_input = self.update_dynamics(rates, self.ff_input[:, step], rec_input)
             mv_rates += rates
-
+            
             # Needs that to start summing from 0
             if step == self.N_STEADY-self.N_WINDOW-1:
                 mv_rates *= 0.0
@@ -154,20 +154,22 @@ class Network(nn.Module):
                         self.print_activity(step, rates)
                     
                     if REC_LAST_ONLY==0:
-                        output.append(mv_rates[..., :self.Na[0]].cpu().detach().numpy() / self.N_WINDOW)
-                    
+                        output.append(mv_rates[..., :self.Na[0]] / self.N_WINDOW)
                     # reset mv avg
                     mv_rates = 0
         
         if REC_LAST_ONLY:
             output = rates[..., :self.Na[0]]
         else:
-            output = np.array(output)
-        
-        if self.LR_TRAIN:
-            y_pred = self.linear(output)
+            output = torch.cat(output, dim=0).reshape((self.N_BATCH, -1, self.Na[0]))
             
-            return torch.sigmoid(y_pred).squeeze(-1)
+        if self.LR_TRAIN:
+            if REC_LAST_ONLY:
+                y_pred = self.linear(output)
+            else:
+                y_pred = self.linear(output[:, -1, ...])
+            
+            return torch.sigmoid(y_pred.squeeze(-1))
             
         # if self.VERBOSE:
         # print('Saving rates to:', self.DATA_PATH + self.FILE_NAME + '.npy')
@@ -287,7 +289,7 @@ class Network(nn.Module):
         self.PHASE = torch.tensor(self.PHASE * torch.pi / 180.0, dtype=self.FLOAT, device=self.device)
         
         self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
-                       
+        
         if self.TASK == 'dual':
             mean_ = torch.tensor(self.LR_MEAN, dtype=self.FLOAT, device=self.device)
             # Define the covariance matrix
