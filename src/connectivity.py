@@ -29,22 +29,26 @@ class Connectivity():
             
             del mean_
             del cov_
-            del mv_normal        
+            del mv_normal
         else:
             self.ksi = ksi
         
         if self.verbose:
             print('ksi', self.ksi.shape)
         
-        Lij = 0
-        for i in range(self.ksi.shape[0]):
-            Lij = Lij + torch.outer(self.ksi[i], self.ksi[i])
-            
-        Pij = 1.0 + kappa * Lij / torch.sqrt(self.Kb)
+        # Lij = 0
+        # for i in range(self.ksi.shape[0]):
+        #     Lij = Lij + torch.outer(self.ksi[i], self.ksi[i])
+        
+        # Pij = 1.0 + kappa * Lij / torch.sqrt(self.Kb)        
+        # del Lij
+        
+        Pij = 1.0 + kappa * (ksi.T @ ksi) / torch.sqrt(self.Kb)
+        
+        # print(Pij.shape)
         
         # Pij[Pij>1] = 1
         # Pij[Pij<0] = 0
-        del Lij
         
         return Pij
     
@@ -88,6 +92,7 @@ class Connectivity():
             Pij = torch.tensor(1.0, dtype=self.dtype, device=self.device)
             if self.verbose:
                 print('uniform probability')
+                
         return Pij
     
     def forward(self, con_type, proba_type, **kwargs):
@@ -109,9 +114,8 @@ class Connectivity():
             if self.verbose:
                 print('Sparse random connectivity')
             
-            Cij = torch.rand(self.Na, self.Nb, device=self.device) < (self.Kb / float(self.Nb) * Pij)            
-
-        
+            Cij = torch.rand(self.Na, self.Nb, device=self.device) <= (self.Kb / float(self.Nb) * Pij)
+            
         # fully connected network that scales as 1/Nb
         if 'all2all' in con_type:
             if self.verbose:
@@ -145,4 +149,3 @@ class Connectivity():
     def __call__(self, con_type='sparse', proba_type='unif', **kwargs):
         # This method will be called when you do Conn()()
         return self.forward(con_type, proba_type, **kwargs)
-    

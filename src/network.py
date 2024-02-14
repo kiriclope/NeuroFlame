@@ -11,19 +11,30 @@ from time import perf_counter
 from src.connectivity import Connectivity
 from src.activation import Activation
 from src.stimuli import Stimuli
-from src.plasticity import STP_Model
+from src.plasticity import Plasticity
 from src.utils import set_seed, clear_cache
 
 import warnings
 warnings.filterwarnings("ignore")
 
 class Network(nn.Module):
+    
     def __init__(self, conf_file, sim_name, repo_root, **kwargs):
+        '''
+        Class: Network:
+        Creates a recurrent network of rate units with customizable connectivity and dynamics.
+        The network can be trained with standard torch optimization technics.
+        Param: conf_file: name of the configuration file with network's parameters.
+               sim_name: name of the output file for saving purposes.
+               repo_root: root path for the NeuroTorch repository.
+               **kwargs: any parameter in the configuration file can be passed and will then be overwritten.
+        '''
+        
         super().__init__()
-
+        
         # Load parameters from configuration file
         self.loadConfig(conf_file, sim_name, repo_root, **kwargs)
-
+        
         # Set seed for the connectivity/input vectors
         set_seed(self.SEED)
         
@@ -33,35 +44,39 @@ class Network(nn.Module):
         # Rescale synaptic weights for balance state
         self.scaleParam()
         
-        # Add STP
-        if self.IF_STP:
-            self.stp = STP_Model(self.N_NEURON, self.csumNa, self.DT, self.FLOAT, self.device)
-        
         # Initialize network connectivity
         self.initWeights()
-        
+                    
+        # Train a low rank connectivity
         if self.LR_TRAIN:
+            # Low rank vector
             self.U = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)), device=self.device, dtype=self.FLOAT))
             # self.V = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)), device=self.device, dtype=self.FLOAT))
+
+            # Mask to train excitatory neurons only
             self.mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device, dtype=self.FLOAT)
-            
+        
             self.mask[self.csumNa[0] : self.csumNa[1],
                       self.csumNa[0] : self.csumNa[1]] = 1.0
             
+            # Linear readout for supervised learning
+            # self.linear = nn.Linear(self.N_NEURON, 1, device=self.device, dtype=self.FLOAT, bias=False)
             self.linear = nn.Linear(self.Na[0], 1, device=self.device, dtype=self.FLOAT, bias=False)
             
             self.lr_kappa = nn.Parameter(5 * torch.rand(1))
             
+            # Window where to evaluate loss
+            self.lr_eval_win = int(self.LR_EVAL_WIN / self.DT / self.N_WINDOW)
+                        
         # Reset the seed
         set_seed(0)
-            
+        
     def initWeights(self):
         '''
         Initializes the connectivity matrix self.Wab.
         Loops over (pre, post) blocks to create the full matrix.
         Relies on class Connectivity from connetivity.py
         '''
-        # set seed for connectivity
         
         # in pytorch, Wij is i to j.
         self.Wab = torch.zeros((self.N_NEURON, self.N_NEURON), dtype=self.FLOAT, device=self.device)
@@ -82,7 +97,7 @@ class Network(nn.Module):
                 
                 self.Wab[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
                          self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = self.Jab[i_pop][j_pop] * weights
-                
+        
         del weights
     
     def update_dynamics(self, rates, ff_input, rec_input):
@@ -91,28 +106,37 @@ class Network(nn.Module):
         # update stp variables
         A_u_x = 1.0
         if self.IF_STP:
-            A_u_x = self.stp.markram_stp(rates)
-        
+            A_u_x = self.stp(rates[:, :self.Na[0]])
+            stp_ee = (rates[:, :self.Na[0]] * A_u_x) @ self.W_stp.T
+            
         if self.LR_TRAIN:
-            lr = 1.0 + self.lr_kappa * self.mask * (self.U @ self.U.T) / torch.sqrt(self.Ka[0])
-            hidden = (A_u_x * rates) @ (self.Wab.T * lr)
+            lr = (1.0 + self.mask * self.KAPPA[0][0] * (self.U @ self.U.T) / torch.sqrt(self.Ka[0]))
+            hidden = rates @ (self.Wab.T * lr.T)
         else:
-            hidden = (A_u_x * rates) @ self.Wab.T
+            hidden = rates @ self.Wab.T
+        
+        if self.IF_STP:
+            hidden[:, :self.Na[0]] = hidden[:, :self.Na[0]] + stp_ee
+        
+        # update thresholds
+        # if self.THRESH_DYN:
+        #     thresh = self.EXP_DT_TAU_THRESH * thresh + self.DT_TAU_THRESH * (thresh * rates)
         
         # update reccurent input
         if self.SYN_DYN:
             rec_input = self.EXP_DT_TAU_SYN * rec_input + self.DT_TAU_SYN * hidden
         else:
             rec_input = hidden
-        
+
         # compute net input
         net_input = ff_input + rec_input
+        non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
         
         # update rates
         if self.RATE_DYN:
-            rates = self.EXP_DT_TAU * rates + self.DT_TAU * Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
+            rates = self.EXP_DT_TAU * rates + self.DT_TAU * non_linear
         else:
-            rates = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
+            rates = non_linear
         
         return rates, rec_input
     
@@ -133,49 +157,56 @@ class Network(nn.Module):
         
         # Initialization (if  ff_input is None, ff_input is generated)
         rates, rec_input, self.ff_input = self.initialization(ff_input)
-        
-        # Dummy variable to compute the moving average of the rates
-        mv_rates = 0
 
-        # Temporal loop 
+        ################################################
+        # WARNING STP WAS NOT TESTED AND MIGHT BE BROKEN
+        ###############################################
+        # Add STP
+        if self.IF_STP:
+            self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC, self.DT, (self.N_BATCH, self.Na[0]), FLOAT=self.FLOAT, device=self.device)
+            self.W_stp = self.Wab[:self.Na[0], :self.Na[0]]
+            self.Wab[:self.Na[0], :self.Na[0]] = 0
+        
+        # Moving average of the rates
+        mv_rates = 0
+        
+        # Temporal loop
         for step in range(self.N_STEPS):
+            # update dynamics
             rates, rec_input = self.update_dynamics(rates, self.ff_input[:, step], rec_input)
+
+            # update moving average
             mv_rates += rates
             
-            # Needs that to start summing from 0
+            # Reset moving average to start at 0
             if step == self.N_STEADY-self.N_WINDOW-1:
                 mv_rates *= 0.0
                 
-            # Waits until N_STEADY
+            # update output every N_WINDOW steps
             if step >= self.N_STEADY:
-                # Then every N_WINDOW appends mv_rates to output
                 if step % self.N_WINDOW == 0:
+                    
                     if self.VERBOSE:
                         self.print_activity(step, rates)
                     
-                    if REC_LAST_ONLY==0:
-                        output.append(mv_rates[..., :self.Na[0]] / self.N_WINDOW)
-                    # reset mv avg
+                    # output.append(mv_rates / self.N_WINDOW)
+                    output.append(mv_rates[..., :self.Na[0]] / self.N_WINDOW)
+                    
+                    # Reset moving average
                     mv_rates = 0
+
+        # Stack output list to 1st dim so that output is (N_BATCH, N_STEPS, N_NEURON)
+        output = torch.stack(output, dim=1)
+        
+        # Add Linear readout (N_BATCH, N_EVAL_WIN, 1) on last few steps
+        if self.LR_TRAIN:
+            y_pred = self.linear(output[:, -self.lr_eval_win:, ...])
+            return y_pred.squeeze(-1)
         
         if REC_LAST_ONLY:
             output = rates[..., :self.Na[0]]
-        else:
-            output = torch.cat(output, dim=0).reshape((self.N_BATCH, -1, self.Na[0]))
-            
-        if self.LR_TRAIN:
-            if REC_LAST_ONLY:
-                y_pred = self.linear(output)
-            else:
-                y_pred = self.linear(output[:, -1, ...])
-            
-            return torch.sigmoid(y_pred.squeeze(-1))
-            
-        # if self.VERBOSE:
-        # print('Saving rates to:', self.DATA_PATH + self.FILE_NAME + '.npy')
-        # np.save(self.DATA_PATH + self.FILE_NAME + '.npy', output)
         
-        # clear_cache()
+        clear_cache()
         
         if self.VERBOSE:
             end = perf_counter()
@@ -189,9 +220,9 @@ class Network(nn.Module):
         
         activity = []
         for i in range(self.N_POP):
-            activity.append(np.round(torch.mean(rates[:, self.csumNa[i]:self.csumNa[i+1]]).cpu().detach().numpy(), 2))
+            activity.append(np.round(torch.mean(rates[:, self.csumNa[i]:self.csumNa[i+1]]).item(), 2))
         
-        print("times (s)", np.round(times, 2), "rates (Hz)", activity)
+        print("times (s)", times, "rates (Hz)", activity)
     
     def loadConfig(self, conf_file, sim_name, repo_root, **kwargs):
         # Loading configuration file
@@ -228,6 +259,8 @@ class Network(nn.Module):
                 print('generating ff input')
             ff_input = self.init_ff_input()
         else:
+            ff_input = ff_input.to(self.device)
+            # print('ff_input', ff_input.shape)
             self.N_BATCH = ff_input.shape[0]
         
         rec_input = torch.randn((self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
@@ -242,7 +275,7 @@ class Network(nn.Module):
         
         self.N_STIM_ON = [int(i / self.DT) + self.N_STEADY for i in self.T_STIM_ON]
         self.N_STIM_OFF = [int(i / self.DT) + self.N_STEADY for i in self.T_STIM_OFF]
-
+        
         self.Na = []
         self.Ka = []
         
@@ -257,7 +290,7 @@ class Network(nn.Module):
         self.Na = torch.tensor(self.Na, dtype=torch.int, device=self.device)
         self.Ka = torch.tensor(self.Ka, dtype=self.FLOAT, device=self.device)
         self.csumNa = torch.cat((torch.tensor([0], device=self.device), torch.cumsum(self.Na, dim=0)))
-
+        
         if self.VERBOSE:
             print("Na", self.Na, "Ka", self.Ka, "csumNa", self.csumNa)
 
@@ -267,6 +300,7 @@ class Network(nn.Module):
         
         for i_pop in range(self.N_POP):
             self.EXP_DT_TAU[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU[i_pop])
+            # self.EXP_DT_TAU[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = (1.0 - self.DT / self.TAU[i_pop])
             self.DT_TAU[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = self.DT / self.TAU[i_pop]
 
         # if self.VERBOSE:
@@ -278,6 +312,7 @@ class Network(nn.Module):
         
         for i_pop in range(self.N_POP):
             self.EXP_DT_TAU_SYN[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU_SYN[i_pop])
+            # self.EXP_DT_TAU_SYN[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = (1.0-self.DT / self.TAU_SYN[i_pop])
             self.DT_TAU_SYN[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = self.DT / self.TAU_SYN[i_pop]
         
         # if self.VERBOSE:
@@ -296,11 +331,13 @@ class Network(nn.Module):
             cov_ = torch.tensor(self.LR_COV, dtype=self.FLOAT, device=self.device)
             # print(self.LR_COV)
             multivariate_normal = MultivariateNormal(mean_, cov_)
-            del mean_, cov_
             
             self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
-
-
+            
+            # if cov_[1][0] == 0 :
+            #     self.PHI0[1] = self.PHI0[1] - self.PHI0[1] @ self.PHI0[0] / (self.PHI0[0] @ self.PHI0[0]) * self.PHI0[0]
+            
+            del mean_, cov_
             del multivariate_normal
             
     def scaleParam(self):
@@ -328,29 +365,27 @@ class Network(nn.Module):
         Inputs can be noisy or not and depend on the task.
         """
         
-        ff_input = torch.zeros(self.N_BATCH, self.N_STEPS, self.N_NEURON, dtype=self.FLOAT, device=self.device)
-        noise = torch.randn((self.N_BATCH, self.N_STEPS, self.N_NEURON), dtype=self.FLOAT, device=self.device)
+        # ff_input = torch.zeros(self.N_BATCH, self.N_STEPS, self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        ff_input = torch.randn((self.N_BATCH, self.N_STEPS, self.N_NEURON), dtype=self.FLOAT, device=self.device)
         
         for i_pop in range(self.N_POP):
-            noise[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = noise[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] * self.VAR_FF[i_pop]
-
-        for i in range(self.N_POP):
-            ff_input[:, :self.N_STIM_ON[0], self.csumNa[i]:self.csumNa[i+1]] = self.Ja0[i] * (1-self.BUMP_SWITCH[i])
+            ff_input[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = ff_input[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] * self.VAR_FF[i_pop] / torch.sqrt(self.Ka[0])
         
         for i in range(self.N_POP):
-            ff_input[:, self.N_STIM_ON[0]:, self.csumNa[i]:self.csumNa[i+1]] = self.Ja0[i]
+            ff_input[:, :self.N_STIM_ON[0], self.csumNa[i]:self.csumNa[i+1]] += self.Ja0[i] / torch.sqrt(self.Ka[0]) # * (1-self.BUMP_SWITCH[i])
+        
+        for i in range(self.N_POP):
+            ff_input[:, self.N_STIM_ON[0]:, self.csumNa[i]:self.csumNa[i+1]] += self.Ja0[i]
         
         for i in range(len(self.N_STIM_ON)):
             
             size = (self.N_BATCH, self.N_STIM_OFF[i]-self.N_STIM_ON[i], self.Na[0])
-            if i==0:
-                dum = pow(-1, (2 * torch.rand(size)).to(torch.int).to(self.device))                
-                
+            
             stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[i])
             
             ff_input[:, self.N_STIM_ON[i]:self.N_STIM_OFF[i],
-                     self.csumNa[0]:self.csumNa[1]] = self.Ja0[0] + stimulus
+                     self.csumNa[0]:self.csumNa[1]] += self.Ja0[0] + stimulus
         
         del stimulus
-                
-        return ff_input * torch.sqrt(self.Ka[0]) * self.M0 + noise
+        
+        return ff_input * torch.sqrt(self.Ka[0]) * self.M0 

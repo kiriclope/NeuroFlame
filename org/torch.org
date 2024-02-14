@@ -68,10 +68,10 @@
 #+begin_src ipython
   def get_idx(model):
       ksi = model.PHI0.cpu().detach().numpy()
-      # print(ksi.shape)
+      print(ksi.shape)
 
       idx = np.arange(0, len(ksi[0]))
-      theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=1)
+      theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=0)
 
       return theta.argsort()
 #+end_src
@@ -93,11 +93,62 @@
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  model = Network('config_EI.yml', 'dual', REPO_ROOT, VERBOSE=0, DEVICE='cuda')
-  rates = model.forward(REC_LAST_ONLY=0)[:,0]
+  model = Network('config_EI.yml', 'dual', REPO_ROOT, VERBOSE=1, DEVICE='cuda', LR_TRAIN=0)
+  
+  rates = model.forward(REC_LAST_ONLY=0).detach().cpu().numpy()[0]
+
+  Ne = model.Na[0].detach().cpu().numpy()
+  N = model.N_NEURON
+
+  print(rates.shape)
 #+end_src
 
 #+RESULTS:
+#+begin_example
+  Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
+  Jab [1.0, -1.5, 1, -1]
+  Ja0 [2.0, 1.0]
+  generating ff input
+  times (s) 0.0 rates (Hz) [1.21, 2.06]
+  times (s) 0.22 rates (Hz) [1.24, 2.1]
+  times (s) 0.44 rates (Hz) [1.19, 2.04]
+  times (s) 0.66 rates (Hz) [1.15, 1.92]
+  times (s) 0.88 rates (Hz) [78.99, 27.36]
+  times (s) 1.1 rates (Hz) [33.97, 41.52]
+  times (s) 1.32 rates (Hz) [24.03, 32.27]
+  times (s) 1.54 rates (Hz) [25.02, 35.88]
+  times (s) 1.76 rates (Hz) [25.39, 40.16]
+  times (s) 1.98 rates (Hz) [10.38, 16.53]
+  times (s) 2.2 rates (Hz) [9.54, 15.09]
+  times (s) 2.41 rates (Hz) [9.58, 15.11]
+  times (s) 2.63 rates (Hz) [11.29, 17.77]
+  times (s) 2.85 rates (Hz) [12.1, 18.36]
+  times (s) 3.07 rates (Hz) [20.1, 18.04]
+  times (s) 3.29 rates (Hz) [32.75, 44.28]
+  times (s) 3.51 rates (Hz) [34.55, 49.16]
+  times (s) 3.73 rates (Hz) [31.08, 46.27]
+  times (s) 3.95 rates (Hz) [27.6, 45.94]
+  times (s) 4.17 rates (Hz) [10.18, 17.9]
+  times (s) 4.39 rates (Hz) [10.45, 17.28]
+  times (s) 4.61 rates (Hz) [10.15, 16.23]
+  times (s) 4.83 rates (Hz) [11.23, 17.62]
+  times (s) 5.05 rates (Hz) [10.73, 17.39]
+  times (s) 5.27 rates (Hz) [22.71, 18.18]
+  times (s) 5.49 rates (Hz) [31.4, 41.32]
+  times (s) 5.71 rates (Hz) [33.21, 50.47]
+  times (s) 5.93 rates (Hz) [31.0, 48.93]
+  times (s) 6.15 rates (Hz) [25.8, 41.25]
+  times (s) 6.37 rates (Hz) [11.65, 18.5]
+  times (s) 6.59 rates (Hz) [10.23, 16.49]
+  times (s) 6.8 rates (Hz) [11.43, 17.38]
+  times (s) 7.02 rates (Hz) [12.03, 19.16]
+  times (s) 7.24 rates (Hz) [10.7, 17.64]
+  times (s) 7.46 rates (Hz) [11.91, 18.25]
+  times (s) 7.68 rates (Hz) [13.11, 20.06]
+  times (s) 7.9 rates (Hz) [12.82, 19.79]
+  Elapsed (with compilation) = 0.7208402194082737s
+  (37, 8000)
+#+end_example
 
 *** Dynamics
 
@@ -105,7 +156,7 @@
   ff_input = model.ff_input.cpu().detach().numpy()
   print(ff_input.shape)
   
-  fig, ax = plt.subplots(1, 2)
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 
   ax[0].plot(ff_input[0, :, :5])
   ax[0].plot(ff_input[0, :, -5:])
@@ -115,14 +166,28 @@
   ax[1].imshow(ff_input[0].T, cmap='jet', vmin=0, aspect='auto')
   ax[1].set_xlabel('Step')
   ax[1].set_ylabel('Neuron #')
-  ax[1].set_ylim([0, 10000])
+  ax[1].set_ylim([0, N])
   plt.show()
 #+end_src
 
 #+RESULTS:
 :RESULTS:
-: (1, 1275, 10000)
-[[file:./.ob-jupyter/1428fa56dd01a4a5c0537f01c60cefc7f60aff7a.png]]
+# [goto error]
+#+begin_example
+  ---------------------------------------------------------------------------
+  AttributeError                            Traceback (most recent call last)
+  Cell In[8], line 1
+  ----> 1 ff_input = model.ff_input.cpu().detach().numpy()
+        2 print(ff_input.shape)
+        4 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/nn/modules/module.py:1695, in Module.__getattr__(self, name)
+     1693     if name in modules:
+     1694         return modules[name]
+  -> 1695 raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+  AttributeError: 'Network' object has no attribute 'ff_input'
+#+end_example
 :END:
 
 #+begin_src ipython
@@ -136,11 +201,55 @@
 
 #+RESULTS:
 :RESULTS:
-: (49, 7500)
-[[file:./.ob-jupyter/41808e1d1b27df792910f40456a02e8d1bf894c5.png]]
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[9], line 1
+: ----> 1 print(rates.shape)
+:       2 r_max = 15 # 0.5 * np.max(rates[-1])
+:       4 plt.imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+: 
+: NameError: name 'rates' is not defined
 :END:
 
 #+RESULTS:
+
+#+begin_src ipython
+  overlap = get_overlap(model, rates)
+  print(overlap.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[10], line 1
+: ----> 1 overlap = get_overlap(model, rates)
+:       2 print(overlap.shape)
+: 
+: NameError: name 'rates' is not defined
+:END:
+
+#+begin_src ipython
+  plt.plot(overlap)
+  plt.xlabel('Step')
+  plt.ylabel('Overlap')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[11], line 1
+: ----> 1 plt.plot(overlap)
+:       2 plt.xlabel('Step')
+:       3 plt.ylabel('Overlap')
+: 
+: NameError: name 'overlap' is not defined
+:END:
 
 #+begin_src ipython
   idx = get_idx(model)
@@ -148,24 +257,54 @@
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+: (3, 8000)
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[12], line 2
+:       1 idx = get_idx(model)
+: ----> 2 rates_ordered = rates[:, idx]
+: 
+: NameError: name 'rates' is not defined
+:END:
 
 #+begin_src ipython
-  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=15)
+  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=10)
   plt.ylabel('Pref. Location (°)')
   plt.xlabel('Time (au)')
-  plt.yticks(np.linspace(0, 7500, 5), np.linspace(0, 360, 5).astype(int))
+  plt.yticks(np.linspace(0, Ne, 5), np.linspace(0, 360, 5).astype(int))
   plt.colorbar()
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/25a184d7842ca43e4ac6b44fa7c791f5f9dbd541.png]]
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[13], line 1
+: ----> 1 plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=10)
+:       2 plt.ylabel('Pref. Location (°)')
+:       3 plt.xlabel('Time (au)')
+: 
+: NameError: name 'rates_ordered' is not defined
+:END:
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[14], line 1
+: ----> 1 m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+: 
+: NameError: name 'rates_ordered' is not defined
+:END:
 
 #+begin_src ipython
   plt.plot((phi * 180 / np.pi))
@@ -174,7 +313,23 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/6f1e4c4a64ed5f3e3c12d412356b3e90bef12b45.png]]
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[15], line 1
+: ----> 1 plt.plot((phi * 180 / np.pi))
+:       2 plt.yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))  
+:       3 plt.show()
+: 
+: NameError: name 'phi' is not defined
+:END:
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 ** Multiple initializations
 *** Parameters
@@ -191,8 +346,18 @@
 
 #+begin_src ipython  
   start = perf_counter()
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', N_BATCH=50)
-  rates = model.forward(REC_LAST_ONLY=0)
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', N_BATCH=10, LR_TRAIN=0)
+
+  model.I0[0] = 1
+  sample_A = model.init_ff_input()
+
+  model.I0[0] = -1
+  sample_B = model.init_ff_input()
+
+  ff_input = torch.vstack((sample_A, sample_B))
+  print(ff_input.shape)
+  
+  rates = model.forward(ff_input, REC_LAST_ONLY=0).detach().cpu().numpy()
   end = perf_counter()
 
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
@@ -201,46 +366,88 @@
 #+end_src
 
 #+RESULTS:
-: torch.Size([7500])
-: torch.Size([7500])
-: Elapsed (with compilation) = 0h 0m 3s
-: rates (49, 50, 7500)
+: torch.Size([20, 1025, 10000])
+: Elapsed (with compilation) = 0h 0m 1s
+: rates (20, 37, 8000)
 
 *** Results
 
+#+begin_src ipython 
+  ff_input = model.ff_input.cpu().detach().numpy()
+  print(ff_input.shape)
+
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+  ax[0].plot(ff_input[0, :, :5])
+  ax[0].plot(ff_input[1, :, :5])
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('FF Input')
+
+  ax[1].imshow(ff_input[1].T, cmap='jet', vmin=0, aspect='auto')
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('Neuron #')
+  ax[1].set_ylim([0, N])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (20, 1025, 10000)
+[[file:./.ob-jupyter/6ada64859bb686624136b9333af9e832aa29fdbd.png]]
+:END:
+
 #+begin_src ipython
-  idx = get_idx(model)  
+  print(rates.mean(-1).shape)
+  plt.plot(rates.mean(-1).T)
+  plt.xlabel('Step')
+  plt.ylabel('Rates (Hz)')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (20, 37)
+[[file:./.ob-jupyter/777efadb4cbefe62f63b77d6fbc800c242ca386f.png]]
+:END:
+
+#+begin_src ipython
+  idx = get_idx(model)
   rates_ordered = rates[..., idx]
   print(rates_ordered.shape)
 #+end_src
 
 #+RESULTS:
-: (49, 50, 7500)
+: (3, 8000)
+: (20, 37, 8000)
 
 #+begin_src ipython
   overlap = get_overlap(model, rates)
-  print(overlap.shape)
+  print(overlap.T.shape)
 #+end_src
 
 #+RESULTS:
-: (49, 50, 2)
+: (3, 37, 20)
 
 #+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
 
-  ax[0].plot(overlap[..., 0])
+  ax[0].plot(overlap.T[0])
   ax[0].set_ylabel('Overlap on $\\xi_1$ (Hz)')
   ax[0].set_xlabel('Step')
 
-  ax[1].plot(overlap[..., 1])
+  ax[1].plot(overlap.T[1])
   ax[1].set_ylabel('Overlap on $\\xi_2$ (Hz)')
   ax[1].set_xlabel('Step')
+
+  ax[2].plot(overlap.T[2])
+  ax[2].set_ylabel('Overlap on $\\xi_3$ (Hz)')
+  ax[2].set_xlabel('Step')
   
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/46859e74f81559324f1ad13a7512f868429c3259.png]]
+[[file:./.ob-jupyter/248751a20dd7311f8aa9d6df7f59b9d0b411c17b.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -248,24 +455,24 @@
 #+end_src
 
 #+RESULTS:
-: (49, 50)
+: (20, 37)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
- 
-  ax[0].plot(m0)
+  
+  ax[0].plot(m0.T)
   #ax[0].set_ylim([0, 360])
   #ax[0].set_yticks([0, 90, 180, 270, 360])
   ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
   ax[0].set_xlabel('Step')
 
-  ax[1].plot(m1)
+  ax[1].plot(m1.T)
   # ax[1].set_ylim([0, 360])
   # ax[1].set_yticks([0, 90, 180, 270, 360])
   ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
   ax[1].set_xlabel('Step')
 
-  ax[2].plot(phi * 180 / np.pi)
+  ax[2].plot(phi.T * 180 / np.pi)
   ax[2].set_ylim([0, 360])
   ax[2].set_yticks([0, 90, 180, 270, 360])
   ax[2].set_ylabel('Phase (°)')
@@ -275,11 +482,12 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2bee5ec27a7b0ac302cf2d74aecd2060db01e53d.png]]
-
+[[file:./.ob-jupyter/d6b218f3f9b2f447bcec6572a0afe72297f54979.png]]
 
 #+begin_src ipython
-  plt.imshow(rates_ordered[:, 3].T, aspect='auto', cmap='jet', vmin=0, vmax=4)
+  print(rates_ordered.shape)
+  
+  plt.imshow(rates_ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=5)
   plt.ylabel('Pref. Location (°)')
   plt.xlabel('Time (au)')
   plt.yticks(np.linspace(0, rates_ordered.shape[-1], 5), np.linspace(0, 360, 5).astype(int))
@@ -288,12 +496,15 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f3a763acfb29be1a993f917065683ffd803b6e89.png]]
+:RESULTS:
+: (20, 37, 8000)
+[[file:./.ob-jupyter/883a96afcf2818cd7377e1da05b3c0f123c88c3a.png]]
+:END:
 
 #+begin_src ipython
-  x = m1[-1]/ m0[-1] * np.cos(phi[-1])
-  y = m1[-1] / m0[-1] * np.sin(phi[-1])
-
+  x = m1[:, -1]/ m0[:, -1] * np.cos(phi[:, -1])
+  y = m1[:, -1] / m0[:, -1] * np.sin(phi[:, -1])
+  
   fig, ax = plt.subplots(figsize=(height, height))
   ax.plot(x, y, 'o')
   ax.set_xlim([-2, 2])
@@ -302,7 +513,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/080220f3bb44442c078c62848532c1f9cde5902d.png]]
+[[file:./.ob-jupyter/034bc31f431834e1b80579bcb79c1cffd75ddd7f.png]]
 
 #+begin_src ipython
 
@@ -322,10 +533,19 @@
       for real in real_list:
 
           model = Network(conf_name, '%s_real_%d' % (name, real),
-                          REPO_ROOT, DEVICE=device,  VERBOSE=0, SEED=0, N_BATCH=n_ini, **kwargs)
+                          REPO_ROOT, DEVICE=device,  VERBOSE=0, SEED=0,
+                          LR_TRAIN=0, N_BATCH=n_ini, **kwargs)
+
+          model.I0[0] = 1
+          sample_A = model.init_ff_input()
           
+          model.I0[0] = -1
+          sample_B = model.init_ff_input()
+
+          ff_input = torch.cat((sample_A, sample_B))
+
           ksi.append(model.PHI0.cpu().detach().numpy())
-          rates.append(model.forward().cpu().detach().numpy())
+          rates.append(model.forward(ff_input, REC_LAST_ONLY=1).cpu().detach().numpy())
 
           del model
 
@@ -349,7 +569,8 @@
 #+RESULTS:
 
 #+begin_src ipython
-  real_list = np.arange(0, 100)
+  real_list = np.arange(0, 50)
+  cov_list = [0.0, 0.1, ]
   n_ini = 1
 #+end_src
 
@@ -362,47 +583,227 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 4s
+: Elapsed (with compilation) = 0h 0m 55s
 
 #+begin_src ipython
   rates_cov, ksi_cov = run_X(conf_name, name, real_list, n_ini, device='cuda', LR_COV=[[1.0, 0.1], [0.1, 1.0]])
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 4s
+:RESULTS:
+# [goto error]
+#+begin_example
+  ---------------------------------------------------------------------------
+  RuntimeError                              Traceback (most recent call last)
+  Cell In[44], line 1
+  ----> 1 rates_cov, ksi_cov = run_X(conf_name, name, real_list, n_ini, device='cuda', LR_COV=[[1.0, 0.1], [0.1, 1.0]])
+
+  Cell In[40], line 8, in run_X(conf_name, name, real_list, n_ini, device, **kwargs)
+        5 ksi = []
+        6 for real in real_list:
+  ----> 8     model = Network(conf_name, '%s_real_%d' % (name, real),
+        9                     REPO_ROOT, DEVICE=device,  VERBOSE=0, SEED=0,
+       10                     LR_TRAIN=0, N_BATCH=n_ini, **kwargs)
+       12     model.I0[0] = 1
+       13     sample_A = model.init_ff_input()
+
+  File ~/models/NeuroTorch/org/../src/network.py:42, in Network.__init__(self, conf_file, sim_name, repo_root, **kwargs)
+       39 set_seed(self.SEED)
+       41 # Rescale some parameters (time steps, time constants, ...)
+  ---> 42 self.initConst()
+       44 # Rescale synaptic weights for balance state
+       45 self.scaleParam()
+
+  File ~/models/NeuroTorch/org/../src/network.py:335, in Network.initConst(self)
+      332 # print(self.LR_COV)
+      333 multivariate_normal = MultivariateNormal(mean_, cov_)
+  --> 335 self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
+      337 # if cov_[1][0] == 0 :
+      338 #     self.PHI0[1] = self.PHI0[1] - self.PHI0[1] @ self.PHI0[0] / (self.PHI0[0] @ self.PHI0[0]) * self.PHI0[0]
+      340 del mean_, cov_
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/distributions/distribution.py:164, in Distribution.sample(self, sample_shape)
+      159 """
+      160 Generates a sample_shape shaped sample or sample_shape shaped batch of
+      161 samples if the distribution parameters are batched.
+      162 """
+      163 with torch.no_grad():
+  --> 164     return self.rsample(sample_shape)
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/distributions/multivariate_normal.py:242, in MultivariateNormal.rsample(self, sample_shape)
+      240 shape = self._extended_shape(sample_shape)
+      241 eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
+  --> 242 return self.loc + _batch_mv(self._unbroadcasted_scale_tril, eps)
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/distributions/multivariate_normal.py:22, in _batch_mv(bmat, bvec)
+       11 def _batch_mv(bmat, bvec):
+       12     r"""
+       13     Performs a batched matrix-vector product, with compatible but different batch shapes.
+       14 
+     (...)
+       20     just ones which can be broadcasted.
+       21     """
+  ---> 22     return torch.matmul(bmat, bvec.unsqueeze(-1)).squeeze(-1)
+
+  RuntimeError: Expected size for first two dimensions of batch2 tensor to be: [8000, 2] but got: [8000, 3].
+#+end_example
+:END:
 
 #+begin_src ipython
-  rates_var, ksi_var = run_X(conf_name, name, real_list, n_ini, device='cuda', LR_COV=[[1.0, 0.0], [0.0, 1.25]])
+  rates_var, ksi_var = run_X(conf_name, name, real_list, n_ini, device='cuda', LR_COV=[[0.75, 0.0], [0.0, 0.75]])
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 4s
+:RESULTS:
+# [goto error]
+#+begin_example
+  ---------------------------------------------------------------------------
+  RuntimeError                              Traceback (most recent call last)
+  Cell In[45], line 1
+  ----> 1 rates_var, ksi_var = run_X(conf_name, name, real_list, n_ini, device='cuda', LR_COV=[[0.75, 0.0], [0.0, 0.75]])
+
+  Cell In[40], line 8, in run_X(conf_name, name, real_list, n_ini, device, **kwargs)
+        5 ksi = []
+        6 for real in real_list:
+  ----> 8     model = Network(conf_name, '%s_real_%d' % (name, real),
+        9                     REPO_ROOT, DEVICE=device,  VERBOSE=0, SEED=0,
+       10                     LR_TRAIN=0, N_BATCH=n_ini, **kwargs)
+       12     model.I0[0] = 1
+       13     sample_A = model.init_ff_input()
+
+  File ~/models/NeuroTorch/org/../src/network.py:42, in Network.__init__(self, conf_file, sim_name, repo_root, **kwargs)
+       39 set_seed(self.SEED)
+       41 # Rescale some parameters (time steps, time constants, ...)
+  ---> 42 self.initConst()
+       44 # Rescale synaptic weights for balance state
+       45 self.scaleParam()
+
+  File ~/models/NeuroTorch/org/../src/network.py:335, in Network.initConst(self)
+      332 # print(self.LR_COV)
+      333 multivariate_normal = MultivariateNormal(mean_, cov_)
+  --> 335 self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
+      337 # if cov_[1][0] == 0 :
+      338 #     self.PHI0[1] = self.PHI0[1] - self.PHI0[1] @ self.PHI0[0] / (self.PHI0[0] @ self.PHI0[0]) * self.PHI0[0]
+      340 del mean_, cov_
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/distributions/distribution.py:164, in Distribution.sample(self, sample_shape)
+      159 """
+      160 Generates a sample_shape shaped sample or sample_shape shaped batch of
+      161 samples if the distribution parameters are batched.
+      162 """
+      163 with torch.no_grad():
+  --> 164     return self.rsample(sample_shape)
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/distributions/multivariate_normal.py:242, in MultivariateNormal.rsample(self, sample_shape)
+      240 shape = self._extended_shape(sample_shape)
+      241 eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
+  --> 242 return self.loc + _batch_mv(self._unbroadcasted_scale_tril, eps)
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/distributions/multivariate_normal.py:22, in _batch_mv(bmat, bvec)
+       11 def _batch_mv(bmat, bvec):
+       12     r"""
+       13     Performs a batched matrix-vector product, with compatible but different batch shapes.
+       14 
+     (...)
+       20     just ones which can be broadcasted.
+       21     """
+  ---> 22     return torch.matmul(bmat, bvec.unsqueeze(-1)).squeeze(-1)
+
+  RuntimeError: Expected size for first two dimensions of batch2 tensor to be: [8000, 2] but got: [8000, 3].
+#+end_example
+:END:
 
 #+begin_src ipython
   rates_covar, ksi_covar = run_X(conf_name, name, real_list, n_ini, device='cuda', LR_COV=[[1.0, 0.1], [0.1, 1.25]])
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 4s
+:RESULTS:
+# [goto error]
+#+begin_example
+  ---------------------------------------------------------------------------
+  RuntimeError                              Traceback (most recent call last)
+  Cell In[46], line 1
+  ----> 1 rates_covar, ksi_covar = run_X(conf_name, name, real_list, n_ini, device='cuda', LR_COV=[[1.0, 0.1], [0.1, 1.25]])
+
+  Cell In[40], line 8, in run_X(conf_name, name, real_list, n_ini, device, **kwargs)
+        5 ksi = []
+        6 for real in real_list:
+  ----> 8     model = Network(conf_name, '%s_real_%d' % (name, real),
+        9                     REPO_ROOT, DEVICE=device,  VERBOSE=0, SEED=0,
+       10                     LR_TRAIN=0, N_BATCH=n_ini, **kwargs)
+       12     model.I0[0] = 1
+       13     sample_A = model.init_ff_input()
+
+  File ~/models/NeuroTorch/org/../src/network.py:42, in Network.__init__(self, conf_file, sim_name, repo_root, **kwargs)
+       39 set_seed(self.SEED)
+       41 # Rescale some parameters (time steps, time constants, ...)
+  ---> 42 self.initConst()
+       44 # Rescale synaptic weights for balance state
+       45 self.scaleParam()
+
+  File ~/models/NeuroTorch/org/../src/network.py:335, in Network.initConst(self)
+      332 # print(self.LR_COV)
+      333 multivariate_normal = MultivariateNormal(mean_, cov_)
+  --> 335 self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
+      337 # if cov_[1][0] == 0 :
+      338 #     self.PHI0[1] = self.PHI0[1] - self.PHI0[1] @ self.PHI0[0] / (self.PHI0[0] @ self.PHI0[0]) * self.PHI0[0]
+      340 del mean_, cov_
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/distributions/distribution.py:164, in Distribution.sample(self, sample_shape)
+      159 """
+      160 Generates a sample_shape shaped sample or sample_shape shaped batch of
+      161 samples if the distribution parameters are batched.
+      162 """
+      163 with torch.no_grad():
+  --> 164     return self.rsample(sample_shape)
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/distributions/multivariate_normal.py:242, in MultivariateNormal.rsample(self, sample_shape)
+      240 shape = self._extended_shape(sample_shape)
+      241 eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
+  --> 242 return self.loc + _batch_mv(self._unbroadcasted_scale_tril, eps)
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/distributions/multivariate_normal.py:22, in _batch_mv(bmat, bvec)
+       11 def _batch_mv(bmat, bvec):
+       12     r"""
+       13     Performs a batched matrix-vector product, with compatible but different batch shapes.
+       14 
+     (...)
+       20     just ones which can be broadcasted.
+       21     """
+  ---> 22     return torch.matmul(bmat, bvec.unsqueeze(-1)).squeeze(-1)
+
+  RuntimeError: Expected size for first two dimensions of batch2 tensor to be: [8000, 2] but got: [8000, 3].
+#+end_example
+:END:
+
+#+begin_src ipython
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (50, 2, 8000)
 
 *** Results
 
 #+begin_src ipython
-  rates_ord = rates
-
-  for i in real_list:      
+  rates_ord = np.zeros(rates.shape)
+  
+  for i in real_list:
       idx = np.arange(0, len(ksi[i][0]))
       theta = get_theta(ksi[i][1], ksi[i][0], GM=0, IF_NORM=0)
 
       index_order = theta.argsort()
-      rates_ord[i] = rates[i][..., index_order]
+      rates_ord[i] = rates[i][ ..., index_order]
   print(rates_ord.shape)
 
-  m0, m1, phi = decode_bump(rates_ord, axis=-1)  
+  m0, m1, phi = decode_bump(rates_ord, axis=-1)
+  print(m0.shape)
 #+end_src
 
 #+RESULTS:
-: (100, 1, 7500)
+: (50, 2, 8000)
+: (50, 2)
 
 #+begin_src ipython
   rates_ord_cov = np.zeros(rates.shape)
@@ -415,12 +816,24 @@
       rates_ord_cov[i] = rates_cov[i][..., index_order]
 
   print(rates_ord_cov.shape)
-   
+
   m0_cov, m1_cov, phi_cov = decode_bump(rates_ord_cov, axis=-1)
 #+end_src
 
 #+RESULTS:
-: (100, 1, 7500)
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[55], line 4
+:       1 rates_ord_cov = np.zeros(rates.shape)
+:       3 for i in real_list:      
+: ----> 4     idx = np.arange(0, len(ksi_cov[i][0]))
+:       5     theta = get_theta(ksi_cov[i][1], ksi_cov[i][0], GM=0, IF_NORM=0)
+:       7     index_order = theta.argsort()
+: 
+: NameError: name 'ksi_cov' is not defined
+:END:
 
 #+begin_src ipython
   rates_ord_var = np.zeros(rates.shape)
@@ -438,7 +851,19 @@
 #+end_src
 
 #+RESULTS:
-: (100, 1, 7500)
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[56], line 4
+:       1 rates_ord_var = np.zeros(rates.shape)
+:       3 for i in real_list:
+: ----> 4     idx = np.arange(0, len(ksi_var[i][0]))
+:       5     theta = get_theta(ksi_var[i][1], ksi_var[i][0], GM=0, IF_NORM=0)
+:       7     index_order = theta.argsort()
+: 
+: NameError: name 'ksi_var' is not defined
+:END:
 
 #+begin_src ipython
   rates_ord_covar = np.zeros(rates.shape)
@@ -446,94 +871,132 @@
   for i in real_list:
       idx = np.arange(0, len(ksi_covar[i][0]))
       theta = get_theta(ksi_covar[i][1], ksi_covar[i][0], GM=0, IF_NORM=0)
-      
+
       index_order = theta.argsort()
       rates_ord_covar[i] = rates_covar[i][..., index_order]
 
   print(rates_ord_var.shape)
 
   m0_covar, m1_covar, phi_covar = decode_bump(rates_ord_covar, axis=-1)
+  print(m0_covar.shape)
 #+end_src
 
 #+RESULTS:
-: (100, 1, 7500)
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[57], line 4
+:       1 rates_ord_covar = np.zeros(rates.shape)
+:       3 for i in real_list:
+: ----> 4     idx = np.arange(0, len(ksi_covar[i][0]))
+:       5     theta = get_theta(ksi_covar[i][1], ksi_covar[i][0], GM=0, IF_NORM=0)
+:       7     index_order = theta.argsort()
+: 
+: NameError: name 'ksi_covar' is not defined
+:END:
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 4, figsize=[4*height, height])
 
-  ax[0].hist(phi[..., 0].T * 180 / np.pi, density=True, bins=25)
+  ax[0].hist(phi * 180 / np.pi, density=True, bins=20)
   ax[0].set_title('$\\xi_1 . \\xi_2 = 0$')
   ax[0].set_xlim([0, 360])
   ax[0].set_xticks([0, 90, 180, 270, 360])
 
-  ax[1].hist(phi_cov[..., 0].T * 180 / np.pi, density=True, bins=25)
+  ax[1].hist(phi_cov * 180 / np.pi, density=True, bins=10)
   ax[1].set_title('$\\xi_1 . \\xi_2 > 0$')
   ax[1].set_xlim([0, 360])
   ax[1].set_xticks([0, 90, 180, 270, 360])
 
-  ax[2].hist(phi_var[..., 0].T * 180 / np.pi, density=True, bins=25)
+  ax[2].hist(phi_var * 180 / np.pi, density=True, bins=25)
   ax[2].set_title('$\delta\\xi_1^2 < \delta\\xi_2^2$')
   ax[2].set_xlim([0, 360])
   ax[2].set_xticks([0, 90, 180, 270, 360])
-
-  ax[3].hist(phi_covar[..., 0].T * 180 / np.pi, density=True, bins=25)
+  
+  ax[3].hist(phi_covar * 180 / np.pi, density=True, bins=25)
   ax[3].set_title('$\delta\\xi_1^2 < \delta\\xi_2^2$')
   ax[3].set_xlim([0, 360])
   ax[3].set_xticks([0, 90, 180, 270, 360])
-  
+
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/13b710a9f63db9f53fb1f103a2715702f375938e.png]]
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[58], line 8
+:       5 ax[0].set_xlim([0, 360])
+:       6 ax[0].set_xticks([0, 90, 180, 270, 360])
+: ----> 8 ax[1].hist(phi_cov * 180 / np.pi, density=True, bins=10)
+:       9 ax[1].set_title('$\\xi_1 . \\xi_2 > 0$')
+:      10 ax[1].set_xlim([0, 360])
+: 
+: NameError: name 'phi_cov' is not defined
+[[file:./.ob-jupyter/e31796f9b9ea0449b59179c6e2e95c47cb0b5e48.png]]
+:END:
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 4, figsize=[4*height, height])
 
-  x = m1[..., 0] / m0[..., 0] * np.cos(phi[..., 0])
-  y = m1[...,0] / m0[..., 0] * np.sin(phi[..., 0])
-
-  # x = np.cos(phi[..., 0])
-  # y = np.sin(phi[..., 0])
-
+  x = m1 / m0 * np.cos(phi)
+  y = m1 / m0 * np.sin(phi)
+  
   ax[0].plot(x, y, 'o')
   ax[0].set_xlim([-2, 2])
   ax[0].set_ylim([-2, 2])
   ax[0].set_title('$\\xi_1 . \\xi_2 = 0$')
 
-  x_cov = m1_cov[..., 0] / m0_cov[..., 0] * np.cos(phi_cov[..., 0])
-  y_cov = m1_cov[...,0] / m0_cov[..., 0] * np.sin(phi_cov[..., 0])
+  x_cov = m1_cov / m0_cov * np.cos(phi_cov)
+  y_cov = m1_cov / m0_cov * np.sin(phi_cov)
 
   ax[1].plot(x_cov, y_cov, 'o')
   ax[1].set_xlim([-2, 2])
   ax[1].set_ylim([-2, 2]) 
   ax[1].set_title('$\\xi_1 . \\xi_2 > 0$')
 
-  x_var = m1_var[..., 0] / m0_var[..., 0] * np.cos(phi_var[..., 0])
-  y_var = m1_var[...,0] / m0_var[..., 0] * np.sin(phi_var[..., 0])
+  x_var = m1_var / m0_var * np.cos(phi_var)
+  y_var = m1_var / m0_var * np.sin(phi_var)
 
   ax[2].plot(x_var, y_var, 'o')
   ax[2].set_xlim([-2, 2])
   ax[2].set_ylim([-2, 2]) 
   ax[2].set_title('$\delta\\xi_1^2 < \delta\\xi_2^2$')
 
-  x_covar = m1_covar[..., 0] / m0_covar[..., 0] * np.cos(phi_covar[..., 0])
-  y_covar = m1_covar[...,0] / m0_covar[..., 0] * np.sin(phi_covar[..., 0])
+  x_covar = m1_covar / m0_covar * np.cos(phi_covar)
+  y_covar = m1_covar / m0_covar * np.sin(phi_covar)
 
   ax[3].plot(x_covar, y_covar, 'o')
   ax[3].set_xlim([-2, 2])
   ax[3].set_ylim([-2, 2]) 
   ax[3].set_title('$\delta\\xi_1^2 < \delta\\xi_2^2 $ \n $\\xi_1 . \\xi_2 > 0$')
-  
+
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/d6f19a336953a4cd97edf78de229fb82bcceeab8.png]]
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[59], line 11
+:       8 ax[0].set_ylim([-2, 2])
+:       9 ax[0].set_title('$\\xi_1 . \\xi_2 = 0$')
+: ---> 11 x_cov = m1_cov / m0_cov * np.cos(phi_cov)
+:      12 y_cov = m1_cov / m0_cov * np.sin(phi_cov)
+:      14 ax[1].plot(x_cov, y_cov, 'o')
+: 
+: NameError: name 'm1_cov' is not defined
+[[file:./.ob-jupyter/f6cdd201df50716fc71670e92c1ca7a504c2176d.png]]
+:END:
 
 #+begin_src ipython
 
 #+end_src
+
+#+RESULTS:
 
 ** Behavior
 *** Helpers
@@ -547,22 +1010,23 @@
       for cov in cov_list:
 
           model = Network(conf_name, '%s_cov_%.3f' % (name, cov),
-                          REPO_ROOT, DEVICE=device,
-                          LR_COV = [[1.0, cov], [cov, 1.0]],
+                          REPO_ROOT, DEVICE=device, LR_TRAIN=0,
+                          # LR_COV = [[1.0, cov], [cov, 1.0]],
+                          LR_COV = [[1.0, 0.0, cov], [0.0 , 1.0, cov], [cov, cov, 1.0]],
                           VERBOSE=0, SEED=0, N_BATCH=n_ini, **kwargs)
 
-          model.I0[0] = 1
+          model.I0[0] = .1
           sample_A = model.init_ff_input()
 
-          model.I0[0] = 1
+          model.I0[0] = -.1
           sample_B = model.init_ff_input()
 
           ff_input = torch.cat((sample_A, sample_B))
 
+          rates.append(model.forward(ff_input, REC_LAST_ONLY=0).cpu().detach().numpy())
           ksi.append(model.PHI0.cpu().detach().numpy())
-          rates.append(model.forward(ff_input, REC_LAST_ONLY=0))
 
-          del model
+          del model         
 
       end = perf_counter()
 
@@ -584,35 +1048,25 @@
 #+RESULTS:
 
 #+begin_src ipython
-  cov_list = np.linspace(0.025, 0, 10)
+  cov_list = np.linspace(0.2, 0, 10)
   print(cov_list)
-  n_ini = 50
+  n_ini = 75
 #+end_src
 
 #+RESULTS:
-: [0.025      0.02222222 0.01944444 0.01666667 0.01388889 0.01111111
-:  0.00833333 0.00555556 0.00277778 0.        ]
+: [0.2        0.17777778 0.15555556 0.13333333 0.11111111 0.08888889
+:  0.06666667 0.04444444 0.02222222 0.        ]
 
 *** Run
 
 #+begin_src ipython
   rates, ksi = run_behavior(conf_name, name, cov_list, n_ini, device='cuda')
+  print(rates.shape)
 #+end_src
 
 #+RESULTS:
-#+begin_example
-  [[1.0, 0.025], [0.025, 1.0]]
-  [[1.0, 0.022222222222222223], [0.022222222222222223, 1.0]]
-  [[1.0, 0.019444444444444445], [0.019444444444444445, 1.0]]
-  [[1.0, 0.01666666666666667], [0.01666666666666667, 1.0]]
-  [[1.0, 0.01388888888888889], [0.01388888888888889, 1.0]]
-  [[1.0, 0.011111111111111112], [0.011111111111111112, 1.0]]
-  [[1.0, 0.008333333333333335], [0.008333333333333335, 1.0]]
-  [[1.0, 0.005555555555555557], [0.005555555555555557, 1.0]]
-  [[1.0, 0.0027777777777777783], [0.0027777777777777783, 1.0]]
-  [[1.0, 0.0], [0.0, 1.0]]
-  Elapsed (with compilation) = 0h 0m 51s
-#+end_example
+: Elapsed (with compilation) = 0h 0m 51s
+: (10, 150, 37, 8000)
 
 #+begin_src ipython
   print(rates.shape)
@@ -620,11 +1074,11 @@
 #+end_src
 
 #+RESULTS:
-: (10, 49, 100, 7500)
-: (10, 2, 7500)
+: (10, 150, 37, 8000)
+: (10, 3, 8000)
 
 #+begin_src ipython
-  rates_ord = rates.copy()
+  rates_ord = np.zeros(rates.shape)
   overlap = []
 
   for i in range(len(cov_list)):
@@ -632,17 +1086,15 @@
       theta = get_theta(ksi[i][0], ksi[i][1], GM=0, IF_NORM=0)
 
       overlap.append(rates[i] @ ksi[i].T / rates.shape[-1])
-      
+
       index_order = theta.argsort()
       rates_ord[i] = rates[i][..., index_order]
-  print(rates_ord.shape)
-
+  
   overlap = np.array(overlap)
   m0, m1, phi = decode_bump(rates_ord, axis=-1)
 #+end_src
 
 #+RESULTS:
-: (10, 49, 100, 7500)
 
 #+begin_src ipython
   print(m0.shape)
@@ -650,77 +1102,111 @@
 #+end_src
 
 #+RESULTS:
-: (10, 49, 100)
-: (10, 49, 100, 2)
+: (10, 150, 37)
+: (10, 150, 37, 3)
 
 #+begin_src ipython
-  x = m1 / m0 * np.cos(phi)
-  print(x.shape)
+  plt.plot(overlap[..., -5:, :].mean((1,2)))
+  plt.ylabel('Overlap')
+  plt.xlabel('Day')
+  plt.show()
 #+end_src
 
 #+RESULTS:
-: (10, 49, 100)
+[[file:./.ob-jupyter/4c0f47fcb6bc35a46b61708b6812e632de519ed9.png]]
 
-#+begin_src ipython  
-  performance = np.mean(x[:,-1] >0, axis=-1) * 100
-  print(performance)
-  plt.plot(performance)
+#+begin_src ipython
+  print(m0.shape)
+  x = m1[..., -1] / m0[..., -1] * np.cos(phi[..., -1])
+  print((x>0).shape)
+#+end_src
+
+#+RESULTS:
+: (10, 150, 37)
+: (10, 150)
+
+#+begin_src ipython 
+  x = m1[..., -1] / m0[..., -1] * np.cos(phi[..., -1])
+  performance = (x[: , :n_ini] > 0).mean(1) * 100
+
+  x = m1[..., -1] / m0[..., -1] * np.cos(phi[..., -1])
+  performance += (x[: , n_ini:] < 0).mean(1) * 100
+  
+  print(performance/2)
+  plt.plot(performance/2)
   plt.show()
 #+end_src
 
 #+RESULTS:
 :RESULTS:
-: [ 0.  0.  1.  7. 71. 16.  7.  2. 89. 77.]
-[[file:./.ob-jupyter/a858f9ac5c021e7a9c114fb9543a9d5ee14308a3.png]]
+: [ 0.          0.          0.          0.          4.66666667  0.66666667
+:  50.          0.66666667 51.33333333 50.66666667]
+[[file:./.ob-jupyter/f35213ef56699c795f5ee3b285e2a2841de56525.png]]
 :END:
+#+RESULTS:
 
 #+begin_src ipython
-
+  print(overlap.shape)
+  readout = overlap[..., -5:, -1]
+  print(readout.shape)
+  perf = (readout>0).mean((1,2))
+  plt.plot(perf)
+  plt.ylabel('Performance')
+  plt.xlabel('Day')
+  plt.show()
 #+end_src
-
 #+RESULTS:
+:RESULTS:
+: (10, 150, 37, 3)
+: (10, 150, 5)
+[[file:./.ob-jupyter/d7b353b979e48e9bb6db698958d11e0731ac0d10.png]]
+:END:
 
 **** single
 
 #+begin_src ipython
   ini = -1
+  print(overlap[ini].shape)
+  print(m0[ini].shape)
 #+end_src
 
 #+RESULTS:
+: (150, 37, 3)
+: (150, 37)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-
-  ax[0].plot(overlap[ini, ..., 0])
+  
+  ax[0].plot(overlap[ini, ..., 0].T)
   ax[0].set_ylabel('Overlap on $\\xi_1$ (Hz)')
   ax[0].set_xlabel('Step')
 
-  ax[1].plot(overlap[ini, ..., 1])
+  ax[1].plot(overlap[ini, ..., 1].T)
   ax[1].set_ylabel('Overlap on $\\xi_2$ (Hz)')
   ax[1].set_xlabel('Step')
-  
+
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2f23900bf28538eeb7f3aa10227ed4556e8dc79d.png]]
+[[file:./.ob-jupyter/c342dde871041b8d0fe8a43d16ed9a6fc2613a5f.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
  
-  ax[0].plot(m0[ini])
+  ax[0].plot(m0[ini].T)
   #ax[0].set_ylim([0, 360])
   #ax[0].set_yticks([0, 90, 180, 270, 360])
   ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
   ax[0].set_xlabel('Step')
 
-  ax[1].plot(m1[ini])
+  ax[1].plot(m1[ini].T)
   # ax[1].set_ylim([0, 360])
   # ax[1].set_yticks([0, 90, 180, 270, 360])
   ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
   ax[1].set_xlabel('Step')
 
-  ax[2].plot(phi[ini] * 180 / np.pi)
+  ax[2].plot(phi[ini].T * 180 / np.pi)
   ax[2].set_ylim([0, 360])
   ax[2].set_yticks([0, 90, 180, 270, 360])
   ax[2].set_ylabel('Phase (°)')
@@ -730,58 +1216,27 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/38d23665f60b5a00ab443805129a7337a9a4f818.png]]
+[[file:./.ob-jupyter/4cf7f8d230d92849670a6202ad8756978dd37841.png]]
 
-#+begin_src ipython
-  x = m1[ini, -1]/ m0[ini, -1] * np.cos(phi[ini, -1])
-  y = m1[ini, -1] / m0[ini, -1] * np.sin(phi[ini, -1])
+#+begin_src ipython  
+  x = m1[ini, ..., -1] / m0[ini, ..., -1] * np.cos(phi[ini, ..., -1])
+  y = m1[ini, ..., -1] / m0[ini, ..., -1] * np.sin(phi[ini, ..., -1])
 
   fig, ax = plt.subplots(figsize=(height, height))
-  ax.plot(x, y, 'o')
+  ax.plot(x.T, y.T, 'o')
   ax.set_xlim([-2, 2])
   ax.set_ylim([-2, 2])
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/0c69274474902e5676ca841698f522ccbc8983cd.png]]
+[[file:./.ob-jupyter/c1dee9f338fb7ff7ac99d329d43946238d553c5d.png]]
 
 #+RESULTS:
 : 0.0
 
 #+begin_src ipython
 
-#+end_src
-
-*** o
-#+begin_src ipython
-  model.N_BATCH = 50
-  model.I0[0] = 1 
-  sample_A = model.init_ff_input()
-
-  model.I0[0] = 1
-  sample_B = model.init_ff_input()
-
-  ff_input = torch.cat((sample_A, sample_B))
-  print(ff_input.shape)
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-# [goto error]
-: ---------------------------------------------------------------------------
-: NameError                                 Traceback (most recent call last)
-: Cell In[47], line 1
-: ----> 1 model.N_BATCH = 50
-:       2 model.I0[0] = 1 
-:       3 sample_A = model.init_ff_input()
-: 
-: NameError: name 'model' is not defined
-:END:
-
-#+begin_src ipython
-  rates = model.forward(ff_input, REC_LAST_ONLY=0)
-  ksi = model.PHI0.cpu().detach().numpy()
 #+end_src
 
 #+RESULTS:
