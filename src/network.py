@@ -3,7 +3,7 @@ import numpy as np
 
 import torch
 from torch import nn
-from torch.distributions import Normal, MultivariateNormal, Exponential
+from torch.distributions import MultivariateNormal
 
 from yaml import safe_load
 from time import perf_counter
@@ -46,7 +46,7 @@ class Network(nn.Module):
         
         # Initialize network connectivity
         self.initWeights()
-                    
+        
         # Train a low rank connectivity
         if self.LR_TRAIN:
             # Low rank vector
@@ -299,9 +299,9 @@ class Network(nn.Module):
         self.DT_TAU = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
         
         for i_pop in range(self.N_POP):
-            self.EXP_DT_TAU[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU[i_pop])
+            self.EXP_DT_TAU[self.csumNa[i_pop]:self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU[i_pop])
             # self.EXP_DT_TAU[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = (1.0 - self.DT / self.TAU[i_pop])
-            self.DT_TAU[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = self.DT / self.TAU[i_pop]
+            self.DT_TAU[self.csumNa[i_pop]:self.csumNa[i_pop + 1]] = self.DT / self.TAU[i_pop]
 
         # if self.VERBOSE:
         #     print("DT", self.DT, "TAU", self.TAU)
@@ -311,9 +311,9 @@ class Network(nn.Module):
         self.DT_TAU_SYN = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
         
         for i_pop in range(self.N_POP):
-            self.EXP_DT_TAU_SYN[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU_SYN[i_pop])
+            self.EXP_DT_TAU_SYN[self.csumNa[i_pop]:self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU_SYN[i_pop])
             # self.EXP_DT_TAU_SYN[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = (1.0-self.DT / self.TAU_SYN[i_pop])
-            self.DT_TAU_SYN[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = self.DT / self.TAU_SYN[i_pop]
+            self.DT_TAU_SYN[self.csumNa[i_pop]:self.csumNa[i_pop + 1]] = self.DT / self.TAU_SYN[i_pop]
         
         # if self.VERBOSE:
         #     print("EXP_DT_TAU", self.EXP_DT_TAU, "DT_TAU", self.DT_TAU)

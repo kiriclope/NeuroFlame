@@ -2,8 +2,10 @@
 
 ## Introduction
 This package provides an implementation of a recurrent neural network trainer and simulator with pytorch.
-The network can have multiple neural populations, different connectivity profiles (all to all, sparse, tuned, ...).
-For more info look at the config files in ./conf/.
+Networks can have multiple neural populations with different connectivity types (all to all, sparse) that can be structured (tuned, low rank).
+Network weights can be trained in a unsupervised or supervised manner just as vanilla RNNs in torch.
+
+For more info look at the notebooks in ./notebooks and the configuration files in ./conf. 
 
 ## Installation
 ```bash
@@ -26,12 +28,13 @@ model = Network(config_file_name, output_file_name, path_to_repo, **kwargs)
 
 # kwargs can be any of the args in the config file
 
-# run the model
-model.run()
+# run a forward pass
+model()
 ```
-There are two configs here:
-- The first one is config_bump.py which is a continuous 1 population bump attractor model as in the NB stim paper.
-- The second is config_EI.py which are standard parameters for a tuned bump attractor balance network with 2 populations.
+
+There are two basic configuration files:
+- 'config_bump.py' contains the parameters of a single continuous bump attractor network.
+- 'config_EI.py' contains the parameters of a standard balanced network.
 
 ## Contributing
 Feel free to contribute.
