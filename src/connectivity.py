@@ -35,15 +35,16 @@ class Connectivity():
         
         if self.verbose:
             print('ksi', self.ksi.shape)
-        
-        # Lij = 0
-        # for i in range(self.ksi.shape[0]):
-        #     Lij = Lij + torch.outer(self.ksi[i], self.ksi[i])
-        
-        # Pij = 1.0 + kappa * Lij / torch.sqrt(self.Kb)        
-        # del Lij
-        
-        Pij = 1.0 + kappa * (ksi.T @ ksi) / torch.sqrt(self.Kb)
+
+
+        if self.ksi.shape[0]==4:
+            Lij = torch.outer(self.ksi[0], self.ksi[1])
+            Lij = Lij + torch.outer(self.ksi[2], self.ksi[3])
+            
+            Pij = 1.0 + kappa * Lij / torch.sqrt(self.Kb)
+            del Lij
+        else:
+            Pij = 1.0 + kappa * (ksi.T @ ksi) / torch.sqrt(self.Kb)
         
         # print(Pij.shape)
         

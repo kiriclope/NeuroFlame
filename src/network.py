@@ -21,13 +21,20 @@ class Network(nn.Module):
     
     def __init__(self, conf_file, sim_name, repo_root, **kwargs):
         '''
-        Class: Network:
+        Class: Network
         Creates a recurrent network of rate units with customizable connectivity and dynamics.
         The network can be trained with standard torch optimization technics.
-        Param: conf_file: name of the configuration file with network's parameters.
-               sim_name: name of the output file for saving purposes.
-               repo_root: root path for the NeuroTorch repository.
-               **kwargs: any parameter in the configuration file can be passed and will then be overwritten.
+        Parameters:
+               conf_file: yml,
+               name of the configuration file with network's parameters.
+               sim_name: str,
+               name of the output file for saving purposes.
+               repo_root: str,
+               root path for the NeuroTorch repository.
+               **kwargs: **dict,
+               any parameter in the configuration file can be passed and will then be overwritten.
+        Returns:
+               rates: tensorfloat of size (N_BATCH, N_SEQ_LEN, N_NEURON).
         '''
         
         super().__init__()
@@ -98,7 +105,7 @@ class Network(nn.Module):
                 self.Wab[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
                          self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = self.Jab[i_pop][j_pop] * weights
         
-        del weights
+                del weights
     
     def update_dynamics(self, rates, ff_input, rec_input):
         '''Updates the dynamics of the model at each timestep'''
@@ -128,15 +135,21 @@ class Network(nn.Module):
         else:
             rec_input = hidden
 
+        del hidden
+        
         # compute net input
         net_input = ff_input + rec_input
         non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
+
+        del net_input
         
         # update rates
         if self.RATE_DYN:
             rates = self.EXP_DT_TAU * rates + self.DT_TAU * non_linear
         else:
             rates = non_linear
+
+        del non_linear
         
         return rates, rec_input
     
@@ -181,7 +194,7 @@ class Network(nn.Module):
             # Reset moving average to start at 0
             if step == self.N_STEADY-self.N_WINDOW-1:
                 mv_rates *= 0.0
-                
+            
             # update output every N_WINDOW steps
             if step >= self.N_STEADY:
                 if step % self.N_WINDOW == 0:
@@ -190,21 +203,28 @@ class Network(nn.Module):
                         self.print_activity(step, rates)
                     
                     # output.append(mv_rates / self.N_WINDOW)
-                    output.append(mv_rates[..., :self.Na[0]] / self.N_WINDOW)
+                    if not REC_LAST_ONLY:
+                        output.append(mv_rates[..., :self.Na[0]] / self.N_WINDOW)
                     
                     # Reset moving average
                     mv_rates = 0
-
-        # Stack output list to 1st dim so that output is (N_BATCH, N_STEPS, N_NEURON)
-        output = torch.stack(output, dim=1)
+                    
+        del self.Wab
+        
+        if not REC_LAST_ONLY:
+            # Stack output list to 1st dim so that output is (N_BATCH, N_STEPS, N_NEURON)
+            output = torch.stack(output, dim=1)
         
         # Add Linear readout (N_BATCH, N_EVAL_WIN, 1) on last few steps
         if self.LR_TRAIN:
             y_pred = self.linear(output[:, -self.lr_eval_win:, ...])
+            del output
             return y_pred.squeeze(-1)
         
         if REC_LAST_ONLY:
-            output = rates[..., :self.Na[0]]
+            output = rates[...,:self.Na[0]]
+        
+        del rates, rec_input
         
         clear_cache()
         
@@ -381,7 +401,7 @@ class Network(nn.Module):
             
             size = (self.N_BATCH, self.N_STIM_OFF[i]-self.N_STIM_ON[i], self.Na[0])
             
-            stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[i])
+            stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])
             
             ff_input[:, self.N_STIM_ON[i]:self.N_STIM_OFF[i],
                      self.csumNa[0]:self.csumNa[1]] += self.Ja0[0] + stimulus
