@@ -38,7 +38,7 @@
 #+RESULTS:
 
 * Helpers
-
+** Random
 #+begin_src ipython
   def convert_seconds(seconds):
       h = seconds // 3600
@@ -264,8 +264,8 @@
 
 #+RESULTS:
 
-* RNN with torch
-** Connectivity
+* Connectivity
+** Imports
 
 #+begin_src ipython
   from src.connectivity import Connectivity
@@ -273,14 +273,13 @@
 
 #+RESULTS:
 
-*** ODR
+** ODR
 
 #+begin_src ipython
   Cij = Connectivity(10000, 10000, 1000)('sparse', 'cosine', kappa=1.0, sigma=0, phase=0)
 #+end_src
 
 #+RESULTS:
-: strong cosine probability
 
 #+begin_src ipython
   Cij = Cij.cpu().detach().numpy()
@@ -328,7 +327,7 @@
 #+RESULTS:
 [[file:./.ob-jupyter/dd3270e92b2424ee65552fc5a6dbb7b40e9b2ee0.png]]
 
-*** Dual Task
+** Dual Task
 
 #+begin_src ipython
   Con = Connectivity(10000, 10000, 1000)
@@ -443,15 +442,89 @@
 
 #+end_src
 
-** Stimuli
+** Sparse
 
+#+begin_src ipython
+    REPO_ROOT = "/home/leon/models/NeuroTorch"
+    model = Network('config_EI.yml', 'test', REPO_ROOT, VERBOSE=1, DEVICE='cuda', TASK='odr',
+                    PROBA_TYPE=['cosine', '', '',''], KAPPA=[1, 0, 0, 0])
+#+end_src
+
+#+RESULTS:
+: Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
+: Jab [1.0, -1.5, 1, -1]
+: Ja0 [2.0, 1.0]
+
+#+begin_src ipython
+  import torch
+
+  # Simulate a large dense matrix
+  # Example is small for demonstration purposes, adjust sizes accordingly
+  # dense_matrix = torch.tensor([[0, 0, 3], [4, 0, 0], [0, 0, 5]], dtype=torch.float32)
+
+  N = 10000
+  K = 1000
+
+  # dense_matrix = 1.0 * (torch.rand(N, N, device='cuda') <= (K / float(N)))
+  dense_matrix = model.Wab
+  
+  # Define variables to store indices and values of non-zero elements
+  nnz_indices = []
+  nnz_values = []
+
+  # Define chunk size (adjust based on your memory constraints)
+  chunk_size = 4  # Here, a chunk consists of 1 row for simplicity
+
+  # Loop through chunks of the matrix
+  for i in range(0, dense_matrix.size(0), chunk_size):
+      # Get the current chunk
+      chunk = dense_matrix[i:i+chunk_size, :]
+
+      # Find non-zero elements in the chunk
+      chunk_nnz_indices = torch.nonzero(chunk, as_tuple=False).t()  # Transpose to match COO format
+      chunk_nnz_values = chunk[chunk_nnz_indices[0], chunk_nnz_indices[1]]
+
+      # Adjust chunk indices to global indices
+      chunk_nnz_indices[0] += i  # Adjust row indices for chunks beyond the first
+
+      # Append current chunk's non-zero elements to the lists
+      nnz_indices.append(chunk_nnz_indices)
+      nnz_values.append(chunk_nnz_values)
+
+  # Concatenate all non-zero indices and values
+  nnz_indices = torch.cat(nnz_indices, dim=1)  # Concatenate along columns
+  nnz_values = torch.cat(nnz_values)
+
+  # Create sparse tensor
+  sparse_matrix = torch.sparse_coo_tensor(nnz_indices, nnz_values, dense_matrix.size())
+
+  print(sparse_matrix)
+#+end_src
+
+#+RESULTS:
+: tensor(indices=tensor([[   0,    0,    0,  ..., 9999, 9999, 9999],
+:                        [   1,    5,    7,  ..., 9984, 9987, 9994]]),
+:        values=tensor([ 0.0447,  0.0447,  0.0447,  ..., -0.0447, -0.0447,
+:                       -0.0447]),
+:        device='cuda:0', size=(10000, 10000), nnz=10001697,
+:        layout=torch.sparse_coo)
+
+#+begin_src ipython  
+  plot_con(sparse_matrix.to_dense().cpu().detach().numpy().T)
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/79a7ab88241119d363f0ed6a0c14390c8c65f3ee.png]]
+
+* Stimuli
+** Imports
 #+begin_src ipython
   from src.stimuli import Stimuli
 #+end_src
 
 #+RESULTS:
 
-*** ODR
+** ODR
 
 #+begin_src ipython
   ff_input = Stimuli(task='odr', size=(1, 1000))(1, 1, 0).cpu().detach().numpy() 
@@ -469,7 +542,7 @@
 [[file:./.ob-jupyter/f10bdc01e2a8555af8b2cba16bda2923182df89d.png]]
 :END:
 
-*** Dual Task
+** Dual Task
 
 #+begin_src ipython
   xi = torch.randn((1000), device='cuda')
@@ -488,8 +561,8 @@
 [[file:./.ob-jupyter/dabec26f24752a3e579c5e3b122ff9bd2380a1eb.png]]
 :END:
 
-** FF Inputs
-*** ODR
+* FF Inputs
+** ODR
 
 #+begin_src ipython
     REPO_ROOT = "/home/leon/models/NeuroTorch"
@@ -538,7 +611,7 @@
 #+RESULTS:
 [[file:./.ob-jupyter/eaa8833382cfdb42c71a857da719aaed6b43a321.png]]
 
-*** Dual Task
+** Dual Task
 
 #+begin_src ipython
     REPO_ROOT = "/home/leon/models/NeuroTorch"
@@ -610,8 +683,8 @@
 #+RESULTS:
 [[file:./.ob-jupyter/a617e87c20b5c356b1960db422df34b0cc675028.png]]
 
-** STP
-*** from class
+* STP
+** from class
 #+begin_src ipython
   from src.plasticity import Plasticity
 #+end_src
@@ -666,7 +739,7 @@
 #+RESULTS:
 [[file:./.ob-jupyter/acd2e43b154eb994b2c0dfcf72db956e153f6ac2.png]]
 
-*** from model
+** from model
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
@@ -1250,25 +1323,20 @@
 [[file:./.ob-jupyter/4551ba157c0f9850006f23974721743841056315.png]]
 :END:
 
-** Single Trial
-*** Model
+* Single Trial
+** Model
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  model = Network('config_EI.yml', 'ord', REPO_ROOT, VERBOSE=1, DEVICE='cuda', TASK='dual',
-                  PROBA_TYPE=['lr', '', '', ''], KAPPA=[5,0,0,0])
+  model = Network('config_2pop.yml', 'test', REPO_ROOT, VERBOSE=1, DEVICE='cuda', TASK='None')
 #+end_src
 
 #+RESULTS:
-: Na tensor([7500, 2500], device='cuda:0', dtype=torch.int32) Ka tensor([1000., 1000.], device='cuda:0') csumNa tensor([    0,  7500, 10000], device='cuda:0')
+: Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
 : Jab [1.0, -1.5, 1, -1]
 : Ja0 [2.0, 1.0]
-: low rank probability
-: uniform probability
-: uniform probability
-: uniform probability
 
-**** Connectivity
+** Connectivity
 
 #+begin_src ipython
   Cij = model.Wab.cpu().detach().numpy() 
@@ -1314,7 +1382,7 @@
 : (10000, 10000)
 [[file:./.ob-jupyter/92299d24e4612f871da0bb7fbcd8229cb6bda32f.png]]
 :END:
-**** FF Inputs
+** FF Inputs
 
 #+begin_src ipython
   ff_input = model.ff_input.cpu().detach().numpy()
@@ -1340,85 +1408,24 @@
 [[file:./.ob-jupyter/41b92bbdbefec6771fa2309c2b9faccb4ac1e076.png]]
 :END:
 
-*** Dynamics
+** Dynamics
 
 #+begin_src ipython
-  rates = model.forward(REC_LAST_ONLY=0)[:, 0]
+  rates = model.forward(REC_LAST_ONLY=0)[0].cpu().detach().numpy()
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-#+begin_example
-  generating ff input
-  task dual
-  times (s) 0.0 rates (Hz) [0.0, 1.97]
-  times (s) 0.09 rates (Hz) [0.0, 1.93]
-  times (s) 0.18 rates (Hz) [0.0, 1.95]
-  times (s) 0.27 rates (Hz) [0.0, 1.96]
-  times (s) 0.36 rates (Hz) [0.0, 1.93]
-  times (s) 0.45 rates (Hz) [0.0, 1.96]
-  times (s) 0.55 rates (Hz) [0.0, 1.95]
-  times (s) 0.64 rates (Hz) [0.0, 1.96]
-  times (s) 0.73 rates (Hz) [0.0, 1.92]
-  times (s) 0.82 rates (Hz) [0.0, 1.94]
-  times (s) 0.91 rates (Hz) [66.41, 1.93]
-  times (s) 1.0 rates (Hz) [85.27, 68.96]
-  times (s) 1.09 rates (Hz) [58.67, 70.93]
-  times (s) 1.18 rates (Hz) [23.56, 43.81]
-  times (s) 1.27 rates (Hz) [4.22, 17.44]
-  times (s) 1.36 rates (Hz) [1.2, 7.52]
-  times (s) 1.45 rates (Hz) [0.72, 4.59]
-  times (s) 1.55 rates (Hz) [0.61, 3.5]
-  times (s) 1.64 rates (Hz) [0.61, 2.99]
-  times (s) 1.73 rates (Hz) [0.65, 2.75]
-  times (s) 1.82 rates (Hz) [0.32, 2.66]
-  times (s) 1.91 rates (Hz) [0.37, 2.45]
-  times (s) 2.0 rates (Hz) [0.44, 2.37]
-  times (s) 2.09 rates (Hz) [0.53, 2.38]
-  times (s) 2.18 rates (Hz) [0.67, 2.42]
-  times (s) 2.27 rates (Hz) [0.83, 2.55]
-  times (s) 2.36 rates (Hz) [1.01, 2.7]
-  times (s) 2.45 rates (Hz) [1.21, 2.86]
-  times (s) 2.55 rates (Hz) [1.42, 3.04]
-  times (s) 2.64 rates (Hz) [1.64, 3.26]
-  times (s) 2.73 rates (Hz) [1.83, 3.49]
-  times (s) 2.82 rates (Hz) [2.01, 3.68]
-  times (s) 2.91 rates (Hz) [2.13, 3.87]
-  times (s) 3.0 rates (Hz) [2.25, 4.02]
-  times (s) 3.09 rates (Hz) [2.32, 4.14]
-  times (s) 3.18 rates (Hz) [2.37, 4.2]
-  times (s) 3.27 rates (Hz) [2.41, 4.25]
-  times (s) 3.36 rates (Hz) [2.42, 4.33]
-  times (s) 3.45 rates (Hz) [2.41, 4.29]
-  times (s) 3.55 rates (Hz) [2.42, 4.32]
-  times (s) 3.64 rates (Hz) [2.42, 4.32]
-  times (s) 3.73 rates (Hz) [2.42, 4.31]
-  times (s) 3.82 rates (Hz) [2.4, 4.32]
-  times (s) 3.91 rates (Hz) [2.41, 4.31]
-  times (s) 4.0 rates (Hz) [2.41, 4.33]
-  times (s) 4.09 rates (Hz) [2.41, 4.31]
-  times (s) 4.18 rates (Hz) [2.39, 4.31]
-  times (s) 4.27 rates (Hz) [2.39, 4.32]
-  times (s) 4.36 rates (Hz) [2.4, 4.32]
-  times (s) 4.45 rates (Hz) [2.4, 4.29]
-  times (s) 4.55 rates (Hz) [2.4, 4.29]
-  times (s) 4.64 rates (Hz) [2.4, 4.31]
-  times (s) 4.73 rates (Hz) [2.4, 4.31]
-  times (s) 4.82 rates (Hz) [2.4, 4.3]
-  times (s) 4.91 rates (Hz) [2.4, 4.31]
-  times (s) 5.0 rates (Hz) [2.41, 4.32]
-  times (s) 5.09 rates (Hz) [2.39, 4.32]
-  times (s) 5.18 rates (Hz) [2.39, 4.32]
-  times (s) 5.27 rates (Hz) [2.39, 4.29]
-  times (s) 5.36 rates (Hz) [2.41, 4.34]
-  times (s) 5.45 rates (Hz) [2.4, 4.31]
-  Elapsed (with compilation) = 0.3518892554566264s
-  (61, 7500)
-#+end_example
+: generating ff input
+: times (s) 0.0 rates (Hz) [8.9, 13.43]
+: times (s) 0.6 rates (Hz) [8.28, 12.98]
+: times (s) 1.2 rates (Hz) [8.02, 12.69]
+: times (s) 1.8 rates (Hz) [7.81, 12.54]
+: Elapsed (with compilation) = 0.5204478511586785s
+: (4, 8000)
 
 #+begin_src ipython
-  print(rates.shape)
-  r_max = 1.5 # * np.max(rates[-1, :15000])
+  r_max = 15 
   plt.imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
   plt.colorbar()
   plt.show()
@@ -1426,13 +1433,13 @@
 
 #+RESULTS:
 :RESULTS:
-: (61, 7500)
-[[file:./.ob-jupyter/fb1ad9f00492badb833153c5595449bf833fd4e0.png]]
+: (4, 8000)
+[[file:./.ob-jupyter/6fa57b29b01fee92f625286fd8f4168d6ae8b674.png]]
 :END:
 
 #+RESULTS:
 
-**** dual
+*** dual
 
 #+begin_src ipython
   ksi = model.PHI0.cpu().detach().numpy()
@@ -1471,21 +1478,22 @@
 #+RESULTS:
 [[file:./.ob-jupyter/2d4bd62b2a158a64146f0c3a09c9462ccfa8a085.png]]
 
-** Balance
+* Balance
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
   K_list = [500, 1000, 1500, 2000, 2500, 3000]
   rates_list = []
-
+  
   for K in K_list:
-      model = Network('config_EI.yml', 'balance', REPO_ROOT, VERBOSE=0, DEVICE='cuda', K=K)
+      model = Network('config_2pop.yml', 'balance', REPO_ROOT, VERBOSE=0, DEVICE='cuda', K=K)
       rates = model.forward()
       rates_list.append(rates[0].cpu().detach().numpy())
 
 #+end_src
 
 #+RESULTS:
+: c548e102-bffc-4bcb-b865-52c9c61c257c
 
 #+begin_src ipython
   rates = np.array(rates_list)

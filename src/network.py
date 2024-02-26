@@ -61,10 +61,8 @@ class Network(nn.Module):
             # self.V = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)), device=self.device, dtype=self.FLOAT))
 
             # Mask to train excitatory neurons only
-            self.mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device, dtype=self.FLOAT)
-        
-            self.mask[self.csumNa[0] : self.csumNa[1],
-                      self.csumNa[0] : self.csumNa[1]] = 1.0
+            self.mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device, dtype=self.FLOAT)            
+            self.mask[self.slices[0], self.slices[0]] = 1.0
             
             # Linear readout for supervised learning
             # self.linear = nn.Linear(self.N_NEURON, 1, device=self.device, dtype=self.FLOAT, bias=False)
@@ -86,7 +84,7 @@ class Network(nn.Module):
         '''
         
         # in pytorch, Wij is i to j.
-        self.Wab = torch.zeros((self.N_NEURON, self.N_NEURON), dtype=self.FLOAT, device=self.device)
+        self.Wab_T = torch.zeros((self.N_NEURON, self.N_NEURON), dtype=self.FLOAT, device=self.device)
         
         for i_pop in range(self.N_POP):
             for j_pop in range(self.N_POP):
@@ -102,10 +100,14 @@ class Network(nn.Module):
                                                        lr_cov=self.LR_COV,
                                                        ksi=self.PHI0)
                 
-                self.Wab[self.csumNa[i_pop] : self.csumNa[i_pop + 1],
-                         self.csumNa[j_pop] : self.csumNa[j_pop + 1]] = self.Jab[i_pop][j_pop] * weights
-        
-                del weights
+                self.Wab_T[self.slices[i_pop], self.slices[j_pop]] = self.Jab[i_pop][j_pop] * weights
+                
+        del weights
+
+        self.Wab_T = self.Wab_T.T
+        # if self.CON_TYPE=='sparse':
+        #     self.Wab_T = self.Wab_T.to_sparse()
+
     
     def update_dynamics(self, rates, ff_input, rec_input):
         '''Updates the dynamics of the model at each timestep'''
@@ -115,12 +117,17 @@ class Network(nn.Module):
         if self.IF_STP:
             A_u_x = self.stp(rates[:, :self.Na[0]])
             stp_ee = (rates[:, :self.Na[0]] * A_u_x) @ self.W_stp.T
-            
-        if self.LR_TRAIN:
-            lr = (1.0 + self.mask * self.KAPPA[0][0] * (self.U @ self.U.T) / torch.sqrt(self.Ka[0]))
-            hidden = rates @ (self.Wab.T * lr.T)
-        else:
-            hidden = rates @ self.Wab.T
+        
+        # if self.LR_TRAIN:
+        #     lr = (1.0 + self.mask * self.KAPPA[0][0] * (self.U @ self.U.T) / torch.sqrt(self.Ka[0]))
+        #     hidden = rates @ (self.Wab.T * lr.T)
+        # else:
+        #     hidden = rates @ self.Wab.T
+
+        # if self.CON_TYPE=='sparse':
+        #     hidden = torch.sparse.mm(rates, self.Wab_T)
+        # else:
+        hidden = rates @ self.Wab_T
         
         if self.IF_STP:
             hidden[:, :self.Na[0]] = hidden[:, :self.Na[0]] + stp_ee
@@ -135,22 +142,16 @@ class Network(nn.Module):
         else:
             rec_input = hidden
 
-        del hidden
-        
         # compute net input
         net_input = ff_input + rec_input
         non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
 
-        del net_input
-        
         # update rates
         if self.RATE_DYN:
             rates = self.EXP_DT_TAU * rates + self.DT_TAU * non_linear
         else:
             rates = non_linear
 
-        del non_linear
-        
         return rates, rec_input
     
     def forward(self, ff_input=None, REC_LAST_ONLY=1):
@@ -177,8 +178,8 @@ class Network(nn.Module):
         # Add STP
         if self.IF_STP:
             self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC, self.DT, (self.N_BATCH, self.Na[0]), FLOAT=self.FLOAT, device=self.device)
-            self.W_stp = self.Wab[:self.Na[0], :self.Na[0]]
-            self.Wab[:self.Na[0], :self.Na[0]] = 0
+            self.W_stp = self.Wab_T[:self.Na[0], :self.Na[0]]
+            self.Wab_T[:self.Na[0], :self.Na[0]] = 0
         
         # Moving average of the rates
         mv_rates = 0
@@ -204,12 +205,10 @@ class Network(nn.Module):
                     
                     # output.append(mv_rates / self.N_WINDOW)
                     if not REC_LAST_ONLY:
-                        output.append(mv_rates[..., :self.Na[0]] / self.N_WINDOW)
+                        output.append(mv_rates[..., self.slices[0]] / self.N_WINDOW)
                     
                     # Reset moving average
                     mv_rates = 0
-                    
-        del self.Wab
         
         if not REC_LAST_ONLY:
             # Stack output list to 1st dim so that output is (N_BATCH, N_STEPS, N_NEURON)
@@ -222,7 +221,7 @@ class Network(nn.Module):
             return y_pred.squeeze(-1)
         
         if REC_LAST_ONLY:
-            output = rates[...,:self.Na[0]]
+            output = rates[..., self.slices[0]]
         
         del rates, rec_input
         
@@ -240,8 +239,8 @@ class Network(nn.Module):
         
         activity = []
         for i in range(self.N_POP):
-            activity.append(np.round(torch.mean(rates[:, self.csumNa[i]:self.csumNa[i+1]]).item(), 2))
-        
+            activity.append(np.round(torch.mean(rates[:, self.slices[i]]).item(), 2))
+            
         print("times (s)", times, "rates (Hz)", activity)
     
     def loadConfig(self, conf_file, sim_name, repo_root, **kwargs):
@@ -310,6 +309,10 @@ class Network(nn.Module):
         self.Na = torch.tensor(self.Na, dtype=torch.int, device=self.device)
         self.Ka = torch.tensor(self.Ka, dtype=self.FLOAT, device=self.device)
         self.csumNa = torch.cat((torch.tensor([0], device=self.device), torch.cumsum(self.Na, dim=0)))
+
+        self.slices = []
+        for i_pop in range(self.N_POP):
+            self.slices.append(slice(self.csumNa[i_pop], self.csumNa[i_pop + 1]))
         
         if self.VERBOSE:
             print("Na", self.Na, "Ka", self.Ka, "csumNa", self.csumNa)
@@ -319,9 +322,9 @@ class Network(nn.Module):
         self.DT_TAU = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
         
         for i_pop in range(self.N_POP):
-            self.EXP_DT_TAU[self.csumNa[i_pop]:self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU[i_pop])
+            self.EXP_DT_TAU[self.slices[i_pop]] = torch.exp(-self.DT / self.TAU[i_pop])
             # self.EXP_DT_TAU[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = (1.0 - self.DT / self.TAU[i_pop])
-            self.DT_TAU[self.csumNa[i_pop]:self.csumNa[i_pop + 1]] = self.DT / self.TAU[i_pop]
+            self.DT_TAU[self.slices[i_pop]] = self.DT / self.TAU[i_pop]
 
         # if self.VERBOSE:
         #     print("DT", self.DT, "TAU", self.TAU)
@@ -331,9 +334,9 @@ class Network(nn.Module):
         self.DT_TAU_SYN = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
         
         for i_pop in range(self.N_POP):
-            self.EXP_DT_TAU_SYN[self.csumNa[i_pop]:self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU_SYN[i_pop])
+            self.EXP_DT_TAU_SYN[self.slices[i_pop]] = torch.exp(-self.DT / self.TAU_SYN[i_pop])
             # self.EXP_DT_TAU_SYN[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = (1.0-self.DT / self.TAU_SYN[i_pop])
-            self.DT_TAU_SYN[self.csumNa[i_pop]:self.csumNa[i_pop + 1]] = self.DT / self.TAU_SYN[i_pop]
+            self.DT_TAU_SYN[self.slices[i_pop]] = self.DT / self.TAU_SYN[i_pop]
         
         # if self.VERBOSE:
         #     print("EXP_DT_TAU", self.EXP_DT_TAU, "DT_TAU", self.DT_TAU)
@@ -345,11 +348,11 @@ class Network(nn.Module):
         
         self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
         
-        if self.TASK == 'dual':
+        if self.PROBA_TYPE[0][0] == 'lr':
             mean_ = torch.tensor(self.LR_MEAN, dtype=self.FLOAT, device=self.device)
             # Define the covariance matrix
             cov_ = torch.tensor(self.LR_COV, dtype=self.FLOAT, device=self.device)
-            # print(self.LR_COV)
+            print(self.LR_COV)
             multivariate_normal = MultivariateNormal(mean_, cov_)
             
             self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
@@ -389,23 +392,23 @@ class Network(nn.Module):
         ff_input = torch.randn((self.N_BATCH, self.N_STEPS, self.N_NEURON), dtype=self.FLOAT, device=self.device)
         
         for i_pop in range(self.N_POP):
-            ff_input[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = ff_input[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] * self.VAR_FF[i_pop] / torch.sqrt(self.Ka[0])
+            ff_input[..., self.slices[i_pop]] = ff_input[..., self.slices[i_pop]] * self.VAR_FF[i_pop] / torch.sqrt(self.Ka[0])
         
-        for i in range(self.N_POP):
-            ff_input[:, :self.N_STIM_ON[0], self.csumNa[i]:self.csumNa[i+1]] += self.Ja0[i] / torch.sqrt(self.Ka[0]) # * (1-self.BUMP_SWITCH[i])
+        for i_pop in range(self.N_POP):
+            if self.BUMP_SWITCH[i_pop]:
+                ff_input[:, :self.N_STIM_ON[0], self.slices[i_pop]] += self.Ja0[i_pop] / torch.sqrt(self.Ka[0])
+            else:
+                ff_input[:, :self.N_STIM_ON[0], self.slices[i_pop]] += self.Ja0[i_pop]
         
-        for i in range(self.N_POP):
-            ff_input[:, self.N_STIM_ON[0]:, self.csumNa[i]:self.csumNa[i+1]] += self.Ja0[i]
+        for i_pop in range(self.N_POP):
+            ff_input[:, self.N_STIM_ON[0]:, self.slices[i_pop]] += self.Ja0[i_pop]
         
-        for i in range(len(self.N_STIM_ON)):
-            
-            size = (self.N_BATCH, self.N_STIM_OFF[i]-self.N_STIM_ON[i], self.Na[0])
-            
-            stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])
-            
-            ff_input[:, self.N_STIM_ON[i]:self.N_STIM_OFF[i],
-                     self.csumNa[0]:self.csumNa[1]] += self.Ja0[0] + stimulus
+        if self.TASK != 'None':
+            for i ,_ in enumerate(self.N_STIM_ON):            
+                size = (self.N_BATCH, self.N_STIM_OFF[i]-self.N_STIM_ON[i], self.Na[0])                
+                stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])                
+                ff_input[:, self.N_STIM_ON[i]:self.N_STIM_OFF[i], self.slices[0]] += stimulus
         
-        del stimulus
+            del stimulus
         
-        return ff_input * torch.sqrt(self.Ka[0]) * self.M0 
+        return ff_input * torch.sqrt(self.Ka[0]) * self.M0

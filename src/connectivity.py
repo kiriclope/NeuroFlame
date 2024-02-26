@@ -3,6 +3,15 @@ from torch.distributions import MultivariateNormal
 
 class Connectivity():
     def __init__(self, Na, Nb, Kb, device='cuda', dtype=torch.float, verbose=0):
+        '''
+        Class: Connectivity
+        Creates a connectivity matrix. The connectivity can be sparse are all to all.
+        Connections can be tuned with different profiles see (forward method).
+        Parameters:
+        Na : int, number of postsynaptic neurons
+        Nb : int, number of presynaptic neurons
+        Kb : float, in degree
+        '''
         
         self.Na = torch.tensor(Na)
         self.Nb = torch.tensor(Nb)
