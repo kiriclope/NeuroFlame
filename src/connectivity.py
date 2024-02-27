@@ -82,6 +82,15 @@ class Connectivity():
         
         return Pij
 
+    def von_mises_proba(self, kappa):
+        theta_list = torch.linspace(0, 2.0 * torch.pi, self.Na + 1, dtype=self.dtype, device=self.device)[:-1]
+        phi_list = torch.linspace(0, 2.0 * torch.pi, self.Nb + 1, dtype=self.dtype, device=self.device)[:-1]
+        
+        theta_i, theta_j = torch.meshgrid(theta_list, phi_list, indexing="ij")
+        theta_diff = theta_i - theta_j
+        
+        return torch.exp(kappa * torch.cos(theta_diff)) / torch.special.i0(torch.tensor(kappa, device=self.device)) / 2.0 / torch.pi
+    
     def get_con_proba(self, proba_type, **kwargs):
         '''returns probability of connection of type proba_type with footprint/strength kappa'''
         
@@ -98,6 +107,10 @@ class Connectivity():
             Pij = self.low_rank_proba(kwargs['kappa'], kwargs['lr_mean'], kwargs['lr_cov'], kwargs['ksi'])
             if self.verbose:
                 print('low rank probability')
+        elif 'von_mises' in proba_type:
+            Pij = self.von_mises_proba(kwargs['kappa'])
+            if self.verbose:
+                print('von Mises probability')
         else:
             Pij = torch.tensor(1.0, dtype=self.dtype, device=self.device)
             if self.verbose:

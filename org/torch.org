@@ -250,10 +250,10 @@
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  model = Network('config_EI.yml', 'dual', REPO_ROOT, VERBOSE=1, DEVICE='cuda', LR_TRAIN=0)
-
-  rates = model.forward(REC_LAST_ONLY=0).detach().cpu().numpy()[0]
+  model = Network('config_EI.yml', 'dual', REPO_ROOT, VERBOSE=1, DEVICE='cuda:0', LR_TRAIN=0)
   
+  rates = model(REC_LAST_ONLY=0).cpu().numpy()
+
   Ne = model.Na[0].detach().cpu().numpy()
   N = model.N_NEURON
 
@@ -263,22 +263,23 @@
 #+RESULTS:
 #+begin_example
   Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
+  [[1.0, 0.5, 0.0, 0.0], [0.5, 1.0, 0.25, 0.0], [0.0, 0.25, 1.0, 0.5], [0.0, 0.0, 0.5, 1.0]]
   Jab [1.0, -1.5, 1, -1]
   Ja0 [2.0, 1.0]
   generating ff input
-  times (s) 0.0 rates (Hz) [0.0, 2.61]
-  times (s) 0.83 rates (Hz) [20.22, 2.63]
-  times (s) 1.67 rates (Hz) [10.21, 16.44]
-  times (s) 2.5 rates (Hz) [9.09, 14.17]
-  times (s) 3.33 rates (Hz) [8.73, 13.66]
-  times (s) 4.17 rates (Hz) [9.24, 14.44]
-  times (s) 5.0 rates (Hz) [9.74, 15.48]
-  times (s) 5.83 rates (Hz) [10.12, 16.35]
-  times (s) 6.67 rates (Hz) [9.97, 15.98]
-  times (s) 7.5 rates (Hz) [9.49, 14.52]
-  times (s) 8.33 rates (Hz) [10.03, 15.57]
-  Elapsed (with compilation) = 1.7092998465523124s
-  (11, 8000)
+  times (s) 0.0 rates (Hz) [0.0, 2.85]
+  times (s) 0.83 rates (Hz) [22.36, 2.66]
+  times (s) 1.67 rates (Hz) [9.38, 15.0]
+  times (s) 2.5 rates (Hz) [8.92, 13.44]
+  times (s) 3.33 rates (Hz) [8.93, 13.36]
+  times (s) 4.17 rates (Hz) [8.75, 13.44]
+  times (s) 5.0 rates (Hz) [8.37, 13.16]
+  times (s) 5.83 rates (Hz) [8.67, 13.47]
+  times (s) 6.67 rates (Hz) [8.46, 13.16]
+  times (s) 7.5 rates (Hz) [8.95, 13.72]
+  times (s) 8.33 rates (Hz) [8.22, 12.8]
+  Elapsed (with compilation) = 1.1150267124176025s
+  (1, 11, 8000)
 #+end_example
 
 *** Dynamics

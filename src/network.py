@@ -205,7 +205,8 @@ class Network(nn.Module):
                     
                     # output.append(mv_rates / self.N_WINDOW)
                     if not REC_LAST_ONLY:
-                        output.append(mv_rates[..., self.slices[0]] / self.N_WINDOW)
+                        # output.append(mv_rates[..., self.slices[0]] / self.N_WINDOW)
+                        output.append(mv_rates / self.N_WINDOW)
                     
                     # Reset moving average
                     mv_rates = 0
@@ -221,7 +222,8 @@ class Network(nn.Module):
             return y_pred.squeeze(-1)
         
         if REC_LAST_ONLY:
-            output = rates[..., self.slices[0]]
+            # output = rates[..., self.slices[0]]
+            output = rates
         
         del rates, rec_input
         

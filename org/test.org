@@ -195,8 +195,8 @@
 #+end_src
 
 #+RESULTS:
-: GPU 0 Memory Usage: 0.07%
-: GPU 1 Memory Usage: 0.07%
+: GPU 0 Memory Usage: 3.92%
+: GPU 1 Memory Usage: 4.00%
 
 #+begin_src ipython
   from time import sleep
@@ -515,6 +515,60 @@
 
 #+RESULTS:
 [[file:./.ob-jupyter/79a7ab88241119d363f0ed6a0c14390c8c65f3ee.png]]
+
+** Von Mises
+
+#+begin_src ipython
+  Cij = Connectivity(1000, 1000, 1.0)('all2all', 'von_mises', kappa=.10, sigma=0, phase=0)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  Cij = Cij.cpu().detach().numpy()
+  print(Cij.shape)
+#+end_src
+
+#+RESULTS:
+: (1000, 1000)
+
+#+begin_src ipython
+  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
+
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij, cmap='jet', aspect=1)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij, axis=0)  # sum over pres
+  ax2.plot(Kj)
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij, axis=1)  # sum over pres
+  ax3.plot(Kj)
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij.shape[0] / 2)):
+      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/805db560325611cb5d8cc955757ec61fcaa2db35.png]]
 
 * Stimuli
 ** Imports
