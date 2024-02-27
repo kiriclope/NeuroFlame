@@ -1,0 +1,61 @@
+
+
+
+* Documentation
+
+This is an implementation of a rate based recurrent neural network trainer and simulater.
+
+** Dynamics
+*** Rates
+When *RATE_DYN=1*:
+#+begin_src latex
+  \tau \frac{dr_i}{dt}(t) = - r_i(t) + \Phi(\sum_j J_{ij} h_j(t) + h_{ext}(t))
+#+end_src
+otherwise we have instantaneous rates:
+
+#+begin_src latex
+  r_i(t) = \Phi(\sum_j J_{ij} h_j(t) + h_{ext}(t))
+#+end_src
+
+Her Phi is the transfer function defined in *src/activation.py*
+*** Currents
+We can add dynamics on the currents or synapses with *SYN_DYN=1*
+
+#+begin_src latex
+  \tau_{syn} \frac{dh_i}{dt}(t) = - h_i(t) + \sum_j J_{ij} h_j(t)
+#+end_src
+or not
+#+begin_src latex
+  h_i(t) = \sum_j J_{ij} h_j(t)
+#+end_src
+
+** Connectivity 
+Probability of connection from population B to A:
+*** Sparse Nets
+by default it is a sparse net
+
+#+begin_src latex
+P_{ij}^{AB} = \frac{K_B}{N_B}
+#+end_src
+
+otherwise
+it can be cosine
+#+begin_src latex
+P_{ij}^{AB} = ( 1.0 + \KAPPA_B \cos(\theta_i^A - \theta_j^B) )
+#+end_src
+
+and also low rank
+
+#+begin_src latex
+  J_{ij}^{AB} = \frac{J_{AB}}{\sqrt{K_B}} with proba. P_{ij}^{AB} * \frac{K_B}{N_B} 
+               0 otherwise
+#+end_src
+
+*** All to all
+
+#+begin_src latex
+  J_{ij}^{AB} =  \frac{J_{AB}}{N_B} P_{ij}^{AB}
+#+end_src
+
+where Pij can be as above.
+

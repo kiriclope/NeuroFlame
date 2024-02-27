@@ -405,8 +405,9 @@ class Network(nn.Module):
         
         if self.TASK != 'None':
             for i ,_ in enumerate(self.N_STIM_ON):            
-                size = (self.N_BATCH, self.N_STIM_OFF[i]-self.N_STIM_ON[i], self.Na[0])                
-                stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])                
+                size = (self.N_BATCH, self.N_STIM_OFF[i]-self.N_STIM_ON[i], self.Na[0])
+                # PHI0 should be PHI0[i] not PHI0[2*i+1]
+                stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])
                 ff_input[:, self.N_STIM_ON[i]:self.N_STIM_OFF[i], self.slices[0]] += stimulus
         
             del stimulus
