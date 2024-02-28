@@ -1,37 +1,44 @@
-
-
-
 * Documentation
 
-This is an implementation of a rate based recurrent neural network trainer and simulater.
+Neurotorch is an implementation of a rate based recurrent neural network trainer and simulator.
 
-** Dynamics
-*** Rates
-When *RATE_DYN=1*:
-#+begin_src latex
-  \tau \frac{dr_i}{dt}(t) = - r_i(t) + \Phi(\sum_j J_{ij} h_j(t) + h_{ext}(t))
-#+end_src
-otherwise we have instantaneous rates:
-
-#+begin_src latex
-  r_i(t) = \Phi(\sum_j J_{ij} h_j(t) + h_{ext}(t))
-#+end_src
-
-Her Phi is the transfer function defined in *src/activation.py*
-*** Currents
-We can add dynamics on the currents or synapses with *SYN_DYN=1*
+** Simulation
+*** Dynamics
+**** Currents
+Neuron $i$ in population $A$ has a reccurent input $h^A_i$,
 
 #+begin_src latex
   \tau_{syn} \frac{dh_i}{dt}(t) = - h_i(t) + \sum_j J_{ij} h_j(t)
 #+end_src
+
 or not
+
 #+begin_src latex
-  h_i(t) = \sum_j J_{ij} h_j(t)
+  h^A_i(t) = \sum_{jB} J^{AB}_{ij} h_j(t)
 #+end_src
 
-** Connectivity 
+**** Rates
+
+The models can have rate dynamics (setting *RATE_DYN* to 1 in the configuration file):
+
+#+begin_src latex
+  \tau_A \frac{d r^A_i}{dt}(t) = - r^A_i(t) + \Phi( \sum_{jB} J^{AB}_{ij} h^{AB}_j(t) + h^A_{ext}(t))
+#+end_src
+
+Here, $r_i$ is the rate of unit $i$ in population $A$
+
+otherwise rates will be instantaneous:
+
+#+begin_src latex
+  r^A_i(t) = \Phi(\sum_{jB} J^{AB}_{ij} h_j(t) + h^A_{ext}(t))
+#+end_src
+
+Here $\Phi$ is the transfer function defined in *src/activation.py*
+
+
+*** Connectivity 
 Probability of connection from population B to A:
-*** Sparse Nets
+**** Sparse Nets
 by default it is a sparse net
 
 #+begin_src latex
@@ -51,7 +58,7 @@ and also low rank
                0 otherwise
 #+end_src
 
-*** All to all
+**** All to all
 
 #+begin_src latex
   J_{ij}^{AB} =  \frac{J_{AB}}{N_B} P_{ij}^{AB}

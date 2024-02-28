@@ -1,6 +1,6 @@
 #+STARTUP: fold
 #+TITLE: RNN with pytorch
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session torch :kernel torch
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session test :kernel torch
 
 * Notebook Settings
 
@@ -31,6 +31,7 @@
   from time import perf_counter  
 
   from src.network import Network
+  from src.lif_network import LIFNetwork
   from src.plot_utils import plot_con
   from src.decode import decode_bump
 #+end_src
@@ -39,6 +40,7 @@
 
 * Helpers
 ** Random
+
 #+begin_src ipython
   def convert_seconds(seconds):
       h = seconds // 3600
@@ -102,164 +104,24 @@
 
 #+RESULTS:
 
-** Data
 #+begin_src ipython
-  def get_rates_ini_phi(name, ini_list, phi_list):
-    rates_list = []
-    for ini in ini_list:
-      for phi in phi_list:
-        rates = np.load(REPO_ROOT + '/data/simul/%s_ini_%d_phi_%d.npy' % (name, ini, phi))
-        rates_list.append(rates)
+  def get_idx(model):
+      ksi = model.PHI0.cpu().detach().numpy()
+      print(ksi.shape)
 
-    rates_list = np.array(rates_list).reshape(len(ini_list), len(phi_list), rates.shape[0], rates.shape[1])
-    print(rates_list.shape)
-    return rates_list  
+      idx = np.arange(0, len(ksi[0]))
+      theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
+
+      return theta.argsort()
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-  def get_df_ini_phi(rates):
-      n_trials, n_phi, n_times, n_neurons = rates.shape
-
-      # Create indices
-      trials_ind, phi_ind, times_ind, neurons_ind = np.indices((n_trials, n_phi, n_times, n_neurons))
-
-      # Construct DataFrame
-      df = pd.DataFrame({
-          'trial': trials_ind.flatten(),
-          'phi': phi_ind.flatten(),
-          'neuron': neurons_ind.flatten(),
-          'time': times_ind.flatten(),
-          'rates': rates.flatten()
-      })
-
-      return df
-
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  def load_data_ini_phi(name, ini_list, phi_list):
-      rates = get_rates_ini_phi(name, ini_list, phi_list)
-      df = get_df_ini_phi(rates)
-      return df
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  def get_code_ini_phi(df):
-      df_code = df.groupby(['time', 'trial', 'phi'] )['rates'].apply(decode_bump).reset_index()
-      df_code[['m0', 'm1', 'phase']] = pd.DataFrame(df_code['rates'].tolist(), index=df_code.index)
-      df_code = df_code.drop(columns=['rates'])
-      
-      end_point = df_code[df_code.time==df_code.time.iloc[-1]]
-      end_point = end_point.drop(columns=['time'])
-      print(end_point.head())  
-      return df_code, end_point  
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  def get_precision(x):
-      return x - circmean(x)
-#+end_src
-
-#+RESULTS:
-
-** Simul
-
-#+begin_src ipython
-  import subprocess
-
-  def gpu_memory_usage_percentage():
-      total_mem_str = subprocess.check_output(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,nounits,noheader"])
-      used_mem_str = subprocess.check_output(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,nounits,noheader"])
-      
-      total_mem_list = map(float, total_mem_str.decode('utf-8').strip().split('\n'))
-      used_mem_list = map(float, used_mem_str.decode('utf-8').strip().split('\n'))
-
-      mem_percentage_list = [(used_mem / total_mem) * 100.0 for total_mem, used_mem in zip(total_mem_list, used_mem_list)]
-
-      return np.array(mem_percentage_list)
-
-  memory_percentages = gpu_memory_usage_percentage()
-
-  # The memory usage for each GPU is indexed from 0
-  for index, percentage in enumerate(memory_percentages):
-      print(f'GPU {index} Memory Usage: {percentage:.2f}%')
-
-#+end_src
-
-#+RESULTS:
-: GPU 0 Memory Usage: 3.92%
-: GPU 1 Memory Usage: 4.00%
-
-#+begin_src ipython
-  from time import sleep
-
-  def check_gpu(device):
-      memory_percentages = gpu_memory_usage_percentage()
-      if device == 'cuda:0':
-          if memory_percentages[0] > 75:
-              while memory_percentages[1] > 75:
-                  memory_percentages = gpu_memory_usage_percentage()
-                  sleep(10)
-              else:
-                  device='cuda:1'
-      else:
-          if memory_percentages[1] > 75:
-              while memory_percentages[0] > 75:
-                  memory_percentages = gpu_memory_usage_percentage()
-                  sleep(10)
-              else:
-                  device='cuda:0'
-                  
-      return device
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  device = check_gpu('cuda:0')
-  print(device)
-#+end_src
-
-#+RESULTS:
-: cuda:0
-
-#+begin_src ipython
-  # import multiprocessing
-  # if multiprocessing.get_start_method(allow_none=True) != 'spawn':
-  #   multiprocessing.set_start_method('spawn', force=True)
-  # from multiprocessing import Process
-
-  def run_ini_phi(conf, name, ini_list, phi_list):
-      LOAD_MAT = 0
-      SAVE_MAT = 1
-
-      df_list = []
-      for ini in ini_list:
-          for phi in phi_list:
-
-              print('##########################################')
-              print("trial", ini, "phi", phi)
-              print('##########################################')
-
-              model = Network('%s.yml' % conf, '%s_ini_%d_phi_%d' % (name, ini, phi),
-                              REPO_ROOT, LOAD_MAT=LOAD_MAT, SAVE_MAT=SAVE_MAT, PHI0=phi)
-              
-              model.run()
-              # process = Process(target=model.run)
-              # process.start()
-              # process.join()
-              # device = check_gpu(device)
-
-              LOAD_MAT = 1
-              SAVE_MAT = 0
+  def get_overlap(model, rates):
+      ksi = model.PHI0.cpu().detach().numpy()
+      return rates @ ksi.T / rates.shape[-1]
+  
 #+end_src
 
 #+RESULTS:
@@ -276,66 +138,10 @@
 ** ODR
 
 #+begin_src ipython
-  Cij = Connectivity(10000, 10000, 1000)('sparse', 'cosine', kappa=1.0, sigma=0, phase=0)
+  Cij = Connectivity(1000, 1000, 100)('sparse', 'cosine', kappa=1.0, sigma=0, phase=0)
 #+end_src
 
 #+RESULTS:
-
-#+begin_src ipython
-  Cij = Cij.cpu().detach().numpy()
-  print(Cij.shape)
-#+end_src
-
-#+RESULTS:
-: (10000, 10000)
-
-#+begin_src ipython
-  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
-
-  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
-  im = ax1.imshow(Cij, cmap='jet', aspect=1)
-  ax1.set_xlabel("Presynaptic")
-  ax1.set_ylabel("Postsynaptic")
-
-  # Second column, first row
-  ax2 = plt.subplot2grid((2, 3), (0, 1))
-  Kj = np.sum(Cij, axis=0)  # sum over pres
-  ax2.plot(Kj)
-  # ax2.set_xticklabels([])
-  ax2.set_ylabel("$K_j$")
-
-  # # Second column, second row
-  ax3 = plt.subplot2grid((2, 3), (1, 1))
-  Ki = np.sum(Cij, axis=1)  # sum over pres
-  ax3.plot(Kj)
-  ax3.set_ylabel("$K_i$")
-
-  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
-  diags = []
-  for i in range(int(Cij.shape[0] / 2)):
-      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
-  diags = np.array(diags)
-  ax4.plot(diags)
-  ax4.set_xlabel("Neuron #")
-  ax4.set_ylabel("$P_{ij}$")
-
-  plt.tight_layout()
-  plt.show()
-
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/dd3270e92b2424ee65552fc5a6dbb7b40e9b2ee0.png]]
-
-** Dual Task
-
-#+begin_src ipython
-  Con = Connectivity(10000, 10000, 1000)
-  Cij = Con('sparse', 'lr', kappa=4, lr_mean=[0, 0], lr_cov=[[1, 0], [0, 1]])
-#+end_src
-
-#+RESULTS:
-: low rank probability
 
 #+begin_src ipython
   Cij = Cij.cpu().detach().numpy()
@@ -381,7 +187,67 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/dbbf56eabd9bd8c75c6488e25f873faa54c99abc.png]]
+[[file:./.ob-jupyter/af5d45fae0b40e95ad18a3a6ac798240b326657f.png]]
+
+** Dual Task
+
+#+begin_src ipython
+  Con = Connectivity(1000, 1000, 100, verbose=1)
+  Cij = Con('sparse', 'lr', kappa=10, lr_mean=[0, 0], lr_cov=[[1, 0], [0, 1]])
+#+end_src
+
+#+RESULTS:
+: Generating low rank vectors
+: ksi torch.Size([2, 1000])
+: low rank probability
+: Sparse random connectivity
+: with weak low rank structure, KAPPA 10.00
+
+#+begin_src ipython
+  Cij = Cij.cpu().detach().numpy()
+  print(Cij.shape)
+#+end_src
+
+#+RESULTS:
+: (1000, 1000)
+
+#+begin_src ipython
+  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
+
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij, cmap='jet', aspect=1)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij, axis=0)  # sum over pres
+  ax2.plot(Kj)
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij, axis=1)  # sum over pres
+  ax3.plot(Kj)
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij.shape[0] / 2)):
+      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/3c321c7ad0c258cea890c8dd486bc4aa280ac221.png]]
 
 #+begin_src ipython
   ksi = Con.ksi.cpu().detach().numpy()
@@ -436,7 +302,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/b059f05089130c8d02b52421cc4af5359fc29ec8.png]]
+[[file:./.ob-jupyter/7044ca7b355c351e5832a88319970eca7909aa1f.png]]
 
 #+begin_src ipython
 
@@ -466,7 +332,7 @@
   K = 1000
 
   # dense_matrix = 1.0 * (torch.rand(N, N, device='cuda') <= (K / float(N)))
-  dense_matrix = model.Wab
+  dense_matrix = model.Wab_T.T
   
   # Define variables to store indices and values of non-zero elements
   nnz_indices = []
@@ -503,10 +369,10 @@
 
 #+RESULTS:
 : tensor(indices=tensor([[   0,    0,    0,  ..., 9999, 9999, 9999],
-:                        [   1,    5,    7,  ..., 9984, 9987, 9994]]),
+:                        [   7,    8,   10,  ..., 9990, 9994, 9996]]),
 :        values=tensor([ 0.0447,  0.0447,  0.0447,  ..., -0.0447, -0.0447,
 :                       -0.0447]),
-:        device='cuda:0', size=(10000, 10000), nnz=10001697,
+:        device='cuda:0', size=(10000, 10000), nnz=10000299,
 :        layout=torch.sparse_coo)
 
 #+begin_src ipython  
@@ -514,12 +380,12 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/79a7ab88241119d363f0ed6a0c14390c8c65f3ee.png]]
+[[file:./.ob-jupyter/150232b2d43b109da6dcaf5c5118316817735ae5.png]]
 
 ** Von Mises
 
 #+begin_src ipython
-  Cij = Connectivity(1000, 1000, 1.0)('all2all', 'von_mises', kappa=.10, sigma=0, phase=0)
+  Cij = Connectivity(1000, 1000, 1.0)('all2all', 'von_mises', kappa=1.0, sigma=0, phase=0)
 #+end_src
 
 #+RESULTS:
@@ -568,10 +434,11 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/805db560325611cb5d8cc955757ec61fcaa2db35.png]]
+[[file:./.ob-jupyter/063bd67c90e50bbfef9b5fe334589105198dfacf.png]]
 
 * Stimuli
 ** Imports
+
 #+begin_src ipython
   from src.stimuli import Stimuli
 #+end_src
@@ -599,9 +466,15 @@
 ** Dual Task
 
 #+begin_src ipython
-  xi = torch.randn((1000), device='cuda')
-  ff_input = Stimuli(task='dual', size=(1, 1000))(1, 1, xi).cpu().detach().numpy()
+  xi = torch.randn((2, 1000), device='cuda')
+  ff_input = Stimuli(task='dual', size=(1, 1000))(1, 1, xi[0]).cpu().detach().numpy()  
   print(ff_input.shape)
+  
+  theta = get_theta(xi[0].cpu().numpy(), xi[1].cpu().numpy(), GM=0, IF_NORM=0)
+  theta = np.arctan2(xi[1].cpu().numpy(), xi[0].cpu().numpy())
+  index_order = theta.argsort()
+
+  ff_input = ff_input[index_order]
   plt.plot(ff_input)
   plt.xlabel('Neuron #')
   plt.ylabel('Input Strength')
@@ -612,7 +485,7 @@
 #+RESULTS:
 :RESULTS:
 : (1000,)
-[[file:./.ob-jupyter/dabec26f24752a3e579c5e3b122ff9bd2380a1eb.png]]
+[[file:./.ob-jupyter/16677d3ec5e5eafa315dfa4966462f1df7d37162.png]]
 :END:
 
 * FF Inputs
@@ -625,13 +498,9 @@
 #+end_src
 
 #+RESULTS:
-: Na tensor([7500, 2500], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  7500, 10000], device='cuda:0')
+: Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
 : Jab [1.0, -1.5, 1, -1]
 : Ja0 [2.0, 1.0]
-: strong cosine probability
-: uniform probability
-: uniform probability
-: uniform probability
 
 #+begin_src ipython
   ff_input = model.init_ff_input().cpu().detach().numpy()
@@ -639,9 +508,7 @@
 #+end_src
 
 #+RESULTS:
-: task odr
-: torch.Size([7500])
-: (1, 660, 10000)
+: (1, 1125, 10000)
 
 #+begin_src ipython
   plt.plot(ff_input[0, :, :5])
@@ -652,7 +519,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/dadc600fd164ef2760a59fd23911e004194f36bd.png]]
+[[file:./.ob-jupyter/77d1c1eab3e144ead8fb8b6c0f95da5e4571adf2.png]]
 
 #+begin_src ipython
   plt.imshow(ff_input[0].T, cmap='jet', vmin=0, vmax=55, aspect='auto')
@@ -663,7 +530,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/eaa8833382cfdb42c71a857da719aaed6b43a321.png]]
+[[file:./.ob-jupyter/326904e9582ba172c16a1d23efd7424b3c982add.png]]
 
 ** Dual Task
 
@@ -674,13 +541,10 @@
 #+end_src
 
 #+RESULTS:
-: Na tensor([7500, 2500], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  7500, 10000], device='cuda:0')
+: Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
+: [[1.0, 0.9, 0.0, 0.0], [0.9, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.9], [0.0, 0.0, 0.9, 1.0]]
 : Jab [1.0, -1.5, 1, -1]
 : Ja0 [2.0, 1.0]
-: low rank probability
-: uniform probability
-: uniform probability
-: uniform probability
 
 #+begin_src ipython
   ff_input = model.init_ff_input().cpu().detach().numpy()
@@ -688,8 +552,7 @@
 #+end_src
 
 #+RESULTS:
-: task dual
-: (1, 660, 10000)
+: (1, 1125, 10000)
 
 #+begin_src ipython
   plt.plot(ff_input[0, :, :5])
@@ -700,7 +563,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5b20057e796609f7cdefa8103ae49120287bcd3f.png]]
+[[file:./.ob-jupyter/9a4c7ec074ebfcb42646a8d2319ec6e1811c9ce1.png]]
 
 #+begin_src ipython
   plt.imshow(ff_input[0].T, cmap='jet', vmin=0, vmax=55, aspect='auto')
@@ -711,7 +574,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/6fbc8e4bc15d3e9dd5a4d1842506ea7e92458276.png]]
+[[file:./.ob-jupyter/c78cf7f973451df247d56a259208afcf16bd5f42.png]]
 
 #+begin_src ipython
   ksi = model.PHI0.cpu().detach().numpy()
@@ -723,7 +586,7 @@
 #+end_src
 
 #+RESULTS:
-: (2, 7500)
+: (4, 8000)
 
 #+begin_src ipython
   plt.imshow(ff_ordered[0].T, cmap='jet', vmin=0, aspect='auto')
@@ -735,7 +598,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/a617e87c20b5c356b1960db422df34b0cc675028.png]]
+[[file:./.ob-jupyter/0567909b66d6446f5f1628a365d3d08e0252fe33.png]]
 
 * STP
 ** from class
@@ -766,7 +629,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5a355f076fb7350204a47291a30be2284cb590dd.png]]
+[[file:./.ob-jupyter/5bc5582682d7afd17924d618bdbeb6cb8545427f.png]]
 
 #+begin_src ipython
   stp = Plasticity(0.03, 0.65, 0.25, 0.01, (1,1000))
@@ -791,579 +654,22 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/acd2e43b154eb994b2c0dfcf72db956e153f6ac2.png]]
+[[file:./.ob-jupyter/478dddcbb71fa79e20c3a05f6253383890756054.png]]
 
 ** from model
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  model = Network('config_EI.yml', 'ord', REPO_ROOT, VERBOSE=1, DEVICE='cuda', IF_STP=1, LR_TRAIN=0, N_BATCH=1, DT=0.005, N_NEURON=10000, K=500)
+  model = Network('config_EI.yml', 'odr', REPO_ROOT, VERBOSE=0, DEVICE='cuda', IF_STP=1, LR_TRAIN=0, N_BATCH=1, DT=0.005)
   rates = model(REC_LAST_ONLY=0).cpu().detach().numpy()
 #+end_src
 
 #+RESULTS:
-#+begin_example
-  Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
-  Jab [1.0, -1.5, 1, -1]
-  Ja0 [2.0, 1.0]
-  generating ff input
-  times (s) 0.0 rates (Hz) [4.38, 13.2]
-  times (s) 0.01 rates (Hz) [4.41, 13.19]
-  times (s) 0.02 rates (Hz) [4.41, 13.3]
-  times (s) 0.03 rates (Hz) [4.41, 13.24]
-  times (s) 0.04 rates (Hz) [4.4, 13.25]
-  times (s) 0.05 rates (Hz) [4.39, 13.2]
-  times (s) 0.05 rates (Hz) [4.39, 13.26]
-  times (s) 0.06 rates (Hz) [4.41, 13.23]
-  times (s) 0.07 rates (Hz) [4.41, 13.29]
-  times (s) 0.08 rates (Hz) [4.4, 13.27]
-  times (s) 0.09 rates (Hz) [4.37, 13.2]
-  times (s) 0.1 rates (Hz) [4.37, 13.23]
-  times (s) 0.11 rates (Hz) [4.4, 13.29]
-  times (s) 0.12 rates (Hz) [4.39, 13.29]
-  times (s) 0.13 rates (Hz) [4.33, 13.15]
-  times (s) 0.14 rates (Hz) [4.37, 13.26]
-  times (s) 0.15 rates (Hz) [4.38, 13.19]
-  times (s) 0.16 rates (Hz) [4.39, 13.21]
-  times (s) 0.16 rates (Hz) [4.41, 13.28]
-  times (s) 0.17 rates (Hz) [4.39, 13.27]
-  times (s) 0.18 rates (Hz) [4.36, 13.27]
-  times (s) 0.19 rates (Hz) [4.35, 13.1]
-  times (s) 0.2 rates (Hz) [4.41, 13.31]
-  times (s) 0.21 rates (Hz) [4.4, 13.37]
-  times (s) 0.22 rates (Hz) [4.33, 13.08]
-  times (s) 0.23 rates (Hz) [4.4, 13.28]
-  times (s) 0.24 rates (Hz) [4.43, 13.43]
-  times (s) 0.25 rates (Hz) [4.37, 13.08]
-  times (s) 0.26 rates (Hz) [4.43, 13.34]
-  times (s) 0.27 rates (Hz) [4.39, 13.32]
-  times (s) 0.27 rates (Hz) [4.37, 13.13]
-  times (s) 0.28 rates (Hz) [4.41, 13.26]
-  times (s) 0.29 rates (Hz) [4.41, 13.25]
-  times (s) 0.3 rates (Hz) [4.4, 13.25]
-  times (s) 0.31 rates (Hz) [4.4, 13.26]
-  times (s) 0.32 rates (Hz) [4.4, 13.22]
-  times (s) 0.33 rates (Hz) [4.4, 13.3]
-  times (s) 0.34 rates (Hz) [4.38, 13.21]
-  times (s) 0.35 rates (Hz) [4.4, 13.2]
-  times (s) 0.36 rates (Hz) [4.42, 13.23]
-  times (s) 0.37 rates (Hz) [4.41, 13.29]
-  times (s) 0.38 rates (Hz) [4.4, 13.2]
-  times (s) 0.38 rates (Hz) [4.43, 13.42]
-  times (s) 0.39 rates (Hz) [4.39, 13.18]
-  times (s) 0.4 rates (Hz) [4.38, 13.23]
-  times (s) 0.41 rates (Hz) [4.39, 13.25]
-  times (s) 0.42 rates (Hz) [4.42, 13.35]
-  times (s) 0.43 rates (Hz) [4.4, 13.24]
-  times (s) 0.44 rates (Hz) [4.42, 13.24]
-  times (s) 0.45 rates (Hz) [4.4, 13.4]
-  times (s) 0.46 rates (Hz) [4.35, 13.18]
-  times (s) 0.47 rates (Hz) [4.4, 13.23]
-  times (s) 0.48 rates (Hz) [4.44, 13.41]
-  times (s) 0.49 rates (Hz) [4.4, 13.24]
-  times (s) 0.49 rates (Hz) [4.41, 13.26]
-  times (s) 0.5 rates (Hz) [4.4, 13.29]
-  times (s) 0.51 rates (Hz) [4.39, 13.23]
-  times (s) 0.52 rates (Hz) [4.38, 13.14]
-  times (s) 0.53 rates (Hz) [4.42, 13.3]
-  times (s) 0.54 rates (Hz) [4.4, 13.29]
-  times (s) 0.55 rates (Hz) [4.38, 13.21]
-  times (s) 0.56 rates (Hz) [4.4, 13.27]
-  times (s) 0.57 rates (Hz) [4.4, 13.31]
-  times (s) 0.58 rates (Hz) [4.4, 13.23]
-  times (s) 0.59 rates (Hz) [4.4, 13.22]
-  times (s) 0.59 rates (Hz) [4.42, 13.28]
-  times (s) 0.6 rates (Hz) [4.4, 13.31]
-  times (s) 0.61 rates (Hz) [4.39, 13.25]
-  times (s) 0.62 rates (Hz) [4.4, 13.28]
-  times (s) 0.63 rates (Hz) [4.39, 13.21]
-  times (s) 0.64 rates (Hz) [4.39, 13.32]
-  times (s) 0.65 rates (Hz) [4.41, 13.23]
-  times (s) 0.66 rates (Hz) [4.41, 13.37]
-  times (s) 0.67 rates (Hz) [4.37, 13.21]
-  times (s) 0.68 rates (Hz) [4.38, 13.27]
-  times (s) 0.69 rates (Hz) [4.43, 13.31]
-  times (s) 0.7 rates (Hz) [4.43, 13.38]
-  times (s) 0.7 rates (Hz) [4.38, 13.24]
-  times (s) 0.71 rates (Hz) [4.35, 13.14]
-  times (s) 0.72 rates (Hz) [4.41, 13.38]
-  times (s) 0.73 rates (Hz) [4.39, 13.21]
-  times (s) 0.74 rates (Hz) [4.41, 13.24]
-  times (s) 0.75 rates (Hz) [4.42, 13.4]
-  times (s) 0.76 rates (Hz) [4.37, 13.29]
-  times (s) 0.77 rates (Hz) [4.39, 13.29]
-  times (s) 0.78 rates (Hz) [4.39, 13.34]
-  times (s) 0.79 rates (Hz) [4.39, 13.21]
-  times (s) 0.8 rates (Hz) [4.42, 13.34]
-  times (s) 0.81 rates (Hz) [4.41, 13.32]
-  times (s) 0.81 rates (Hz) [4.36, 13.26]
-  times (s) 0.82 rates (Hz) [4.35, 13.19]
-  times (s) 0.83 rates (Hz) [4.39, 13.25]
-  times (s) 0.84 rates (Hz) [4.38, 13.21]
-  times (s) 0.85 rates (Hz) [4.39, 13.26]
-  times (s) 0.86 rates (Hz) [4.41, 13.39]
-  times (s) 0.87 rates (Hz) [4.35, 13.21]
-  times (s) 0.88 rates (Hz) [4.38, 13.26]
-  times (s) 0.89 rates (Hz) [4.4, 13.27]
-  times (s) 0.9 rates (Hz) [4.41, 13.22]
-  times (s) 0.91 rates (Hz) [4.4, 13.25]
-  times (s) 0.92 rates (Hz) [4.97, 13.4]
-  times (s) 0.92 rates (Hz) [5.46, 14.49]
-  times (s) 0.93 rates (Hz) [5.02, 14.01]
-  times (s) 0.94 rates (Hz) [4.51, 13.41]
-  times (s) 0.95 rates (Hz) [4.33, 13.21]
-  times (s) 0.96 rates (Hz) [4.47, 13.28]
-  times (s) 0.97 rates (Hz) [4.67, 13.51]
-  times (s) 0.98 rates (Hz) [4.75, 13.68]
-  times (s) 0.99 rates (Hz) [4.7, 13.57]
-  times (s) 1.0 rates (Hz) [4.62, 13.57]
-  times (s) 1.01 rates (Hz) [4.56, 13.34]
-  times (s) 1.02 rates (Hz) [4.62, 13.56]
-  times (s) 1.02 rates (Hz) [4.66, 13.47]
-  times (s) 1.03 rates (Hz) [4.68, 13.69]
-  times (s) 1.04 rates (Hz) [4.63, 13.55]
-  times (s) 1.05 rates (Hz) [4.62, 13.48]
-  times (s) 1.06 rates (Hz) [4.64, 13.57]
-  times (s) 1.07 rates (Hz) [4.65, 13.51]
-  times (s) 1.08 rates (Hz) [4.66, 13.66]
-  times (s) 1.09 rates (Hz) [4.62, 13.48]
-  times (s) 1.1 rates (Hz) [4.63, 13.6]
-  times (s) 1.11 rates (Hz) [4.63, 13.53]
-  times (s) 1.12 rates (Hz) [4.62, 13.54]
-  times (s) 1.13 rates (Hz) [4.61, 13.54]
-  times (s) 1.13 rates (Hz) [4.63, 13.48]
-  times (s) 1.14 rates (Hz) [4.66, 13.67]
-  times (s) 1.15 rates (Hz) [4.63, 13.53]
-  times (s) 1.16 rates (Hz) [4.62, 13.55]
-  times (s) 1.17 rates (Hz) [4.64, 13.52]
-  times (s) 1.18 rates (Hz) [4.62, 13.58]
-  times (s) 1.19 rates (Hz) [4.63, 13.55]
-  times (s) 1.2 rates (Hz) [4.62, 13.58]
-  times (s) 1.21 rates (Hz) [4.63, 13.54]
-  times (s) 1.22 rates (Hz) [4.66, 13.64]
-  times (s) 1.23 rates (Hz) [4.64, 13.56]
-  times (s) 1.24 rates (Hz) [4.64, 13.55]
-  times (s) 1.24 rates (Hz) [4.63, 13.62]
-  times (s) 1.25 rates (Hz) [4.61, 13.5]
-  times (s) 1.26 rates (Hz) [4.64, 13.67]
-  times (s) 1.27 rates (Hz) [4.63, 13.47]
-  times (s) 1.28 rates (Hz) [4.62, 13.55]
-  times (s) 1.29 rates (Hz) [4.63, 13.6]
-  times (s) 1.3 rates (Hz) [4.64, 13.54]
-  times (s) 1.31 rates (Hz) [4.66, 13.75]
-  times (s) 1.32 rates (Hz) [4.61, 13.44]
-  times (s) 1.33 rates (Hz) [4.65, 13.64]
-  times (s) 1.34 rates (Hz) [4.64, 13.61]
-  times (s) 1.35 rates (Hz) [4.61, 13.51]
-  times (s) 1.35 rates (Hz) [4.62, 13.57]
-  times (s) 1.36 rates (Hz) [4.64, 13.5]
-  times (s) 1.37 rates (Hz) [4.63, 13.61]
-  times (s) 1.38 rates (Hz) [4.62, 13.5]
-  times (s) 1.39 rates (Hz) [4.62, 13.59]
-  times (s) 1.4 rates (Hz) [4.6, 13.51]
-  times (s) 1.41 rates (Hz) [4.63, 13.56]
-  times (s) 1.42 rates (Hz) [4.66, 13.64]
-  times (s) 1.43 rates (Hz) [4.6, 13.54]
-  times (s) 1.44 rates (Hz) [4.59, 13.46]
-  times (s) 1.45 rates (Hz) [4.63, 13.6]
-  times (s) 1.46 rates (Hz) [4.63, 13.61]
-  times (s) 1.46 rates (Hz) [4.63, 13.56]
-  times (s) 1.47 rates (Hz) [4.63, 13.62]
-  times (s) 1.48 rates (Hz) [4.61, 13.49]
-  times (s) 1.49 rates (Hz) [4.61, 13.59]
-  times (s) 1.5 rates (Hz) [4.63, 13.56]
-  times (s) 1.51 rates (Hz) [4.64, 13.58]
-  times (s) 1.52 rates (Hz) [4.64, 13.57]
-  times (s) 1.53 rates (Hz) [4.61, 13.53]
-  times (s) 1.54 rates (Hz) [4.62, 13.59]
-  times (s) 1.55 rates (Hz) [4.63, 13.52]
-  times (s) 1.56 rates (Hz) [4.64, 13.54]
-  times (s) 1.56 rates (Hz) [4.64, 13.52]
-  times (s) 1.57 rates (Hz) [4.66, 13.63]
-  times (s) 1.58 rates (Hz) [4.65, 13.52]
-  times (s) 1.59 rates (Hz) [4.65, 13.64]
-  times (s) 1.6 rates (Hz) [4.61, 13.58]
-  times (s) 1.61 rates (Hz) [4.58, 13.47]
-  times (s) 1.62 rates (Hz) [4.61, 13.56]
-  times (s) 1.63 rates (Hz) [4.62, 13.54]
-  times (s) 1.64 rates (Hz) [4.64, 13.62]
-  times (s) 1.65 rates (Hz) [4.62, 13.53]
-  times (s) 1.66 rates (Hz) [4.6, 13.5]
-  times (s) 1.67 rates (Hz) [4.63, 13.68]
-  times (s) 1.67 rates (Hz) [4.62, 13.53]
-  times (s) 1.68 rates (Hz) [4.64, 13.6]
-  times (s) 1.69 rates (Hz) [4.63, 13.66]
-  times (s) 1.7 rates (Hz) [4.59, 13.49]
-  times (s) 1.71 rates (Hz) [4.63, 13.62]
-  times (s) 1.72 rates (Hz) [4.62, 13.64]
-  times (s) 1.73 rates (Hz) [4.61, 13.53]
-  times (s) 1.74 rates (Hz) [4.64, 13.59]
-  times (s) 1.75 rates (Hz) [4.64, 13.58]
-  times (s) 1.76 rates (Hz) [4.61, 13.53]
-  times (s) 1.77 rates (Hz) [4.61, 13.56]
-  times (s) 1.78 rates (Hz) [4.61, 13.59]
-  times (s) 1.78 rates (Hz) [4.61, 13.61]
-  times (s) 1.79 rates (Hz) [4.61, 13.53]
-  times (s) 1.8 rates (Hz) [4.62, 13.63]
-  times (s) 1.81 rates (Hz) [4.61, 13.53]
-  times (s) 1.82 rates (Hz) [4.59, 13.58]
-  times (s) 1.83 rates (Hz) [4.15, 13.46]
-  times (s) 1.84 rates (Hz) [3.67, 12.44]
-  times (s) 1.85 rates (Hz) [3.94, 12.67]
-  times (s) 1.86 rates (Hz) [4.51, 13.27]
-  times (s) 1.87 rates (Hz) [4.73, 13.63]
-  times (s) 1.88 rates (Hz) [4.55, 13.56]
-  times (s) 1.89 rates (Hz) [4.3, 13.21]
-  times (s) 1.89 rates (Hz) [4.2, 12.99]
-  times (s) 1.9 rates (Hz) [4.35, 13.17]
-  times (s) 1.91 rates (Hz) [4.46, 13.42]
-  times (s) 1.92 rates (Hz) [4.42, 13.23]
-  times (s) 1.93 rates (Hz) [4.36, 13.4]
-  times (s) 1.94 rates (Hz) [4.32, 13.02]
-  times (s) 1.95 rates (Hz) [4.39, 13.29]
-  times (s) 1.96 rates (Hz) [4.39, 13.26]
-  times (s) 1.97 rates (Hz) [4.35, 13.12]
-  times (s) 1.98 rates (Hz) [4.42, 13.3]
-  times (s) 1.99 rates (Hz) [4.41, 13.22]
-  times (s) 2.0 rates (Hz) [4.41, 13.26]
-  times (s) 2.0 rates (Hz) [4.38, 13.21]
-  times (s) 2.01 rates (Hz) [4.41, 13.29]
-  times (s) 2.02 rates (Hz) [4.4, 13.18]
-  times (s) 2.03 rates (Hz) [4.41, 13.25]
-  times (s) 2.04 rates (Hz) [4.39, 13.33]
-  times (s) 2.05 rates (Hz) [4.36, 13.16]
-  times (s) 2.06 rates (Hz) [4.41, 13.27]
-  times (s) 2.07 rates (Hz) [4.44, 13.32]
-  times (s) 2.08 rates (Hz) [4.4, 13.35]
-  times (s) 2.09 rates (Hz) [4.35, 13.18]
-  times (s) 2.1 rates (Hz) [4.37, 13.22]
-  times (s) 2.1 rates (Hz) [4.42, 13.35]
-  times (s) 2.11 rates (Hz) [4.41, 13.21]
-  times (s) 2.12 rates (Hz) [4.39, 13.29]
-  times (s) 2.13 rates (Hz) [4.38, 13.3]
-  times (s) 2.14 rates (Hz) [4.35, 13.23]
-  times (s) 2.15 rates (Hz) [4.4, 13.25]
-  times (s) 2.16 rates (Hz) [4.42, 13.33]
-  times (s) 2.17 rates (Hz) [4.39, 13.21]
-  times (s) 2.18 rates (Hz) [4.36, 13.3]
-  times (s) 2.19 rates (Hz) [4.36, 13.16]
-  times (s) 2.2 rates (Hz) [4.4, 13.32]
-  times (s) 2.21 rates (Hz) [4.39, 13.2]
-  times (s) 2.21 rates (Hz) [4.41, 13.34]
-  times (s) 2.22 rates (Hz) [4.4, 13.34]
-  times (s) 2.23 rates (Hz) [4.38, 13.21]
-  times (s) 2.24 rates (Hz) [4.38, 13.29]
-  times (s) 2.25 rates (Hz) [4.4, 13.26]
-  times (s) 2.26 rates (Hz) [4.4, 13.26]
-  times (s) 2.27 rates (Hz) [4.4, 13.28]
-  times (s) 2.28 rates (Hz) [4.39, 13.29]
-  times (s) 2.29 rates (Hz) [4.36, 13.22]
-  times (s) 2.3 rates (Hz) [4.39, 13.33]
-  times (s) 2.31 rates (Hz) [4.39, 13.3]
-  times (s) 2.32 rates (Hz) [4.4, 13.33]
-  times (s) 2.32 rates (Hz) [4.42, 13.21]
-  times (s) 2.33 rates (Hz) [4.42, 13.4]
-  times (s) 2.34 rates (Hz) [4.36, 13.27]
-  times (s) 2.35 rates (Hz) [4.35, 13.25]
-  times (s) 2.36 rates (Hz) [4.37, 13.23]
-  times (s) 2.37 rates (Hz) [4.39, 13.24]
-  times (s) 2.38 rates (Hz) [4.42, 13.28]
-  times (s) 2.39 rates (Hz) [4.4, 13.26]
-  times (s) 2.4 rates (Hz) [4.39, 13.23]
-  times (s) 2.41 rates (Hz) [4.38, 13.24]
-  times (s) 2.42 rates (Hz) [4.39, 13.24]
-  times (s) 2.43 rates (Hz) [4.41, 13.32]
-  times (s) 2.43 rates (Hz) [4.38, 13.18]
-  times (s) 2.44 rates (Hz) [4.4, 13.25]
-  times (s) 2.45 rates (Hz) [4.39, 13.23]
-  times (s) 2.46 rates (Hz) [4.4, 13.25]
-  times (s) 2.47 rates (Hz) [4.4, 13.32]
-  times (s) 2.48 rates (Hz) [4.38, 13.16]
-  times (s) 2.49 rates (Hz) [4.38, 13.26]
-  times (s) 2.5 rates (Hz) [4.41, 13.31]
-  times (s) 2.51 rates (Hz) [4.39, 13.25]
-  times (s) 2.52 rates (Hz) [4.37, 13.26]
-  times (s) 2.53 rates (Hz) [4.37, 13.12]
-  times (s) 2.53 rates (Hz) [4.42, 13.32]
-  times (s) 2.54 rates (Hz) [4.39, 13.21]
-  times (s) 2.55 rates (Hz) [4.38, 13.24]
-  times (s) 2.56 rates (Hz) [4.36, 13.26]
-  times (s) 2.57 rates (Hz) [4.37, 13.26]
-  times (s) 2.58 rates (Hz) [4.41, 13.28]
-  times (s) 2.59 rates (Hz) [4.42, 13.3]
-  times (s) 2.6 rates (Hz) [4.39, 13.28]
-  times (s) 2.61 rates (Hz) [4.37, 13.21]
-  times (s) 2.62 rates (Hz) [4.4, 13.32]
-  times (s) 2.63 rates (Hz) [4.41, 13.27]
-  times (s) 2.64 rates (Hz) [4.41, 13.29]
-  times (s) 2.64 rates (Hz) [4.38, 13.24]
-  times (s) 2.65 rates (Hz) [4.39, 13.24]
-  times (s) 2.66 rates (Hz) [4.39, 13.23]
-  times (s) 2.67 rates (Hz) [4.38, 13.35]
-  times (s) 2.68 rates (Hz) [4.39, 13.25]
-  times (s) 2.69 rates (Hz) [4.42, 13.33]
-  times (s) 2.7 rates (Hz) [4.39, 13.21]
-  times (s) 2.71 rates (Hz) [4.38, 13.2]
-  times (s) 2.72 rates (Hz) [4.39, 13.27]
-  times (s) 2.73 rates (Hz) [4.39, 13.21]
-  times (s) 2.74 rates (Hz) [4.39, 13.3]
-  times (s) 2.75 rates (Hz) [4.38, 13.23]
-  times (s) 2.75 rates (Hz) [4.36, 13.18]
-  times (s) 2.76 rates (Hz) [4.37, 13.24]
-  times (s) 2.77 rates (Hz) [4.41, 13.3]
-  times (s) 2.78 rates (Hz) [4.38, 13.25]
-  times (s) 2.79 rates (Hz) [4.36, 13.2]
-  times (s) 2.8 rates (Hz) [4.4, 13.3]
-  times (s) 2.81 rates (Hz) [4.39, 13.25]
-  times (s) 2.82 rates (Hz) [4.38, 13.21]
-  times (s) 2.83 rates (Hz) [4.41, 13.43]
-  times (s) 2.84 rates (Hz) [4.35, 13.12]
-  times (s) 2.85 rates (Hz) [4.38, 13.27]
-  times (s) 2.86 rates (Hz) [4.39, 13.16]
-  times (s) 2.86 rates (Hz) [4.39, 13.3]
-  times (s) 2.87 rates (Hz) [4.41, 13.22]
-  times (s) 2.88 rates (Hz) [4.39, 13.29]
-  times (s) 2.89 rates (Hz) [4.36, 13.18]
-  times (s) 2.9 rates (Hz) [4.37, 13.18]
-  times (s) 2.91 rates (Hz) [4.42, 13.23]
-  times (s) 2.92 rates (Hz) [4.4, 13.33]
-  times (s) 2.93 rates (Hz) [4.36, 13.22]
-  times (s) 2.94 rates (Hz) [4.38, 13.19]
-  times (s) 2.95 rates (Hz) [4.41, 13.24]
-  times (s) 2.96 rates (Hz) [4.42, 13.36]
-  times (s) 2.97 rates (Hz) [4.38, 13.24]
-  times (s) 2.97 rates (Hz) [4.38, 13.28]
-  times (s) 2.98 rates (Hz) [4.39, 13.26]
-  times (s) 2.99 rates (Hz) [4.43, 13.24]
-  times (s) 3.0 rates (Hz) [4.41, 13.37]
-  times (s) 3.01 rates (Hz) [4.36, 13.2]
-  times (s) 3.02 rates (Hz) [4.36, 13.27]
-  times (s) 3.03 rates (Hz) [4.39, 13.23]
-  times (s) 3.04 rates (Hz) [4.39, 13.17]
-  times (s) 3.05 rates (Hz) [4.4, 13.31]
-  times (s) 3.06 rates (Hz) [4.4, 13.26]
-  times (s) 3.07 rates (Hz) [4.41, 13.33]
-  times (s) 3.07 rates (Hz) [4.39, 13.25]
-  times (s) 3.08 rates (Hz) [4.41, 13.29]
-  times (s) 3.09 rates (Hz) [4.4, 13.32]
-  times (s) 3.1 rates (Hz) [4.37, 13.17]
-  times (s) 3.11 rates (Hz) [4.4, 13.2]
-  times (s) 3.12 rates (Hz) [4.42, 13.26]
-  times (s) 3.13 rates (Hz) [4.41, 13.26]
-  times (s) 3.14 rates (Hz) [4.41, 13.29]
-  times (s) 3.15 rates (Hz) [4.39, 13.24]
-  times (s) 3.16 rates (Hz) [4.39, 13.28]
-  times (s) 3.17 rates (Hz) [4.38, 13.15]
-  times (s) 3.18 rates (Hz) [4.43, 13.33]
-  times (s) 3.18 rates (Hz) [4.4, 13.29]
-  times (s) 3.19 rates (Hz) [4.39, 13.23]
-  times (s) 3.2 rates (Hz) [4.38, 13.22]
-  times (s) 3.21 rates (Hz) [4.41, 13.31]
-  times (s) 3.22 rates (Hz) [4.43, 13.32]
-  times (s) 3.23 rates (Hz) [4.39, 13.21]
-  times (s) 3.24 rates (Hz) [4.4, 13.16]
-  times (s) 3.25 rates (Hz) [4.43, 13.32]
-  times (s) 3.26 rates (Hz) [4.41, 13.28]
-  times (s) 3.27 rates (Hz) [4.39, 13.23]
-  times (s) 3.28 rates (Hz) [4.41, 13.24]
-  times (s) 3.29 rates (Hz) [4.43, 13.34]
-  times (s) 3.29 rates (Hz) [4.39, 13.25]
-  times (s) 3.3 rates (Hz) [4.4, 13.28]
-  times (s) 3.31 rates (Hz) [4.43, 13.35]
-  times (s) 3.32 rates (Hz) [4.39, 13.31]
-  times (s) 3.33 rates (Hz) [4.38, 13.2]
-  times (s) 3.34 rates (Hz) [4.4, 13.26]
-  times (s) 3.35 rates (Hz) [4.39, 13.27]
-  times (s) 3.36 rates (Hz) [4.41, 13.26]
-  times (s) 3.37 rates (Hz) [4.44, 13.4]
-  times (s) 3.38 rates (Hz) [4.42, 13.31]
-  times (s) 3.39 rates (Hz) [4.4, 13.33]
-  times (s) 3.4 rates (Hz) [4.38, 13.21]
-  times (s) 3.4 rates (Hz) [4.41, 13.33]
-  times (s) 3.41 rates (Hz) [4.42, 13.3]
-  times (s) 3.42 rates (Hz) [4.41, 13.31]
-  times (s) 3.43 rates (Hz) [4.41, 13.42]
-  times (s) 3.44 rates (Hz) [4.39, 13.14]
-  times (s) 3.45 rates (Hz) [4.41, 13.26]
-  times (s) 3.46 rates (Hz) [4.43, 13.28]
-  times (s) 3.47 rates (Hz) [4.41, 13.33]
-  times (s) 3.48 rates (Hz) [4.39, 13.22]
-  times (s) 3.49 rates (Hz) [4.42, 13.33]
-  times (s) 3.5 rates (Hz) [4.41, 13.28]
-  times (s) 3.5 rates (Hz) [4.39, 13.22]
-  times (s) 3.51 rates (Hz) [4.38, 13.17]
-  times (s) 3.52 rates (Hz) [4.41, 13.3]
-  times (s) 3.53 rates (Hz) [4.42, 13.24]
-  times (s) 3.54 rates (Hz) [4.43, 13.36]
-  times (s) 3.55 rates (Hz) [4.37, 13.23]
-  times (s) 3.56 rates (Hz) [4.38, 13.25]
-  times (s) 3.57 rates (Hz) [4.41, 13.28]
-  times (s) 3.58 rates (Hz) [4.41, 13.24]
-  times (s) 3.59 rates (Hz) [4.41, 13.29]
-  times (s) 3.6 rates (Hz) [4.38, 13.24]
-  times (s) 3.61 rates (Hz) [4.41, 13.36]
-  times (s) 3.61 rates (Hz) [4.41, 13.24]
-  times (s) 3.62 rates (Hz) [4.43, 13.34]
-  times (s) 3.63 rates (Hz) [4.41, 13.24]
-  times (s) 3.64 rates (Hz) [4.38, 13.27]
-  times (s) 3.65 rates (Hz) [4.4, 13.34]
-  times (s) 3.66 rates (Hz) [4.93, 13.28]
-  times (s) 3.67 rates (Hz) [5.47, 14.52]
-  times (s) 3.68 rates (Hz) [5.01, 14.03]
-  times (s) 3.69 rates (Hz) [4.49, 13.3]
-  times (s) 3.7 rates (Hz) [4.33, 13.19]
-  times (s) 3.71 rates (Hz) [4.47, 13.32]
-  times (s) 3.72 rates (Hz) [4.68, 13.56]
-  times (s) 3.72 rates (Hz) [4.76, 13.6]
-  times (s) 3.73 rates (Hz) [4.71, 13.71]
-  times (s) 3.74 rates (Hz) [4.58, 13.41]
-  times (s) 3.75 rates (Hz) [4.57, 13.46]
-  times (s) 3.76 rates (Hz) [4.61, 13.45]
-  times (s) 3.77 rates (Hz) [4.65, 13.59]
-  times (s) 3.78 rates (Hz) [4.64, 13.58]
-  times (s) 3.79 rates (Hz) [4.61, 13.46]
-  times (s) 3.8 rates (Hz) [4.64, 13.51]
-  times (s) 3.81 rates (Hz) [4.66, 13.6]
-  times (s) 3.82 rates (Hz) [4.61, 13.52]
-  times (s) 3.83 rates (Hz) [4.61, 13.66]
-  times (s) 3.83 rates (Hz) [4.61, 13.47]
-  times (s) 3.84 rates (Hz) [4.65, 13.59]
-  times (s) 3.85 rates (Hz) [4.64, 13.58]
-  times (s) 3.86 rates (Hz) [4.63, 13.59]
-  times (s) 3.87 rates (Hz) [4.62, 13.54]
-  times (s) 3.88 rates (Hz) [4.61, 13.55]
-  times (s) 3.89 rates (Hz) [4.6, 13.48]
-  times (s) 3.9 rates (Hz) [4.62, 13.55]
-  times (s) 3.91 rates (Hz) [4.64, 13.57]
-  times (s) 3.92 rates (Hz) [4.63, 13.58]
-  times (s) 3.93 rates (Hz) [4.62, 13.46]
-  times (s) 3.94 rates (Hz) [4.64, 13.59]
-  times (s) 3.94 rates (Hz) [4.6, 13.56]
-  times (s) 3.95 rates (Hz) [4.58, 13.47]
-  times (s) 3.96 rates (Hz) [4.6, 13.55]
-  times (s) 3.97 rates (Hz) [4.61, 13.47]
-  times (s) 3.98 rates (Hz) [4.63, 13.56]
-  times (s) 3.99 rates (Hz) [4.62, 13.53]
-  times (s) 4.0 rates (Hz) [4.62, 13.58]
-  times (s) 4.01 rates (Hz) [4.61, 13.51]
-  times (s) 4.02 rates (Hz) [4.62, 13.57]
-  times (s) 4.03 rates (Hz) [4.62, 13.58]
-  times (s) 4.04 rates (Hz) [4.61, 13.47]
-  times (s) 4.04 rates (Hz) [4.65, 13.59]
-  times (s) 4.05 rates (Hz) [4.6, 13.49]
-  times (s) 4.06 rates (Hz) [4.62, 13.54]
-  times (s) 4.07 rates (Hz) [4.61, 13.47]
-  times (s) 4.08 rates (Hz) [4.62, 13.6]
-  times (s) 4.09 rates (Hz) [4.6, 13.5]
-  times (s) 4.1 rates (Hz) [4.61, 13.53]
-  times (s) 4.11 rates (Hz) [4.62, 13.54]
-  times (s) 4.12 rates (Hz) [4.62, 13.58]
-  times (s) 4.13 rates (Hz) [4.61, 13.5]
-  times (s) 4.14 rates (Hz) [4.64, 13.65]
-  times (s) 4.15 rates (Hz) [4.61, 13.5]
-  times (s) 4.15 rates (Hz) [4.63, 13.57]
-  times (s) 4.16 rates (Hz) [4.63, 13.42]
-  times (s) 4.17 rates (Hz) [4.66, 13.64]
-  times (s) 4.18 rates (Hz) [4.62, 13.59]
-  times (s) 4.19 rates (Hz) [4.59, 13.47]
-  times (s) 4.2 rates (Hz) [4.61, 13.49]
-  times (s) 4.21 rates (Hz) [4.65, 13.57]
-  times (s) 4.22 rates (Hz) [4.62, 13.5]
-  times (s) 4.23 rates (Hz) [4.62, 13.62]
-  times (s) 4.24 rates (Hz) [4.58, 13.5]
-  times (s) 4.25 rates (Hz) [4.59, 13.48]
-  times (s) 4.26 rates (Hz) [4.62, 13.55]
-  times (s) 4.26 rates (Hz) [4.62, 13.51]
-  times (s) 4.27 rates (Hz) [4.63, 13.59]
-  times (s) 4.28 rates (Hz) [4.63, 13.52]
-  times (s) 4.29 rates (Hz) [4.6, 13.59]
-  times (s) 4.3 rates (Hz) [4.56, 13.38]
-  times (s) 4.31 rates (Hz) [4.62, 13.61]
-  times (s) 4.32 rates (Hz) [4.59, 13.46]
-  times (s) 4.33 rates (Hz) [4.62, 13.44]
-  times (s) 4.34 rates (Hz) [4.62, 13.55]
-  times (s) 4.35 rates (Hz) [4.63, 13.54]
-  times (s) 4.36 rates (Hz) [4.62, 13.55]
-  times (s) 4.37 rates (Hz) [4.61, 13.48]
-  times (s) 4.37 rates (Hz) [4.6, 13.45]
-  times (s) 4.38 rates (Hz) [4.61, 13.46]
-  times (s) 4.39 rates (Hz) [4.64, 13.62]
-  times (s) 4.4 rates (Hz) [4.6, 13.49]
-  times (s) 4.41 rates (Hz) [4.62, 13.57]
-  times (s) 4.42 rates (Hz) [4.62, 13.49]
-  times (s) 4.43 rates (Hz) [4.62, 13.54]
-  times (s) 4.44 rates (Hz) [4.6, 13.49]
-  times (s) 4.45 rates (Hz) [4.61, 13.58]
-  times (s) 4.46 rates (Hz) [4.62, 13.51]
-  times (s) 4.47 rates (Hz) [4.63, 13.62]
-  times (s) 4.48 rates (Hz) [4.59, 13.42]
-  times (s) 4.48 rates (Hz) [4.62, 13.62]
-  times (s) 4.49 rates (Hz) [4.63, 13.5]
-  times (s) 4.5 rates (Hz) [4.63, 13.52]
-  times (s) 4.51 rates (Hz) [4.62, 13.58]
-  times (s) 4.52 rates (Hz) [4.58, 13.46]
-  times (s) 4.53 rates (Hz) [4.6, 13.47]
-  times (s) 4.54 rates (Hz) [4.62, 13.58]
-  times (s) 4.55 rates (Hz) [4.61, 13.52]
-  times (s) 4.56 rates (Hz) [4.62, 13.53]
-  times (s) 4.57 rates (Hz) [4.63, 13.48]
-  times (s) 4.58 rates (Hz) [4.23, 13.6]
-  times (s) 4.58 rates (Hz) [3.76, 12.58]
-  times (s) 4.59 rates (Hz) [3.97, 12.62]
-  times (s) 4.6 rates (Hz) [4.54, 13.49]
-  times (s) 4.61 rates (Hz) [4.68, 13.57]
-  times (s) 4.62 rates (Hz) [4.52, 13.44]
-  times (s) 4.63 rates (Hz) [4.31, 13.24]
-  times (s) 4.64 rates (Hz) [4.25, 13.14]
-  times (s) 4.65 rates (Hz) [4.34, 13.29]
-  times (s) 4.66 rates (Hz) [4.39, 13.29]
-  times (s) 4.67 rates (Hz) [4.41, 13.32]
-  times (s) 4.68 rates (Hz) [4.4, 13.33]
-  times (s) 4.69 rates (Hz) [4.35, 13.18]
-  times (s) 4.69 rates (Hz) [4.35, 13.25]
-  times (s) 4.7 rates (Hz) [4.38, 13.29]
-  times (s) 4.71 rates (Hz) [4.39, 13.3]
-  times (s) 4.72 rates (Hz) [4.39, 13.39]
-  times (s) 4.73 rates (Hz) [4.35, 13.24]
-  times (s) 4.74 rates (Hz) [4.38, 13.35]
-  times (s) 4.75 rates (Hz) [4.37, 13.21]
-  times (s) 4.76 rates (Hz) [4.39, 13.32]
-  times (s) 4.77 rates (Hz) [4.38, 13.24]
-  times (s) 4.78 rates (Hz) [4.4, 13.36]
-  times (s) 4.79 rates (Hz) [4.38, 13.26]
-  times (s) 4.8 rates (Hz) [4.4, 13.36]
-  times (s) 4.8 rates (Hz) [4.4, 13.25]
-  times (s) 4.81 rates (Hz) [4.39, 13.31]
-  times (s) 4.82 rates (Hz) [4.38, 13.27]
-  times (s) 4.83 rates (Hz) [4.36, 13.26]
-  times (s) 4.84 rates (Hz) [4.39, 13.29]
-  times (s) 4.85 rates (Hz) [4.38, 13.27]
-  times (s) 4.86 rates (Hz) [4.39, 13.3]
-  times (s) 4.87 rates (Hz) [4.38, 13.25]
-  times (s) 4.88 rates (Hz) [4.37, 13.28]
-  times (s) 4.89 rates (Hz) [4.38, 13.26]
-  times (s) 4.9 rates (Hz) [4.39, 13.23]
-  times (s) 4.91 rates (Hz) [4.41, 13.36]
-  times (s) 4.91 rates (Hz) [4.38, 13.17]
-  times (s) 4.92 rates (Hz) [4.39, 13.22]
-  times (s) 4.93 rates (Hz) [4.38, 13.27]
-  times (s) 4.94 rates (Hz) [4.39, 13.25]
-  times (s) 4.95 rates (Hz) [4.4, 13.27]
-  times (s) 4.96 rates (Hz) [4.39, 13.29]
-  times (s) 4.97 rates (Hz) [4.38, 13.36]
-  times (s) 4.98 rates (Hz) [4.34, 13.12]
-  times (s) 4.99 rates (Hz) [4.38, 13.35]
-  times (s) 5.0 rates (Hz) [4.39, 13.22]
-  times (s) 5.01 rates (Hz) [4.39, 13.31]
-  times (s) 5.01 rates (Hz) [4.38, 13.13]
-  times (s) 5.02 rates (Hz) [4.42, 13.44]
-  times (s) 5.03 rates (Hz) [4.38, 13.14]
-  Elapsed (with compilation) = 1.923221081495285s
-#+end_example
+: [[1.0, 0.9, 0.0, 0.0], [0.9, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.9], [0.0, 0.0, 0.9, 1.0]]
 
 #+begin_src ipython
   print(rates.shape)
-  r_max = 15 # * np.max(rates[-1, :15000])
+  r_max = 2 # * np.max(rates[-1, :15000])
   plt.imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
   plt.ylabel('Neuron #')
   plt.xlabel('Step')
@@ -1373,8 +679,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (1, 551, 8000)
-[[file:./.ob-jupyter/4551ba157c0f9850006f23974721743841056315.png]]
+: (1, 41, 8000)
+[[file:./.ob-jupyter/f6ccd9cb0d5e156e9e3bc0846dc258b48634f3d1.png]]
 :END:
 
 * Single Trial
@@ -1382,18 +688,90 @@
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  model = Network('config_2pop.yml', 'test', REPO_ROOT, VERBOSE=1, DEVICE='cuda', TASK='None')
+  model = LIFNetwork('config_2pop.yml', 'test', REPO_ROOT, VERBOSE=1, DEVICE='cuda', TASK='None', LR_TRAIN=0)
 #+end_src
 
 #+RESULTS:
-: Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
+: Na tensor([5000, 5000], device='cuda:0', dtype=torch.int32) Ka tensor([250., 250.], device='cuda:0') csumNa tensor([    0,  5000, 10000], device='cuda:0')
 : Jab [1.0, -1.5, 1, -1]
 : Ja0 [2.0, 1.0]
+
+** Dynamics
+
+#+begin_src ipython
+  rates = model.forward()[0].cpu().detach().numpy()
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  generating ff input
+  times (s) 0.0 rates (Hz) [6.31, 11.98]
+  times (s) 0.22 rates (Hz) [6.1, 11.68]
+  times (s) 0.44 rates (Hz) [6.41, 11.88]
+  times (s) 0.67 rates (Hz) [6.4, 11.96]
+  times (s) 0.89 rates (Hz) [6.28, 11.8]
+  times (s) 1.11 rates (Hz) [6.47, 11.98]
+  times (s) 1.33 rates (Hz) [6.38, 11.96]
+  times (s) 1.56 rates (Hz) [6.44, 11.92]
+  times (s) 1.78 rates (Hz) [6.36, 11.91]
+  times (s) 2.0 rates (Hz) [6.2, 11.75]
+  times (s) 2.22 rates (Hz) [6.42, 11.92]
+  times (s) 2.44 rates (Hz) [6.39, 11.87]
+  times (s) 2.67 rates (Hz) [6.39, 11.95]
+  times (s) 2.89 rates (Hz) [6.32, 11.88]
+  times (s) 3.11 rates (Hz) [6.36, 11.94]
+  times (s) 3.33 rates (Hz) [6.33, 11.87]
+  times (s) 3.56 rates (Hz) [6.48, 11.96]
+  times (s) 3.78 rates (Hz) [6.41, 11.95]
+  times (s) 4.0 rates (Hz) [6.45, 11.97]
+  times (s) 4.22 rates (Hz) [6.2, 11.81]
+  times (s) 4.44 rates (Hz) [6.2, 11.75]
+  times (s) 4.67 rates (Hz) [6.33, 11.81]
+  times (s) 4.89 rates (Hz) [6.47, 11.94]
+  times (s) 5.11 rates (Hz) [6.46, 11.92]
+  times (s) 5.33 rates (Hz) [6.19, 11.68]
+  times (s) 5.56 rates (Hz) [6.2, 11.74]
+  times (s) 5.78 rates (Hz) [6.28, 11.78]
+  times (s) 6.0 rates (Hz) [6.43, 11.96]
+  times (s) 6.22 rates (Hz) [6.27, 11.85]
+  times (s) 6.44 rates (Hz) [6.38, 11.84]
+  times (s) 6.67 rates (Hz) [6.31, 11.87]
+  times (s) 6.89 rates (Hz) [6.34, 11.88]
+  times (s) 7.11 rates (Hz) [6.41, 11.94]
+  times (s) 7.33 rates (Hz) [6.36, 11.89]
+  times (s) 7.56 rates (Hz) [6.18, 11.73]
+  times (s) 7.78 rates (Hz) [6.42, 11.93]
+  times (s) 8.0 rates (Hz) [6.4, 11.81]
+  times (s) 8.22 rates (Hz) [6.21, 11.72]
+  times (s) 8.44 rates (Hz) [6.37, 11.88]
+  times (s) 8.67 rates (Hz) [6.34, 11.85]
+  times (s) 8.89 rates (Hz) [6.47, 11.99]
+  Elapsed (with compilation) = 5.953561099246144s
+  (41, 10000)
+#+end_example
+
+#+begin_src ipython
+  import matplotlib.colors
+  # Color for False and True
+  cmap = matplotlib.colors.ListedColormap(['blue', 'yellow'])
+
+  r_max = 10
+  
+  plt.imshow(rates.T, aspect='auto', origin='lower', vmax=r_max, cmap='jet')
+  plt.colorbar()
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/2914392137f0a8d78863823d66ea2e844044e081.png]]
+
+#+RESULTS:
 
 ** Connectivity
 
 #+begin_src ipython
-  Cij = model.Wab.cpu().detach().numpy() 
+  Cij = model.Wab_T.cpu().detach().numpy().T
   print(Cij.shape)
 
   plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
@@ -1434,8 +812,9 @@
 #+RESULTS:
 :RESULTS:
 : (10000, 10000)
-[[file:./.ob-jupyter/92299d24e4612f871da0bb7fbcd8229cb6bda32f.png]]
+[[file:./.ob-jupyter/29aed35cf0a63c81a46bf79cc066e8912998d04b.png]]
 :END:
+
 ** FF Inputs
 
 #+begin_src ipython
@@ -1458,79 +837,9 @@
   
 #+RESULTS:
 :RESULTS:
-: (1, 660, 10000)
-[[file:./.ob-jupyter/41b92bbdbefec6771fa2309c2b9faccb4ac1e076.png]]
+: (1, 500, 10000)
+[[file:./.ob-jupyter/437eb044167792bde5794ef5f334f2ae2100fb0e.png]]
 :END:
-
-** Dynamics
-
-#+begin_src ipython
-  rates = model.forward(REC_LAST_ONLY=0)[0].cpu().detach().numpy()
-  print(rates.shape)
-#+end_src
-
-#+RESULTS:
-: generating ff input
-: times (s) 0.0 rates (Hz) [8.9, 13.43]
-: times (s) 0.6 rates (Hz) [8.28, 12.98]
-: times (s) 1.2 rates (Hz) [8.02, 12.69]
-: times (s) 1.8 rates (Hz) [7.81, 12.54]
-: Elapsed (with compilation) = 0.5204478511586785s
-: (4, 8000)
-
-#+begin_src ipython
-  r_max = 15 
-  plt.imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
-  plt.colorbar()
-  plt.show()
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-: (4, 8000)
-[[file:./.ob-jupyter/6fa57b29b01fee92f625286fd8f4168d6ae8b674.png]]
-:END:
-
-#+RESULTS:
-
-*** dual
-
-#+begin_src ipython
-  ksi = model.PHI0.cpu().detach().numpy()
-  idx = np.arange(0, len(ksi[0]))
-  theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=1)
-  index_order = theta.argsort()
-  rates_ordered = rates[:, index_order]
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=2)
-  plt.ylabel('Pref. Location (°)')
-  plt.xlabel('Time (au)')
-  plt.yticks(np.linspace(0, idx.shape[0], 5), np.linspace(0, 360, 5).astype(int))
-  plt.colorbar()
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/a630bf2ecd572f9e116f1592c2f693d564e6f5d6.png]]
-
-#+begin_src ipython
-  m0, m1, phi = decode_bump(rates, axis=-1)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  plt.plot((phi * 180 / np.pi))
-  plt.yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))  
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/2d4bd62b2a158a64146f0c3a09c9462ccfa8a085.png]]
 
 * Balance
 
@@ -1540,21 +849,19 @@
   rates_list = []
   
   for K in K_list:
-      model = Network('config_2pop.yml', 'balance', REPO_ROOT, VERBOSE=0, DEVICE='cuda', K=K)
+      model = LIFNetwork('config_2pop.yml', 'balance', REPO_ROOT, VERBOSE=0, DEVICE='cuda', K=K)
       rates = model.forward()
       rates_list.append(rates[0].cpu().detach().numpy())
 
 #+end_src
 
 #+RESULTS:
-: c548e102-bffc-4bcb-b865-52c9c61c257c
 
 #+begin_src ipython
   rates = np.array(rates_list)
   print(rates.shape)
-
-  # rates = rates[:, 0, :30000]
-  plt.plot(np.sqrt(K_list), np.mean(rates) * np.sqrt(K_list), '-o')
+  
+  plt.plot(np.sqrt(K_list), np.mean(rates[..., 8000]) * np.sqrt(K_list), '-o')
   plt.xlabel('$\sqrt{K}$')
   plt.ylabel('$\sqrt{K}$ Rates')
   plt.show()
@@ -1562,10 +869,12 @@
 
 #+RESULTS:
 :RESULTS:
-: (6, 7500)
-[[file:./.ob-jupyter/ce5fc327fcafb03fc9925c132f01e5880947ffe4.png]]
+: (6, 41, 10000)
+[[file:./.ob-jupyter/d3f09a8c678cca33a2797e5df9664a637068a3dc.png]]
 :END:
 
 #+begin_src ipython
 
 #+end_src
+
+#+RESULTS:

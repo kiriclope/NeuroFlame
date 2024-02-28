@@ -91,14 +91,15 @@ class Network(nn.Module):
                 
                 weights = Connectivity(self.Na[i_pop],
                                        self.Na[j_pop],
-                                       self.Ka[j_pop])(self.CON_TYPE,
-                                                       self.PROBA_TYPE[i_pop][j_pop],
-                                                       kappa=self.KAPPA[i_pop][j_pop],
-                                                       phase=self.PHASE,
-                                                       sigma=self.SIGMA[i_pop][j_pop],
-                                                       lr_mean= self.LR_MEAN,
-                                                       lr_cov=self.LR_COV,
-                                                       ksi=self.PHI0)
+                                       self.Ka[j_pop],
+                                       device=self.device)(self.CON_TYPE,
+                                                           self.PROBA_TYPE[i_pop][j_pop],
+                                                           kappa=self.KAPPA[i_pop][j_pop],
+                                                           phase=self.PHASE,
+                                                           sigma=self.SIGMA[i_pop][j_pop],
+                                                           lr_mean= self.LR_MEAN,
+                                                           lr_cov=self.LR_COV,
+                                                           ksi=self.PHI0)
                 
                 self.Wab_T[self.slices[i_pop], self.slices[j_pop]] = self.Jab[i_pop][j_pop] * weights
                 
@@ -120,9 +121,9 @@ class Network(nn.Module):
         
         # if self.LR_TRAIN:
         #     lr = (1.0 + self.mask * self.KAPPA[0][0] * (self.U @ self.U.T) / torch.sqrt(self.Ka[0]))
-        #     hidden = rates @ (self.Wab.T * lr.T)
+        #     hidden = rates @ (self.Wab_T * lr.T)
         # else:
-        #     hidden = rates @ self.Wab.T
+        #     hidden = rates @ self.Wab_T
 
         # if self.CON_TYPE=='sparse':
         #     hidden = torch.sparse.mm(rates, self.Wab_T)
@@ -145,16 +146,16 @@ class Network(nn.Module):
         # compute net input
         net_input = ff_input + rec_input
         non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
-
+        
         # update rates
         if self.RATE_DYN:
             rates = self.EXP_DT_TAU * rates + self.DT_TAU * non_linear
         else:
             rates = non_linear
-
+        
         return rates, rec_input
     
-    def forward(self, ff_input=None, REC_LAST_ONLY=1):
+    def forward(self, ff_input=None, REC_LAST_ONLY=0):
         '''
         Main method of Network class, runs networks dynamics over set of timesteps and returns rates at each time point or just the last time point.
         args:
@@ -166,29 +167,34 @@ class Network(nn.Module):
         
         if self.VERBOSE:
             start = perf_counter()
-        
-        output = []
-        
+                
         # Initialization (if  ff_input is None, ff_input is generated)
-        rates, rec_input, self.ff_input = self.initialization(ff_input)
-
-        ################################################
-        # WARNING STP WAS NOT TESTED AND MIGHT BE BROKEN
-        ###############################################
+        ff_input = torch.zeros((self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
+        ff_input = self.live_ff_input(0, ff_input)
+        rates, ff_input, rec_input = self.initialization(ff_input)
+        
         # Add STP
         if self.IF_STP:
-            self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC, self.DT, (self.N_BATCH, self.Na[0]), FLOAT=self.FLOAT, device=self.device)
-            self.W_stp = self.Wab_T[:self.Na[0], :self.Na[0]]
-            self.Wab_T[:self.Na[0], :self.Na[0]] = 0
+            self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC, self.DT,
+                                  (self.N_BATCH, self.Na[0]),
+                                  FLOAT=self.FLOAT, device=self.device)
+            
+            self.W_stp = self.Wab_T[self.slices[0],self.slices[0]]
+            self.Wab_T[self.slices[0], self.slices[0]] = 0
         
         # Moving average of the rates
         mv_rates = 0
-        
+
+        output = []
         # Temporal loop
         for step in range(self.N_STEPS):
-            # update dynamics
-            rates, rec_input = self.update_dynamics(rates, self.ff_input[:, step], rec_input)
 
+            ff_input = self.live_ff_input(step, ff_input)
+            rates, rec_input = self.update_dynamics(rates, ff_input, rec_input)
+            
+            # update dynamics
+            # rates, rec_input = self.update_dynamics(rates, ff_input[:, step], rec_input)
+            
             # update moving average
             mv_rates += rates
             
@@ -203,10 +209,9 @@ class Network(nn.Module):
                     if self.VERBOSE:
                         self.print_activity(step, rates)
                     
-                    # output.append(mv_rates / self.N_WINDOW)
                     if not REC_LAST_ONLY:
-                        # output.append(mv_rates[..., self.slices[0]] / self.N_WINDOW)
-                        output.append(mv_rates / self.N_WINDOW)
+                        output.append(mv_rates[..., self.slices[0]] / self.N_WINDOW)
+                        # output.append(mv_rates / self.N_WINDOW)
                     
                     # Reset moving average
                     mv_rates = 0
@@ -222,10 +227,10 @@ class Network(nn.Module):
             return y_pred.squeeze(-1)
         
         if REC_LAST_ONLY:
-            # output = rates[..., self.slices[0]]
-            output = rates
-        
-        del rates, rec_input
+            output = rates[..., self.slices[0]]
+            
+        self.ff_input = ff_input
+        del rates, ff_input, rec_input
         
         clear_cache()
         
@@ -285,16 +290,17 @@ class Network(nn.Module):
             self.N_BATCH = ff_input.shape[0]
         
         rec_input = torch.randn((self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
-        rates = Activation()(ff_input[:, 0] + rec_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
+        # rates = Activation()(ff_input[:, 0] + rec_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
+        rates = Activation()(ff_input + rec_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
         
-        return rates, rec_input, ff_input
+        return rates, ff_input, rec_input
 
     def initConst(self):
         self.N_STEADY = int(self.T_STEADY / self.DT)
         self.N_WINDOW = int(self.T_WINDOW / self.DT)
         self.N_STEPS = int(self.DURATION / self.DT) + self.N_STEADY + self.N_WINDOW
         
-        self.N_STIM_ON = [int(i / self.DT) + self.N_STEADY for i in self.T_STIM_ON]
+        self.N_STIM_ON = np.array([int(i / self.DT) + self.N_STEADY for i in self.T_STIM_ON])
         self.N_STIM_OFF = [int(i / self.DT) + self.N_STEADY for i in self.T_STIM_OFF]
         
         self.Na = []
@@ -354,7 +360,7 @@ class Network(nn.Module):
             mean_ = torch.tensor(self.LR_MEAN, dtype=self.FLOAT, device=self.device)
             # Define the covariance matrix
             cov_ = torch.tensor(self.LR_COV, dtype=self.FLOAT, device=self.device)
-            print(self.LR_COV)
+            # print(self.LR_COV)
             multivariate_normal = MultivariateNormal(mean_, cov_)
             
             self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
@@ -383,14 +389,46 @@ class Network(nn.Module):
         self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device)
         # self.Ja0 = self.Ja0 * self.M0 * torch.sqrt(self.Ka[0])
         # now inputs are scaled in init_ff_input
+
+    def live_ff_input(self, step, ff_input):
         
+        if step<=self.N_STIM_ON[0]:
+            for i_pop in range(self.N_POP):
+                if self.BUMP_SWITCH[i_pop]:
+                    ff_input[:, self.slices[i_pop]] = self.Ja0[i_pop] / torch.sqrt(self.Ka[0])
+                else:
+                    ff_input[:, self.slices[i_pop]] = self.Ja0[i_pop]
+        
+        if step>self.N_STIM_ON[0]:
+            for i_pop in range(self.N_POP):
+                ff_input[:, self.slices[i_pop]] = self.Ja0[i_pop]
+
+        if self.TASK != 'None':
+            if step in self.N_STIM_ON:
+                i = np.where(self.N_STIM_ON == step)[0][0]
+                
+                size = (self.N_BATCH, self.Na[0])
+                
+                if self.TASK == 'dual':
+                    random = torch.randn((self.Na[0],), dtype=self.FLOAT, device=self.device)
+                    stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], random)
+                    del random
+                    # stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])
+                else:
+                    stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[i])
+                
+                ff_input[:, self.slices[0]] += stimulus
+                
+                del stimulus
+            
+        return ff_input * torch.sqrt(self.Ka[0]) * self.M0
+                
     def init_ff_input(self):
         """
         Creates ff input for all timestep
         Inputs can be noisy or not and depend on the task.
         """
         
-        # ff_input = torch.zeros(self.N_BATCH, self.N_STEPS, self.N_NEURON, dtype=self.FLOAT, device=self.device)
         ff_input = torch.randn((self.N_BATCH, self.N_STEPS, self.N_NEURON), dtype=self.FLOAT, device=self.device)
         
         for i_pop in range(self.N_POP):
@@ -406,10 +444,16 @@ class Network(nn.Module):
             ff_input[:, self.N_STIM_ON[0]:, self.slices[i_pop]] += self.Ja0[i_pop]
         
         if self.TASK != 'None':
-            for i ,_ in enumerate(self.N_STIM_ON):            
+            for i ,_ in enumerate(self.N_STIM_ON):
                 size = (self.N_BATCH, self.N_STIM_OFF[i]-self.N_STIM_ON[i], self.Na[0])
                 # PHI0 should be PHI0[i] not PHI0[2*i+1]
-                stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])
+                if self.TASK == 'dual':
+                    random = torch.randn((self.Na[0],), dtype=self.FLOAT, device=self.device)
+                    stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], random)
+                    # stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])
+                else:
+                    stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[i])
+                
                 ff_input[:, self.N_STIM_ON[i]:self.N_STIM_OFF[i], self.slices[0]] += stimulus
         
             del stimulus

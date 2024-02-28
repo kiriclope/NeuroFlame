@@ -88,171 +88,15 @@
 
 #+RESULTS:
 
-* Phase space
-
-#+begin_src ipython
-  REPO_ROOT = "/home/leon/models/NeuroTorch"
-  conf_name = "config_EI.yml"
-  name = "low_rank_ini"
-  n_ini = 20
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-      model = Network(conf_name, '%s' % (name),
-                      REPO_ROOT, DEVICE='cuda', LR_TRAIN=0, TASK='None',
-                      LR_COV = [[1.0, 0.9, 0.0, 0.0],
-                                [0.9, 1.0, 0., 0.0],
-                                [0.0, 0., 1.0, 0.9],
-                                [0.0, 0.0, 0.9, 1.0]],
-                      VERBOSE=0, SEED=0, N_BATCH=n_ini)
-#+end_src
-
-#+RESULTS:
-: [[1.0, 0.9, 0.0, 0.0], [0.9, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.9], [0.0, 0.0, 0.9, 1.0]]
-
-#+begin_src ipython
-  Ja0 = np.linspace(0, 2, 10)
-  print(Ja0)
-#+end_src
-
-#+RESULTS:
-: [0.         0.22222222 0.44444444 0.66666667 0.88888889 1.11111111
-:  1.33333333 1.55555556 1.77777778 2.        ]
-
-#+begin_src ipython
-  ff_input = []
-  for x in Ja0:
-      model.Ja0[0] = x
-      ff_input.append(model.init_ff_input())
-
-  ff_input = torch.cat(ff_input)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  print(ff_input.shape)
-#+end_src
-
-#+RESULTS:
-: torch.Size([200, 1200, 10000])
-
-#+begin_src ipython
-  rates = model.forward(ff_input, REC_LAST_ONLY=0).cpu().detach().numpy()
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  overlap = get_overlap(model, rates)
-  overlap = np.abs(overlap.reshape(10, n_ini, 11, -1))
-  print(overlap.shape)
-#+end_src
-
-#+RESULTS:
-: (10, 20, 11, 4)
-
-#+begin_src ipython
-  mean_overlap = overlap.mean(1)
-  for i in range(n_ini):
-      plt.plot(overlap[:, i, -1], 'o')
-  plt.plot(mean_overlap[:, -1, :], '-o')
-  plt.ylabel('Overlap')
-  plt.xlabel('$J_{A0}$')
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/686154d466dae923b6f7d1800299bb645726cb0c.png]]
-
-#+begin_src ipython
-  idx = get_idx(model)
-  rates_ord = rates[..., idx].reshape((10, n_ini, 11, -1))[..., -1, :]
-  m0, m1, phi = decode_bump(rates_ord, axis=-1)
-  print(m0.shape)
-#+end_src
-
-#+RESULTS:
-: (4, 8000)
-: (10, 20)
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=[2*height, height])
-
-  x = m1 / m0 * np.cos(phi)
-  y = m1 / m0 * np.sin(phi)
-
-  ax[0].hist(np.hstack(phi) * 180 / np.pi, density=True, bins='auto')
-  ax[0].set_xlim([0, 360])
-  ax[0].set_xticks([0, 180, 360])
-  ax[0].set_xlabel('Pref. Location (°)')
-  ax[0].set_ylabel('Density')
-
-  ax[1].plot(x.T, y.T, 'o')
-  ax[1].set_xlim([-2, 2])
-  ax[1].set_ylim([-2, 2])
-  # ax[1].set_title('$h_S . \\xi_D = 0$')
-  ax[1].set_xlabel('Sample Axis')
-  ax[1].set_ylabel('Distractor Axis')
-
-  plt.show() 
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/a3e007e35c354880d0390b321f8173ef1a06ab1f.png]]
-
-#+begin_src ipython
-  cos = torch.nn.CosineSimilarity(dim=0, eps=1e-6)  
-  print(model.PHI0.shape)
-  
-  theta01 = np.arccos(cos(model.PHI0[0], model.PHI0[1]).item()) * 180 / np.pi
-  theta02 = np.arccos(cos(model.PHI0[0], model.PHI0[2]).item()) * 180 / np.pi
-  theta12 = np.arccos(cos(model.PHI0[1], model.PHI0[2]).item()) * 180 / np.pi
-  print(theta01, theta02, theta12)
-#+end_src
-
-#+RESULTS:
-: torch.Size([4, 8000])
-: 25.84251566350928 90.12336302340005 90.16332386469915
-
-#+begin_src ipython
-  def covariance(x, y):
-      if x.size(0) != y.size(0):
-          raise ValueError("x and y must have the same number of elements.")
-    
-      x_mean = torch.mean(x)
-      y_mean = torch.mean(y)
-    
-      cov = torch.mean((x - x_mean) * (y - y_mean))
-      return cov
-
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  print(model.PHI0.shape)
-  cov01 = covariance(model.PHI0[0], model.PHI0[1]).item()
-  cov02 = covariance(model.PHI0[0], model.PHI0[2]).item()
-  cov12 = covariance(model.PHI0[1], model.PHI0[2]).item()
-  print(cov01, cov02, cov12)
-#+end_src
-
-#+RESULTS:
-: torch.Size([4, 8000])
-: 0.8871580958366394 -0.0017717686714604497 -0.0025606986600905657
-
 * RNN with torch
 ** Single Trial
 *** Model
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  model = Network('config_EI.yml', 'dual', REPO_ROOT, VERBOSE=1, DEVICE='cuda:0', LR_TRAIN=0)
+  model = Network('config_EI.yml', 'dual', REPO_ROOT, VERBOSE=1, DEVICE='cuda:0')
   
-  rates = model(REC_LAST_ONLY=0).cpu().numpy()
+  rates = model().cpu().numpy()[0]
 
   Ne = model.Na[0].detach().cpu().numpy()
   N = model.N_NEURON
@@ -262,24 +106,32 @@
 
 #+RESULTS:
 #+begin_example
-  Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
-  [[1.0, 0.5, 0.0, 0.0], [0.5, 1.0, 0.25, 0.0], [0.0, 0.25, 1.0, 0.5], [0.0, 0.0, 0.5, 1.0]]
+  Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([1000., 1000.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
   Jab [1.0, -1.5, 1, -1]
   Ja0 [2.0, 1.0]
-  generating ff input
-  times (s) 0.0 rates (Hz) [0.0, 2.85]
-  times (s) 0.83 rates (Hz) [22.36, 2.66]
-  times (s) 1.67 rates (Hz) [9.38, 15.0]
-  times (s) 2.5 rates (Hz) [8.92, 13.44]
-  times (s) 3.33 rates (Hz) [8.93, 13.36]
-  times (s) 4.17 rates (Hz) [8.75, 13.44]
-  times (s) 5.0 rates (Hz) [8.37, 13.16]
-  times (s) 5.83 rates (Hz) [8.67, 13.47]
-  times (s) 6.67 rates (Hz) [8.46, 13.16]
-  times (s) 7.5 rates (Hz) [8.95, 13.72]
-  times (s) 8.33 rates (Hz) [8.22, 12.8]
-  Elapsed (with compilation) = 1.1150267124176025s
-  (1, 11, 8000)
+  times (s) 0.0 rates (Hz) [0.23, 0.36]
+  times (s) 0.91 rates (Hz) [0.37, 0.36]
+  times (s) 1.82 rates (Hz) [7.37, 11.34]
+  times (s) 2.73 rates (Hz) [7.25, 11.24]
+  times (s) 3.64 rates (Hz) [7.21, 11.19]
+  times (s) 4.55 rates (Hz) [7.18, 11.17]
+  times (s) 5.45 rates (Hz) [7.15, 11.14]
+  times (s) 6.36 rates (Hz) [7.15, 11.13]
+  times (s) 7.27 rates (Hz) [7.15, 11.13]
+  times (s) 8.18 rates (Hz) [7.15, 11.13]
+  times (s) 9.09 rates (Hz) [7.15, 11.13]
+  times (s) 10.0 rates (Hz) [7.15, 11.13]
+  times (s) 10.91 rates (Hz) [7.15, 11.13]
+  times (s) 11.82 rates (Hz) [7.15, 11.13]
+  times (s) 12.73 rates (Hz) [7.15, 11.13]
+  times (s) 13.64 rates (Hz) [7.15, 11.13]
+  times (s) 14.55 rates (Hz) [7.15, 11.13]
+  times (s) 15.45 rates (Hz) [7.15, 11.13]
+  times (s) 16.36 rates (Hz) [7.15, 11.13]
+  times (s) 17.27 rates (Hz) [7.15, 11.13]
+  times (s) 18.18 rates (Hz) [7.15, 11.13]
+  Elapsed (with compilation) = 17.595287590287626s
+  (21, 8000)
 #+end_example
 
 *** Dynamics
@@ -304,8 +156,19 @@
 
 #+RESULTS:
 :RESULTS:
-: (1, 1200, 10000)
-[[file:./.ob-jupyter/6a49e81ca10a0ea0bc8eaa4f0ad323cf7441513f.png]]
+: (1, 10000)
+# [goto error]
+: ---------------------------------------------------------------------------
+: IndexError                                Traceback (most recent call last)
+: Cell In[31], line 6
+:       2 print(ff_input.shape)
+:       4 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+: ----> 6 ax[0].plot(ff_input[0, :, :5])
+:       7 ax[0].plot(ff_input[0, :, -5:])
+:       8 ax[0].set_xlabel('Step')
+: 
+: IndexError: too many indices for array: array is 2-dimensional, but 3 were indexed
+[[file:./.ob-jupyter/cc42f05ae6c6122d0c4fa6711a25aeda3f3e0235.png]]
 :END:
 
 #+begin_src ipython
@@ -319,8 +182,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (11, 8000)
-[[file:./.ob-jupyter/408b86edbfb495000616a543027ab8f2a5d1f10c.png]]
+: (21, 8000)
+[[file:./.ob-jupyter/2ceff2be4af79bbf64082b0ae74fac3b524171a9.png]]
 :END:
 
 #+RESULTS:
@@ -331,7 +194,7 @@
 #+end_src
 
 #+RESULTS:
-: (11, 4)
+: (21, 4)
 
 #+begin_src ipython
   plt.plot(overlap[:, :2], 'r')
@@ -342,7 +205,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/784b6e33506c42a228573d57b364e2978134479d.png]]
+[[file:./.ob-jupyter/2bf1d205924a96bde83471b2e5511e0d284bbcfa.png]]
 
 #+begin_src ipython
   idx = get_idx(model)
@@ -353,7 +216,7 @@
 : (4, 8000)
 
 #+begin_src ipython
-  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=15)
+  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=5)
   plt.ylabel('Pref. Location (°)')
   plt.xlabel('Time (au)')
   plt.yticks(np.linspace(0, Ne, 5), np.linspace(0, 360, 5).astype(int))
@@ -362,7 +225,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/738b62a0143851d0056893941dd05fe1fef2dd70.png]]
+[[file:./.ob-jupyter/8a7d3db727db9e3637b579bee9f77bb8a7746c52.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -377,7 +240,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/fa5a80d3c364da6b143d8b63e3c529656e0d2db3.png]]
+[[file:./.ob-jupyter/ca93e4e141d3d008f32b9ce32e3702bab817b15a.png]]
 
 #+begin_src ipython
 
@@ -392,38 +255,71 @@
   REPO_ROOT = "/home/leon/models/NeuroTorch"
   conf_name = "config_EI.yml"
   name = "low_rank_ini"
-  seed = 0
+  seed = np.random.randint(100)
+  # 34, 53
+  print(seed)
 #+end_src
 
 #+RESULTS:
+: 45
 
 *** Simulation
 
-#+begin_src ipython  
+#+begin_src ipython 
   start = perf_counter()
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', N_BATCH=10, LR_TRAIN=0, SEED=seed)
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', N_BATCH=1000, SEED=seed)
+
+  # model.I0[0] = 1
+  # sample_A = model.init_ff_input()
+
+  # model.I0[0] = -1
+  # sample_B = model.init_ff_input()
+
+  # ff_input = torch.vstack((sample_A, sample_B))
+  # print(ff_input.shape)
+  ff_input = None
   
-  model.I0[0] = 1
-  sample_A = model.init_ff_input()
-
-  model.I0[0] = -1
-  sample_B = model.init_ff_input()
-
-  ff_input = torch.vstack((sample_A, sample_B))
-  print(ff_input.shape)
-
-  rates = model.forward(ff_input, REC_LAST_ONLY=0).detach().cpu().numpy()
+  rates = model.forward(ff_input).detach().cpu().numpy()
   end = perf_counter()
 
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
   print('rates', rates.shape)
-
 #+end_src
 
 #+RESULTS:
-: torch.Size([20, 1200, 10000])
-: Elapsed (with compilation) = 0h 0m 1s
-: rates (20, 11, 8000)
+: Elapsed (with compilation) = 0h 8m 46s
+: rates (1000, 21, 8000)
+
+#+begin_src ipython
+  start = perf_counter()
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1', N_BATCH=40, SEED=seed)
+
+  rates = []
+  for i in range(10):
+      rates.append(model.forward().detach().cpu().numpy())
+
+  rates = np.vstack(rates)
+  end = perf_counter()
+
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+  print('rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  ff_input torch.Size([40, 10000])
+  ff_input torch.Size([40, 10000])
+  ff_input torch.Size([40, 10000])
+  ff_input torch.Size([40, 10000])
+  ff_input torch.Size([40, 10000])
+  ff_input torch.Size([40, 10000])
+  ff_input torch.Size([40, 10000])
+  ff_input torch.Size([40, 10000])
+  ff_input torch.Size([40, 10000])
+  ff_input torch.Size([40, 10000])
+  Elapsed (with compilation) = 0h 8m 48s
+  rates (400, 21, 8000)
+#+end_example
 
 *** Results
 
@@ -450,8 +346,19 @@
 
 #+RESULTS:
 :RESULTS:
-: (20, 1200, 10000)
-[[file:./.ob-jupyter/a5069129f7f4d5ab52bd5222126f997dc97504ce.png]]
+: (1000, 10000)
+# [goto error]
+: ---------------------------------------------------------------------------
+: IndexError                                Traceback (most recent call last)
+: Cell In[41], line 9
+:       5 print(ff_input.shape)
+:       7 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+: ----> 9 ax[0].plot(ff_input[0, :, :5])
+:      10 ax[0].plot(ff_input[1, :, :5])
+:      11 ax[0].set_xlabel('Step')
+: 
+: IndexError: too many indices for array: array is 2-dimensional, but 3 were indexed
+[[file:./.ob-jupyter/cc42f05ae6c6122d0c4fa6711a25aeda3f3e0235.png]]
 :END:
 
 #+begin_src ipython
@@ -464,8 +371,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (20, 11)
-[[file:./.ob-jupyter/6235a8c7dc76c24bc8917c6ad242a780486eea24.png]]
+: (1000, 21)
+[[file:./.ob-jupyter/0761e43e6a1da49b939d5d4e59931b17889a9c78.png]]
 :END:
 
 #+begin_src ipython
@@ -476,7 +383,7 @@
 
 #+RESULTS:
 : (4, 8000)
-: (20, 11, 8000)
+: (1000, 21, 8000)
 
 #+begin_src ipython
   overlap = get_overlap(model, rates)
@@ -484,7 +391,7 @@
 #+end_src
 
 #+RESULTS:
-: (4, 11, 20)
+: (4, 21, 1000)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -505,7 +412,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f4c374283006cf28ad0e5349ac756c96d748f1c4.png]]
+[[file:./.ob-jupyter/c117dbb4ff9216527d5d7a7017e2dd462fe3e86c.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -513,7 +420,7 @@
 #+end_src
 
 #+RESULTS:
-: (20, 11)
+: (1000, 21)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -540,7 +447,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e298c05513d4db2295626b13bdc8b9bdb8a3064d.png]]
+[[file:./.ob-jupyter/96a08bad29e3eb3e10c5af159f8f81bb1e14d181.png]]
 
 #+begin_src ipython
   print(rates_ordered.shape)
@@ -555,8 +462,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (20, 11, 8000)
-[[file:./.ob-jupyter/2038a312b0d08a127c52b98bd4d85fe7e9a8967f.png]]
+: (1000, 21, 8000)
+[[file:./.ob-jupyter/64952e73426b82ef51d0ebf805dbdcef485b7729.png]]
 :END:
 
 #+begin_src ipython
@@ -573,8 +480,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (20, 11)
-[[file:./.ob-jupyter/fe2457d3e56cd7028ba081ef37b4d00c3b6103a7.png]]
+: (1000, 21)
+[[file:./.ob-jupyter/e18c7d836fa91c0bd4f333e40528dfcbee2390d9.png]]
 :END:
 
 #+begin_src ipython
@@ -644,7 +551,7 @@
   conf_name = "config_EI.yml"
   name = "low_rank_ini"
 #+end_src
-w
+
 #+RESULTS:
 
 #+begin_src ipython
@@ -1031,6 +938,7 @@ w
 #+end_src
 
 #+RESULTS:
+
 
 **** xi_S . xi_D >0
 

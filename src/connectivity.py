@@ -21,12 +21,13 @@ class Connectivity():
         self.device = device
         self.dtype = dtype
         
-    def low_rank_proba(self, kappa, lr_mean, lr_cov, ksi=None):
+    def low_rank_proba(self, kappa, lr_mean, lr_cov, ksi=None, **kwargs):
         '''returns Low rank probability of connection'''
         
         if ksi is None:
             if self.verbose:
                 print('Generating low rank vectors')
+
             mean_ = torch.tensor(lr_mean, dtype=self.dtype, device=self.device)
             cov_ = torch.tensor(lr_cov, dtype=self.dtype, device=self.device)
             
@@ -53,7 +54,7 @@ class Connectivity():
             Pij = 1.0 + kappa * Lij / torch.sqrt(self.Kb)
             del Lij
         else:
-            Pij = 1.0 + kappa * (ksi.T @ ksi) / torch.sqrt(self.Kb)
+            Pij = 1.0 + kappa * (self.ksi.T @ self.ksi) / torch.sqrt(self.Kb)
         
         # print(Pij.shape)
         
@@ -104,7 +105,8 @@ class Connectivity():
                 if self.verbose:
                     print('strong cosine probability')
         elif 'lr' in proba_type:
-            Pij = self.low_rank_proba(kwargs['kappa'], kwargs['lr_mean'], kwargs['lr_cov'], kwargs['ksi'])
+            # Pij = self.low_rank_proba(kwargs['kappa'], kwargs['lr_mean'], kwargs['lr_cov'], kwargs['ksi'])
+            Pij = self.low_rank_proba(**kwargs)
             if self.verbose:
                 print('low rank probability')
         elif 'von_mises' in proba_type:
@@ -161,11 +163,11 @@ class Connectivity():
         if self.verbose:
             if "cos" in proba_type:
                 if "spec" in proba_type:
-                    print('with weak cosine structure, KAPPA %.2f' % self.kappa.cpu().detach().numpy())
+                    print('with weak cosine structure, KAPPA %.2f' % kwargs['kappa'])
                 else:
-                    print('with strong cosine structure, KAPPA', self.kappa.cpu().detach().numpy())
+                    print('with strong cosine structure, KAPPA', kwargs['kappa'])
             elif "lr" in proba_type:
-                print('with weak low rank structure, KAPPA %.2f' % self.kappa.cpu().detach().numpy())
+                print('with weak low rank structure, KAPPA %.2f' % kwargs['kappa'])
         
         return Cij
     
