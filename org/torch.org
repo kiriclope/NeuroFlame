@@ -29,11 +29,12 @@
   import torch
   import gc
   import pandas as pd
-  from time import perf_counter  
+  from time import perf_counter
 
   from src.network import Network
   from src.plot_utils import plot_con
   from src.decode import decode_bump
+  from src.utils import clear_cache
 #+end_src
 
 #+RESULTS:
@@ -49,14 +50,15 @@
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src ipython :tangle ../src/lr_utils.py
+  import numpy as np
   def get_theta(a, b, GM=0, IF_NORM=0):
 
       u, v = a, b
 
-      if GM:          
+      if GM:
           v = b - np.dot(b, a) / np.dot(a, a) * a
-          
+
       if IF_NORM:
           u = a / np.linalg.norm(a)
           v = b / np.linalg.norm(b)
@@ -66,24 +68,62 @@
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src ipython :tangle ../src/lr_utils.py
   def get_idx(model):
       ksi = model.PHI0.cpu().detach().numpy()
       print(ksi.shape)
 
       idx = np.arange(0, len(ksi[0]))
       theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
-
       return theta.argsort()
 #+end_src
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src ipython :tangle ../src/lr_utils.py
   def get_overlap(model, rates):
       ksi = model.PHI0.cpu().detach().numpy()
       return rates @ ksi.T / rates.shape[-1]
-  
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def pretty_size(size):
+      """Pretty prints a torch.Size object"""
+      assert(isinstance(size, torch.Size))
+      return " × ".join(map(str, size))
+
+  def dump_tensors(gpu_only=True):
+      """Prints a list of the Tensors being tracked by the garbage collector."""
+      import gc
+      total_size = 0
+      for obj in gc.get_objects():
+          try:
+              if torch.is_tensor(obj):
+                  if not gpu_only or obj.is_cuda:
+                      print("%s:%s%s %s" % (type(obj).__name__,
+                                            " GPU" if obj.is_cuda else "",
+                                            " pinned" if obj.is_pinned else "",
+                                            pretty_size(obj.size())))
+                      total_size += obj.numel()
+              elif hasattr(obj, "data") and torch.is_tensor(obj.data):
+                  if not gpu_only or obj.is_cuda:
+                      print("%s → %s:%s%s%s%s %s" % (type(obj).__name__,
+                                                     type(obj.data).__name__,
+                                                     " GPU" if obj.is_cuda else "",
+                                                     " pinned" if obj.data.is_pinned else "",
+                                                     " grad" if obj.requires_grad else "",
+                                                     " volatile" if obj.volatile else "",
+                                                     pretty_size(obj.data.size())))
+                      total_size += obj.data.numel()
+              del obj
+              torch.cuda.empty_cache()
+          except Exception as e:
+              pass
+      print("Total size:", total_size)
+
 #+end_src
 
 #+RESULTS:
@@ -94,52 +134,44 @@
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  model = Network('config_EI.yml', 'dual', REPO_ROOT, VERBOSE=1, DEVICE='cuda:0')
+
+  start = perf_counter()
   
+  model = Network('config_EI.yml', 'dual_rand', REPO_ROOT, VERBOSE=0, DEVICE='cuda', LIVE_FF_UPDATE=0, N_BATCH=1)
   rates = model().cpu().numpy()[0]
+
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
   Ne = model.Na[0].detach().cpu().numpy()
   N = model.N_NEURON
 
-  print(rates.shape)
+  print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-#+begin_example
-  Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([1000., 1000.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
-  Jab [1.0, -1.5, 1, -1]
-  Ja0 [2.0, 1.0]
-  times (s) 0.0 rates (Hz) [0.23, 0.36]
-  times (s) 0.91 rates (Hz) [0.37, 0.36]
-  times (s) 1.82 rates (Hz) [7.37, 11.34]
-  times (s) 2.73 rates (Hz) [7.25, 11.24]
-  times (s) 3.64 rates (Hz) [7.21, 11.19]
-  times (s) 4.55 rates (Hz) [7.18, 11.17]
-  times (s) 5.45 rates (Hz) [7.15, 11.14]
-  times (s) 6.36 rates (Hz) [7.15, 11.13]
-  times (s) 7.27 rates (Hz) [7.15, 11.13]
-  times (s) 8.18 rates (Hz) [7.15, 11.13]
-  times (s) 9.09 rates (Hz) [7.15, 11.13]
-  times (s) 10.0 rates (Hz) [7.15, 11.13]
-  times (s) 10.91 rates (Hz) [7.15, 11.13]
-  times (s) 11.82 rates (Hz) [7.15, 11.13]
-  times (s) 12.73 rates (Hz) [7.15, 11.13]
-  times (s) 13.64 rates (Hz) [7.15, 11.13]
-  times (s) 14.55 rates (Hz) [7.15, 11.13]
-  times (s) 15.45 rates (Hz) [7.15, 11.13]
-  times (s) 16.36 rates (Hz) [7.15, 11.13]
-  times (s) 17.27 rates (Hz) [7.15, 11.13]
-  times (s) 18.18 rates (Hz) [7.15, 11.13]
-  Elapsed (with compilation) = 17.595287590287626s
-  (21, 8000)
-#+end_example
+: Elapsed (with compilation) = 0h 0m 3s
+: rates (21, 8000)
+
+#+RESULTS:
+
+#+begin_src ipython
+  print(torch.cuda.memory_allocated()/100000)
+  # del model
+  clear_cache()
+  print(torch.cuda.memory_allocated()/100000)
+#+end_src
+
+#+RESULTS:
+: 5939.20512
+: 5939.20512
 
 *** Dynamics
 
 #+begin_src ipython
   ff_input = model.ff_input.cpu().detach().numpy()
   print(ff_input.shape)
-  
+
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 
   ax[0].plot(ff_input[0, :, :5])
@@ -156,25 +188,14 @@
 
 #+RESULTS:
 :RESULTS:
-: (1, 10000)
-# [goto error]
-: ---------------------------------------------------------------------------
-: IndexError                                Traceback (most recent call last)
-: Cell In[31], line 6
-:       2 print(ff_input.shape)
-:       4 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
-: ----> 6 ax[0].plot(ff_input[0, :, :5])
-:       7 ax[0].plot(ff_input[0, :, -5:])
-:       8 ax[0].set_xlabel('Step')
-: 
-: IndexError: too many indices for array: array is 2-dimensional, but 3 were indexed
-[[file:./.ob-jupyter/cc42f05ae6c6122d0c4fa6711a25aeda3f3e0235.png]]
+: (1, 4600, 10000)
+[[file:./.ob-jupyter/a02a8932203aa58537c449ad398dea78ef5ec3af.png]]
 :END:
 
 #+begin_src ipython
   print(rates.shape)
   r_max = 15 # 0.5 * np.max(rates[-1])
-  
+
   plt.imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
   plt.colorbar()
   plt.show()
@@ -183,7 +204,7 @@
 #+RESULTS:
 :RESULTS:
 : (21, 8000)
-[[file:./.ob-jupyter/2ceff2be4af79bbf64082b0ae74fac3b524171a9.png]]
+[[file:./.ob-jupyter/aaf475146d608736f363b2b849bee5d6236b9ea0.png]]
 :END:
 
 #+RESULTS:
@@ -205,7 +226,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2bf1d205924a96bde83471b2e5511e0d284bbcfa.png]]
+[[file:./.ob-jupyter/296c6a05dac176bcd17a3679e43a13b391bd7013.png]]
 
 #+begin_src ipython
   idx = get_idx(model)
@@ -216,7 +237,7 @@
 : (4, 8000)
 
 #+begin_src ipython
-  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=5)
+  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=10)
   plt.ylabel('Pref. Location (°)')
   plt.xlabel('Time (au)')
   plt.yticks(np.linspace(0, Ne, 5), np.linspace(0, 360, 5).astype(int))
@@ -225,7 +246,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/8a7d3db727db9e3637b579bee9f77bb8a7746c52.png]]
+[[file:./.ob-jupyter/778fad7555a9b64c49fab38e0b7f81a210da9760.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -235,12 +256,12 @@
 
 #+begin_src ipython
   plt.plot((phi * 180 / np.pi))
-  plt.yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))  
+  plt.yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ca93e4e141d3d008f32b9ce32e3702bab817b15a.png]]
+[[file:./.ob-jupyter/9799469fbfc03df956d2943dad69a0e8c90b9cd2.png]]
 
 #+begin_src ipython
 
@@ -261,24 +282,18 @@
 #+end_src
 
 #+RESULTS:
-: 45
+: 95
 
 *** Simulation
 
-#+begin_src ipython 
+#+begin_src ipython
   start = perf_counter()
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', N_BATCH=1000, SEED=seed)
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda',
+                  N_BATCH=100, SEED=seed,
+                  TASK='dual', LIVE_FF_UPDATE=1)
 
-  # model.I0[0] = 1
-  # sample_A = model.init_ff_input()
-
-  # model.I0[0] = -1
-  # sample_B = model.init_ff_input()
-
-  # ff_input = torch.vstack((sample_A, sample_B))
-  # print(ff_input.shape)
   ff_input = None
-  
+
   rates = model.forward(ff_input).detach().cpu().numpy()
   end = perf_counter()
 
@@ -287,18 +302,18 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 8m 46s
-: rates (1000, 21, 8000)
+: Elapsed (with compilation) = 0h 0m 16s
+: rates (100, 21, 8000)
 
 #+begin_src ipython
   start = perf_counter()
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1', N_BATCH=40, SEED=seed)
+  # model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:0', N_BATCH=20, SEED=seed)
 
-  rates = []
-  for i in range(10):
-      rates.append(model.forward().detach().cpu().numpy())
+  # rates = []
+  # for i in range(3):
+  #     rates.append(model.forward().detach().cpu().numpy())
 
-  rates = np.vstack(rates)
+  # rates = np.vstack(rates)
   end = perf_counter()
 
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
@@ -306,60 +321,33 @@
 #+end_src
 
 #+RESULTS:
-#+begin_example
-  ff_input torch.Size([40, 10000])
-  ff_input torch.Size([40, 10000])
-  ff_input torch.Size([40, 10000])
-  ff_input torch.Size([40, 10000])
-  ff_input torch.Size([40, 10000])
-  ff_input torch.Size([40, 10000])
-  ff_input torch.Size([40, 10000])
-  ff_input torch.Size([40, 10000])
-  ff_input torch.Size([40, 10000])
-  ff_input torch.Size([40, 10000])
-  Elapsed (with compilation) = 0h 8m 48s
-  rates (400, 21, 8000)
-#+end_example
+: Elapsed (with compilation) = 0h 0m 0s
+: rates (100, 21, 8000)
 
 *** Results
 
-#+begin_src ipython 
+#+begin_src ipython
   Ne = model.Na[0].detach().cpu().numpy()
   N = model.N_NEURON
 
-  ff_input = model.ff_input.cpu().detach().numpy()
-  print(ff_input.shape)
+  # ff_input = model.ff_input.cpu().detach().numpy()
+  # print(ff_input.shape)
 
-  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+  # fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 
-  ax[0].plot(ff_input[0, :, :5])
-  ax[0].plot(ff_input[1, :, :5])
-  ax[0].set_xlabel('Step')
-  ax[0].set_ylabel('FF Input')
+  # ax[0].plot(ff_input[0, :, :5])
+  # ax[0].plot(ff_input[1, :, :5])
+  # ax[0].set_xlabel('Step')
+  # ax[0].set_ylabel('FF Input')
 
-  ax[1].imshow(ff_input[1].T, cmap='jet', vmin=0, aspect='auto')
-  ax[1].set_xlabel('Step')
-  ax[1].set_ylabel('Neuron #')
-  ax[1].set_ylim([0, N])
-  plt.show()
+  # ax[1].imshow(ff_input[1].T, cmap='jet', vmin=0, aspect='auto')
+  # ax[1].set_xlabel('Step')
+  # ax[1].set_ylabel('Neuron #')
+  # ax[1].set_ylim([0, N])
+  # plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: (1000, 10000)
-# [goto error]
-: ---------------------------------------------------------------------------
-: IndexError                                Traceback (most recent call last)
-: Cell In[41], line 9
-:       5 print(ff_input.shape)
-:       7 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
-: ----> 9 ax[0].plot(ff_input[0, :, :5])
-:      10 ax[0].plot(ff_input[1, :, :5])
-:      11 ax[0].set_xlabel('Step')
-: 
-: IndexError: too many indices for array: array is 2-dimensional, but 3 were indexed
-[[file:./.ob-jupyter/cc42f05ae6c6122d0c4fa6711a25aeda3f3e0235.png]]
-:END:
 
 #+begin_src ipython
   print(rates.mean(-1).shape)
@@ -371,8 +359,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (1000, 21)
-[[file:./.ob-jupyter/0761e43e6a1da49b939d5d4e59931b17889a9c78.png]]
+: (100, 21)
+[[file:./.ob-jupyter/8701316d94a5cd36afc8d332b477c69d21f4a6b5.png]]
 :END:
 
 #+begin_src ipython
@@ -383,7 +371,7 @@
 
 #+RESULTS:
 : (4, 8000)
-: (1000, 21, 8000)
+: (100, 21, 8000)
 
 #+begin_src ipython
   overlap = get_overlap(model, rates)
@@ -391,7 +379,7 @@
 #+end_src
 
 #+RESULTS:
-: (4, 21, 1000)
+: (4, 21, 100)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -407,12 +395,12 @@
   ax[2].plot(overlap.T[2])
   ax[2].set_ylabel('Overlap on $\\xi_3$ (Hz)')
   ax[2].set_xlabel('Step')
-  
+
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c117dbb4ff9216527d5d7a7017e2dd462fe3e86c.png]]
+[[file:./.ob-jupyter/af9e8610ba7ada447b9fe28df721e13a301c2eb5.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -420,11 +408,11 @@
 #+end_src
 
 #+RESULTS:
-: (1000, 21)
+: (100, 21)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
-  
+
   ax[0].plot(m0.T)
   #ax[0].set_ylim([0, 360])
   #ax[0].set_yticks([0, 90, 180, 270, 360])
@@ -447,12 +435,12 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/96a08bad29e3eb3e10c5af159f8f81bb1e14d181.png]]
+[[file:./.ob-jupyter/8a4b9249a386d09dc2cb2da6b36537ffbd6c75bf.png]]
 
 #+begin_src ipython
   print(rates_ordered.shape)
 
-  plt.imshow(rates_ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=15)
+  plt.imshow(rates_ordered[2].T, aspect='auto', cmap='jet', vmin=0, vmax=10)
   plt.ylabel('Pref. Location (°)')
   plt.xlabel('Time (au)')
   plt.yticks(np.linspace(0, rates_ordered.shape[-1], 5), np.linspace(0, 360, 5).astype(int))
@@ -462,8 +450,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (1000, 21, 8000)
-[[file:./.ob-jupyter/64952e73426b82ef51d0ebf805dbdcef485b7729.png]]
+: (100, 21, 8000)
+[[file:./.ob-jupyter/0c4c69545d03e75c1168e28d1a453694f11b25e1.png]]
 :END:
 
 #+begin_src ipython
@@ -480,8 +468,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (1000, 21)
-[[file:./.ob-jupyter/e18c7d836fa91c0bd4f333e40528dfcbee2390d9.png]]
+: (100, 21)
+[[file:./.ob-jupyter/d5dd46857b9576c01ebff834a7a9dea6e7648b2d.png]]
 :END:
 
 #+begin_src ipython
@@ -503,32 +491,32 @@
           for cov in cov_list:
 
               model = Network(conf_name, '%s_cov_%.3f' % (name, cov),
-                              REPO_ROOT, DEVICE=device, LR_TRAIN=0,
-                              # LR_COV = [[1.0, cov], [cov, 1.0]],
-                              # LR_COV = [[1.0, cov, cov], [cov, 1.0, cov], [cov, cov, 1.0]],
+                              REPO_ROOT, DEVICE=device,
                               LR_COV = [[1.0, 0.9, 0.0, 0.0], [0.9, 1.0, cov, 0.0],
                                         [0.0, cov, 1.0, 0.9], [0.0, 0.0, 0.9, 1.0]],
-                              VERBOSE=0, SEED=seed, N_BATCH=n_ini, **kwargs)
+                              LIVE_FF_UPDATE=1,
+                              VERBOSE=0, SEED=seed, N_BATCH=2*n_ini, **kwargs)
 
-              model.I0[0] = .1
-              # ff_input = model.init_ff_input()
-              sample_A = model.init_ff_input()
+              # model.I0[0] = .1
+              # # ff_input = model.init_ff_input()
+              # sample_A = model.init_ff_input()
 
-              model.I0[0] = -.1
-              sample_B = model.init_ff_input()
-              
-              ff_input = torch.cat((sample_A, sample_B))
+              # model.I0[0] = -.1
+              # sample_B = model.init_ff_input()
 
-              sample_A.cpu(), sample_B.cpu()
-              del sample_A, sample_B
+              # ff_input = torch.cat((sample_A, sample_B))
+
+              # sample_A.cpu(), sample_B.cpu()
+              # del sample_A, sample_B
+              ff_input = None
 
               rates.append(model.forward(ff_input, REC_LAST_ONLY=0).cpu().detach().numpy())
               ksi.append(model.PHI0.cpu().detach().numpy())
 
               model.cpu()
-              ff_input.cpu()
+              # ff_input.cpu()
 
-              del ff_input
+              # del ff_input
               del model
 
               gc.collect()
@@ -537,7 +525,7 @@
 
       end = perf_counter()
 
-      print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))      
+      print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
       return np.array(rates), np.array(ksi)
 #+end_src
@@ -566,17 +554,16 @@
 #+RESULTS:
 : [0.05       0.04444444 0.03888889 0.03333333 0.02777778 0.02222222
 :  0.01666667 0.01111111 0.00555556 0.        ]
-: 7
+: 44
 
 #+begin_src ipython
   def ret_overlap(rates, ksi):
       rates_ord = np.zeros(rates.shape)
       overlap = []
-      
-      for i in range(len(cov_list)):
-          idx = np.arange(len(ksi[i][0]))
-          theta = get_theta(ksi[i][0], ksi[i][2], GM=0, IF_NORM=0)
 
+      for i in range(len(cov_list)):
+          theta = get_theta(ksi[i][0], ksi[i][2], GM=0, IF_NORM=0)
+          
           overlap.append(rates[i] @ ksi[i].T / rates.shape[-1])
 
           index_order = theta.argsort()
@@ -590,37 +577,37 @@
 *** Run
 
 #+begin_src ipython
-  I0 = [0.1, 0.0, 0.0]
+  I0 = [1, 0.0, 0.0]
   rates, ksi = run_behavior(conf_name, name, cov_list, n_ini, seed, device='cuda', I0=I0)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 44s
+: Elapsed (with compilation) = 0h 1m 45s
 
 #+begin_src ipython
   print(rates.shape)
-  print(ksi.shape)  
+  print(ksi.shape)
 #+end_src
 
 #+RESULTS:
-: (10, 64, 11, 8000)
+: (10, 64, 21, 8000)
 : (10, 4, 8000)
 
 #+begin_src ipython
-  I0 = [0.1, 0.1, 0.0]
+  I0 = [1, 1, 0.0]
   ratesGo, ksiGo = run_behavior(conf_name, name, cov_list, n_ini, seed, device='cuda', I0=I0)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 27s
+: Elapsed (with compilation) = 0h 1m 47s
 
-#+begin_src ipython  
+#+begin_src ipython
   print(ratesGo.shape)
-  print(ksiGo.shape)  
+  print(ksiGo.shape)
 #+end_src
 
 #+RESULTS:
-: (10, 64, 11, 8000)
+: (10, 64, 21, 8000)
 : (10, 4, 8000)
 
 #+begin_src ipython
@@ -636,10 +623,11 @@
 #+end_src
 
 #+RESULTS:
-: (10, 64, 11, 4)
-: (10, 64, 11, 4)
+: (10, 64, 21, 4)
+: (10, 64, 21, 4)
 
 #+begin_src ipython
+  # n_ini = 16
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 
   ax[0].plot(overlap1[:, :n_ini, -5:, 0].mean((1,2)), '-rs')
@@ -647,7 +635,7 @@
   ax[0].set_ylabel('Sample Overlap')
   ax[0].set_xlabel('Day')
   ax[0].set_title('DPA')
-  
+
   ax[1].plot(overlap2[:, :n_ini, -5:, 0].mean((1,2)), '-bs')
   ax[1].plot(overlap2[:, n_ini:, -5:, 0].mean((1,2)), '-bo')
   ax[1].set_ylabel('Sample Overlap')
@@ -658,7 +646,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/4deb5a7ac80d559e78d0764532f2db3a91f6c1b5.png]]
+[[file:./.ob-jupyter/154deedc8f34c4e6286e0f97aedb8160d776e6a5.png]]
 
 #+begin_src ipython
   readout1A = overlap1[:, :n_ini, -5:, 0]
@@ -690,7 +678,7 @@
 #+RESULTS:
 :RESULTS:
 : (10, 32, 5)
-[[file:./.ob-jupyter/8683874d4f0ffe8cce819cb0890e384ef19659cf.png]]
+[[file:./.ob-jupyter/d7a21f42ab01597358bf4cf4c12ecb91572b006d.png]]
 :END:
 
 #+begin_src ipython
@@ -713,7 +701,7 @@
 
 #+RESULTS:
 
-#+begin_src ipython 
+#+begin_src ipython
   perf1 = get_perf(rates1)
   print(perf1)
   perf2 = get_perf(rates2)
@@ -728,17 +716,17 @@
 
 #+RESULTS:
 :RESULTS:
-: [64.0625 60.9375 56.25   68.75   67.1875 64.0625 78.125  70.3125 84.375
-:  75.    ]
-: [50.     50.     50.     50.     50.     50.     51.5625 50.     54.6875
-:  59.375 ]
-[[file:./.ob-jupyter/c7fe9b8f29a6f143629602c634e93606ff972201.png]]
+: [57.8125 64.0625 67.1875 70.3125 75.     75.     79.6875 92.1875 95.3125
+:  95.3125]
+: [46.875  48.4375 46.875  48.4375 46.875  62.5    51.5625 40.625  51.5625
+:  56.25  ]
+[[file:./.ob-jupyter/ffda0e75c8c040af04de1c374e88dd86df865700.png]]
 :END:
 
 **** Single
 
 #+begin_src ipython
-  ini = -1
+  ini = 0
   overlap = overlap1.copy()
   print(overlap1[ini].shape)
   m0, m1, phi = decode_bump(rates1, axis=-1)
@@ -746,12 +734,12 @@
 #+end_src
 
 #+RESULTS:
-: (64, 11, 4)
-: (64, 11)
+: (64, 21, 4)
+: (64, 21)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
-  
+
   ax[0].plot(overlap[ini, ..., 0].T, alpha=.2)
   ax[0].set_ylabel('Overlap on $\\xi_1$ (Hz)')
   ax[0].set_xlabel('Step')
@@ -768,11 +756,11 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/de5ea793aa0a91b89326ec578d0b431602bc1e8b.png]]
+[[file:./.ob-jupyter/3460c0c340adff6be5c5b7d153843a1ea31defeb.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
- 
+
   ax[0].plot(m0[ini].T)
   #ax[0].set_ylim([0, 360])
   #ax[0].set_yticks([0, 90, 180, 270, 360])
@@ -795,9 +783,9 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e6a71062bebc5f6772126c537ab28f98a7ae49c5.png]]
+[[file:./.ob-jupyter/57fd8adf374deb62764ab66e4a254731d53a0a3d.png]]
 
-#+begin_src ipython  
+#+begin_src ipython
   x = m1[ini, ..., -1] / m0[ini, ..., -1] * np.cos(phi[ini, ..., -1])
   y = m1[ini, ..., -1] / m0[ini, ..., -1] * np.sin(phi[ini, ..., -1])
 
@@ -809,7 +797,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/dfbc01ed1a353f2fc09f0e93b44801ac281047f0.png]]
+[[file:./.ob-jupyter/e992f0f29674bdf2a3b18474beb2e9f3e2f28134.png]]
 
 #+begin_src ipython
 
@@ -848,7 +836,7 @@
 
       end = perf_counter()
 
-      print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))      
+      print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
       return np.array(rates), np.array(ksi)
 #+end_src
@@ -890,7 +878,7 @@
 
 #+begin_src ipython
   rates_ord = np.zeros(rates.shape)
-  
+
   for i in real_list:
       idx = np.arange(0, len(ksi[i][0]))
       theta = get_theta(ksi[i][0], ksi[i][2], GM=0, IF_NORM=1)
@@ -912,7 +900,7 @@
 
   x = m1 / m0 * np.cos(phi)
   y = m1 / m0 * np.sin(phi)
-  
+
   ax[0].hist(np.hstack(phi) * 180 / np.pi, density=True, bins='auto')
   ax[0].set_title('$h_S . \\xi_D = 0$')
   ax[0].set_xlim([0, 360])
@@ -927,7 +915,7 @@
   ax[1].set_xlabel('Sample Axis')
   ax[1].set_ylabel('Distractor Axis')
 
-  plt.show() 
+  plt.show()
 #+end_src
 
 #+RESULTS:
@@ -958,10 +946,10 @@
 #+begin_src ipython
   rates_ord_cov = np.zeros(rates_cov.shape)
 
-  for i in real_list:      
+  for i in real_list:
       idx = np.arange(0, len(ksi_cov[i][0]))
       theta = get_theta(ksi_cov[i][0], ksi_cov[i][2], GM=0, IF_NORM=1)
-      
+
       index_order = theta.argsort()
       rates_ord_cov[i] = rates_cov[i][..., index_order]
 
@@ -993,7 +981,7 @@
   ax[1].set_xlabel('Sample Axis')
   ax[1].set_ylabel('Distractor Axis')
 
-  plt.show() 
+  plt.show()
 #+end_src
 
 #+RESULTS:
@@ -1023,7 +1011,7 @@
 #+begin_src ipython
   rates_ord_cov2 = np.zeros(rates_cov2.shape)
 
-  for i in real_list:      
+  for i in real_list:
       idx = np.arange(0, len(ksi_cov2[i][0]))
       theta = get_theta(ksi_cov2[i][0], ksi_cov2[i][2], GM=0, IF_NORM=0)
 
@@ -1058,7 +1046,7 @@
   ax[1].set_xlabel('Sample Axis')
   ax[1].set_ylabel('Distractor Axis')
 
-  plt.show() 
+  plt.show()
 #+end_src
 
 #+RESULTS:
@@ -1088,7 +1076,7 @@
 #+begin_src ipython
   rates_ord_cov3 = np.zeros(rates_cov3.shape)
 
-  for i in real_list:      
+  for i in real_list:
       idx = np.arange(0, len(ksi_cov3[i][0]))
       theta = get_theta(ksi_cov3[i][0], ksi_cov3[i][2], GM=0, IF_NORM=0)
 
@@ -1125,7 +1113,7 @@
   ax[1].set_xlabel('Sample Axis')
   ax[1].set_ylabel('Distractor Axis')
 
-  plt.show() 
+  plt.show()
 #+end_src
 
 #+RESULTS:
@@ -1155,7 +1143,7 @@
 #+begin_src ipython
   rates_ord_cov4 = np.zeros(rates_cov4.shape)
 
-  for i in real_list:      
+  for i in real_list:
       idx = np.arange(0, len(ksi_cov4[i][0]))
       theta = get_theta(ksi_cov4[i][0], ksi_cov4[i][2], GM=0, IF_NORM=0)
 
@@ -1192,7 +1180,7 @@
   ax[1].set_xlabel('Sample Axis')
   ax[1].set_ylabel('Distractor Axis')
 
-  plt.show() 
+  plt.show()
 #+end_src
 
 #+RESULTS:
@@ -1203,8 +1191,3 @@
 #+end_src
 
 #+RESULTS:
-
-
-
-
-

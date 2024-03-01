@@ -1,5 +1,6 @@
 import torch
 from torch.distributions import MultivariateNormal
+from src.utils import clear_cache
 
 class Connectivity():
     def __init__(self, Na, Nb, Kb, device='cuda', dtype=torch.float, verbose=0):
@@ -39,13 +40,12 @@ class Connectivity():
             
             del mean_
             del cov_
-            del mv_normal
+            del mv_normal            
         else:
             self.ksi = ksi
         
         if self.verbose:
-            print('ksi', self.ksi.shape)
-
+            print('ksi', self.ksi.shape)            
 
         if self.ksi.shape[0]==4:
             Lij = torch.outer(self.ksi[0], self.ksi[1])
@@ -168,6 +168,8 @@ class Connectivity():
                     print('with strong cosine structure, KAPPA', kwargs['kappa'])
             elif "lr" in proba_type:
                 print('with weak low rank structure, KAPPA %.2f' % kwargs['kappa'])
+
+        clear_cache()
         
         return Cij
     
