@@ -32,7 +32,7 @@ class Network(nn.Module):
                **kwargs: **dict, any parameter in conf_file can be passed here
                                  and will then be overwritten.
         Returns:
-               rates: tensorfloat of size (N_BATCH, N_SEQ_LEN or 1, N_NEURON).
+               rates: tensorfloat of size (N_BATCH, N_STEPS or 1, N_NEURON).
         '''
 
         super().__init__()
@@ -78,7 +78,7 @@ class Network(nn.Module):
 
         # Window where to evaluate loss
         self.lr_eval_win = int(self.LR_EVAL_WIN / self.DT / self.N_WINDOW)
-        
+    
     def initWeights(self):
         '''
         Initializes the connectivity matrix self.Wab.
@@ -103,17 +103,32 @@ class Network(nn.Module):
                                                            lr_mean= self.LR_MEAN,
                                                            lr_cov=self.LR_COV,
                                                            ksi=self.PHI0)
-
+                
+                # if i_pop==0 and j_pop==0:                
+                #     U, S, V = torch.svd(1.0 * weights)
+                #     # Use only the first singular value and vectors for rank 1 approximation
+                #     # weights = S[0] * U[:, 0].unsqueeze(1) @ V[:, 0].unsqueeze(0)
+                #     S_2 = torch.diag(S[:2])  
+                #     # Use only the first two singular vectors from U and V for rank 2 approx
+                #     weights = U[:, :2] @ S_2 @ V[:, :2].T
+                
                 # self.Wab_T[self.slices[i_pop], self.slices[j_pop]] = weights
                 self.Wab_T[self.slices[i_pop], self.slices[j_pop]] = self.Jab[i_pop][j_pop] * weights
-
+        
         del weights
 
         # U, S, V = torch.svd(self.Wab_T)
+        # # Use only the first singular value and vectors for rank 1 approximation
+        # # self.Wab_T = S[0] * U[:, 0].unsqueeze(1) @ V[:, 0].unsqueeze(0)
 
-        # Use only the first singular value and vectors for rank 1 approximation
-        # self.Wab_T = S[0] * U[:, 0].unsqueeze(1) @ V[:, 0].unsqueeze(0)
-
+        # S_adjusted = S.clone()
+        
+        # factor = 1.0 / torch.sqrt(self.Ka[0])
+        # S_adjusted[0] *= factor  # Assuming S is sorted in descending order
+        
+        # # Reconstruct A with the adjusted singular value
+        # self.Wab_T = torch.matmul(U, torch.diag(S_adjusted)) @ V.t()
+        
         self.Wab_T = self.Wab_T.T
         
         # if self.CON_TYPE=='sparse':
@@ -139,17 +154,23 @@ class Network(nn.Module):
         
         # update reccurent input
         if self.SYN_DYN:
-            rec_input = self.EXP_DT_TAU_SYN * rec_input + self.DT_TAU_SYN * hidden
+            rec_input[0] = rec_input[0] * self.EXP_DT_TAU_SYN + hidden * self.DT_TAU_SYN
         else:
             rec_input = hidden
-        
+
         # compute net input
-        net_input = ff_input + rec_input
+        net_input = ff_input + rec_input[0]
+            
+        if self.IF_NMDA:
+            hidden = rates[:, self.slices[0]] @ self.Wab_T[self.slices[0]][self.slices[0]]
+            rec_input[1] = rec_input[1] * self.EXP_DT_TAU_NMDA + hidden * self.DT_TAU_NMDA
+            net_input.add_(rec_input[1])
+        
         non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
         
         # update rates
         if self.RATE_DYN:
-            rates = self.EXP_DT_TAU * rates + self.DT_TAU * non_linear
+            rates = rates * self.EXP_DT_TAU + non_linear * self.DT_TAU
         else:
             rates = non_linear
         
@@ -161,10 +182,10 @@ class Network(nn.Module):
         '''
         Main method of Network class, runs networks dynamics over set of timesteps and returns rates at each time point or just the last time point.
         args:
-        :param ff_input: float (N_BATCH, N_TIME, N_NEURONS), ff inputs into the network.
+        :param ff_input: float (N_BATCH, N_STEP, N_NEURONS), ff inputs into the network.
         :param REC_LAST_ONLY: bool, wether to record the last timestep only.
         output:
-        :param output: float (N_BATCH, N_TIME or 1, N_NEURONS), rates of the neurons.
+        :param output: float (N_BATCH, N_STEP or 1, N_NEURONS), rates of the neurons.
         '''
         
         if self.VERBOSE:
@@ -215,11 +236,11 @@ class Network(nn.Module):
                     
                     # Reset moving average
                     mv_rates = 0
-
+            
         if not REC_LAST_ONLY:
             # Stack output list to 1st dim so that output is (N_BATCH, N_STEPS, N_NEURON)
             output = torch.stack(output, dim=1)
-
+        
         # Add Linear readout (N_BATCH, N_EVAL_WIN, 1) on last few steps
         if self.LR_TRAIN:
             y_pred = self.linear(output[:, -self.lr_eval_win:, ...])
@@ -280,13 +301,13 @@ class Network(nn.Module):
             ff_input.to(self.device)
             self.N_BATCH = ff_input.shape[0]
         
-        rec_input = torch.randn((self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
-
+        rec_input = torch.randn((self.IF_NMDA+1, self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
+        
         if self.LIVE_FF_UPDATE:
-            rates = Activation()(ff_input + rec_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
+            rates = Activation()(ff_input + rec_input[0], func_name=self.TF_TYPE, thresh=self.THRESH[0])
         else:
-            rates = Activation()(ff_input[:, 0] + rec_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
-
+            rates = Activation()(ff_input[:, 0] + rec_input[0], func_name=self.TF_TYPE, thresh=self.THRESH[0])
+        
         return rates, ff_input, rec_input
 
     def initConst(self):
@@ -334,7 +355,7 @@ class Network(nn.Module):
         self.TAU_SYN = torch.tensor(self.TAU_SYN, dtype=self.FLOAT, device=self.device)
         self.EXP_DT_TAU_SYN = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
         self.DT_TAU_SYN = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
-
+        
         for i_pop in range(self.N_POP):
             self.EXP_DT_TAU_SYN[self.slices[i_pop]] = torch.exp(-self.DT / self.TAU_SYN[i_pop])
             # self.EXP_DT_TAU_SYN[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = (1.0-self.DT / self.TAU_SYN[i_pop])
@@ -343,6 +364,16 @@ class Network(nn.Module):
         # if self.VERBOSE:
         #     print("EXP_DT_TAU", self.EXP_DT_TAU, "DT_TAU", self.DT_TAU)
 
+        if self.IF_NMDA:
+            self.TAU_NMDA = torch.tensor(self.TAU_NMDA, dtype=self.FLOAT, device=self.device)
+            self.EXP_DT_TAU_NMDA = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+            self.DT_TAU_NMDA = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        
+            for i_pop in range(self.N_POP):
+                self.EXP_DT_TAU_NMDA[self.slices[i_pop]] = torch.exp(-self.DT / self.TAU_NMDA[i_pop])
+                # self.EXP_DT_TAU_NMDA[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = (1.0-self.DT / self.TAU_NMDA[i_pop])
+                self.DT_TAU_NMDA[self.slices[i_pop]] = self.DT / self.TAU_NMDA[i_pop]
+        
         self.PROBA_TYPE = np.array(self.PROBA_TYPE).reshape(self.N_POP, self.N_POP)
         self.SIGMA = torch.tensor(self.SIGMA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
         self.KAPPA = torch.tensor(self.KAPPA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
@@ -412,16 +443,23 @@ class Network(nn.Module):
                 if 'dual' in self.TASK:
                     if 'rand' in self.TASK:
                         theta = get_theta(self.PHI0[0], self.PHI0[2])
-                        stimulus = Stimuli('odr', size, device=self.device)(self.I0[i], self.SIGMA0[i], self.PHI0[i],
-                                                                            rnd_phase=1, theta_list=theta)
+                        stimulus = Stimuli('odr', size, device=self.device)(self.I0[i],
+                                                                            self.SIGMA0[i],
+                                                                            self.PHI0[i],
+                                                                            rnd_phase=1,
+                                                                            theta_list=theta)
                         del theta
-
+                    
                     else:
-                        stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])
+                        stimulus = Stimuli(self.TASK, size)(self.I0[i],
+                                                            self.SIGMA0[i],
+                                                            self.PHI0[2*i+1])
                         if i == 0:
                             stimulus = self.stim_mask * stimulus
                 else:
-                    stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[i])
+                    stimulus = Stimuli(self.TASK, size)(self.I0[i],
+                                                        self.SIGMA0[i],
+                                                        self.PHI0[i])
 
                 ff_input[:, self.slices[0]] = self.Ja0[0] + stimulus * torch.sqrt(self.Ka[0]) * self.M0
                 del stimulus

@@ -57,10 +57,7 @@ class Connectivity():
             Pij = 1.0 + kappa * (self.ksi.T @ self.ksi) / torch.sqrt(self.Kb)
         
         # print(Pij.shape)
-        
-        # Pij[Pij>1] = 1
-        # Pij[Pij<0] = 0
-        
+        # self.Pij = Pij     
         return Pij
     
     def cosine_proba(self, kappa, phase=0):

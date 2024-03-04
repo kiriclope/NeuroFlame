@@ -39,6 +39,30 @@
 #+RESULTS:
 
 * Helpers
+** Connectivity
+
+#+begin_src ipython
+  def plot_eigen(W):
+      # Compute eigenvalues
+      eigenvalues = torch.linalg.eigvals(W).cpu().numpy()
+
+      # Extract real and imaginary parts
+      real_parts = eigenvalues.real
+      imag_parts = eigenvalues.imag
+
+      # Plotting
+      plt.scatter(real_parts, imag_parts)
+      plt.xlabel('Real Part')
+      plt.ylabel('Imaginary Part')
+      plt.axhline(y=0, color='k', linestyle='--')
+      plt.axvline(x=0, color='k', linestyle='--')
+      
+      # plt.grid(True, which='both')
+      plt.show()
+#+end_src
+
+#+RESULTS:
+
 ** Random
 
 #+begin_src ipython
@@ -135,16 +159,16 @@
 
 #+RESULTS:
 
-** ODR
+** Balance
 
 #+begin_src ipython
-  Cij = Connectivity(1000, 1000, 100)('sparse', 'cosine', kappa=1.0, sigma=0, phase=0)
+  Wij = Connectivity(1000, 1000, 100)('sparse', 'None', kappa=1.0, sigma=0, phase=0)
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-  Cij = Cij.cpu().detach().numpy()
+  Cij = Wij.cpu().detach().numpy()
   print(Cij.shape)
 #+end_src
 
@@ -187,13 +211,96 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/af5d45fae0b40e95ad18a3a6ac798240b326657f.png]]
+[[file:./.ob-jupyter/8ebcdc8e70775109d07cbfb09509b5fb5ec8a0bb.png]]
+
+#+begin_src ipython
+  plot_eigen(1.0 * Wij)
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/d4aa354d9dcc7f7f846018b23222beb52e2655c9.png]]
+
+#+begin_src ipython
+  dominant_eigenvalue = eigenvalues[-1]
+  dominant_eigenvector = eigenvectors[:, -1]
+
+  # Assuming you want to reduce the dominant eigenvalue by a certain factor
+  factor = 0.5  # Example factor to reduce the dominant eigenvalue
+  adjustment = factor * dominant_eigenvalue
+
+  # Construct the rank-one update matrix
+  update_matrix = adjustment * torch.outer(dominant_eigenvector, dominant_eigenvector)
+  
+  # Subtract the update_matrix from A
+  A_adjusted = A - update_matrix
+
+#+end_src
+** ODR
+
+#+begin_src ipython
+  Wij = Connectivity(1000, 1000, 100)('sparse', 'cosine', kappa=1.0, sigma=0, phase=0)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  Cij = Wij.cpu().detach().numpy()
+  print(Cij.shape)
+#+end_src
+
+#+RESULTS:
+: (1000, 1000)
+
+#+begin_src ipython
+  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
+
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij, cmap='jet', aspect=1)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij, axis=0)  # sum over pres
+  ax2.plot(Kj)
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij, axis=1)  # sum over pres
+  ax3.plot(Kj)
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij.shape[0] / 2)):
+      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/66091c258e0c7044130e432b034f3c76fa5dd1d9.png]]
+
+#+begin_src ipython
+  plot_eigen(1.0 * Wij)
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/4e590a36c922f02c0f084b94c11e6945d06891b8.png]]
 
 ** Dual Task
 
 #+begin_src ipython
   Con = Connectivity(1000, 1000, 100, verbose=1)
-  Cij = Con('sparse', 'lr', kappa=10, lr_mean=[0, 0], lr_cov=[[1, 0], [0, 1]])
+  Wij = Con('sparse', 'lr', kappa=5, lr_mean=[0, 0], lr_cov=[[1, 0], [0, 1]])
 #+end_src
 
 #+RESULTS:
@@ -201,10 +308,27 @@
 : ksi torch.Size([2, 1000])
 : low rank probability
 : Sparse random connectivity
-: with weak low rank structure, KAPPA 10.00
+: with weak low rank structure, KAPPA 5.00
 
 #+begin_src ipython
-  Cij = Cij.cpu().detach().numpy()
+  Pij = Con.Pij.cpu().numpy()
+  print(Pij.shape)
+#+end_src
+
+#+RESULTS:
+: (1000, 1000)
+
+#+begin_src ipython
+  Pj = Pij.mean(axis=0)
+  plt.plot(Pj)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/b687917c78ef6f2cda3c7136589552296f422554.png]]
+
+#+begin_src ipython
+  Cij = Wij.cpu().detach().numpy()
   print(Cij.shape)
 #+end_src
 
@@ -247,7 +371,14 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/3c321c7ad0c258cea890c8dd486bc4aa280ac221.png]]
+[[file:./.ob-jupyter/18f4027615f9b6e1df435a6a716386a9bd7b1054.png]]
+
+#+begin_src ipython
+  plot_eigen(1.0 * Wij)
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/2a3a938fda4f5664448104ff3b14f6957d820dc0.png]]
 
 #+begin_src ipython
   ksi = Con.ksi.cpu().detach().numpy()
@@ -258,7 +389,7 @@
   theta = np.arctan2(ksi[1], ksi[0])
   index_order = theta.argsort()
   # print(index_order)
-  Cij_ordered = Cij[index_order][index_order]
+  Cij_ordered = Cij[:][index_order]
   print(Cij_ordered.shape)
 #+end_src
 
@@ -302,11 +433,13 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7044ca7b355c351e5832a88319970eca7909aa1f.png]]
+[[file:./.ob-jupyter/2a2d6eba4312ebc10219035ab785ee98c8a9e463.png]]
 
 #+begin_src ipython
 
 #+end_src
+
+#+RESULTS:
 
 ** Sparse
 
