@@ -45,20 +45,20 @@ class Network(nn.Module):
 
         # Rescale some parameters (time steps, time constants, ...)
         self.initConst()
-
-        # Rescale synaptic weights for balance state
+        
+        # Rescale synaptic weights for balanced state
         self.scaleParam()
-
+        
         # Initialize network connectivity
         self.initWeights()
-
+        
         # Initialize low rank connectivity
         if self.LR_TRAIN:
             self.initLR()
-
+        
         # Reset the seed
         set_seed(0)
-    
+
     def initLR(self):
         # Low rank vector
         self.U = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)),
@@ -74,12 +74,11 @@ class Network(nn.Module):
 
         # Linear readout for supervised learning
         self.linear = nn.Linear(self.Na[0], 1, device=self.device, dtype=self.FLOAT, bias=False)
-
         self.lr_kappa = nn.Parameter(5 * torch.rand(1))
 
         # Window where to evaluate loss
         self.lr_eval_win = int(self.LR_EVAL_WIN / self.DT / self.N_WINDOW)
-
+        
     def initWeights(self):
         '''
         Initializes the connectivity matrix self.Wab.
@@ -116,55 +115,46 @@ class Network(nn.Module):
         # self.Wab_T = S[0] * U[:, 0].unsqueeze(1) @ V[:, 0].unsqueeze(0)
 
         self.Wab_T = self.Wab_T.T
-
+        
         # if self.CON_TYPE=='sparse':
         #     self.Wab_T = self.Wab_T.to_sparse()
 
     def update_dynamics(self, rates, ff_input, rec_input):
         '''Updates the dynamics of the model at each timestep'''
-
-        # update stp variables
-        A_u_x = 1.0
-        if self.IF_STP:
-            A_u_x = self.stp(rates[:, :self.Na[0]])
-            stp_ee = (rates[:, :self.Na[0]] * A_u_x) @ self.W_stp.T
-
-        # if self.LR_TRAIN:
-        #     lr = (1.0 + self.mask * self.KAPPA[0][0] * (self.U @ self.U.T) / torch.sqrt(self.Ka[0]))
-        #     hidden = rates @ (self.Wab_T * lr.T)
-        # else:
-        #     hidden = rates @ self.Wab_T
-
+        
+        # update hidden state
+        if self.LR_TRAIN:
+            lr = (1.0 + self.mask * self.KAPPA[0][0] * (self.U @ self.U.T) / torch.sqrt(self.Ka[0]))
+            hidden = rates @ (self.Wab_T * lr.T)
+        else:
+            hidden = rates @ self.Wab_T
+        
         # if self.CON_TYPE=='sparse':
         #     hidden = torch.sparse.mm(rates, self.Wab_T)
-        # else:
-
-        # update hidden state
-        hidden = rates @ self.Wab_T
-
+        
+        # update stp variables
         if self.IF_STP:
-            hidden[:, :self.Na[0]] = hidden[:, :self.Na[0]] + stp_ee
-
+            A_u_x = self.stp(rates[:, :self.Na[0]])
+            hidden[:, :self.Na[0]].add_((rates[:, :self.Na[0]] * A_u_x) @ self.W_stp.T)
+        
         # update reccurent input
         if self.SYN_DYN:
             rec_input = self.EXP_DT_TAU_SYN * rec_input + self.DT_TAU_SYN * hidden
         else:
             rec_input = hidden
-
+        
         # compute net input
         net_input = ff_input + rec_input
-        non_linear = Activation()(net_input,
-                                  func_name=self.TF_TYPE,
-                                  thresh=self.THRESH[0])
-
+        non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
+        
         # update rates
         if self.RATE_DYN:
             rates = self.EXP_DT_TAU * rates + self.DT_TAU * non_linear
         else:
             rates = non_linear
-
+        
         del hidden, net_input, non_linear
-
+        
         return rates, rec_input
 
     def forward(self, ff_input=None, REC_LAST_ONLY=0):
@@ -176,52 +166,36 @@ class Network(nn.Module):
         output:
         :param output: float (N_BATCH, N_TIME or 1, N_NEURONS), rates of the neurons.
         '''
-
+        
         if self.VERBOSE:
             start = perf_counter()
-
-        # Here, ff_input is (N_BATCH, N_NEURON) and is updated at each timestep.
-        # Otherwise, ff_input is (N_BATCH, N_STEP, N_NEURON).
-        # Live FF update is recommended when dealing with large batch size.
-
-        if self.LIVE_FF_UPDATE:
-            self.stim_mask = torch.ones((self.N_BATCH, self.Na[0]),
-                                        dtype=self.FLOAT, device=self.device)
-
-            self.stim_mask[self.N_BATCH//2:] = -1
-
-            ff_input = torch.zeros((self.N_BATCH, self.N_NEURON),
-                                   dtype=self.FLOAT, device=self.device)
-
-            ff_input, noise = self.live_ff_input(0, ff_input)
-
+       
         # Initialization (if  ff_input is None, ff_input is generated)
         rates, ff_input, rec_input = self.initialization(ff_input)
-
+        
         # Add STP
         if self.IF_STP:
             self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC, self.DT,
                                   (self.N_BATCH, self.Na[0]),
                                   FLOAT=self.FLOAT, device=self.device)
-
+            
             self.W_stp = self.Wab_T[self.slices[0],self.slices[0]]
             self.Wab_T[self.slices[0], self.slices[0]] = 0
-
+        
         # Moving average of the rates
         mv_rates = 0
-
-        self.ff_input = []
+        
         output = []
         # Temporal loop
         for step in range(self.N_STEPS):
-
+            
             # update dynamics
             if self.LIVE_FF_UPDATE:
                 ff_input, noise = self.live_ff_input(step, ff_input)
                 rates, rec_input = self.update_dynamics(rates, ff_input + noise, rec_input)
             else:
                 rates, rec_input = self.update_dynamics(rates, ff_input[:, step], rec_input)
-
+            
             # update moving average
             mv_rates += rates
 
@@ -235,18 +209,17 @@ class Network(nn.Module):
 
                     if self.VERBOSE:
                         self.print_activity(step, rates)
-
+                    
                     if not REC_LAST_ONLY:
                         output.append(mv_rates[..., self.slices[0]] / self.N_WINDOW)
-                        # output.append(mv_rates / self.N_WINDOW)
-
+                    
                     # Reset moving average
                     mv_rates = 0
 
         if not REC_LAST_ONLY:
             # Stack output list to 1st dim so that output is (N_BATCH, N_STEPS, N_NEURON)
             output = torch.stack(output, dim=1)
-            
+
         # Add Linear readout (N_BATCH, N_EVAL_WIN, 1) on last few steps
         if self.LR_TRAIN:
             y_pred = self.linear(output[:, -self.lr_eval_win:, ...])
@@ -259,7 +232,7 @@ class Network(nn.Module):
 
         # self.ff_input = ff_input
         del rates, ff_input, rec_input
-        
+
         if self.VERBOSE:
             end = perf_counter()
             print("Elapsed (with compilation) = {}s".format((end - start)))
@@ -275,30 +248,16 @@ class Network(nn.Module):
         activity = []
         for i in range(self.N_POP):
             activity.append(np.round(torch.mean(rates[:, self.slices[i]]).item(), 2))
-
+        
         print("times (s)", times, "rates (Hz)", activity)
 
     def loadConfig(self, conf_file, sim_name, repo_root, **kwargs):
-        # Loading configuration file
         conf_path = repo_root + '/conf/'+ conf_file
-        # if self.VERBOSE:
-        #     print('Loading config from', conf_path)
         param = safe_load(open(conf_path, "r"))
-
-        param["FILE_NAME"] = sim_name
         param.update(kwargs)
 
         for k, v in param.items():
             setattr(self, k, v)
-
-        self.DATA_PATH = repo_root + "/data/simul/"
-        self.MAT_PATH = repo_root + "/data/matrix/"
-
-        if not os.path.exists(self.DATA_PATH):
-            os.makedirs(self.DATA_PATH)
-
-        if not os.path.exists(self.MAT_PATH):
-            os.makedirs(self.MAT_PATH)
 
         if self.FLOAT_PRECISION == 32:
             self.FLOAT = torch.float
@@ -310,13 +269,17 @@ class Network(nn.Module):
     def initialization(self, ff_input=None):
         if ff_input is None:
             if self.VERBOSE:
-                print('generating ff input')
-            ff_input = self.init_ff_input()
-        else:
-            ff_input = ff_input.to(self.device)
-            # print('ff_input', ff_input.shape)
-            self.N_BATCH = ff_input.shape[0]
+                print('Generating ff input')
 
+            if self.LIVE_FF_UPDATE:
+                ff_input = self.init_ff_live()
+            else:
+                ff_input = self.init_ff_input()
+                
+        else:
+            ff_input.to(self.device)
+            self.N_BATCH = ff_input.shape[0]
+        
         rec_input = torch.randn((self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
 
         if self.LIVE_FF_UPDATE:
@@ -385,43 +348,39 @@ class Network(nn.Module):
         self.KAPPA = torch.tensor(self.KAPPA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
         self.PHASE = torch.tensor(self.PHASE * torch.pi / 180.0, dtype=self.FLOAT, device=self.device)
 
-        self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device)) / torch.sqrt(self.Ka[0]) * self.M0
-
         if self.PROBA_TYPE[0][0] == 'lr':
             mean_ = torch.tensor(self.LR_MEAN, dtype=self.FLOAT, device=self.device)
-            # Define the covariance matrix
             cov_ = torch.tensor(self.LR_COV, dtype=self.FLOAT, device=self.device)
-            # print(self.LR_COV)
             multivariate_normal = MultivariateNormal(mean_, cov_)
 
             self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
-
-            # if cov_[1][0] == 0 :
-            #     self.PHI0[1] = self.PHI0[1] - self.PHI0[1] @ self.PHI0[0] / (self.PHI0[0] @ self.PHI0[0]) * self.PHI0[0]
-
+            
             del mean_, cov_
             del multivariate_normal
 
     def scaleParam(self):
 
-        # scaling recurrent weights Jab
+        # scaling recurrent weights Jab as 1 / sqrt(Kb)
         if self.VERBOSE:
             print("Jab", self.Jab)
 
         self.Jab = torch.tensor(self.Jab, dtype=self.FLOAT, device=self.device).reshape(self.N_POP, self.N_POP) * self.GAIN
-
         for i_pop in range(self.N_POP):
             self.Jab[:, i_pop] = self.Jab[:, i_pop] / torch.sqrt(self.Ka[i_pop])
 
-        # scaling FF weights
+        # scaling FF weights as sqrt(K0)
         if self.VERBOSE:
             print("Ja0", self.Ja0)
-        
+
         self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device)
 
+        # now inputs are scaled in init_ff_input unless live update
         if self.LIVE_FF_UPDATE:
             self.Ja0.mul_(self.M0 * torch.sqrt(self.Ka[0]))
-        # now inputs are scaled in init_ff_input
+
+        # scaling variance as 1 / sqrt(K0)
+        self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
+        self.VAR_FF.mul_(self.M0 / torch.sqrt(self.Ka[0]))
 
     def live_ff_input(self, step, ff_input):
 
@@ -437,47 +396,67 @@ class Network(nn.Module):
                     ff_input[:, self.slices[i_pop]] = self.Ja0[i_pop] / torch.sqrt(self.Ka[0])
                 else:
                     ff_input[:, self.slices[i_pop]] = self.Ja0[i_pop]
-        
+
         if step==self.N_STIM_ON[0]:
             for i_pop in range(self.N_POP):
                 ff_input[:, self.slices[i_pop]] = self.Ja0[i_pop]
-        
+
         stimulus = torch.zeros((1, 1), device=self.device)
-        
+
         if self.TASK != 'None':
             if step in self.N_STIM_ON:
                 i = np.where(self.N_STIM_ON == step)[0][0]
-                
+
                 size = (self.N_BATCH, self.Na[0])
-                
+
                 if 'dual' in self.TASK:
                     if 'rand' in self.TASK:
                         theta = get_theta(self.PHI0[0], self.PHI0[2])
                         stimulus = Stimuli('odr', size, device=self.device)(self.I0[i], self.SIGMA0[i], self.PHI0[i],
                                                                             rnd_phase=1, theta_list=theta)
                         del theta
-                        
+
                     else:
                         stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])
                         if i == 0:
                             stimulus = self.stim_mask * stimulus
                 else:
                     stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[i])
-                
+
                 ff_input[:, self.slices[0]] = self.Ja0[0] + stimulus * torch.sqrt(self.Ka[0]) * self.M0
                 del stimulus
-                
+
             if step in self.N_STIM_OFF:
                 ff_input[:, self.slices[0]] = self.Ja0[0]
-        
-        return ff_input, noise
 
+        return ff_input, noise
+    
+    def init_ff_live(self):
+        
+        # Here, ff_input is (N_BATCH, N_NEURON) and is updated at each timestep.
+        # Otherwise, ff_input is (N_BATCH, N_STEP, N_NEURON).
+        # Live FF update is recommended when dealing with large batch size.
+        
+        self.stim_mask = torch.ones((self.N_BATCH, self.Na[0]),
+                                    dtype=self.FLOAT, device=self.device)
+        
+        self.stim_mask[self.N_BATCH//2:] = -1
+        
+        ff_input = torch.zeros((self.N_BATCH, self.N_NEURON),
+                               dtype=self.FLOAT, device=self.device)
+        
+        ff_input, noise = self.live_ff_input(0, ff_input)
+
+        return ff_input
+    
     def init_ff_input(self):
         """
-        Creates ff input for all timestep
-        Inputs can be noisy or not and depend on the task.
+        Creates ff input to the network for all timesteps.
+        Inputs can be noisy or not and depends on the task.
+        returns:
+        ff_input: tensorfloat of size (N_BATCH, N_STEPS, N_NEURON)
         """
-
+        
         ff_input = torch.randn((self.N_BATCH, self.N_STEPS, self.N_NEURON), dtype=self.FLOAT, device=self.device)
 
         for i_pop in range(self.N_POP):
@@ -491,34 +470,29 @@ class Network(nn.Module):
 
         for i_pop in range(self.N_POP):
             ff_input[:, self.N_STIM_ON[0]:, self.slices[i_pop]].add_(self.Ja0[i_pop])
-
+        
         if self.TASK != 'None':
             for i ,_ in enumerate(self.N_STIM_ON):
                 size = (self.N_BATCH, self.Na[0])
                 if 'dual' in self.TASK:
                     if 'rand' in self.TASK:
+                        # random phase on the lr ring
                         theta = get_theta(self.PHI0[0], self.PHI0[2])
-                        stimulus = Stimuli('odr', size, device=self.device)(self.I0[i], self.SIGMA0[i], self.PHI0[i], rnd_phase=1, theta_list=theta)
+                        stimulus = Stimuli('odr', size, device=self.device)(self.I0[i], self.SIGMA0[i], self.PHI0[i],
+                                                                            rnd_phase=1, theta_list=theta)
                         del theta
-
+                        
                         stimulus = stimulus.unsqueeze(1).expand((stimulus.shape[0],
                                                                  1,
                                                                  stimulus.shape[-1]))
                     else:
                         stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])
-                        
+
                 else:
                     stimulus = Stimuli(self.TASK, size, device=self.device)(self.I0[i], self.SIGMA0[i], self.PHI0[i])
-                
-                # if 'rand' in self.TASK:
-                #     # theta = get_theta(self.PHI0[0], self.PHI0[2])
-                #     # idx = theta.argsort()
-                #     # print(idx)
-                    
-                #     ff_input[:, self.N_STIM_ON[i]:self.N_STIM_OFF[i], idx].add_(stimulus)
-                # else:
+
                 ff_input[:, self.N_STIM_ON[i]:self.N_STIM_OFF[i], self.slices[0]].add_(stimulus)
-                
+
                 del stimulus
-        
+
         return ff_input * torch.sqrt(self.Ka[0]) * self.M0

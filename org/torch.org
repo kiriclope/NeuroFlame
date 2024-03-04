@@ -156,15 +156,29 @@
 #+RESULTS:
 
 #+begin_src ipython
+  overlap = get_overlap(model, rates)
+  print(overlap.shape)
+
+  idx = get_idx(model)
+  rates_ordered = rates[:, idx]
+
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+#+end_src
+
+#+RESULTS:
+: (21, 4)
+: (4, 8000)
+
+#+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
-  # del model
+  del model
   clear_cache()
   print(torch.cuda.memory_allocated()/100000)
 #+end_src
 
 #+RESULTS:
-: 5939.20512
-: 5939.20512
+: 4093.71136
+: 85.1968
 
 *** Dynamics
 
@@ -188,80 +202,48 @@
 
 #+RESULTS:
 :RESULTS:
-: (1, 4600, 10000)
-[[file:./.ob-jupyter/a02a8932203aa58537c449ad398dea78ef5ec3af.png]]
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[31], line 1
+: ----> 1 ff_input = model.ff_input.cpu().detach().numpy()
+:       2 print(ff_input.shape)
+:       4 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+: 
+: NameError: name 'model' is not defined
 :END:
 
 #+begin_src ipython
-  print(rates.shape)
-  r_max = 15 # 0.5 * np.max(rates[-1])
+  fig, ax = plt.subplots(2, 2, figsize=(2*width, 2*height))
 
-  plt.imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
-  plt.colorbar()
+  r_max = 15 
+
+  ax[0][0].imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+  ax[0][0].set_ylabel('Neuron #')
+  ax[0][0].set_xlabel('Step')
+
+  ax[0][1].imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=10)
+  ax[0][1].set_ylabel('Pref. Location (°)')
+  ax[0][1].set_xlabel('Step')
+  ax[0][1].set_yticks(np.linspace(0, Ne, 5), np.linspace(0, 360, 5).astype(int))
+  # ax[0][1].colorbar()
+
+  ax[1][0].plot(overlap[:, :2], 'r')
+  ax[1][0].plot(overlap[:, 2:], 'b')
+  ax[1][0].set_xlabel('Step')
+  ax[1][0].set_ylabel('Overlap')
+
+  ax[1][1].plot((phi * 180 / np.pi))
+  ax[1][1].set_yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
+  ax[1][0].set_xlabel('Step')
+  ax[1][0].set_ylabel('Phase (°)')
+
   plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: (21, 8000)
-[[file:./.ob-jupyter/aaf475146d608736f363b2b849bee5d6236b9ea0.png]]
-:END:
+[[file:./.ob-jupyter/7bda8039447f06f4bd6a65d49ff49b5ddc2225e8.png]]
 
-#+RESULTS:
-
-#+begin_src ipython
-  overlap = get_overlap(model, rates)
-  print(overlap.shape)
-#+end_src
-
-#+RESULTS:
-: (21, 4)
-
-#+begin_src ipython
-  plt.plot(overlap[:, :2], 'r')
-  plt.plot(overlap[:, 2:], 'b')
-  plt.xlabel('Step')
-  plt.ylabel('Overlap')
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/296c6a05dac176bcd17a3679e43a13b391bd7013.png]]
-
-#+begin_src ipython
-  idx = get_idx(model)
-  rates_ordered = rates[:, idx]
-#+end_src
-
-#+RESULTS:
-: (4, 8000)
-
-#+begin_src ipython
-  plt.imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=10)
-  plt.ylabel('Pref. Location (°)')
-  plt.xlabel('Time (au)')
-  plt.yticks(np.linspace(0, Ne, 5), np.linspace(0, 360, 5).astype(int))
-  plt.colorbar()
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/778fad7555a9b64c49fab38e0b7f81a210da9760.png]]
-
-#+begin_src ipython
-  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  plt.plot((phi * 180 / np.pi))
-  plt.yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/9799469fbfc03df956d2943dad69a0e8c90b9cd2.png]]
 
 #+begin_src ipython
 
@@ -282,7 +264,7 @@
 #+end_src
 
 #+RESULTS:
-: 95
+: 51
 
 *** Simulation
 
@@ -290,11 +272,9 @@
   start = perf_counter()
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda',
                   N_BATCH=100, SEED=seed,
-                  TASK='dual', LIVE_FF_UPDATE=1)
-
-  ff_input = None
-
-  rates = model.forward(ff_input).detach().cpu().numpy()
+                  TASK='dual_rand', LIVE_FF_UPDATE=1)
+  
+  rates = model().detach().cpu().numpy()
   end = perf_counter()
 
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
@@ -360,7 +340,7 @@
 #+RESULTS:
 :RESULTS:
 : (100, 21)
-[[file:./.ob-jupyter/8701316d94a5cd36afc8d332b477c69d21f4a6b5.png]]
+[[file:./.ob-jupyter/752ae678d515bfede1ff54ea9a4a8170931647e3.png]]
 :END:
 
 #+begin_src ipython
@@ -400,7 +380,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/af9e8610ba7ada447b9fe28df721e13a301c2eb5.png]]
+[[file:./.ob-jupyter/97d9be93098a25acca1cfb6f662d9eb7c2692b9a.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -435,7 +415,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/8a4b9249a386d09dc2cb2da6b36537ffbd6c75bf.png]]
+[[file:./.ob-jupyter/3515fff881cc4cbd87c29e9805bdc9aac1ccdd42.png]]
 
 #+begin_src ipython
   print(rates_ordered.shape)
@@ -451,7 +431,7 @@
 #+RESULTS:
 :RESULTS:
 : (100, 21, 8000)
-[[file:./.ob-jupyter/0c4c69545d03e75c1168e28d1a453694f11b25e1.png]]
+[[file:./.ob-jupyter/727f14884bfe2ab265160e4d93b7bf2db74259b2.png]]
 :END:
 
 #+begin_src ipython
@@ -469,7 +449,7 @@
 #+RESULTS:
 :RESULTS:
 : (100, 21)
-[[file:./.ob-jupyter/d5dd46857b9576c01ebff834a7a9dea6e7648b2d.png]]
+[[file:./.ob-jupyter/0a250885aee4d0cfbff6ba845c2bf513a875077c.png]]
 :END:
 
 #+begin_src ipython
