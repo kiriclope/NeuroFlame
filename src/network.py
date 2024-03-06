@@ -157,12 +157,12 @@ class Network(nn.Module):
             rec_input[0] = rec_input[0] * self.EXP_DT_TAU_SYN + hidden * self.DT_TAU_SYN
         else:
             rec_input = hidden
-
+        
         # compute net input
         net_input = ff_input + rec_input[0]
-            
+        
         if self.IF_NMDA:
-            hidden = rates[:, self.slices[0]] @ self.Wab_T[self.slices[0]][self.slices[0]]
+            hidden =  self.R_NMDA * rates[:, self.slices[0]] @ self.Wab_T[self.slices[0]]
             rec_input[1] = rec_input[1] * self.EXP_DT_TAU_NMDA + hidden * self.DT_TAU_NMDA
             net_input.add_(rec_input[1])
         
@@ -453,9 +453,9 @@ class Network(nn.Module):
                     else:
                         stimulus = Stimuli(self.TASK, size)(self.I0[i],
                                                             self.SIGMA0[i],
-                                                            self.PHI0[2*i+1])
-                        if i == 0:
-                            stimulus = self.stim_mask * stimulus
+                                                            self.PHI0[2*i])
+                        # if i == 0:
+                        stimulus = self.stim_mask[:, i] * stimulus
                 else:
                     stimulus = Stimuli(self.TASK, size)(self.I0[i],
                                                         self.SIGMA0[i],
@@ -475,7 +475,7 @@ class Network(nn.Module):
         # Otherwise, ff_input is (N_BATCH, N_STEP, N_NEURON).
         # Live FF update is recommended when dealing with large batch size.
         
-        self.stim_mask = torch.ones((self.N_BATCH, self.Na[0]),
+        self.stim_mask = torch.ones((self.N_BATCH, 2, self.Na[0]),
                                     dtype=self.FLOAT, device=self.device)
         
         self.stim_mask[self.N_BATCH//2:] = -1

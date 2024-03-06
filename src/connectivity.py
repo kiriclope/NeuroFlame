@@ -21,7 +21,7 @@ class Connectivity():
         self.verbose = verbose
         self.device = device
         self.dtype = dtype
-        
+            
     def low_rank_proba(self, kappa, lr_mean, lr_cov, ksi=None, **kwargs):
         '''returns Low rank probability of connection'''
         
@@ -110,11 +110,13 @@ class Connectivity():
             Pij = self.von_mises_proba(kwargs['kappa'])
             if self.verbose:
                 print('von Mises probability')
+        elif 'gaussian' in proba_type:
+            Pij = torch.randn((self.Na, self.Nb), dtype=self.dtype, device=self.device)
         else:
             Pij = torch.tensor(1.0, dtype=self.dtype, device=self.device)
             if self.verbose:
                 print('uniform probability')
-                
+        
         return Pij
     
     def forward(self, con_type, proba_type, **kwargs):
@@ -137,15 +139,16 @@ class Connectivity():
                 print('Sparse random connectivity')
             
             Cij = torch.rand(self.Na, self.Nb, device=self.device) <= (self.Kb / float(self.Nb) * Pij)
-            
+        
         # fully connected network that scales as 1/Nb
         if 'all2all' in con_type:
             if self.verbose:
                 print('All to all connectivity')
             
-            Cij = Pij / float(self.Nb)
+            # Cij = Pij / float(self.Nb)
+            Cij = Pij / torch.sqrt(1.0 * self.Nb)
             
-            # adds heterogeneity that scales as 1/sqrt(Nb)            
+            # adds heterogeneity that scales as 1/sqrt(Nb)
             if 'sigma' in kwargs:
                 if self.verbose:
                     print('with heterogeneity, SIGMA', kwargs['sigma'])
