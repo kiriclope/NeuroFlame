@@ -1,7 +1,7 @@
 # NeuroTorch
 
 ## Introduction
-This package provides an implementation of a recurrent neural network trainer and simulator with pytorch.
+This package provides an implementation of a recurrent neural network simulator with pytorch.
 The network can have multiple neural populations, different connectivity profiles (all to all, sparse, tuned, ...).
 For more info look at the config files in ./conf/.
 
@@ -31,7 +31,7 @@ model.run()
 ```
 There are two configs here:
 - The first one is config_bump.py which is a continuous 1 population bump attractor model as in the NB stim paper.
-- The second is config_EI.py which are standard parameters for a tuned bump attractor balance network with 2 populations.
+- The second is config_EI.py which are parameters for a tuned bump attractor balance network with 2 populations.
 
 ## Contributing
 Feel free to contribute.
