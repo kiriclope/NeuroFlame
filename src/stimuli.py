@@ -17,13 +17,15 @@ class Stimuli():
         float: footprint: footprint/tuning width of the stimulus
         float: phase: location of the stimulus
         """
+
         # Amp = self.I1[0]
         # if self.I1[1]>0:
         #     Amp = Amp + self.I1[1] * torch.randn((self.N_BATCH, 1), dtype=self.FLOAT, device=self.DEVICE)
+        
         if rnd_phase:
             phase = torch.rand(self.size[0], dtype=self.dtype, device=self.device) * 360
             phase = phase.unsqueeze(1).expand((phase.shape[0], self.size[-1]))
-            
+        
         if theta_list is None:
             theta_list = torch.linspace(0, 2.0 * torch.pi, self.size[-1] + 1, dtype=self.dtype, device=self.device)[:-1]
         

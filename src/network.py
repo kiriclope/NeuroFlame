@@ -314,7 +314,7 @@ class Network(nn.Module):
         self.N_STEADY = int(self.T_STEADY / self.DT)
         self.N_WINDOW = int(self.T_WINDOW / self.DT)
         self.N_STEPS = int(self.DURATION / self.DT) + self.N_STEADY + self.N_WINDOW
-
+        
         self.N_STIM_ON = np.array([int(i / self.DT) + self.N_STEADY for i in self.T_STIM_ON])
         self.N_STIM_OFF = [int(i / self.DT) + self.N_STEADY for i in self.T_STIM_OFF]
 
@@ -449,18 +449,35 @@ class Network(nn.Module):
                                                                             rnd_phase=1,
                                                                             theta_list=theta)
                         del theta
-                    
+                        
+                    if 'odr' in self.TASK:
+                        theta = get_theta(self.PHI0[0], self.PHI0[2])
+                        phase = torch.ones(size[0], device=self.device)
+                        phase = phase.unsqueeze(1).expand((phase.shape[0], size[-1])) * self.PHI1[i]
+                        
+                        if i == 0:
+                            print(phase)
+                            phase = phase - self.stim_mask[:, i] * 90
+                            print(phase)
+                        
+                        stimulus = Stimuli('odr', size, device=self.device)(self.I0[i],
+                                                                            self.SIGMA0[i],
+                                                                            phase,
+                                                                            rnd_phase=0,
+                                                                            theta_list=theta)
+                        del theta, phase
                     else:
                         stimulus = Stimuli(self.TASK, size)(self.I0[i],
                                                             self.SIGMA0[i],
                                                             self.PHI0[2*i])
-                        # if i == 0:
-                        stimulus = self.stim_mask[:, i] * stimulus
+                        if i == 0:
+                            stimulus = self.stim_mask[:, i] * stimulus
                 else:
                     stimulus = Stimuli(self.TASK, size)(self.I0[i],
                                                         self.SIGMA0[i],
-                                                        self.PHI0[i])
-
+                                                        self.PHI0[i],
+                                                        rnd_phase=1)
+                
                 ff_input[:, self.slices[0]] = self.Ja0[0] + stimulus * torch.sqrt(self.Ka[0]) * self.M0
                 del stimulus
 

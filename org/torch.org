@@ -136,7 +136,10 @@
 
   start = perf_counter()
 
-  model = Network('config_EI.yml', 'dual_rand', REPO_ROOT, VERBOSE=0, DEVICE='cuda', LIVE_FF_UPDATE=0, N_BATCH=1)
+  model = Network('config_EI.yml', 'dual_rand', REPO_ROOT,
+                  VERBOSE=0, DEVICE='cuda',
+                  LIVE_FF_UPDATE=0, N_BATCH=1)
+  
   rates = model().cpu().numpy()[0]
 
   end = perf_counter()
@@ -144,7 +147,7 @@
 
   Ne = model.Na[0].detach().cpu().numpy()
   N = model.N_NEURON
-  
+
   print('rates', rates.shape)
 #+end_src
 
@@ -178,6 +181,7 @@
 #+RESULTS:
 : 4094.52544
 : 85.1968
+:
 
 *** Dynamics
 
@@ -204,7 +208,7 @@
 # [goto error]
 : ---------------------------------------------------------------------------
 : NameError                                 Traceback (most recent call last)
-: Cell In[88], line 1
+: Cell In[11], line 1
 : ----> 1 ff_input = model.ff_input.cpu().detach().numpy()
 :       2 print(ff_input.shape)
 :       4 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -231,7 +235,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/07f75da6b74d0b37903fcfba5d8b547c09ff188d.png]]
+[[file:./.ob-jupyter/8c705454cf31b27c59d96ec0ead4092a88e36c7f.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -249,7 +253,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/abdda0d69518389a7b417d6c65e10d3c90ccad8e.png]]
+[[file:./.ob-jupyter/081c58ed6d047f44dab1e39acf4ae7213b9e7bb3.png]]
 
 #+begin_src ipython
 
@@ -270,21 +274,21 @@
 #+end_src
 
 #+RESULTS:
-: 72
+: 46
 
 *** Simulation
 
 #+begin_src ipython
-  LR_COV = [[1.0, 0.6, 0.4, 0.0],
-            [0.6, 1.0, 0.0, 0.0],
-            [0.4, 0.0, 1.0, 0.6],
-            [0.0, 0.0, 0.6, 1.0]]
+  LR_COV = [[1.0, 0.9, 0.0, 0.0],
+            [0.9, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.9],
+            [0.0, 0.0, 0.9, 1.0]]
 
   start = perf_counter()
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda',
                   N_BATCH=100, SEED=seed, LR_COV=LR_COV,
-                  TASK='dual', LIVE_FF_UPDATE=1)
-
+                  TASK='dual', LIVE_FF_UPDATE=1, DURATION=30)
+  
   rates = model().detach().cpu().numpy()
   end = perf_counter()
 
@@ -293,8 +297,8 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 27s
-: rates (100, 101, 8000)
+: Elapsed (with compilation) = 0h 0m 43s
+: rates (100, 301, 8000)
 
 #+begin_src ipython
   start = perf_counter()
@@ -313,7 +317,7 @@
 
 #+RESULTS:
 : Elapsed (with compilation) = 0h 0m 0s
-: rates (100, 101, 8000)
+: rates (100, 301, 8000)
 
 *** Results
 
@@ -350,9 +354,166 @@
 
 #+RESULTS:
 :RESULTS:
-: (100, 101)
-[[file:./.ob-jupyter/d01db8dc7f361fc8d5787fefbacca5b014dc3ba4.png]]
+: (100, 301)
+[[file:./.ob-jupyter/48677f6b25988b858e7286a6d4b34b51f51d48e2.png]]
 :END:
+
+#+begin_src ipython
+  idx = get_idx(model)
+  rates_ordered = rates[..., idx]
+  print(rates_ordered.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 8000)
+: (100, 301, 8000)
+
+#+begin_src ipython
+  overlap = get_overlap(model, rates)
+  print(overlap.T.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 301, 100)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+
+  ax[0].plot(overlap.T[0])
+  ax[0].set_ylabel('Overlap on $\\xi_1$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(overlap.T[1])
+  ax[1].set_ylabel('Overlap on $\\xi_2$ (Hz)')
+  ax[1].set_xlabel('Step')
+
+  ax[2].plot(overlap.T[2])
+  ax[2].set_ylabel('Overlap on $\\xi_3$ (Hz)')
+  ax[2].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/e9bc296d70d54e80a9484954c1cfd80fa5ed361b.png]]
+
+#+begin_src ipython
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (100, 301)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+
+  ax[0].plot(m0.T)
+  #ax[0].set_ylim([0, 360])
+  #ax[0].set_yticks([0, 90, 180, 270, 360])
+  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(m1.T)
+  # ax[1].set_ylim([0, 360])
+  # ax[1].set_yticks([0, 90, 180, 270, 360])
+  ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
+  ax[1].set_xlabel('Step')
+
+  ax[2].plot(phi.T * 180 / np.pi)
+  ax[2].set_ylim([0, 360])
+  ax[2].set_yticks([0, 90, 180, 270, 360])
+  ax[2].set_ylabel('Phase (°)')
+  ax[2].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/c953b5b86225a7dfd03212022022aa28e0917e1d.png]]
+
+#+begin_src ipython
+  print(rates_ordered.shape)
+
+  plt.imshow(rates_ordered[2].T, aspect='auto', cmap='jet', vmin=0, vmax=10)
+  plt.ylabel('Pref. Location (°)')
+  plt.xlabel('Time (au)')
+  plt.yticks(np.linspace(0, rates_ordered.shape[-1], 5), np.linspace(0, 360, 5).astype(int))
+  plt.colorbar()
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (100, 301, 8000)
+[[file:./.ob-jupyter/3d4638497696e7ce33a603a7a9bf4080747b3897.png]]
+:END:
+
+#+begin_src ipython
+  print(m0.shape)
+  x = m1[:, -1]/ m0[:, -1] * np.cos(phi[:, -1])
+  y = m1[:, -1] / m0[:, -1] * np.sin(phi[:, -1])
+
+  fig, ax = plt.subplots(figsize=(height, height))
+  ax.plot(x, y, 'o')
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (100, 301)
+[[file:./.ob-jupyter/dc0877a34fdad3d306f8d0d769f3a27041366ded.png]]
+:END:
+
+#+begin_src ipython
+  mean_phi = np.mean(phi[:, -1] * 180 / np.pi)
+  print(mean_phi)
+#+end_src
+
+#+RESULTS:
+: 228.47025627995063
+
+#+begin_src ipython
+  model.PHI1 = torch.tensor([mean_phi, 90+mean_phi], device='cuda')
+  model.TASK = 'dual_odr'
+  model.DURATION = 10
+  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  rates = model().detach().cpu().numpy()
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  tensor([[228.4703, 228.4703, 228.4703,  ..., 228.4703, 228.4703, 228.4703],
+          [228.4703, 228.4703, 228.4703,  ..., 228.4703, 228.4703, 228.4703],
+          [228.4703, 228.4703, 228.4703,  ..., 228.4703, 228.4703, 228.4703],
+          ...,
+          [228.4703, 228.4703, 228.4703,  ..., 228.4703, 228.4703, 228.4703],
+          [228.4703, 228.4703, 228.4703,  ..., 228.4703, 228.4703, 228.4703],
+          [228.4703, 228.4703, 228.4703,  ..., 228.4703, 228.4703, 228.4703]],
+         device='cuda:0')
+  tensor([[138.4703, 138.4703, 138.4703,  ..., 138.4703, 138.4703, 138.4703],
+          [138.4703, 138.4703, 138.4703,  ..., 138.4703, 138.4703, 138.4703],
+          [138.4703, 138.4703, 138.4703,  ..., 138.4703, 138.4703, 138.4703],
+          ...,
+          [318.4703, 318.4703, 318.4703,  ..., 318.4703, 318.4703, 318.4703],
+          [318.4703, 318.4703, 318.4703,  ..., 318.4703, 318.4703, 318.4703],
+          [318.4703, 318.4703, 318.4703,  ..., 318.4703, 318.4703, 318.4703]],
+         device='cuda:0')
+#+end_example
+
+#+begin_src ipython
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (100, 101, 8000)
 
 #+begin_src ipython
   idx = get_idx(model)
@@ -391,7 +552,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/27bd1c4984dc86dfe4d2f2435b7e0e4f957db57d.png]]
+[[file:./.ob-jupyter/e618eefe4a692350a68783f327ef700162115812.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -426,42 +587,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/4c5b0f580d6d703557c879381e9c793cf457b139.png]]
-
-#+begin_src ipython
-  print(rates_ordered.shape)
-
-  plt.imshow(rates_ordered[2].T, aspect='auto', cmap='jet', vmin=0, vmax=10)
-  plt.ylabel('Pref. Location (°)')
-  plt.xlabel('Time (au)')
-  plt.yticks(np.linspace(0, rates_ordered.shape[-1], 5), np.linspace(0, 360, 5).astype(int))
-  plt.colorbar()
-  plt.show()
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-: (100, 101, 8000)
-[[file:./.ob-jupyter/f0ddeb91e142364614884e5c2c9d57ed64b2d9cf.png]]
-:END:
-
-#+begin_src ipython
-  print(m0.shape)
-  x = m1[:, -1]/ m0[:, -1] * np.cos(phi[:, -1])
-  y = m1[:, -1] / m0[:, -1] * np.sin(phi[:, -1])
-
-  fig, ax = plt.subplots(figsize=(height, height))
-  ax.plot(x, y, 'o')
-  ax.set_xlim([-2, 2])
-  ax.set_ylim([-2, 2])
-  plt.show()
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-: (100, 101)
-[[file:./.ob-jupyter/1a96e47d79adc066a73707041a2326d2c5e84b14.png]]
-:END:
+[[file:./.ob-jupyter/b12001b75f80818bf6dfa04d0758b8711f06a264.png]]
 
 #+begin_src ipython
 
@@ -483,37 +609,22 @@
 
               model = Network(conf_name, '%s_cov_%.3f' % (name, cov),
                               REPO_ROOT, DEVICE=device,
-                              LR_COV = [[1.0, 0.9, 0.0, 0.0], [0.9, 1.0, cov, 0.0],
-                                        [0.0, cov, 1.0, 0.9], [0.0, 0.0, 0.9, 1.0]],
+                              LR_COV = [[1.0, 0.9, 0.0, 0.0],
+                                        [0.9, 1.0, cov, 0.0],
+                                        [0.0, cov, 1.0, 0.9],
+                                        [0.0, 0.0, 0.9, 1.0]],
                               LIVE_FF_UPDATE=1,
                               VERBOSE=0, SEED=seed, N_BATCH=2*n_ini, **kwargs)
 
-              # model.I0[0] = .1
-              # # ff_input = model.init_ff_input()
-              # sample_A = model.init_ff_input()
-
-              # model.I0[0] = -.1
-              # sample_B = model.init_ff_input()
-
-              # ff_input = torch.cat((sample_A, sample_B))
-
-              # sample_A.cpu(), sample_B.cpu()
-              # del sample_A, sample_B
-              ff_input = None
-
-              rates.append(model(ff_input).cpu().detach().numpy())
+              rates.append(model().cpu().detach().numpy())
               ksi.append(model.PHI0.cpu().detach().numpy())
-              
-              model.cpu()
-              # ff_input.cpu()
 
-              # del ff_input
+              model.cpu()
               del model
 
               gc.collect()
               torch.cuda.empty_cache()
-              # print(torch.cuda.memory_allocated())
-
+              
       end = perf_counter()
 
       print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
@@ -534,7 +645,7 @@
 #+RESULTS:
 
 #+begin_src ipython
-  cov_list = np.linspace(0.05, 0, 10)
+  cov_list = np.linspace(0.1, 0, 5)
   print(cov_list)
   n_ini = 32
   seed = np.random.randint(100)
@@ -543,9 +654,8 @@
 #+end_src
 
 #+RESULTS:
-: [0.05       0.04444444 0.03888889 0.03333333 0.02777778 0.02222222
-:  0.01666667 0.01111111 0.00555556 0.        ]
-: 76
+: [0.1   0.075 0.05  0.025 0.   ]
+: 57
 
 #+begin_src ipython
   def ret_overlap(rates, ksi):
@@ -569,11 +679,117 @@
 
 #+begin_src ipython
   I0 = [.1, 0.0, 0.0]
+  rates_list = []
+  ksi_list = []
+  
+  for i in range(10):
+      rates, ksi = run_behavior(conf_name, name, cov_list, n_ini, seed=i, device='cuda', I0=I0)
+      rates_list.append(rates)
+      ksi_list.append(ksi)
+
+  rates_list = np.array(rates_list)
+  ksi_list = np.array(ksi_list)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  Elapsed (with compilation) = 0h 0m 49s
+  Elapsed (with compilation) = 0h 0m 50s
+  Elapsed (with compilation) = 0h 0m 50s
+  Elapsed (with compilation) = 0h 0m 51s
+  Elapsed (with compilation) = 0h 0m 52s
+  Elapsed (with compilation) = 0h 0m 51s
+  Elapsed (with compilation) = 0h 0m 51s
+  Elapsed (with compilation) = 0h 0m 51s
+  Elapsed (with compilation) = 0h 0m 51s
+  Elapsed (with compilation) = 0h 0m 51s
+#+end_example
+
+#+begin_src ipython
+  overlap_list, rate_list = [], []
+  for i in range(rates_list.shape[0]):
+      overlap, rates = ret_overlap(rates_list[i], ksi_list[i])
+      rate_list.append(rates)
+      overlap_list.append(overlap)
+
+  rate_list = np.array(rate_list)
+  overlap_list = np.array(overlap_list)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  print(overlap_list.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 5, 64, 101, 4)
+
+#+begin_src ipython
+  readoutA = overlap_list[..., :n_ini, -5:, 0]
+  readoutB = overlap_list[..., n_ini:, -5:, 0]
+
+  readout = np.stack((readoutA, readoutB))
+  print(readout.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 10, 5, 32, 5)
+
+#+begin_src ipython
+  perf = (readout[0]>0).mean((2, 3))
+  perf += (readout[1]<0).mean((2, 3))
+
+  print(perf.shape)
+
+  plt.plot(perf.T/2)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (10, 5)
+[[file:./.ob-jupyter/c5ce18ee0ba02c0b8fe38bc0e773d52a13bd40f5.png]]
+:END:
+
+#+begin_src ipython
+  print(rate_list.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 5, 64, 101, 8000)
+
+#+begin_src ipython
+  m0, m1, phi = decode_bump(rate_list, axis=-1)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 5, 64, 101)
+
+#+begin_src ipython
+  ini = 0
+  
+  x = m1[:, ini, ..., -1] / m0[:, ini, ..., -1] * np.cos(phi[:, ini, ..., -1])
+  y = m1[:, ini, ..., -1] / m0[:, ini, ..., -1] * np.sin(phi[:, ini, ..., -1])
+
+  fig, ax = plt.subplots(figsize=(height, height))
+  ax.plot(x.T, y.T, 'o')
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/b20c38bd3704158cbc3e222baca54a60b88dff78.png]]
+
+#+begin_src ipython
+  I0 = [.1, 0.0, 0.0]
   rates, ksi = run_behavior(conf_name, name, cov_list, n_ini, seed, device='cuda', I0=I0)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 2m 52s
+: Elapsed (with compilation) = 0h 0m 52s
 
 #+begin_src ipython
   print(rates.shape)
@@ -581,7 +797,7 @@
 #+end_src
 
 #+RESULTS:
-: (10, 64, 101, 8000)
+: (10, 32, 101, 8000)
 : (10, 4, 8000)
 
 #+begin_src ipython
@@ -590,7 +806,7 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 2m 54s
+: Elapsed (with compilation) = 0h 0m 52s
 
 #+begin_src ipython
   print(ratesGo.shape)
@@ -598,7 +814,7 @@
 #+end_src
 
 #+RESULTS:
-: (10, 64, 101, 8000)
+: (10, 32, 101, 8000)
 : (10, 4, 8000)
 
 #+begin_src ipython
@@ -614,8 +830,8 @@
 #+end_src
 
 #+RESULTS:
-: (10, 64, 101, 4)
-: (10, 64, 101, 4)
+: (10, 32, 101, 4)
+: (10, 32, 101, 4)
 
 #+begin_src ipython
   # n_ini = 16
@@ -637,7 +853,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5649318675a40c30607500b9857a3ed127e504c8.png]]
+[[file:./.ob-jupyter/1503c071827ed3ffcf7eb6928f4ca669a6aa92cd.png]]
 
 #+begin_src ipython
   readout1A = overlap1[:, :n_ini, -5:, 0]
@@ -668,8 +884,8 @@
 #+end_src
 #+RESULTS:
 :RESULTS:
-: (10, 32, 5)
-[[file:./.ob-jupyter/3008053fc7572e27fa32f200e43cc59b54ee3f22.png]]
+: (10, 16, 5)
+[[file:./.ob-jupyter/f78316f76b9bc942d3baf3278dbd430866fafcb1.png]]
 :END:
 
 #+begin_src ipython
@@ -707,11 +923,11 @@
 
 #+RESULTS:
 :RESULTS:
-: [ 96.875   98.4375 100.      98.4375 100.      98.4375 100.      98.4375
-:   96.875   98.4375]
-: [50.     50.     50.     50.     51.5625 50.     54.6875 54.6875 56.25
-:  67.1875]
-[[file:./.ob-jupyter/fef44961a30d088e1c0555c9813a021ffbe72531.png]]
+: [ 81.25  100.     96.875 100.     96.875 100.    100.    100.    100.
+:  100.   ]
+: [ 59.375  65.625  90.625  90.625  90.625 100.    100.    100.    100.
+:  100.   ]
+[[file:./.ob-jupyter/83df794da56ac35b1be0d5ba39edc5f717d3275c.png]]
 :END:
 
 **** Single
@@ -725,8 +941,11 @@
 #+end_src
 
 #+RESULTS:
-: (64, 101, 4)
-: (64, 101)
+:RESULTS:
+:
+: (32, 101, 4)(32, 101)
+:
+:END:
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -747,7 +966,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/99e495706435c177142aa5a298bd68fb94d5a508.png]]
+[[file:./.ob-jupyter/781aa18171c8b3a5b7032924d40391937c26e36a.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -774,7 +993,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/08b5d64ee3d7d7da8b41ea7d57b19947d773d84d.png]]
+[[file:./.ob-jupyter/9d14cf844a759f9ed7c316fc7948241fe7fb9c14.png]]
 
 #+begin_src ipython
   x = m1[ini, ..., -1] / m0[ini, ..., -1] * np.cos(phi[ini, ..., -1])
@@ -788,7 +1007,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/9e06a97a042604e91ba561aef0e25f710f471e32.png]]
+[[file:./.ob-jupyter/c68b7dafcbd7d0ccb38bdebbafb6608eafa7fb3c.png]]
 
 #+begin_src ipython
 
@@ -924,15 +1143,18 @@
 #+begin_src ipython
   rates_cov, ksi_cov = run_X(conf_name, name, real_list, n_ini,
                              device='cuda',
-                             LR_COV=[[1.0, 0.9, 0.2, 0.0],
-                                     [0.9, 1.0, 0.0, 0.0],
-                                     [0.2, 0.0, 1.0, 0.8],
-                                     [0.0, 0.0, 0.8, 1.0]]
+                             LR_COV=[[1.0, 0.9, 0.0, 0.0],
+                                     [0.9, 1.0, 0.1, 0.0],
+                                     [0.0, 0.1, 1.0, 0.9],
+                                     [0.0, 0.0, 0.9, 1.0]]
                              )
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 28s
+:RESULTS:
+:
+: Elapsed (with compilation) = 0h 0m 49s
+:END:
 
 #+begin_src ipython
   rates_ord_cov = np.zeros(rates_cov.shape)
@@ -950,7 +1172,7 @@
 #+end_src
 
 #+RESULTS:
-: (10, 32, 8000)
+: (10, 16, 8000)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*height, height])
@@ -965,7 +1187,7 @@
   ax[0].set_xlabel('Pref. Location (°)')
   ax[0].set_ylabel('Density')
 
-  ax[1].plot(x, y, 'o')
+  ax[1].plot(x.T, y.T, 'o')
   ax[1].set_xlim([-2, 2])
   ax[1].set_ylim([-2, 2])
   # ax[1].set_title('$\\xi_S . \\xi_D > 0$')
@@ -976,7 +1198,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e7c640ce4ce8effd8e6d296239856910cb741911.png]]
+[[file:./.ob-jupyter/83203ca490054c0312c59849a70f6e448cd3b963.png]]
 
 #+begin_src ipython
 
@@ -989,15 +1211,15 @@
 #+begin_src ipython
   rates_cov2, ksi_cov2 = run_X(conf_name, name, real_list, n_ini,
                                device='cuda',
-                               LR_COV=[[1.0, 0.8, 0.0, 0.0],
-                                       [0.8, 1.0, 0.2, 0.0],
-                                       [0.0, 0.2, 1.0, 0.8],
-                                       [0.0, 0.0, 0.8, 1.0]]
+                               LR_COV=[[1.0, 0.9, 0.0, 0.0],
+                                       [0.9, 1.0, 0.0, 0.0],
+                                       [0.0, 0.0, 0.5, 0.4],
+                                       [0.0, 0.0, 0.4, 1.0]]
                                )
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 27s
+: Elapsed (with compilation) = 0h 0m 52s
 
 #+begin_src ipython
   rates_ord_cov2 = np.zeros(rates_cov2.shape)
@@ -1030,7 +1252,7 @@
   ax[0].set_xlabel('Pref. Location (°)')
   ax[0].set_ylabel('Density')
 
-  ax[1].plot(x, y, 'o')
+  ax[1].plot(x.T, y.T, 'o')
   ax[1].set_xlim([-2, 2])
   ax[1].set_ylim([-2, 2])
   ax[1].set_title('$h_S . \\xi_D > 0$')
@@ -1041,7 +1263,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/b6c96657297b66643f2682978b915e95eb0a426d.png]]
+[[file:./.ob-jupyter/41f95656e035edc9644060fcbb10b001402a72cd.png]]
 
 #+begin_src ipython
 
