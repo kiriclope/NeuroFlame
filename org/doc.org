@@ -65,11 +65,21 @@ Neuron $i$ in population $A$ has a reccurent input $h^A_i$,
   \tau_{syn} \frac{dh_i}{dt}(t) = - h_i(t) + \sum_j J_{ij} h_j(t)
 #+end_src
 
+#+RESULTS:
+#+begin_export latex
+\tau_{syn} \frac{dh_i}{dt}(t) = - h_i(t) + \sum_j J_{ij} h_j(t)
+#+end_export
+
 or not
 
 #+begin_src latex
   h^A_i(t) = \sum_{jB} J^{AB}_{ij} h_j(t)
 #+end_src
+
+#+RESULTS:
+#+begin_export latex
+h^A_i(t) = \sum_{jB} J^{AB}_{ij} h_j(t)
+#+end_export
 
 **** Rates
 
@@ -79,6 +89,11 @@ The models can have rate dynamics (setting *RATE_DYN* to 1 in the configuration 
   \tau_A \frac{d r^A_i}{dt}(t) = - r^A_i(t) + \Phi( \sum_{jB} J^{AB}_{ij} h^{AB}_j(t) + h^A_{ext}(t))
 #+end_src
 
+#+RESULTS:
+#+begin_export latex
+\tau_A \frac{d r^A_i}{dt}(t) = - r^A_i(t) + \Phi( \sum_{jB} J^{AB}_{ij} h^{AB}_j(t) + h^A_{ext}(t))
+#+end_export
+
 Here, $r_i$ is the rate of unit $i$ in population $A$
 
 otherwise rates will be instantaneous:
@@ -86,6 +101,11 @@ otherwise rates will be instantaneous:
 #+begin_src latex
   r^A_i(t) = \Phi(\sum_{jB} J^{AB}_{ij} h_j(t) + h^A_{ext}(t))
 #+end_src
+
+#+RESULTS:
+#+begin_export latex
+r^A_i(t) = \Phi(\sum_{jB} J^{AB}_{ij} h_j(t) + h^A_{ext}(t))
+#+end_export
 
 Here $\Phi$ is the transfer function defined in *src/activation.py*
 
@@ -99,11 +119,21 @@ by default it is a sparse net
 P_{ij}^{AB} = \frac{K_B}{N_B}
 #+end_src
 
+#+RESULTS:
+#+begin_export latex
+P_{ij}^{AB} = \frac{K_B}{N_B}
+#+end_export
+
 otherwise
 it can be cosine
 #+begin_src latex
 P_{ij}^{AB} = ( 1.0 + \KAPPA_B \cos(\theta_i^A - \theta_j^B) )
 #+end_src
+
+#+RESULTS:
+#+begin_export latex
+P_{ij}^{AB} = ( 1.0 + \KAPPA_B \cos(\theta_i^A - \theta_j^B) )
+#+end_export
 
 and also low rank
 
@@ -112,14 +142,24 @@ and also low rank
                0 otherwise
 #+end_src
 
+#+RESULTS:
+#+begin_export latex
+J_{ij}^{AB} = \frac{J_{AB}}{\sqrt{K_B}} with proba. P_{ij}^{AB} * \frac{K_B}{N_B} 
+             0 otherwise
+#+end_export
+
 **** All to all
 
 #+begin_src latex
   J_{ij}^{AB} =  \frac{J_{AB}}{N_B} P_{ij}^{AB}
 #+end_src
 
-where Pij can be as above.
+#+RESULTS:
+#+begin_export latex
+J_{ij}^{AB} =  \frac{J_{AB}}{N_B} P_{ij}^{AB}
+#+end_export
 
+where Pij can be as above.
 
 
 * RNN with torch
@@ -200,7 +240,7 @@ Elapsed (with compilation) = 0h 0m 5s
 
 #+RESULTS:
 :RESULTS:
-[[file:./.ob-jupyter/b56f0bac21e885746649a8daa31ffc49a8f8fd64.png]]
+[[file:./.ob-jupyter/a97e6de580a8805ffe782925339c63d0f011cb88.png]]
 :END:
 
 #+begin_src ipython
@@ -277,12 +317,14 @@ Then we path these inputs to the model
 
 #+RESULTS:
 :RESULTS:
-[[file:./.ob-jupyter/95ed2b8f341658e2f6716910af7040082d7438ec.png]]
+[[file:./.ob-jupyter/409e77aae59878b13fd5f8e22d4c5abea647b9fd.png]]
 :END:
 
 #+begin_src ipython
 
 #+end_src
+
+#+RESULTS:
 
 **** The hard way (slow but more memory friendly)
 We create a batch of ff inputs that are updated at each time step
@@ -340,9 +382,11 @@ rates (10, 101, 8000)
 
 #+RESULTS:
 :RESULTS:
-[[file:./.ob-jupyter/8eb18cc1086360d5c092673bd7e51a5751558a94.png]]
+[[file:./.ob-jupyter/84b729f07c3adf25a5f3df4615387024f51abd43.png]]
 :END:
 
 #+begin_src ipython
 
 #+end_src
+
+#+RESULTS:
