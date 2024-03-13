@@ -404,7 +404,9 @@ class Network(nn.Module):
             print("Ja0", self.Ja0)
 
         self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device)
-
+        self.Ja0 = self.Ja0.unsqueeze(0)  # add batch dim
+        self.Ja0 = self.Ja0.unsqueeze(-1) # add neural dim
+        
         # now inputs are scaled in init_ff_input unless live update
         if self.LIVE_FF_UPDATE:
             self.Ja0.mul_(self.M0 * torch.sqrt(self.Ka[0]))
@@ -424,13 +426,13 @@ class Network(nn.Module):
         if step==0:
             for i_pop in range(self.N_POP):
                 if self.BUMP_SWITCH[i_pop]:
-                    ff_input[:, self.slices[i_pop]] = self.Ja0[i_pop] / torch.sqrt(self.Ka[0])
+                    ff_input[:, self.slices[i_pop]] = self.Ja0[:, i_pop] / torch.sqrt(self.Ka[0])
                 else:
-                    ff_input[:, self.slices[i_pop]] = self.Ja0[i_pop]
+                    ff_input[:, self.slices[i_pop]] = self.Ja0[:, i_pop]
 
         if step==self.N_STIM_ON[0]:
             for i_pop in range(self.N_POP):
-                ff_input[:, self.slices[i_pop]] = self.Ja0[i_pop]
+                ff_input[:, self.slices[i_pop]] = self.Ja0[:, i_pop]
 
         stimulus = torch.zeros((1, 1), device=self.device)
 
@@ -456,9 +458,7 @@ class Network(nn.Module):
                         phase = phase.unsqueeze(1).expand((phase.shape[0], size[-1])) * self.PHI1[i]
                         
                         if i == 0:
-                            print(phase)
                             phase = phase - self.stim_mask[:, i] * 90
-                            print(phase)
                         
                         stimulus = Stimuli('odr', size, device=self.device)(self.I0[i],
                                                                             self.SIGMA0[i],
@@ -478,11 +478,11 @@ class Network(nn.Module):
                                                         self.PHI0[i],
                                                         rnd_phase=1)
                 
-                ff_input[:, self.slices[0]] = self.Ja0[0] + stimulus * torch.sqrt(self.Ka[0]) * self.M0
+                ff_input[:, self.slices[0]] = self.Ja0[:, 0] + stimulus * torch.sqrt(self.Ka[0]) * self.M0
                 del stimulus
 
             if step in self.N_STIM_OFF:
-                ff_input[:, self.slices[0]] = self.Ja0[0]
+                ff_input[:, self.slices[0]] = self.Ja0[:, 0]
 
         return ff_input, noise
     
@@ -500,7 +500,7 @@ class Network(nn.Module):
         ff_input = torch.zeros((self.N_BATCH, self.N_NEURON),
                                dtype=self.FLOAT, device=self.device)
         
-        ff_input, noise = self.live_ff_input(0, ff_input)
+        ff_input, _ = self.live_ff_input(0, ff_input)
 
         return ff_input
     
@@ -519,12 +519,12 @@ class Network(nn.Module):
 
         for i_pop in range(self.N_POP):
             if self.BUMP_SWITCH[i_pop]:
-                ff_input[:, :self.N_STIM_ON[0], self.slices[i_pop]].add_(self.Ja0[i_pop] / torch.sqrt(self.Ka[0]))
+                ff_input[:, :self.N_STIM_ON[0], self.slices[i_pop]].add_(self.Ja0[:, i_pop] / torch.sqrt(self.Ka[0]))
             else:
-                ff_input[:, :self.N_STIM_ON[0], self.slices[i_pop]].add_(self.Ja0[i_pop])
+                ff_input[:, :self.N_STIM_ON[0], self.slices[i_pop]].add_(self.Ja0[:, i_pop])
 
         for i_pop in range(self.N_POP):
-            ff_input[:, self.N_STIM_ON[0]:, self.slices[i_pop]].add_(self.Ja0[i_pop])
+            ff_input[:, self.N_STIM_ON[0]:, self.slices[i_pop]].add_(self.Ja0[:, i_pop])
         
         if self.TASK != 'None':
             for i ,_ in enumerate(self.N_STIM_ON):
