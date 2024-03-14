@@ -36,6 +36,7 @@
   from src.decode import decode_bump
 #+end_src
 
+#+RESULTS:
 
 * Helpers
 ** Connectivity
@@ -210,14 +211,14 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/8ebcdc8e70775109d07cbfb09509b5fb5ec8a0bb.png]]
+[[file:./.ob-jupyter/33dfc5802d7e4bf339ebe28a17ca3c9d6161a9a9.png]]
 
 #+begin_src ipython
   plot_eigen(1.0 * Wij)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/d4aa354d9dcc7f7f846018b23222beb52e2655c9.png]]
+[[file:./.ob-jupyter/972353dede979f648dfea45b91c791cd94293f3e.png]]
 
 #+begin_src ipython
   dominant_eigenvalue = eigenvalues[-1]
@@ -234,6 +235,20 @@
   A_adjusted = A - update_matrix
 
 #+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[14], line 1
+: ----> 1 dominant_eigenvalue = eigenvalues[-1]
+:       2 dominant_eigenvector = eigenvectors[:, -1]
+:       4 # Assuming you want to reduce the dominant eigenvalue by a certain factor
+: 
+: NameError: name 'eigenvalues' is not defined
+:END:
+
 ** ODR
 
 #+begin_src ipython
@@ -286,14 +301,14 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/66091c258e0c7044130e432b034f3c76fa5dd1d9.png]]
+[[file:./.ob-jupyter/d1532b66ff677858f15b6310d3fb045bea9cf6ac.png]]
 
 #+begin_src ipython
   plot_eigen(1.0 * Wij)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/4e590a36c922f02c0f084b94c11e6945d06891b8.png]]
+[[file:./.ob-jupyter/5eab8b9ca0caa99969f7e52658d965903d74025f.png]]
 
 ** Dual Task
 
@@ -315,7 +330,16 @@
 #+end_src
 
 #+RESULTS:
-: (1000, 1000)
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: AttributeError                            Traceback (most recent call last)
+: Cell In[20], line 1
+: ----> 1 Pij = Con.Pij.cpu().numpy()
+:       2 print(Pij.shape)
+: 
+: AttributeError: 'Connectivity' object has no attribute 'Pij'
+:END:
 
 #+begin_src ipython
   Pj = Pij.mean(axis=0)
@@ -324,7 +348,17 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/b687917c78ef6f2cda3c7136589552296f422554.png]]
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[21], line 1
+: ----> 1 Pj = Pij.mean(axis=0)
+:       2 plt.plot(Pj)
+:       3 plt.show()
+: 
+: NameError: name 'Pij' is not defined
+:END:
 
 #+begin_src ipython
   Cij = Wij.cpu().detach().numpy()
@@ -370,14 +404,14 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/18f4027615f9b6e1df435a6a716386a9bd7b1054.png]]
+[[file:./.ob-jupyter/9ca2e0ea3a5fd991892e71eb0d1f9bebfa528c60.png]]
 
 #+begin_src ipython
   plot_eigen(1.0 * Wij)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2a3a938fda4f5664448104ff3b14f6957d820dc0.png]]
+[[file:./.ob-jupyter/c49ea092c7b6e6ceccf42884f1c2d5ed104c1794.png]]
 
 #+begin_src ipython
   ksi = Con.ksi.cpu().detach().numpy()
@@ -432,7 +466,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2a2d6eba4312ebc10219035ab785ee98c8a9e463.png]]
+[[file:./.ob-jupyter/9d0f14947fad15ffd4080efb5777766a1c032ef0.png]]
 
 #+begin_src ipython
 
@@ -451,7 +485,7 @@
 #+RESULTS:
 : Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([1000., 1000.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
 : Jab [1.0, -1.5, 1, -1]
-: Ja0 [2.0, 1.0]
+: Ja0 [0.0, 0.0]
 
 #+begin_src ipython
   import torch
@@ -501,10 +535,10 @@
 
 #+RESULTS:
 : tensor(indices=tensor([[   0,    0,    0,  ..., 9999, 9999, 9999],
-:                        [   1,    4,   10,  ..., 9992, 9993, 9999]]),
-:        values=tensor([ 0.0632,  0.0632,  0.0632,  ..., -0.0632, -0.0632,
-:                       -0.0632]),
-:        device='cuda:0', size=(10000, 10000), nnz=19995752,
+:                        [   3,    4,   16,  ..., 9995, 9996, 9998]]),
+:        values=tensor([ 0.0316,  0.0316,  0.0316,  ..., -0.0316, -0.0316,
+:                       -0.0316]),
+:        device='cuda:0', size=(10000, 10000), nnz=19997007,
 :        layout=torch.sparse_coo)
 
 #+begin_src ipython
@@ -512,7 +546,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/beb46fbbdf5297b378bf911631e201fd35758eb5.png]]
+[[file:./.ob-jupyter/6363b377319641faa39ce199f413c71ee2c5ff40.png]]
 
 ** Von Mises
 
@@ -566,7 +600,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/063bd67c90e50bbfef9b5fe334589105198dfacf.png]]
+[[file:./.ob-jupyter/3035e87f407ba0146c03212c75b6bf0447e550ab.png]]
 
 ** Manifold
 
@@ -684,14 +718,11 @@
 
 #+begin_src ipython
     REPO_ROOT = "/home/leon/models/NeuroTorch"
-    model = Network('config_EI.yml', 'test', REPO_ROOT, VERBOSE=1, DEVICE='cuda', TASK='dual_rand',
-                    PROBA_TYPE=['lr', '', '',''])
+    model = Network('config_EI.yml', 'test', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='dual_rand',
+                    PROBA_TYPE=['lr', '', '',''], LIVE_FF_UPDATE=0)
 #+end_src
 
 #+RESULTS:
-: Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([1000., 1000.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
-: Jab [1.0, -1.5, 1, -1]
-: Ja0 [2.0, 1.0]
 
 #+begin_src ipython
   ff_input = model.init_ff_input().cpu().detach().numpy()
@@ -699,21 +730,21 @@
 #+end_src
 
 #+RESULTS:
-: (1, 4600, 10000)
+: (1, 11100, 10000)
 
-#+begin_src ipython
-  plt.plot(ff_input[0, :, :5])
-  plt.plot(ff_input[0, :, -5:])
+#+begin_src ipython 
+  plt.plot(ff_input[0, :, :10])
+  plt.plot(ff_input[0, :, -10:])
   plt.xlabel('Step')
   plt.ylabel('FF Input')
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/87e76e3597ea8eca5dbdeb8542ac75b1ee237fb1.png]]
+[[file:./.ob-jupyter/c86dc3c7e1c0bc295c692a8c724e52faaf161ba2.png]]
 
 #+begin_src ipython
-  plt.imshow(ff_input[0].T, cmap='jet', vmin=100, vmax=400, aspect='auto')
+  plt.imshow(ff_input[0].T, cmap='jet', vmin=100, aspect='auto')
   plt.xlabel('Step')
   plt.ylabel('Neuron #')
   plt.ylim([0, 8000])
@@ -721,7 +752,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f95e16b07cbf41dd68a4ab34f02cfcf3e16e7e9e.png]]
+[[file:./.ob-jupyter/7d243642e4a26e8e783eba4ee9df82313361c1a1.png]]
 
 #+begin_src ipython
   ksi = model.PHI0.cpu().detach().numpy()
@@ -742,7 +773,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7e961b8743616c71f1919acf01832dfd38792494.png]]
+[[file:./.ob-jupyter/8e0ecb44fc0d9f68fcf007e76aef192ef0d0c672.png]]
 
 * STP
 ** from class
@@ -832,13 +863,10 @@
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  model = Network('config_2pop.yml', 'test', REPO_ROOT, VERBOSE=1, DEVICE='cuda', TASK='None')
+  model = Network('config_EI.yml', 'test', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='dual', LIVE_FF_UPDATE=1)
 #+end_src
 
 #+RESULTS:
-: Na tensor([5000, 5000], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  5000, 10000], device='cuda:0')
-: Jab [1.0, -1.5, 1, -1]
-: Ja0 [2.0, 1.0]
 
 ** Dynamics
 
@@ -848,52 +876,40 @@
 #+end_src
 
 #+RESULTS:
-#+begin_example
-  generating ff input
-  times (s) 0.0 rates (Hz) [1.14, 1.82]
-  times (s) 0.22 rates (Hz) [1.13, 1.81]
-  times (s) 0.44 rates (Hz) [1.13, 1.82]
-  times (s) 0.67 rates (Hz) [1.14, 1.83]
-  times (s) 0.89 rates (Hz) [1.18, 1.86]
-  times (s) 1.11 rates (Hz) [1.13, 1.83]
-  times (s) 1.33 rates (Hz) [1.16, 1.84]
-  times (s) 1.56 rates (Hz) [1.15, 1.82]
-  times (s) 1.78 rates (Hz) [1.14, 1.83]
-  times (s) 2.0 rates (Hz) [1.17, 1.85]
-  times (s) 2.22 rates (Hz) [1.14, 1.83]
-  times (s) 2.44 rates (Hz) [1.15, 1.84]
-  times (s) 2.67 rates (Hz) [1.18, 1.87]
-  times (s) 2.89 rates (Hz) [1.15, 1.84]
-  times (s) 3.11 rates (Hz) [1.16, 1.85]
-  times (s) 3.33 rates (Hz) [1.15, 1.83]
-  times (s) 3.56 rates (Hz) [1.14, 1.82]
-  times (s) 3.78 rates (Hz) [1.15, 1.84]
-  times (s) 4.0 rates (Hz) [1.15, 1.83]
-  times (s) 4.22 rates (Hz) [1.15, 1.84]
-  times (s) 4.44 rates (Hz) [1.16, 1.84]
-  times (s) 4.67 rates (Hz) [1.14, 1.83]
-  times (s) 4.89 rates (Hz) [1.14, 1.83]
-  times (s) 5.11 rates (Hz) [1.16, 1.85]
-  times (s) 5.33 rates (Hz) [1.15, 1.83]
-  times (s) 5.56 rates (Hz) [1.14, 1.82]
-  times (s) 5.78 rates (Hz) [1.17, 1.85]
-  times (s) 6.0 rates (Hz) [1.15, 1.84]
-  times (s) 6.22 rates (Hz) [1.18, 1.86]
-  times (s) 6.44 rates (Hz) [1.16, 1.84]
-  times (s) 6.67 rates (Hz) [1.12, 1.81]
-  times (s) 6.89 rates (Hz) [1.17, 1.86]
-  times (s) 7.11 rates (Hz) [1.15, 1.83]
-  times (s) 7.33 rates (Hz) [1.14, 1.83]
-  times (s) 7.56 rates (Hz) [1.15, 1.84]
-  times (s) 7.78 rates (Hz) [1.16, 1.85]
-  times (s) 8.0 rates (Hz) [1.15, 1.84]
-  times (s) 8.22 rates (Hz) [1.15, 1.83]
-  times (s) 8.44 rates (Hz) [1.14, 1.82]
-  times (s) 8.67 rates (Hz) [1.14, 1.83]
-  times (s) 8.89 rates (Hz) [1.14, 1.81]
-  Elapsed (with compilation) = 2.212987002916634s
-  (41, 5000)
-#+end_example
+: (51, 8000)
+
+#+begin_src ipython
+  ff_input = model.ff_input.cpu().numpy()
+  print(ff_input.shape)
+#+end_src
+
+#+RESULTS:
+: (1, 51, 8000)
+
+#+begin_src ipython
+  print(np.max(ff_input))
+  print(np.mean(ff_input==0))
+#+end_src
+
+#+RESULTS:
+: 3655.667
+: 0.0
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].plot(ff_input[0, :, 0])
+  ax[0].plot(ff_input[0, :, 0])
+
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('FF Input')
+
+  ax[1].imshow(ff_input[0].T, aspect='auto', origin='lower', cmap='jet', vmin=0, vmax=2000)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/2bcc2a4021bcc141b6edc76d0790ca6696e83869.png]]
 
 #+begin_src ipython
   import matplotlib.colors
@@ -902,13 +918,22 @@
 
   r_max = 20
 
-  plt.imshow(rates.T, aspect='auto', origin='lower', vmax=r_max, cmap='jet')
-  plt.colorbar()
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].plot(rates[:, :20])
+  ax[0].plot(rates[:, -20:])
+
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('Rates')
+
+  ax[1].imshow(rates.T, aspect='auto', origin='lower', cmap='jet')
+
+  # plt.colorbar()
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/de1b15df501739a4f7f2e5ae3e73f02a04da23d3.png]]
+[[file:./.ob-jupyter/bab4ce7e62d8f4e915223c038c56ffebff514e80.png]]
 
 #+RESULTS:
 
@@ -981,8 +1006,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (1, 4500, 10000)
-[[file:./.ob-jupyter/e73b47f12e6377a2acc98d7abb4848bdce067826.png]]
+: (1, 51, 8000)
+[[file:./.ob-jupyter/bb1a77e0bf9212fbd726195f11f62016548bcc60.png]]
 :END:
 
 * Balance

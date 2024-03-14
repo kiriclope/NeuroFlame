@@ -15,10 +15,13 @@
 #+end_src
 
 #+RESULTS:
+:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
+: <Figure size 600x370.82 with 0 Axes>
+:END:
 
 * Imports
 
@@ -179,7 +182,7 @@
 #+end_src
 
 #+RESULTS:
-: 4093.71136
+: 4094.52544
 : 85.1968
 
 *** Dynamics
@@ -234,7 +237,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/8c705454cf31b27c59d96ec0ead4092a88e36c7f.png]]
+[[file:./.ob-jupyter/f4f89d9795d8df32e714c0bdeb37d8aded841801.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -252,14 +255,13 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/081c58ed6d047f44dab1e39acf4ae7213b9e7bb3.png]]
+[[file:./.ob-jupyter/59108ebca78af6fdabaa0875883d9b5764d370ed.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-
 
 ** Multiple initializations
 *** Parameters
@@ -271,23 +273,24 @@
   seed = np.random.randint(100)
   # 34, 53
   print(seed)
+  seed = 86
 #+end_src
 
 #+RESULTS:
-: 46
+: 39
 
 *** Simulation
 
 #+begin_src ipython
-  LR_COV = [[1.0, 0.9, 0.0, 0.0],
-            [0.9, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.9],
-            [0.0, 0.0, 0.9, 1.0]]
+  LR_COV = [[1.0, 0.8, 0.0, 0.0],
+            [0.8, 1.0, 0., 0.0],
+            [0.0, 0., 1.0, 0.8],
+            [0.0, 0.0, 0.8, 1.0]]
 
   start = perf_counter()
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda',
                   N_BATCH=100, SEED=seed, LR_COV=LR_COV,
-                  TASK='dual', LIVE_FF_UPDATE=1, DURATION=30)
+                  TASK='dual', LIVE_FF_UPDATE=1, DURATION=10)
   
   rates = model().detach().cpu().numpy()
   end = perf_counter()
@@ -297,8 +300,8 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 43s
-: rates (100, 301, 8000)
+: Elapsed (with compilation) = 0h 1m 9s
+: rates (100, 101, 8000)
 
 #+begin_src ipython
   start = perf_counter()
@@ -317,7 +320,7 @@
 
 #+RESULTS:
 : Elapsed (with compilation) = 0h 0m 0s
-: rates (100, 301, 8000)
+: rates (100, 101, 8000)
 
 *** Results
 
@@ -325,24 +328,28 @@
   Ne = model.Na[0].detach().cpu().numpy()
   N = model.N_NEURON
 
-  # ff_input = model.ff_input.cpu().detach().numpy()
-  # print(ff_input.shape)
+  ff_input = model.ff_input.cpu().detach().numpy()
+  print(ff_input.shape)
 
-  # fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 
-  # ax[0].plot(ff_input[0, :, :5])
-  # ax[0].plot(ff_input[1, :, :5])
-  # ax[0].set_xlabel('Step')
-  # ax[0].set_ylabel('FF Input')
+  ax[0].plot(ff_input[0, :, :5])
+  ax[0].plot(ff_input[1, :, :5])
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('FF Input')
 
-  # ax[1].imshow(ff_input[1].T, cmap='jet', vmin=0, aspect='auto')
-  # ax[1].set_xlabel('Step')
-  # ax[1].set_ylabel('Neuron #')
-  # ax[1].set_ylim([0, N])
-  # plt.show()
+  ax[1].imshow(ff_input[1].T, cmap='jet', vmin=0, vmax= 400, aspect='auto')
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('Neuron #')
+  ax[1].set_ylim([0, Ne])
+  plt.show()
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+: (100, 101, 8000)
+[[file:./.ob-jupyter/c06631254e6fb70c236c977117f4917f551661d9.png]]
+:END:
 
 #+begin_src ipython
   print(rates.mean(-1).shape)
@@ -354,166 +361,9 @@
 
 #+RESULTS:
 :RESULTS:
-: (100, 301)
-[[file:./.ob-jupyter/48677f6b25988b858e7286a6d4b34b51f51d48e2.png]]
+: (100, 101)
+[[file:./.ob-jupyter/1d9468f600ecf1028e56d94ad197939aab9f927c.png]]
 :END:
-
-#+begin_src ipython
-  idx = get_idx(model)
-  rates_ordered = rates[..., idx]
-  print(rates_ordered.shape)
-#+end_src
-
-#+RESULTS:
-: (4, 8000)
-: (100, 301, 8000)
-
-#+begin_src ipython
-  overlap = get_overlap(model, rates)
-  print(overlap.T.shape)
-#+end_src
-
-#+RESULTS:
-: (4, 301, 100)
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
-
-  ax[0].plot(overlap.T[0])
-  ax[0].set_ylabel('Overlap on $\\xi_1$ (Hz)')
-  ax[0].set_xlabel('Step')
-
-  ax[1].plot(overlap.T[1])
-  ax[1].set_ylabel('Overlap on $\\xi_2$ (Hz)')
-  ax[1].set_xlabel('Step')
-
-  ax[2].plot(overlap.T[2])
-  ax[2].set_ylabel('Overlap on $\\xi_3$ (Hz)')
-  ax[2].set_xlabel('Step')
-
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/e9bc296d70d54e80a9484954c1cfd80fa5ed361b.png]]
-
-#+begin_src ipython
-  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
-  print(m0.shape)
-#+end_src
-
-#+RESULTS:
-: (100, 301)
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
-
-  ax[0].plot(m0.T)
-  #ax[0].set_ylim([0, 360])
-  #ax[0].set_yticks([0, 90, 180, 270, 360])
-  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
-  ax[0].set_xlabel('Step')
-
-  ax[1].plot(m1.T)
-  # ax[1].set_ylim([0, 360])
-  # ax[1].set_yticks([0, 90, 180, 270, 360])
-  ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
-  ax[1].set_xlabel('Step')
-
-  ax[2].plot(phi.T * 180 / np.pi)
-  ax[2].set_ylim([0, 360])
-  ax[2].set_yticks([0, 90, 180, 270, 360])
-  ax[2].set_ylabel('Phase (°)')
-  ax[2].set_xlabel('Step')
-
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/c953b5b86225a7dfd03212022022aa28e0917e1d.png]]
-
-#+begin_src ipython
-  print(rates_ordered.shape)
-
-  plt.imshow(rates_ordered[2].T, aspect='auto', cmap='jet', vmin=0, vmax=10)
-  plt.ylabel('Pref. Location (°)')
-  plt.xlabel('Time (au)')
-  plt.yticks(np.linspace(0, rates_ordered.shape[-1], 5), np.linspace(0, 360, 5).astype(int))
-  plt.colorbar()
-  plt.show()
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-: (100, 301, 8000)
-[[file:./.ob-jupyter/3d4638497696e7ce33a603a7a9bf4080747b3897.png]]
-:END:
-
-#+begin_src ipython
-  print(m0.shape)
-  x = m1[:, -1]/ m0[:, -1] * np.cos(phi[:, -1])
-  y = m1[:, -1] / m0[:, -1] * np.sin(phi[:, -1])
-
-  fig, ax = plt.subplots(figsize=(height, height))
-  ax.plot(x, y, 'o')
-  ax.set_xlim([-2, 2])
-  ax.set_ylim([-2, 2])
-  plt.show()
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-: (100, 301)
-[[file:./.ob-jupyter/dc0877a34fdad3d306f8d0d769f3a27041366ded.png]]
-:END:
-
-#+begin_src ipython
-  mean_phi = np.mean(phi[:, -1] * 180 / np.pi)
-  print(mean_phi)
-#+end_src
-
-#+RESULTS:
-: 228.47025627995063
-
-#+begin_src ipython
-  model.PHI1 = torch.tensor([mean_phi, 90+mean_phi], device='cuda')
-  model.TASK = 'dual_odr'
-  model.DURATION = 10
-  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  rates = model().detach().cpu().numpy()
-#+end_src
-
-#+RESULTS:
-#+begin_example
-  tensor([[228.4703, 228.4703, 228.4703,  ..., 228.4703, 228.4703, 228.4703],
-          [228.4703, 228.4703, 228.4703,  ..., 228.4703, 228.4703, 228.4703],
-          [228.4703, 228.4703, 228.4703,  ..., 228.4703, 228.4703, 228.4703],
-          ...,
-          [228.4703, 228.4703, 228.4703,  ..., 228.4703, 228.4703, 228.4703],
-          [228.4703, 228.4703, 228.4703,  ..., 228.4703, 228.4703, 228.4703],
-          [228.4703, 228.4703, 228.4703,  ..., 228.4703, 228.4703, 228.4703]],
-         device='cuda:0')
-  tensor([[138.4703, 138.4703, 138.4703,  ..., 138.4703, 138.4703, 138.4703],
-          [138.4703, 138.4703, 138.4703,  ..., 138.4703, 138.4703, 138.4703],
-          [138.4703, 138.4703, 138.4703,  ..., 138.4703, 138.4703, 138.4703],
-          ...,
-          [318.4703, 318.4703, 318.4703,  ..., 318.4703, 318.4703, 318.4703],
-          [318.4703, 318.4703, 318.4703,  ..., 318.4703, 318.4703, 318.4703],
-          [318.4703, 318.4703, 318.4703,  ..., 318.4703, 318.4703, 318.4703]],
-         device='cuda:0')
-#+end_example
-
-#+begin_src ipython
-  print(rates.shape)
-#+end_src
-
-#+RESULTS:
-: (100, 101, 8000)
 
 #+begin_src ipython
   idx = get_idx(model)
@@ -552,7 +402,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e618eefe4a692350a68783f327ef700162115812.png]]
+[[file:./.ob-jupyter/273a2f6335c2205cfa7ebad82937d919eaa7272c.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -563,7 +413,7 @@
 : (100, 101)
 
 #+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+  fig, ax = plt.subplots(1, 3, figsize=[2.2*width, height])
 
   ax[0].plot(m0.T)
   #ax[0].set_ylim([0, 360])
@@ -577,7 +427,7 @@
   ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
   ax[1].set_xlabel('Step')
 
-  ax[2].plot(phi.T * 180 / np.pi)
+  ax[2].plot(phi.T * 180 / np.pi, alpha=.2)
   ax[2].set_ylim([0, 360])
   ax[2].set_yticks([0, 90, 180, 270, 360])
   ax[2].set_ylabel('Phase (°)')
@@ -587,7 +437,42 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/b12001b75f80818bf6dfa04d0758b8711f06a264.png]]
+[[file:./.ob-jupyter/2917210cda7f1df212c8580388e836df881d0328.png]]
+
+#+begin_src ipython
+  print(rates_ordered.shape)
+
+  plt.imshow(rates_ordered[2].T, aspect='auto', cmap='jet', vmin=0, vmax=10)
+  plt.ylabel('Pref. Location (°)')
+  plt.xlabel('Time (au)')
+  plt.yticks(np.linspace(0, rates_ordered.shape[-1], 5), np.linspace(0, 360, 5).astype(int))
+  plt.colorbar()
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (100, 101, 8000)
+[[file:./.ob-jupyter/d760dc220b805083b26ed1e43e90622dc6ae1080.png]]
+:END:
+
+#+begin_src ipython
+  print(m0.shape)
+  x = m1[:, -1]/ m0[:, -1] * np.cos(phi[:, -1])
+  y = m1[:, -1] / m0[:, -1] * np.sin(phi[:, -1])
+
+  fig, ax = plt.subplots(figsize=(height, height))
+  ax.plot(x, y, 'o')
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (100, 101)
+[[file:./.ob-jupyter/0f748142df3466f5ed6b55bcbe51edd50a41376b.png]]
+:END:
 
 #+begin_src ipython
 
@@ -655,7 +540,7 @@
 
 #+RESULTS:
 : [0.1   0.075 0.05  0.025 0.   ]
-: 57
+: 66
 
 #+begin_src ipython
   def ret_overlap(rates, ksi):
@@ -675,7 +560,236 @@
 
 #+RESULTS:
 
-*** Run
+*** Single run
+
+#+begin_src ipython
+  I0 = [.1, 0.0, 0.0]
+  rates, ksi = run_behavior(conf_name, name, cov_list, n_ini, seed, device='cuda', I0=I0)
+#+end_src
+
+#+RESULTS:
+: Elapsed (with compilation) = 0h 3m 26s
+
+#+begin_src ipython
+  print(rates.shape)
+  print(ksi.shape)
+#+end_src
+
+#+RESULTS:
+: (5, 64, 101, 8000)
+: (5, 4, 8000)
+
+#+begin_src ipython
+  I0 = [.1, .1, 0.0]
+  ratesGo, ksiGo = run_behavior(conf_name, name, cov_list, n_ini, seed, device='cuda', I0=I0)
+#+end_src
+
+#+RESULTS:
+: Elapsed (with compilation) = 0h 3m 28s
+
+#+begin_src ipython
+  print(ratesGo.shape)
+  print(ksiGo.shape)
+#+end_src
+
+#+RESULTS:
+: (5, 64, 101, 8000)
+: (5, 4, 8000)
+
+#+begin_src ipython
+  overlap1, rates1 = ret_overlap(rates, ksi)
+  overlap2, rates2 = ret_overlap(ratesGo, ksiGo)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  print(overlap1.shape)
+  print(overlap2.shape)
+#+end_src
+
+#+RESULTS:
+: (5, 64, 101, 4)
+: (5, 64, 101, 4)
+
+#+begin_src ipython
+  # n_ini = 16
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+  ax[0].plot(overlap1[:, :n_ini, -5:, 0].mean((1,2)), '-rs')
+  ax[0].plot(overlap1[:, n_ini:, -5:, 0].mean((1,2)), '-ro')
+  ax[0].set_ylabel('Sample Overlap')
+  ax[0].set_xlabel('Day')
+  ax[0].set_title('DPA')
+
+  ax[1].plot(overlap2[:, :n_ini, -5:, 0].mean((1,2)), '-bs')
+  ax[1].plot(overlap2[:, n_ini:, -5:, 0].mean((1,2)), '-bo')
+  ax[1].set_ylabel('Sample Overlap')
+  ax[1].set_xlabel('Day')
+  ax[1].set_title('Dual Go')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/2930c02dc5777f568b37741dc4ce5219c7cf70c6.png]]
+
+#+begin_src ipython
+  readout1A = overlap1[:, :n_ini, -5:, 0]
+  readout1B = overlap1[:, n_ini:, -5:, 0]
+
+  readout1 = np.stack((readout1A, readout1B))
+  # print(readout1.shape)
+
+  perf1 = (readout1[0]>0).mean((1, 2))
+  perf1 += (readout1[1]<0).mean((1, 2))
+
+  readout2A = overlap2[:, :n_ini, -5:, 0]
+  readout2B = overlap2[:, n_ini:, -5:, 0]
+
+  readout2 = np.stack((readout2A, readout2B))
+  print((readout2[0]>0).shape)
+
+  perf2 = (readout2[0]>0).mean((1, 2))
+
+  perf2 += (readout2[1]<0).mean((1, 2))
+
+  plt.plot(perf1/2, 'r')
+  plt.plot(perf2/2, 'b')
+
+  plt.ylabel('Performance')
+  plt.xlabel('Day')
+  plt.show()
+#+end_src
+#+RESULTS:
+:RESULTS:
+: (5, 32, 5)
+[[file:./.ob-jupyter/5aba3397e64b24bf9d126d6eed803ed46978a2d7.png]]
+:END:
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+**** Performance from phase
+
+#+begin_src ipython
+  def get_perf(rates):
+      m0, m1, phi = decode_bump(rates, axis=-1)
+      x = m1[..., -1] / m0[..., -1] * np.cos(phi[..., -1])
+      performance = (x[: , :n_ini] < 0).mean(1) * 100
+      performance += (x[: , n_ini:] > 0).mean(1) * 100
+
+      return performance / 2
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  perf1 = get_perf(rates1)
+  print(perf1)
+  perf2 = get_perf(rates2)
+  print(perf2)
+
+  plt.plot(perf1, 'r')
+  plt.plot(perf2, 'b')
+  plt.ylabel('Performance')
+  plt.xlabel('Day')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: [42.1875 45.3125 50.     56.25   87.5   ]
+: [50.     50.     50.     48.4375 59.375 ]
+[[file:./.ob-jupyter/bcb639fa84ae12f6cc3025c18bf243940d2f05e3.png]]
+:END:
+
+**** Single
+
+#+begin_src ipython
+  ini = -1
+  overlap = overlap2.copy()
+  print(overlap1[ini].shape)
+  m0, m1, phi = decode_bump(rates2, axis=-1)
+  print(m0[ini].shape)
+#+end_src
+
+#+RESULTS:
+: (64, 101, 4)
+: (64, 101)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+
+  ax[0].plot(overlap[ini, ..., 0].T, alpha=.2)
+  ax[0].set_ylabel('Overlap on $\\xi_1$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(overlap[ini, ..., 1].T, alpha=.2)
+  ax[1].set_ylabel('Overlap on $\\xi_2$ (Hz)')
+  ax[1].set_xlabel('Step')
+
+  ax[2].plot(overlap[ini, ..., 2].T, alpha=.2)
+  ax[2].set_ylabel('Overlap on $\\xi_3$ (Hz)')
+  ax[2].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/92d813924e0aaf2d7f9f78c43f9cd55a9b9c2eb5.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+
+  ax[0].plot(m0[ini].T)
+  #ax[0].set_ylim([0, 360])
+  #ax[0].set_yticks([0, 90, 180, 270, 360])
+  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(m1[ini].T)
+  # ax[1].set_ylim([0, 360])
+  # ax[1].set_yticks([0, 90, 180, 270, 360])
+  ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
+  ax[1].set_xlabel('Step')
+
+  ax[2].plot(phi[ini].T * 180 / np.pi)
+  ax[2].set_ylim([0, 360])
+  ax[2].set_yticks([0, 90, 180, 270, 360])
+  ax[2].set_ylabel('Phase (°)')
+  ax[2].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/dc7b5d1af2a5148339105687b59030fc3955fd37.png]]
+
+#+begin_src ipython
+  x = m1[ini, ..., -1] / m0[ini, ..., -1] * np.cos(phi[ini, ..., -1])
+  y = m1[ini, ..., -1] / m0[ini, ..., -1] * np.sin(phi[ini, ..., -1])
+
+  fig, ax = plt.subplots(figsize=(height, height))
+  ax.plot(x.T, y.T, 'o')
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/38896af336d10f27b4fd96010adfec1964fe7b3a.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+** Run
 
 #+begin_src ipython
   I0 = [.1, 0.0, 0.0]
@@ -782,238 +896,6 @@
 
 #+RESULTS:
 [[file:./.ob-jupyter/b20c38bd3704158cbc3e222baca54a60b88dff78.png]]
-
-#+begin_src ipython
-  I0 = [.1, 0.0, 0.0]
-  rates, ksi = run_behavior(conf_name, name, cov_list, n_ini, seed, device='cuda', I0=I0)
-#+end_src
-
-#+RESULTS:
-: Elapsed (with compilation) = 0h 0m 52s
-
-#+begin_src ipython
-  print(rates.shape)
-  print(ksi.shape)
-#+end_src
-
-#+RESULTS:
-: (10, 32, 101, 8000)
-: (10, 4, 8000)
-
-#+begin_src ipython
-  I0 = [.1, .1, 0.0]
-  ratesGo, ksiGo = run_behavior(conf_name, name, cov_list, n_ini, seed, device='cuda', I0=I0)
-#+end_src
-
-#+RESULTS:
-: Elapsed (with compilation) = 0h 0m 52s
-
-#+begin_src ipython
-  print(ratesGo.shape)
-  print(ksiGo.shape)
-#+end_src
-
-#+RESULTS:
-: (10, 32, 101, 8000)
-: (10, 4, 8000)
-
-#+begin_src ipython
-  overlap1, rates1 = ret_overlap(rates, ksi)
-  overlap2, rates2 = ret_overlap(ratesGo, ksiGo)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  print(overlap1.shape)
-  print(overlap2.shape)
-#+end_src
-
-#+RESULTS:
-: (10, 32, 101, 4)
-: (10, 32, 101, 4)
-
-#+begin_src ipython
-  # n_ini = 16
-  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
-
-  ax[0].plot(overlap1[:, :n_ini, -5:, 0].mean((1,2)), '-rs')
-  ax[0].plot(overlap1[:, n_ini:, -5:, 0].mean((1,2)), '-ro')
-  ax[0].set_ylabel('Sample Overlap')
-  ax[0].set_xlabel('Day')
-  ax[0].set_title('DPA')
-
-  ax[1].plot(overlap2[:, :n_ini, -5:, 0].mean((1,2)), '-bs')
-  ax[1].plot(overlap2[:, n_ini:, -5:, 0].mean((1,2)), '-bo')
-  ax[1].set_ylabel('Sample Overlap')
-  ax[1].set_xlabel('Day')
-  ax[1].set_title('Dual Go')
-
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/1503c071827ed3ffcf7eb6928f4ca669a6aa92cd.png]]
-
-#+begin_src ipython
-  readout1A = overlap1[:, :n_ini, -5:, 0]
-  readout1B = overlap1[:, n_ini:, -5:, 0]
-
-  readout1 = np.stack((readout1A, readout1B))
-  # print(readout1.shape)
-
-  perf1 = (readout1[0]>0).mean((1, 2))
-  perf1 += (readout1[1]<0).mean((1, 2))
-
-  readout2A = overlap2[:, :n_ini, -5:, 0]
-  readout2B = overlap2[:, n_ini:, -5:, 0]
-
-  readout2 = np.stack((readout2A, readout2B))
-  print((readout2[0]>0).shape)
-
-  perf2 = (readout2[0]>0).mean((1, 2))
-
-  perf2 += (readout2[1]<0).mean((1, 2))
-
-  plt.plot(perf1/2, 'r')
-  plt.plot(perf2/2, 'b')
-
-  plt.ylabel('Performance')
-  plt.xlabel('Day')
-  plt.show()
-#+end_src
-#+RESULTS:
-:RESULTS:
-: (10, 16, 5)
-[[file:./.ob-jupyter/f78316f76b9bc942d3baf3278dbd430866fafcb1.png]]
-:END:
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
-
-**** Performance from phase
-
-#+begin_src ipython
-  def get_perf(rates):
-      m0, m1, phi = decode_bump(rates, axis=-1)
-      x = m1[..., -1] / m0[..., -1] * np.cos(phi[..., -1])
-      performance = (x[: , :n_ini] < 0).mean(1) * 100
-      performance += (x[: , n_ini:] > 0).mean(1) * 100
-
-      return performance / 2
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  perf1 = get_perf(rates1)
-  print(perf1)
-  perf2 = get_perf(rates2)
-  print(perf2)
-
-  plt.plot(perf1, 'r')
-  plt.plot(perf2, 'b')
-  plt.ylabel('Performance')
-  plt.xlabel('Day')
-  plt.show()
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-: [ 81.25  100.     96.875 100.     96.875 100.    100.    100.    100.
-:  100.   ]
-: [ 59.375  65.625  90.625  90.625  90.625 100.    100.    100.    100.
-:  100.   ]
-[[file:./.ob-jupyter/83df794da56ac35b1be0d5ba39edc5f717d3275c.png]]
-:END:
-
-**** Single
-
-#+begin_src ipython
-  ini = -1
-  overlap = overlap2.copy()
-  print(overlap1[ini].shape)
-  m0, m1, phi = decode_bump(rates2, axis=-1)
-  print(m0[ini].shape)
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-:
-: (32, 101, 4)(32, 101)
-:
-:END:
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
-
-  ax[0].plot(overlap[ini, ..., 0].T, alpha=.2)
-  ax[0].set_ylabel('Overlap on $\\xi_1$ (Hz)')
-  ax[0].set_xlabel('Step')
-
-  ax[1].plot(overlap[ini, ..., 1].T, alpha=.2)
-  ax[1].set_ylabel('Overlap on $\\xi_2$ (Hz)')
-  ax[1].set_xlabel('Step')
-
-  ax[2].plot(overlap[ini, ..., 2].T, alpha=.2)
-  ax[2].set_ylabel('Overlap on $\\xi_3$ (Hz)')
-  ax[2].set_xlabel('Step')
-
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/781aa18171c8b3a5b7032924d40391937c26e36a.png]]
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
-
-  ax[0].plot(m0[ini].T)
-  #ax[0].set_ylim([0, 360])
-  #ax[0].set_yticks([0, 90, 180, 270, 360])
-  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
-  ax[0].set_xlabel('Step')
-
-  ax[1].plot(m1[ini].T)
-  # ax[1].set_ylim([0, 360])
-  # ax[1].set_yticks([0, 90, 180, 270, 360])
-  ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
-  ax[1].set_xlabel('Step')
-
-  ax[2].plot(phi[ini].T * 180 / np.pi)
-  ax[2].set_ylim([0, 360])
-  ax[2].set_yticks([0, 90, 180, 270, 360])
-  ax[2].set_ylabel('Phase (°)')
-  ax[2].set_xlabel('Step')
-
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/9d14cf844a759f9ed7c316fc7948241fe7fb9c14.png]]
-
-#+begin_src ipython
-  x = m1[ini, ..., -1] / m0[ini, ..., -1] * np.cos(phi[ini, ..., -1])
-  y = m1[ini, ..., -1] / m0[ini, ..., -1] * np.sin(phi[ini, ..., -1])
-
-  fig, ax = plt.subplots(figsize=(height, height))
-  ax.plot(x.T, y.T, 'o')
-  ax.set_xlim([-2, 2])
-  ax.set_ylim([-2, 2])
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/c68b7dafcbd7d0ccb38bdebbafb6608eafa7fb3c.png]]
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
 
 ** Different Realizations
 *** Helpers
