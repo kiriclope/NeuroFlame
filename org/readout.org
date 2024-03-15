@@ -127,7 +127,8 @@
 #+end_src
 
 #+RESULTS:
-: 9461fb91-d601-4d02-b252-7a0ea887bce1
+: Elapsed (with compilation) = 0h 1m 52s
+: rates (200, 8000)
 
 ** Readout
 
@@ -137,7 +138,6 @@
 #+end_src
 
 #+RESULTS:
-: 5a3367c2-2a47-4292-a68f-0cda1e05f59b
 
 #+begin_src ipython
   idx = get_idx(model)
@@ -146,7 +146,8 @@
 #+end_src
 
 #+RESULTS:
-: a2eab3e4-7c26-420e-9824-b959253e7c38
+: (4, 8000)
+: (200, 8000)
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -154,7 +155,7 @@
 #+end_src
 
 #+RESULTS:
-: d8987ae8-8941-4945-80fa-0d0986fa842d
+: (200,)
 
 #+begin_src ipython
   from scipy.stats import circmean
@@ -172,7 +173,9 @@
 #+end_src
 
 #+RESULTS:
-: 44fbbce5-384e-49a4-bbb0-4d3101a56693
+: 175.60764741168327
+: 353.2787670430244
+: readout angle 176.6393835215122
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -192,14 +195,13 @@
 #+end_src
 
 #+RESULTS:
-: a67a58ac-bd24-45e5-99c6-43e51cea2e1a
+[[file:./.ob-jupyter/bd7607fcae9cd10438ccdab6306544022ca71ba8.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: a1395367-f50d-467b-9fc0-504a0cb38790
 
 ** Naive
 
@@ -211,21 +213,19 @@
 #+end_src
 
 #+RESULTS:
-: 113d9e83-c12a-4f46-afdf-2bf9f3fee5d6
 
 #+begin_src ipython
   rates = model().detach().cpu().numpy()
 #+end_src
 
 #+RESULTS:
-: 71b60924-91f2-430a-acf7-6c1573bb7c31
 
 #+begin_src ipython
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: 47bdf8d8-52c3-4135-af82-6ad547c20618
+: (200, 101, 8000)
 
 #+begin_src ipython
   idx = get_idx(model)
@@ -234,7 +234,8 @@
 #+end_src
 
 #+RESULTS:
-: 1ae7d51c-26e9-485b-8a32-ebb4e2e3bac1
+: (4, 8000)
+: (200, 101, 8000)
 
 #+begin_src ipython
   overlap = get_overlap(model, rates)
@@ -242,7 +243,7 @@
 #+end_src
 
 #+RESULTS:
-: bd893983-22a2-41b1-b827-df2a35608854
+: (4, 101, 200)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -263,7 +264,7 @@
 #+end_src
 
 #+RESULTS:
-: 90e531b7-9dfd-4fc6-b578-47513e45e0da
+[[file:./.ob-jupyter/68e74af2584f72b1e6bd7593ad4cc85dfa25d323.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -271,7 +272,7 @@
 #+end_src
 
 #+RESULTS:
-: b335870b-a8a9-4c48-bd69-5e3c734ce0d0
+: (200, 101)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -298,7 +299,7 @@
 #+end_src
 
 #+RESULTS:
-: 4425398f-198f-47bd-a2c6-9547251379c1
+[[file:./.ob-jupyter/5f89aeb184fe56731ec1e3dee4b36e639f9d9850.png]]
 
 #+begin_src ipython
   n_ini=100
@@ -310,7 +311,7 @@
 #+end_src
 
 #+RESULTS:
-: aa6bd245-5530-4585-ae45-795035dc785a
+: (2, 100, 5)
 
 #+begin_src ipython
   perf = (readout[0]>0).mean((0, 1))
@@ -320,7 +321,7 @@
 #+end_src
 
 #+RESULTS:
-: afd0dd7e-a5fe-4e76-b1eb-5ac5b5f6a64e
+: performance 0.641
 
 ** Trained
 
@@ -332,21 +333,19 @@
 #+end_src
 
 #+RESULTS:
-: 89049ac3-eee0-4d7d-b7f5-f0cd2a0fe114
 
 #+begin_src ipython
   rates = model().detach().cpu().numpy()
 #+end_src
 
 #+RESULTS:
-: dccf22a0-f50f-4bc8-918a-7a3dd85f80f2
 
 #+begin_src ipython
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: e464014a-59a9-46f4-90f5-ca361a7b6190
+: (200, 101, 8000)
 
 #+begin_src ipython
   idx = get_idx(model)
@@ -355,7 +354,8 @@
 #+end_src
 
 #+RESULTS:
-: df53cc30-4129-4465-afcd-8f65d4050aad
+: (4, 8000)
+: (200, 101, 8000)
 
 #+begin_src ipython
   overlap = get_overlap(model, rates)
@@ -363,7 +363,7 @@
 #+end_src
 
 #+RESULTS:
-: a3f918e1-1527-4158-95c5-e2a64401d693
+: (4, 101, 200)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -384,7 +384,7 @@
 #+end_src
 
 #+RESULTS:
-: c1661edb-7863-4fe4-90c6-f4b60fcb0a2a
+[[file:./.ob-jupyter/30d05fd6f1b4f20e5709096e22dabbc978d63509.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -392,7 +392,7 @@
 #+end_src
 
 #+RESULTS:
-: 03e9d937-5311-410c-baf8-c6906d5892c9
+: (200, 101)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -419,14 +419,14 @@
 #+end_src
 
 #+RESULTS:
-: 79bcc70a-314d-4ccb-9add-f9efb8a9fb5d
+[[file:./.ob-jupyter/ded0bbbfbcfacd9765151cb0637ea6f529c49834.png]]
 
 #+begin_src ipython
   print(overlap.shape)
 #+end_src
 
 #+RESULTS:
-: 7d0ed39e-86ef-4b9a-916f-ad973299c69f
+: (200, 101, 4)
 
 #+begin_src ipython
   n_ini=100
@@ -438,7 +438,7 @@
 #+end_src
 
 #+RESULTS:
-: b684e45b-68e8-4cbc-a81c-7a09f64d9538
+: (2, 100, 5)
 
 #+begin_src ipython
   perf = (readout[0]>0).mean((0, 1))
@@ -448,7 +448,7 @@
 #+end_src
 
 #+RESULTS:
-: 77e2091c-9bea-496f-8c5b-bcd045094dfc
+: 46.300000000000004
 
 #+begin_src ipython
   def get_perf(rates, n_ini=50):
@@ -461,7 +461,6 @@
 #+end_src
 
 #+RESULTS:
-: 08f9aff7-4810-4731-b301-4c4fd7d3689d
 
 #+RESULTS:
 : (100, 101, 8000)
@@ -471,14 +470,15 @@
 #+end_src
 
 #+RESULTS:
-: cd6e5bcd-1c33-451b-9a42-53816696a25f
+: 353.2787670430244
 
 #+begin_src ipython
-  get_perf(rates_ordered)
+  perf = get_perf(rates_ordered)
+  print('perf', perf)
 #+end_src
 
 #+RESULTS:
-: d95aed61-68a2-4d08-9825-41c3fe9782ed
+: perf 42.0
 
 
 

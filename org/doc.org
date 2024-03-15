@@ -59,53 +59,38 @@ Neurotorch is an implementation of a rate based recurrent neural network trainer
 ** Simulation
 *** Dynamics
 **** Currents
+
 Neuron $i$ in population $A$ has a reccurent input $h^A_i$,
 
-#+begin_src latex
+\begin{equation}
   \tau_{syn} \frac{dh_i}{dt}(t) = - h_i(t) + \sum_j J_{ij} h_j(t)
-#+end_src
-
-#+RESULTS:
-#+begin_export latex
-\tau_{syn} \frac{dh_i}{dt}(t) = - h_i(t) + \sum_j J_{ij} h_j(t)
-#+end_export
+\end{equation}
 
 or not
 
-#+begin_src latex
+\begin{equation}
   h^A_i(t) = \sum_{jB} J^{AB}_{ij} h_j(t)
-#+end_src
-
-#+RESULTS:
-#+begin_export latex
-h^A_i(t) = \sum_{jB} J^{AB}_{ij} h_j(t)
-#+end_export
+\end{equation}
 
 **** Rates
 
 The models can have rate dynamics (setting *RATE_DYN* to 1 in the configuration file):
 
-#+begin_src latex
+\begin{equation}
   \tau_A \frac{d r^A_i}{dt}(t) = - r^A_i(t) + \Phi( \sum_{jB} J^{AB}_{ij} h^{AB}_j(t) + h^A_{ext}(t))
-#+end_src
+\end{equation}
 
-#+RESULTS:
-#+begin_export latex
+\begin{equation}
 \tau_A \frac{d r^A_i}{dt}(t) = - r^A_i(t) + \Phi( \sum_{jB} J^{AB}_{ij} h^{AB}_j(t) + h^A_{ext}(t))
-#+end_export
+\end{equation}
 
 Here, $r_i$ is the rate of unit $i$ in population $A$
 
 otherwise rates will be instantaneous:
 
-#+begin_src latex
+\begin{equation}
   r^A_i(t) = \Phi(\sum_{jB} J^{AB}_{ij} h_j(t) + h^A_{ext}(t))
-#+end_src
-
-#+RESULTS:
-#+begin_export latex
-r^A_i(t) = \Phi(\sum_{jB} J^{AB}_{ij} h_j(t) + h^A_{ext}(t))
-#+end_export
+\end{equation}
 
 Here $\Phi$ is the transfer function defined in *src/activation.py*
 
@@ -115,52 +100,31 @@ Probability of connection from population B to A:
 **** Sparse Nets
 by default it is a sparse net
 
-#+begin_src latex
+\begin{equation}
 P_{ij}^{AB} = \frac{K_B}{N_B}
-#+end_src
-
-#+RESULTS:
-#+begin_export latex
-P_{ij}^{AB} = \frac{K_B}{N_B}
-#+end_export
+\end{equation}
 
 otherwise
 it can be cosine
-#+begin_src latex
-P_{ij}^{AB} = ( 1.0 + \KAPPA_B \cos(\theta_i^A - \theta_j^B) )
-#+end_src
 
-#+RESULTS:
-#+begin_export latex
+\begin{equation}
 P_{ij}^{AB} = ( 1.0 + \KAPPA_B \cos(\theta_i^A - \theta_j^B) )
-#+end_export
+\end{equation}
 
 and also low rank
 
-#+begin_src latex
+\begin{equation}
   J_{ij}^{AB} = \frac{J_{AB}}{\sqrt{K_B}} with proba. P_{ij}^{AB} * \frac{K_B}{N_B} 
                0 otherwise
-#+end_src
-
-#+RESULTS:
-#+begin_export latex
-J_{ij}^{AB} = \frac{J_{AB}}{\sqrt{K_B}} with proba. P_{ij}^{AB} * \frac{K_B}{N_B} 
-             0 otherwise
-#+end_export
+\end{equation}
 
 **** All to all
 
-#+begin_src latex
+\begin{equation}
   J_{ij}^{AB} =  \frac{J_{AB}}{N_B} P_{ij}^{AB}
-#+end_src
-
-#+RESULTS:
-#+begin_export latex
-J_{ij}^{AB} =  \frac{J_{AB}}{N_B} P_{ij}^{AB}
-#+end_export
+\end{equation}
 
 where Pij can be as above.
-
 
 * RNN with torch
 ** Parameters
