@@ -13,12 +13,20 @@ class Plasticity():
         
         self.DT = DT
         
-        self.USE = torch.tensor(USE, dtype=FLOAT, device=device)
-        self.DT_TAU_REC = torch.tensor(DT / TAU_REC, dtype=FLOAT, device=device)
-        self.DT_TAU_FAC = torch.tensor(DT / TAU_FAC, dtype=FLOAT, device=device)
+        self.USE = torch.tensor(USE, dtype=FLOAT, device=device).unsqueeze(-1)
+        # print('USE', self.USE.shape)
         
-        self.u_stp = torch.ones((N_BATCH, N_NEURON), dtype=FLOAT, device=device) * self.USE
+        self.DT_TAU_FAC = torch.tensor(DT / TAU_FAC, dtype=FLOAT, device=device).unsqueeze(-1)
+        # print('DT_TAU_FAC', self.DT_TAU_FAC.shape)
+        
+        self.DT_TAU_REC = torch.tensor(DT / TAU_REC, dtype=FLOAT, device=device).unsqueeze(-1)
+        # print('DT_TAU_REC', self.DT_TAU_REC.shape)
+                
+        self.u_stp = self.USE * torch.ones((N_BATCH, N_NEURON), dtype=FLOAT, device=device)
+        # print('u', self.u_stp.shape)
+        
         self.x_stp = torch.ones((N_BATCH, N_NEURON), dtype=FLOAT, device=device)
+        # print('x', self.x_stp.shape)
         
     def forward(self, rates):
         
@@ -26,7 +34,8 @@ class Plasticity():
         
         self.x_stp = self.x_stp + (1.0 - self.x_stp) * self.DT_TAU_REC - self.DT * u_plus * self.x_stp * rates
         self.u_stp = self.u_stp - self.DT_TAU_FAC * self.u_stp + self.DT * self.USE * (1.0 - self.u_stp) * rates
-        return u_plus * self.x_stp
+                
+        return (u_plus * self.x_stp).squeeze(-1)
 
     def __call__(self, rates):
         return self.forward(rates)

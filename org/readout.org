@@ -104,31 +104,33 @@
 #+end_src
 
 #+RESULTS:
-: 71
+: 8
 
 ** Simulation
 
 #+begin_src ipython
+  n_ini  = 50
+
   LR_COV = [[1.0, 0.8, 0.0, 0.0],
             [0.8, 1.0, 0.0, 0.0],
             [0.0, 0.0, 1.0, 0.8],
             [0.0, 0.0, 0.8, 1.0]]
-
+  
   start = perf_counter()
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
-                  N_BATCH=200, SEED=seed, LR_COV=LR_COV,
-                  TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=10)
+                  N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
+                  TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=30, TAU_NMDA=[.5, .5])
 
   rates = model(REC_LAST_ONLY=1).detach().cpu().numpy()
   end = perf_counter()
-  
+
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
   print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 52s
-: rates (200, 8000)
+: Elapsed (with compilation) = 0h 3m 6s
+: rates (100, 8000)
 
 ** Readout
 
@@ -141,13 +143,13 @@
 
 #+begin_src ipython
   idx = get_idx(model)
-  rates_ordered = rates[..., idx]
+  rates_ordered = rates[:, idx]
   print(rates_ordered.shape)
 #+end_src
 
 #+RESULTS:
 : (4, 8000)
-: (200, 8000)
+: (100, 8000)
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -155,47 +157,84 @@
 #+end_src
 
 #+RESULTS:
-: (200,)
+: (100,)
 
 #+begin_src ipython
-  from scipy.stats import circmean
-  n_ini = 100
-  # mean_phi = np.mean(phi[:n_ini]) * 180 / np.pi / 2
-  mean_phi = circmean(phi[:n_ini]) * 180 / np.pi / 2
-  print(mean_phi)
+  from sklearn.cluster import KMeans
+  kmeans = KMeans(n_clusters=2)
 
-  # mean_phi += np.mean(phi[n_ini:]) * 180 / np.pi / 2
-  mean_phi += circmean(phi[n_ini:]) * 180 / np.pi / 2
-  print(mean_phi)
+  x = m1 / m0 * np.cos(phi)
+  y = m1 / m0 * np.sin(phi)
 
-  # mean_phi = circmean(phi) * 180 / np.pi
-  print('readout angle', mean_phi/2)
+  data = np.stack((x,y)).T
+  print(data.shape)
+
+  kmeans.fit(data)
+  labels = kmeans.labels_
+
+  # Getting the cluster centers
+  centers = kmeans.cluster_centers_
+
+  # print("Labels:", labels)
+  print("Cluster Centers:", centers)
+  x_c1, y_c1 = centers[0]
+  x_c2, y_c2 = centers[1]
+
+  phi1 = np.arctan2(y_c1, x_c1)
+  phi2 = np.arctan2(y_c2, x_c2)
+
+  mean_phi = ( (phi1 + phi2) / 2 * 180 / np.pi ) % 180 
+  print('mean phi', mean_phi)
+
+  d_phi = mean_phi - 90
+  # if d_phi<0:
+  #     d_phi = 90-mean_phi
+
+  print('dphi', d_phi)
 #+end_src
 
 #+RESULTS:
-: 175.60764741168327
-: 353.2787670430244
-: readout angle 176.6393835215122
+: (100, 2)
+: Cluster Centers: [[-0.92998152  0.60549115]
+:  [-0.03556429 -0.97649856]]
+: mean phi 27.42345151917421
+: dphi -62.57654848082579
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
   x = m1 / m0 * np.cos(phi)
   y = m1 / m0 * np.sin(phi)
 
-  ax.plot(x, y, 'ob', alpha=.1)
+  ax.plot(x, y, 'ob', alpha=.5)
 
-  x = m1 / m0 * np.cos(phi - mean_phi * np.pi / 180)
-  y = m1 / m0 * np.sin(phi - mean_phi * np.pi / 180)
+  mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
 
-  ax.plot(x, y, 'sr', alpha=.1)
-  
+  x = 2 * np.cos(mean)
+  y = 2 * np.sin(mean)
+  ax.plot(x, y, '--b')
+
+  x = m1 / m0 * np.cos(phi - d_phi * np.pi / 180)
+  y = m1 / m0 * np.sin(phi - d_phi * np.pi / 180)
+
+  ax.plot(x, y, 'sr', alpha=1)
+
+  mean = np.array([mean_phi - d_phi , mean_phi - d_phi - 180]) * np.pi/180
+  x = 2 * np.cos(mean)
+  y = 2 * np.sin(mean)
+
+  ax.plot(x, y, '--r')
+
+  ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
+  ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
+
   ax.set_xlim([-2, 2])
   ax.set_ylim([-2, 2])
+  
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/bd7607fcae9cd10438ccdab6306544022ca71ba8.png]]
+[[file:./.ob-jupyter/e3d7f81311ba70501584ef351214c89650f3e166.png]]
 
 #+begin_src ipython
 
@@ -206,10 +245,15 @@
 ** Naive
 
 #+begin_src ipython
-  model.TASK = 'dual'
-  model.DURATION = 10
-  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
-  model.I0 = [0.5, 0.5]
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
+                  N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
+                  TASK='dual', LIVE_FF_UPDATE=1, DURATION=10,
+                  TAU_NMDA=[.5, .5], I0=[0.1, 0.1])
+  
+  # model.TASK = 'dual'
+  # model.DURATION = 10
+  # model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+  # model.I0 = [0.1, 0.1]
 #+end_src
 
 #+RESULTS:
@@ -225,7 +269,7 @@
 #+end_src
 
 #+RESULTS:
-: (200, 101, 8000)
+: (100, 101, 8000)
 
 #+begin_src ipython
   idx = get_idx(model)
@@ -235,7 +279,7 @@
 
 #+RESULTS:
 : (4, 8000)
-: (200, 101, 8000)
+: (100, 101, 8000)
 
 #+begin_src ipython
   overlap = get_overlap(model, rates)
@@ -243,7 +287,7 @@
 #+end_src
 
 #+RESULTS:
-: (4, 101, 200)
+: (4, 101, 100)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -264,7 +308,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/68e74af2584f72b1e6bd7593ad4cc85dfa25d323.png]]
+[[file:./.ob-jupyter/cfa601cff871858ef03279f787e2b74b0930aabd.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -272,7 +316,7 @@
 #+end_src
 
 #+RESULTS:
-: (200, 101)
+: (100, 101)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -288,8 +332,8 @@
   # ax[1].set_yticks([0, 90, 180, 270, 360])
   ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
   ax[1].set_xlabel('Step')
-
-  ax[2].plot(phi.T * 180 / np.pi)
+  
+  ax[2].plot(phi.T * 180 / np.pi, alpha=0.1)
   ax[2].set_ylim([0, 360])
   ax[2].set_yticks([0, 90, 180, 270, 360])
   ax[2].set_ylabel('Phase (°)')
@@ -299,10 +343,9 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5f89aeb184fe56731ec1e3dee4b36e639f9d9850.png]]
+[[file:./.ob-jupyter/5354a1c1af4fef1d918c1d588b00cdb93e8b3a1f.png]]
 
 #+begin_src ipython
-  n_ini=100
   readoutA = overlap[:n_ini, -5:, 0]
   readoutB = overlap[n_ini:, -5:, 0]
 
@@ -311,149 +354,22 @@
 #+end_src
 
 #+RESULTS:
-: (2, 100, 5)
+: (2, 50, 5)
 
 #+begin_src ipython
   perf = (readout[0]>0).mean((0, 1))
   perf += (readout[1]<0).mean((0,1))
 
-  print('performance', perf/2)
+  print('performance', perf/2 * 100)
 #+end_src
 
 #+RESULTS:
-: performance 0.641
-
-** Trained
+: performance 79.80000000000001
 
 #+begin_src ipython
-  model.PHI1 = torch.tensor([mean_phi, 90+mean_phi], device='cuda:1')
-  model.TASK = 'dual_odr'
-  model.DURATION = 10
-  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  rates = model().detach().cpu().numpy()
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  print(rates.shape)
-#+end_src
-
-#+RESULTS:
-: (200, 101, 8000)
-
-#+begin_src ipython
-  idx = get_idx(model)
-  rates_ordered = rates[..., idx]
-  print(rates_ordered.shape)
-#+end_src
-
-#+RESULTS:
-: (4, 8000)
-: (200, 101, 8000)
-
-#+begin_src ipython
-  overlap = get_overlap(model, rates)
-  print(overlap.T.shape)
-#+end_src
-
-#+RESULTS:
-: (4, 101, 200)
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
-
-  ax[0].plot(overlap.T[0])
-  ax[0].set_ylabel('Overlap on $m_S$ (Hz)')
-  ax[0].set_xlabel('Step')
-
-  ax[1].plot(overlap.T[1])
-  ax[1].set_ylabel('Overlap on $n_S$ (Hz)')
-  ax[1].set_xlabel('Step')
-
-  ax[2].plot(overlap.T[2])
-  ax[2].set_ylabel('Overlap on $m_D$ (Hz)')
-  ax[2].set_xlabel('Step')
-
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/30d05fd6f1b4f20e5709096e22dabbc978d63509.png]]
-
-#+begin_src ipython
-  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
-  print(m0.shape)
-#+end_src
-
-#+RESULTS:
-: (200, 101)
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
-
-  ax[0].plot(m0.T)
-  #ax[0].set_ylim([0, 360])
-  #ax[0].set_yticks([0, 90, 180, 270, 360])
-  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
-  ax[0].set_xlabel('Step')
-
-  ax[1].plot(m1.T)
-  # ax[1].set_ylim([0, 360])
-  # ax[1].set_yticks([0, 90, 180, 270, 360])
-  ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
-  ax[1].set_xlabel('Step')
-
-  ax[2].plot(phi.T * 180 / np.pi)
-  ax[2].set_ylim([0, 360])
-  ax[2].set_yticks([0, 90, 180, 270, 360])
-  ax[2].set_ylabel('Phase (°)')
-  ax[2].set_xlabel('Step')
-
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/ded0bbbfbcfacd9765151cb0637ea6f529c49834.png]]
-
-#+begin_src ipython
-  print(overlap.shape)
-#+end_src
-
-#+RESULTS:
-: (200, 101, 4)
-
-#+begin_src ipython
-  n_ini=100
-  readoutA = overlap[:n_ini, -5:, 0]
-  readoutB = overlap[n_ini:, -5:, 0]
-
-  readout = np.stack((readoutA, readoutB))
-  print(readout.shape)
-#+end_src
-
-#+RESULTS:
-: (2, 100, 5)
-
-#+begin_src ipython
-  perf = (readout[0]>0).mean((0, 1))
-  perf += (readout[1]<0).mean((0,1))
-
-  print(perf/2 * 100)
-#+end_src
-
-#+RESULTS:
-: 46.300000000000004
-
-#+begin_src ipython
-  def get_perf(rates, n_ini=50):
+  def get_correct_perf(rates, n_ini=50):
       m0, m1, phi = decode_bump(rates, axis=-1)
-      x = m1[..., -1] / m0[..., -1] * np.cos(phi[..., -1] - mean_phi * np.pi / 180)
+      x = m1[..., -1] / m0[..., -1] * np.cos(phi[..., -1] + d_phi * np.pi / 180)
       performance = (x[:n_ini] < 0).mean() * 100
       performance += (x[n_ini:] > 0).mean() * 100
       
@@ -462,24 +378,212 @@
 
 #+RESULTS:
 
+#+begin_src ipython
+  perf = get_correct_perf(rates_ordered)
+  print('performance', perf)
+#+end_src
+
+#+RESULTS:
+: performance 64.0
+
+#+begin_src ipython
+  print(phi.shape)
+#+end_src
+
+#+RESULTS:
+: (100, 101)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(figsize=(height, height))
+  x = m1[:,-1] / m0[:,-1] * np.cos(phi[:,-1])
+  y = m1[:,-1] / m0[:,-1] * np.sin(phi[:,-1])
+
+  ax.plot(x, y, 'ob', alpha=.5)
+
+  mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
+
+  x = 2 * np.cos(mean)
+  y = 2 * np.sin(mean)
+  ax.plot(x, y, '--b')
+
+  x = m1[:,-1] / m0[:,-1] * np.cos(phi[:,-1] - d_phi * np.pi / 180)
+  y = m1[:,-1] / m0[:,-1] * np.sin(phi[:,-1] - d_phi * np.pi / 180)
+
+  # ax.plot(x, y, 'sr', alpha=1)
+
+  mean = np.array([mean_phi - d_phi , mean_phi - d_phi - 180]) * np.pi/180
+  x = 2 * np.cos(mean)
+  y = 2 * np.sin(mean)
+
+  # ax.plot(x, y, '--r')
+
+  ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
+  ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
+
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/56278135642f89930130836623297995dc993fc1.png]]
+
+** Trained
+
+#+begin_src ipython
+  model.PHI1 = torch.tensor([d_phi, mean_phi], device='cuda:1')
+  model.I0 = [0.5, 0.5]
+  model.TASK = 'dual_odr'
+  model.GAIN = 3
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  rates = model().detach().cpu().numpy()
+  print(rates.shape)  
+#+end_src
+
 #+RESULTS:
 : (100, 101, 8000)
 
 #+begin_src ipython
-  print(mean_phi)
+  overlap = get_overlap(model, rates)
+  print(overlap.T.shape)
+
+  idx = get_idx(model)
+  rates_ordered = rates[..., idx]
+  print(rates_ordered.shape)
+
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
 #+end_src
 
 #+RESULTS:
-: 353.2787670430244
+: (4, 101, 100)
+: (4, 8000)
+: (100, 101, 8000)
+: (100, 101)
 
 #+begin_src ipython
-  perf = get_perf(rates_ordered)
-  print('perf', perf)
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+
+  ax[0].plot(overlap.T[0], alpha=.25)
+  ax[0].set_ylabel('Overlap on $m_S$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(overlap.T[1], alpha=.25)
+  ax[1].set_ylabel('Overlap on $n_S$ (Hz)')
+  ax[1].set_xlabel('Step')
+
+  ax[2].plot(overlap.T[2])
+  ax[2].set_ylabel('Overlap on $m_D$ (Hz)')
+  ax[2].set_xlabel('Step')
+
+  plt.show()
 #+end_src
 
 #+RESULTS:
-: perf 42.0
+[[file:./.ob-jupyter/3249bd4ae61aec81f616149051cb6596486b9033.png]]
 
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
 
+  ax[0].plot(m0.T)
+  #ax[0].set_ylim([0, 360])
+  #ax[0].set_yticks([0, 90, 180, 270, 360])
+  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(m1.T)
+  # ax[1].set_ylim([0, 360])
+  # ax[1].set_yticks([0, 90, 180, 270, 360])
+  ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
+  ax[1].set_xlabel('Step')
+
+  ax[2].plot(phi.T * 180 / np.pi, alpha=0.2)
+  ax[2].set_ylim([0, 360])
+  ax[2].set_yticks([0, 90, 180, 270, 360])
+  ax[2].set_ylabel('Phase (°)')
+  ax[2].set_xlabel('Step')
+  
+  ax[2].axhline(y= 360 + d_phi, xmin=0, xmax=100, color='k',ls='--')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/f0463c5e081c471f04d57338efaacdfdee827efa.png]]
+
+#+begin_src ipython
+  readoutA = overlap[:n_ini, -5:, 0]
+  readoutB = overlap[n_ini:, -5:, 0]
+
+  readout = np.stack((readoutA, readoutB))
+  print(readout.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 50, 5)
+
+#+begin_src ipython
+  perf = (readout[0]>0).mean((0, 1))
+  perf += (readout[1]<0).mean((0,1))
+
+  print('perf', perf/2 * 100)
+#+end_src
+
+#+RESULTS:
+: perf 50.0
+
+#+begin_src ipython
+  perf = get_correct_perf(rates_ordered)
+  print('performance', perf)
+#+end_src
+
+#+RESULTS:
+: performance 53.0
+
+#+begin_src ipython
+  fig, ax = plt.subplots(figsize=(height, height))
+  x = m1[:,-1] / m0[:,-1] * np.cos(phi[:,-1])
+  y = m1[:,-1] / m0[:,-1] * np.sin(phi[:,-1])
+
+  ax.plot(x, y, 'ob', alpha=.5)
+
+  mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
+
+  x = 2 * np.cos(mean)
+  y = 2 * np.sin(mean)
+  ax.plot(x, y, '--b')
+
+  x = m1[:,-1] / m0[:,-1] * np.cos(phi[:,-1] - d_phi * np.pi / 180)
+  y = m1[:,-1] / m0[:,-1] * np.sin(phi[:,-1] - d_phi * np.pi / 180)
+
+  # ax.plot(x, y, 'sr', alpha=1)
+
+  mean = np.array([mean_phi - d_phi , mean_phi - d_phi - 180]) * np.pi/180
+  x = 2 * np.cos(mean)
+  y = 2 * np.sin(mean)
+
+  # ax.plot(x, y, '--r')
+
+  ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
+  ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
+
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/c73e8108d876a57285e4103ce457230fadd0a976.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 

@@ -15,13 +15,10 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
-: <Figure size 600x370.82 with 0 Axes>
-:END:
 
 * Imports
 
@@ -140,8 +137,8 @@
   start = perf_counter()
 
   model = Network('config_EI.yml', 'dual_rand', REPO_ROOT,
-                  VERBOSE=0, DEVICE='cuda',
-                  LIVE_FF_UPDATE=0, N_BATCH=1)
+                  VERBOSE=0, DEVICE='cpu',
+                  LIVE_FF_UPDATE=0, N_BATCH=200)
   
   rates = model().cpu().numpy()[0]
 
@@ -155,8 +152,7 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 3s
-: rates (101, 8000)
+: 86896cf0-7596-4205-be16-7015b1f29e67
 
 #+RESULTS:
 
@@ -273,11 +269,10 @@
   seed = np.random.randint(100)
   # 34, 53
   print(seed)
-  seed = 86
 #+end_src
 
 #+RESULTS:
-: 39
+: 5
 
 *** Simulation
 
@@ -290,7 +285,7 @@
   start = perf_counter()
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda',
                   N_BATCH=100, SEED=seed, LR_COV=LR_COV,
-                  TASK='dual', LIVE_FF_UPDATE=1, DURATION=10)
+                  TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=10)
   
   rates = model().detach().cpu().numpy()
   end = perf_counter()
@@ -300,7 +295,7 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 9s
+: Elapsed (with compilation) = 0h 1m 7s
 : rates (100, 101, 8000)
 
 #+begin_src ipython
@@ -347,8 +342,24 @@
 
 #+RESULTS:
 :RESULTS:
-: (100, 101, 8000)
-[[file:./.ob-jupyter/c06631254e6fb70c236c977117f4917f551661d9.png]]
+# [goto error]
+#+begin_example
+  ---------------------------------------------------------------------------
+  AttributeError                            Traceback (most recent call last)
+  Cell In[113], line 4
+        1 Ne = model.Na[0].detach().cpu().numpy()
+        2 N = model.N_NEURON
+  ----> 4 ff_input = model.ff_input.cpu().detach().numpy()
+        5 print(ff_input.shape)
+        7 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/nn/modules/module.py:1688, in Module.__getattr__(self, name)
+     1686     if name in modules:
+     1687         return modules[name]
+  -> 1688 raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+  AttributeError: 'Network' object has no attribute 'ff_input'
+#+end_example
 :END:
 
 #+begin_src ipython
@@ -362,7 +373,7 @@
 #+RESULTS:
 :RESULTS:
 : (100, 101)
-[[file:./.ob-jupyter/1d9468f600ecf1028e56d94ad197939aab9f927c.png]]
+[[file:./.ob-jupyter/a64e9b9445b0e6eaf4896d7ff6bccdd8b8e78cd1.png]]
 :END:
 
 #+begin_src ipython
@@ -402,7 +413,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/273a2f6335c2205cfa7ebad82937d919eaa7272c.png]]
+[[file:./.ob-jupyter/e86b21b7a5bae4fa3267e8e49abcf5562fb64115.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -437,7 +448,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2917210cda7f1df212c8580388e836df881d0328.png]]
+[[file:./.ob-jupyter/719d9cfecfdb17e4857ea8da7e366573beced021.png]]
 
 #+begin_src ipython
   print(rates_ordered.shape)
@@ -453,7 +464,7 @@
 #+RESULTS:
 :RESULTS:
 : (100, 101, 8000)
-[[file:./.ob-jupyter/d760dc220b805083b26ed1e43e90622dc6ae1080.png]]
+[[file:./.ob-jupyter/d94c04b343657645fd1c6c50e159578f244e9e84.png]]
 :END:
 
 #+begin_src ipython
@@ -471,7 +482,7 @@
 #+RESULTS:
 :RESULTS:
 : (100, 101)
-[[file:./.ob-jupyter/0f748142df3466f5ed6b55bcbe51edd50a41376b.png]]
+[[file:./.ob-jupyter/8c94e5b748205ea17ef7f6d1689ec7c30be43dc8.png]]
 :END:
 
 #+begin_src ipython

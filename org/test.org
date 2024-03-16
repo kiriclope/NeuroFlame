@@ -777,6 +777,7 @@
 
 * STP
 ** from class
+
 #+begin_src ipython
   from src.plasticity import Plasticity
 #+end_src
@@ -804,7 +805,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5bc5582682d7afd17924d618bdbeb6cb8545427f.png]]
+[[file:./.ob-jupyter/90197594d2894e6e83595200f113674f951a5b0f.png]]
 
 #+begin_src ipython
   stp = Plasticity(0.03, 0.65, 0.25, 0.01, (1,1000))
@@ -829,34 +830,93 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/478dddcbb71fa79e20c3a05f6253383890756054.png]]
+[[file:./.ob-jupyter/afd87d7dcdbd88d46c20c8eb9b47446e9d319f17.png]]
 
 ** from model
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
-  model = Network('config_EI.yml', 'odr', REPO_ROOT, VERBOSE=0, DEVICE='cuda', IF_STP=1, LR_TRAIN=0, N_BATCH=1, DT=0.005)
-  rates = model(REC_LAST_ONLY=0).cpu().detach().numpy()
+  model = Network('config_2pop.yml', 'None', REPO_ROOT, VERBOSE=0, DEVICE='cuda', IF_STP=0, DT=0.005, GAIN=1.0)
+  # rates = model(REC_LAST_ONLY=0).cpu().detach().numpy()
 #+end_src
 
 #+RESULTS:
-: [[1.0, 0.9, 0.0, 0.0], [0.9, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.9], [0.0, 0.0, 0.9, 1.0]]
 
 #+begin_src ipython
+  model.IF_STP=1
+
+  USE = []  
+  for i in np.linspace(0, .1, 10):
+      USE.append(i)
+
+  model.USE = torch.tensor(USE, device='cuda').unsqueeze(-1)
+  model.N_BATCH = 10
+
+  rates_use = model(REC_LAST_ONLY=0).cpu().detach().numpy()
+  
+  print(rates_use.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 101, 8000)
+
+#+begin_src ipython
+  model.IF_STP=1
+
+  TAU_FAC = []  
+  for i in np.linspace(350, 1000, 10):
+      TAU_FAC.append(i)
+
+  model.TAU_FAC = torch.tensor(TAU_FAC, device='cuda').unsqueeze(-1)
+  model.N_BATCH = 10
+
+  rates_fac = model(REC_LAST_ONLY=0).cpu().detach().numpy()
+  
+  print(rates_fac.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 101, 8000)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
   print(rates.shape)
-  r_max = 2 # * np.max(rates[-1, :15000])
-  plt.imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
-  plt.ylabel('Neuron #')
-  plt.xlabel('Step')
-  plt.colorbar()
+  r_max = 10 # * np.max(rates[-1, :15000])
+  ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_xlabel('Step')
+
+  ax[1].imshow(rates_stp[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+  ax[1].set_ylabel('Neuron #')
+  ax[1].set_xlabel('Step')
+
+  # plt.colorbar()
   plt.show()
 #+end_src
 
 #+RESULTS:
 :RESULTS:
-: (1, 41, 8000)
-[[file:./.ob-jupyter/f6ccd9cb0d5e156e9e3bc0846dc258b48634f3d1.png]]
+: (1, 101, 8000)
+[[file:./.ob-jupyter/3007ae4feaef0c3dfaf3d635fe21704091ff96a6.png]]
 :END:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].plot(rates_use[:, -1].mean(-1))
+  ax[0].set_ylabel('Rates')
+  ax[0].set_xlabel('Use')
+  
+  ax[1].plot(rates_fac[:, -1].mean(-1))
+  ax[1].set_ylabel('Rates')
+  ax[1].set_xlabel('tau_fac')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/4712b4f3a614c3a1c8c2f016ff7c52189fd5408f.png]]
 
 * Single Trial
 ** Model
