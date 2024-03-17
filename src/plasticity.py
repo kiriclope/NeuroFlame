@@ -34,7 +34,7 @@ class Plasticity():
         
         self.x_stp = self.x_stp + (1.0 - self.x_stp) * self.DT_TAU_REC - self.DT * u_plus * self.x_stp * rates
         self.u_stp = self.u_stp - self.DT_TAU_FAC * self.u_stp + self.DT * self.USE * (1.0 - self.u_stp) * rates
-                
+        
         return (u_plus * self.x_stp).squeeze(-1)
 
     def __call__(self, rates):

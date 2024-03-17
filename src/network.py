@@ -133,7 +133,7 @@ class Network(nn.Module):
         
         # if self.CON_TYPE=='sparse':
         #     self.Wab_T = self.Wab_T.to_sparse()
-
+    
     def update_dynamics(self, rates, ff_input, rec_input):
         '''Updates the dynamics of the model at each timestep'''
         
@@ -141,7 +141,7 @@ class Network(nn.Module):
         if self.LR_TRAIN:
             lr = (1.0 + self.mask * self.KAPPA[0][0] * (self.U @ self.U.T) / torch.sqrt(self.Ka[0]))
             hidden = rates @ (self.Wab_T * lr.T)  
-        elif self.IF_BATCH_J:
+        elif self.IF_W_BLOCKS:
             EtoE = (rates[:, self.slices[0]]) @ self.Wab_T[self.slices[0], self.slices[0]]
             ItoE = (rates[:, self.slices[1]]) @ self.Wab_T[self.slices[1], self.slices[0]]
             
@@ -158,8 +158,11 @@ class Network(nn.Module):
         # update stp variables
         if self.IF_STP:
             A_ux = self.stp(rates[:, self.slices[0]])
-            # print('A_ux', A_ux.shape, 'rates', rates.shape)
-            hidden[:, self.slices[0]].add_((rates[:, self.slices[0]] * A_ux) @ self.W_stp_T)
+            hidden[:, self.slices[0]].add_((A_ux * rates[:, self.slices[0]]) @ self.W_stp_T)
+            
+        # update batched EtoE
+        if self.IF_BATCH_J:
+            hidden[:, self.slices[0]].add_((self.Jab_batch * rates[:, self.slices[0]]) @ self.W_batch_T)
         
         # update reccurent input
         if self.SYN_DYN:
@@ -203,18 +206,25 @@ class Network(nn.Module):
        
         # Initialization (if  ff_input is None, ff_input is generated)
         rates, ff_input, rec_input = self.initialization(ff_input)
+
+        if self.IF_BATCH_J:
+            self.W_batch_T = self.Wab_T[self.slices[0], self.slices[0]] / self.Jab[0, 0]
         
         # Add STP
         if self.IF_STP:
-            
-            self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC, self.DT,
-                                  (self.N_BATCH, self.Na[0]),
+            self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC,
+                                  self.DT, (self.N_BATCH, self.Na[0]),
                                   FLOAT=self.FLOAT, device=self.device)
             
-            self.W_stp_T = self.Wab_T[self.slices[0],self.slices[0]]
+            self.x_list = []
+            self.u_list = []
+            
+            self.W_stp_T = self.Wab_T[self.slices[0],self.slices[0]] / 0.1
+        
+        if self.IF_BATCH_J or self.IF_STP:
             self.Wab_T[self.slices[0], self.slices[0]] = 0
         
-        # Moving average 
+        # Moving average
         mv_rates = 0
         mv_ff = 0
         
@@ -253,6 +263,9 @@ class Network(nn.Module):
                         output.append(mv_rates[..., self.slices[0]] / self.N_WINDOW)
                         if self.LIVE_FF_UPDATE and RET_FF:
                             ff_output.append(mv_ff[..., self.slices[0]] / self.N_WINDOW)
+                        if self.IF_STP:
+                            self.x_list.append(self.stp.x_stp)
+                            self.u_list.append(self.stp.u_stp)
                             
                     # Reset moving average
                     mv_rates = 0
@@ -264,7 +277,10 @@ class Network(nn.Module):
             if self.LIVE_FF_UPDATE and RET_FF:
                 self.ff_input = torch.stack(ff_output, dim=1)
                 del ff_output
-                
+            if self.IF_STP:
+                self.u_list = torch.stack(self.u_list, dim=1)
+                self.x_list = torch.stack(self.x_list, dim=1)
+        
         # Add Linear readout (N_BATCH, N_EVAL_WIN, 1) on last few steps
         if self.LR_TRAIN:
             y_pred = self.linear(output[:, -self.lr_eval_win:, ...])
@@ -416,7 +432,7 @@ class Network(nn.Module):
             del multivariate_normal
             
     def scaleParam(self):
-
+        
         # scaling recurrent weights Jab as 1 / sqrt(Kb)
         if self.VERBOSE:
             print("Jab", self.Jab)
@@ -437,7 +453,7 @@ class Network(nn.Module):
         # now inputs are scaled in init_ff_input unless live update
         if self.LIVE_FF_UPDATE:
             self.Ja0.mul_(self.M0 * torch.sqrt(self.Ka[0]))
-
+        
         # scaling variance as 1 / sqrt(K0)
         self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
         self.VAR_FF.mul_(self.M0 / torch.sqrt(self.Ka[0]))

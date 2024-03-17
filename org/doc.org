@@ -15,12 +15,10 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-The autoreload extension is already loaded. To reload it, use:
-  %reload_ext autoreload
-Python exe
-/home/leon/mambaforge/bin/python
-:END:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
 
 * Imports
 
@@ -221,9 +219,8 @@ We can run multiple initializations of the network changing N_BATCH to the numbe
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-rates (10, 101, 8000)
-:END:
+: rates (10, 101, 8000)
+
 *** Batching feedforward inputs
 To run some parameter searches, we can easily batch over a different set of ff inputs
 Let's see an example where we change the ff inputs to the excitatory population
@@ -236,7 +233,7 @@ We create a batch of inputs of size (N_BATCH, N_STEPS, N_NEURON)
   
   ff_inputs = []
   for i in range(10):
-      model.Ja0[:, 0, :] = i  # here we set the ff input to E to value i in 0 .. 10
+      model.Ja0[:, 0] = i  # here we set the ff input to E to value i in 0 .. 10
       ff_inputs.append(model.init_ff_input())
 
   ff_inputs = torch.vstack(ff_inputs)
@@ -244,9 +241,7 @@ We create a batch of inputs of size (N_BATCH, N_STEPS, N_NEURON)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-ff_inputs torch.Size([10, 4440, 10000])
-:END:
+: ff_inputs torch.Size([10, 2220, 10000])
 
 Then we path these inputs to the model
 
@@ -256,9 +251,7 @@ Then we path these inputs to the model
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-(10, 101, 8000)
-:END:
+: (10, 101, 8000)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -275,9 +268,7 @@ Then we path these inputs to the model
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-[[file:./.ob-jupyter/409e77aae59878b13fd5f8e22d4c5abea647b9fd.png]]
-:END:
+[[file:./.ob-jupyter/f4446ffb202d66a5b264e8572cea6055bae1d071.png]]
 
 #+begin_src ipython
 
@@ -294,22 +285,18 @@ We create a batch of ff inputs that are updated at each time step
   N_BATCH = 10
   print('original ff_input', model.Ja0.shape)
 
-  new_Ja0 = model.Ja0.repeat((N_BATCH, 1, 1))
-  
+  new_Ja0 = model.Ja0.repeat((N_BATCH, 2, 1))  
   print('new ff_input', new_Ja0.shape)
-
-  new_Ja0[:, 0, :] = torch.linspace(0, 10, 10, device='cuda').unsqueeze(-1) * model.M0 * torch.sqrt(model.Ka[0])
-
+  
+  new_Ja0[:, 0] = torch.linspace(0, 10, 10, device='cuda').unsqueeze(-1) * model.M0 * torch.sqrt(model.Ka[0])
   print('batched ff_input', new_Ja0[:, 0].squeeze(-1))
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-original ff_input torch.Size([1, 2, 1])
-new ff_input torch.Size([10, 2, 1])
-batched ff_input tensor([   0.0000,  124.2260,  248.4520,  372.6780,  496.9040,  621.1299,
-         745.3560,  869.5820,  993.8080, 1118.0339], device='cuda:0')
-:END:
+: original ff_input torch.Size([1, 2, 1])
+: new ff_input torch.Size([10, 4, 1])
+: batched ff_input tensor([   0.0000,  124.2260,  248.4520,  372.6780,  496.9040,  621.1299,
+:          745.3560,  869.5820,  993.8080, 1118.0339], device='cuda:0')
 
 #+begin_src ipython
   model.N_BATCH = N_BATCH
@@ -321,9 +308,7 @@ batched ff_input tensor([   0.0000,  124.2260,  248.4520,  372.6780,  496.9040, 
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-rates (10, 101, 8000)
-:END:
+: rates (10, 101, 8000)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -340,9 +325,7 @@ rates (10, 101, 8000)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-[[file:./.ob-jupyter/84b729f07c3adf25a5f3df4615387024f51abd43.png]]
-:END:
+[[file:./.ob-jupyter/835c89743aabce8dbeaaa2b1672d60af4ef65566.png]]
 
 #+begin_src ipython
 
