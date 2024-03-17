@@ -1,0 +1,714 @@
+#+STARTUP: fold
+#+TITLE: RNN with pytorch
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session test :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Imports
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../../')
+
+  import torch
+  from time import perf_counter
+
+  from src.network import Network
+  from src.plasticity import Plasticity
+#+end_src
+
+#+RESULTS:
+
+* Helpers
+
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+* Testing STP implementation
+** From the Plasticity class in src/plasticity.py
+
+First, I we will plot the dynamics of the stp variables for a neuron with a given rate and Gaussian temporal noise.
+
+#+begin_src ipython
+  tau_list = torch.tensor([0.5, 0.25])
+  N_BATCH = 2
+
+  stp = Plasticity(USE=0.03, TAU_FAC=tau_list, TAU_REC=0.2, DT=0.01, size=(2, 10))
+
+  N_STEPS = 500
+
+  A_ux = []
+  u_stp = []
+  x_stp = []
+  
+  for _ in range(N_STEPS):
+      rate = 10 + 10 * torch.randn((2, 10), device='cuda')
+
+      A_ux.append(stp(rate))
+      u_stp.append(stp.u_stp)
+      x_stp.append(stp.x_stp)
+
+  A_ux = torch.stack(A_ux, dim=1).cpu().numpy()
+  u_stp = torch.stack(u_stp, dim=1).cpu().numpy()
+  x_stp = torch.stack(x_stp, dim=1).cpu().numpy()
+  print(A_ux.shape, u_stp.shape, x_stp.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[3], line 1
+: ----> 1 tau_list = torch.tensor([0.5, 0.25])
+:       2 N_BATCH = 2
+:       4 stp = Plasticity(USE=0.03, TAU_FAC=tau_list, TAU_REC=0.2, DT=0.01, size=(2, 10))
+: 
+: NameError: name 'torch' is not defined
+:END:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=(3*width, height))
+
+  ax[0].plot(A_ux[0, :], 'k', label='Aux', alpha=0.25)
+  ax[1].plot(u_stp[0, :], 'r', label='u', alpha=0.25)
+  ax[2].plot(x_stp[0, :], 'b', label='x', alpha=0.25)
+
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('$A_{ux}$')
+
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$u$')
+
+  ax[2].set_xlabel('Step')
+  ax[2].set_ylabel('$x$')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[4], line 3
+:       1 fig, ax = plt.subplots(1, 3, figsize=(3*width, height))
+: ----> 3 ax[0].plot(A_ux[0, :], 'k', label='Aux', alpha=0.25)
+:       4 ax[1].plot(u_stp[0, :], 'r', label='u', alpha=0.25)
+:       5 ax[2].plot(x_stp[0, :], 'b', label='x', alpha=0.25)
+: 
+: NameError: name 'A_ux' is not defined
+[[file:./.ob-jupyter/06ff865c9d903880d7e4a7634116ed98dc4aa11e.png]]
+:END:
+
+Then I will look at the evolution of the steady state value of A_ux with the rate for different values of tau_fac
+
+#+begin_src ipython
+  tau_list = torch.tensor([1.0, .75, .5, .25])
+  N_BATCH = tau_list.shape[0]
+  
+  stp = Plasticity(USE=0.03, TAU_FAC=tau_list, TAU_REC=0.2, DT=0.01, size=(N_BATCH, 10))
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[5], line 1
+: ----> 1 tau_list = torch.tensor([1.0, .75, .5, .25])
+:       2 N_BATCH = tau_list.shape[0]
+:       4 stp = Plasticity(USE=0.03, TAU_FAC=tau_list, TAU_REC=0.2, DT=0.01, size=(N_BATCH, 10))
+: 
+: NameError: name 'torch' is not defined
+:END:
+
+#+begin_src ipython
+  A_ux = []
+  N_RATES = 100
+  N_STEPS = 300
+
+  for i in range(N_RATES): # firing rate
+      rates = i + np.sqrt(i) * torch.randn((N_BATCH, N_STEPS, 10), device='cuda')
+      for j in range(N_STEPS): # steps before convergence
+          A_u_x = stp(rates[:, j])
+      A_ux.append(A_u_x)
+
+  A_ux = torch.stack(A_ux, dim=1).cpu().numpy()
+  print(A_ux.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[6], line 6
+:       3 N_STEPS = 300
+:       5 for i in range(N_RATES): # firing rate
+: ----> 6     rates = i + np.sqrt(i) * torch.randn((N_BATCH, N_STEPS, 10), device='cuda')
+:       7     for j in range(N_STEPS): # steps before convergence
+:       8         A_u_x = stp(rates[:, j])
+: 
+: NameError: name 'torch' is not defined
+:END:
+
+#+begin_src ipython
+  plt.plot(A_ux.mean(-1).T, label=tau_list.cpu().numpy())
+  plt.xlabel('Rate (Hz)')
+  plt.ylabel('$A_{ux}$')
+  plt.legend(frameon=False, loc="right", fontsize=14)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: AttributeError                            Traceback (most recent call last)
+: Cell In[7], line 1
+: ----> 1 plt.plot(A_ux.mean(-1).T, label=tau_list.cpu().numpy())
+:       2 plt.xlabel('Rate (Hz)')
+:       3 plt.ylabel('$A_{ux}$')
+: 
+: AttributeError: 'list' object has no attribute 'mean'
+:END:
+
+** From model
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  model = Network('config_2pop.yml', 'None', REPO_ROOT, IF_STP=0, DT=0.001, GAIN=1.0, VERBOSE=1)
+#+end_src
+
+#+RESULTS:
+: Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([500., 500.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
+: Jab [1.0, -1.5, 1, -1]
+: Ja0 [2.0, 1.0]
+
+#+begin_src ipython
+  model.IF_STP=0
+  rates = model().cpu().detach().numpy()    
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  Generating ff input
+  times (s) 0.0 rates (Hz) [0.29, 0.47]
+  times (s) 0.09 rates (Hz) [0.29, 0.46]
+  times (s) 0.18 rates (Hz) [0.29, 0.47]
+  times (s) 0.27 rates (Hz) [0.29, 0.47]
+  times (s) 0.36 rates (Hz) [0.29, 0.47]
+  times (s) 0.45 rates (Hz) [0.29, 0.47]
+  times (s) 0.54 rates (Hz) [0.29, 0.47]
+  times (s) 0.63 rates (Hz) [0.29, 0.47]
+  times (s) 0.72 rates (Hz) [0.29, 0.47]
+  times (s) 0.81 rates (Hz) [0.29, 0.47]
+  times (s) 0.9 rates (Hz) [5.6, 5.78]
+  times (s) 0.99 rates (Hz) [6.42, 10.27]
+  times (s) 1.08 rates (Hz) [6.45, 10.4]
+  times (s) 1.17 rates (Hz) [6.5, 10.46]
+  times (s) 1.26 rates (Hz) [6.54, 10.51]
+  times (s) 1.35 rates (Hz) [6.51, 10.47]
+  times (s) 1.44 rates (Hz) [6.5, 10.47]
+  times (s) 1.53 rates (Hz) [6.47, 10.45]
+  times (s) 1.62 rates (Hz) [6.43, 10.42]
+  times (s) 1.71 rates (Hz) [6.43, 10.42]
+  times (s) 1.8 rates (Hz) [6.45, 10.44]
+  times (s) 1.89 rates (Hz) [6.44, 10.43]
+  times (s) 1.98 rates (Hz) [6.47, 10.46]
+  times (s) 2.07 rates (Hz) [6.48, 10.47]
+  times (s) 2.16 rates (Hz) [6.48, 10.47]
+  times (s) 2.25 rates (Hz) [6.47, 10.46]
+  times (s) 2.34 rates (Hz) [6.46, 10.46]
+  times (s) 2.43 rates (Hz) [6.42, 10.42]
+  times (s) 2.52 rates (Hz) [6.41, 10.4]
+  times (s) 2.61 rates (Hz) [6.44, 10.43]
+  times (s) 2.7 rates (Hz) [6.43, 10.43]
+  times (s) 2.79 rates (Hz) [6.4, 10.41]
+  times (s) 2.88 rates (Hz) [6.39, 10.4]
+  times (s) 2.97 rates (Hz) [6.4, 10.41]
+  times (s) 3.06 rates (Hz) [6.41, 10.42]
+  times (s) 3.15 rates (Hz) [6.44, 10.43]
+  times (s) 3.24 rates (Hz) [6.49, 10.47]
+  times (s) 3.33 rates (Hz) [6.48, 10.47]
+  times (s) 3.42 rates (Hz) [6.45, 10.44]
+  times (s) 3.51 rates (Hz) [6.48, 10.47]
+  times (s) 3.6 rates (Hz) [6.51, 10.5]
+  times (s) 3.69 rates (Hz) [6.47, 10.47]
+  times (s) 3.78 rates (Hz) [6.47, 10.47]
+  times (s) 3.87 rates (Hz) [6.47, 10.46]
+  times (s) 3.96 rates (Hz) [6.45, 10.44]
+  times (s) 4.05 rates (Hz) [6.42, 10.41]
+  times (s) 4.14 rates (Hz) [6.4, 10.39]
+  times (s) 4.23 rates (Hz) [6.4, 10.4]
+  times (s) 4.32 rates (Hz) [6.43, 10.43]
+  times (s) 4.41 rates (Hz) [6.43, 10.42]
+  times (s) 4.5 rates (Hz) [6.43, 10.42]
+  times (s) 4.59 rates (Hz) [6.45, 10.44]
+  times (s) 4.68 rates (Hz) [6.44, 10.44]
+  times (s) 4.77 rates (Hz) [6.47, 10.46]
+  times (s) 4.86 rates (Hz) [6.47, 10.46]
+  times (s) 4.95 rates (Hz) [6.46, 10.45]
+  times (s) 5.05 rates (Hz) [6.46, 10.44]
+  times (s) 5.14 rates (Hz) [6.46, 10.44]
+  times (s) 5.23 rates (Hz) [6.43, 10.43]
+  times (s) 5.32 rates (Hz) [6.43, 10.43]
+  times (s) 5.41 rates (Hz) [6.43, 10.43]
+  times (s) 5.5 rates (Hz) [6.43, 10.43]
+  times (s) 5.59 rates (Hz) [6.44, 10.45]
+  times (s) 5.68 rates (Hz) [6.45, 10.46]
+  times (s) 5.77 rates (Hz) [6.46, 10.46]
+  times (s) 5.86 rates (Hz) [6.48, 10.47]
+  times (s) 5.95 rates (Hz) [6.45, 10.46]
+  times (s) 6.04 rates (Hz) [6.45, 10.46]
+  times (s) 6.13 rates (Hz) [6.46, 10.46]
+  times (s) 6.22 rates (Hz) [6.45, 10.44]
+  times (s) 6.31 rates (Hz) [6.43, 10.41]
+  times (s) 6.4 rates (Hz) [6.43, 10.41]
+  times (s) 6.49 rates (Hz) [6.44, 10.42]
+  times (s) 6.58 rates (Hz) [6.44, 10.43]
+  times (s) 6.67 rates (Hz) [6.45, 10.45]
+  times (s) 6.76 rates (Hz) [6.46, 10.46]
+  times (s) 6.85 rates (Hz) [6.45, 10.45]
+  times (s) 6.94 rates (Hz) [6.42, 10.42]
+  times (s) 7.03 rates (Hz) [6.41, 10.41]
+  times (s) 7.12 rates (Hz) [6.42, 10.41]
+  times (s) 7.21 rates (Hz) [6.42, 10.41]
+  times (s) 7.3 rates (Hz) [6.4, 10.39]
+  times (s) 7.39 rates (Hz) [6.4, 10.39]
+  times (s) 7.48 rates (Hz) [6.4, 10.39]
+  times (s) 7.57 rates (Hz) [6.42, 10.42]
+  times (s) 7.66 rates (Hz) [6.46, 10.45]
+  times (s) 7.75 rates (Hz) [6.5, 10.49]
+  times (s) 7.84 rates (Hz) [6.5, 10.48]
+  times (s) 7.93 rates (Hz) [6.5, 10.49]
+  times (s) 8.02 rates (Hz) [6.5, 10.48]
+  times (s) 8.11 rates (Hz) [6.47, 10.47]
+  times (s) 8.2 rates (Hz) [6.44, 10.44]
+  times (s) 8.29 rates (Hz) [6.44, 10.44]
+  times (s) 8.38 rates (Hz) [6.44, 10.42]
+  times (s) 8.47 rates (Hz) [6.47, 10.45]
+  times (s) 8.56 rates (Hz) [6.46, 10.45]
+  times (s) 8.65 rates (Hz) [6.47, 10.48]
+  times (s) 8.74 rates (Hz) [6.49, 10.49]
+  times (s) 8.83 rates (Hz) [6.51, 10.49]
+  times (s) 8.92 rates (Hz) [6.47, 10.44]
+  times (s) 9.01 rates (Hz) [6.44, 10.42]
+  Elapsed (with compilation) = 5.594978877343237s
+#+end_example
+
+#+begin_src ipython
+  model.IF_BATCH_J=1
+  rates_stp = model().cpu().detach().numpy()
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  Generating ff input
+  times (s) 0.0 rates (Hz) [0.29, 0.47]
+  times (s) 0.09 rates (Hz) [0.29, 0.47]
+  times (s) 0.18 rates (Hz) [0.29, 0.47]
+  times (s) 0.27 rates (Hz) [0.29, 0.47]
+  times (s) 0.36 rates (Hz) [0.29, 0.47]
+  times (s) 0.45 rates (Hz) [0.29, 0.47]
+  times (s) 0.54 rates (Hz) [0.29, 0.47]
+  times (s) 0.63 rates (Hz) [0.29, 0.46]
+  times (s) 0.72 rates (Hz) [0.29, 0.46]
+  times (s) 0.81 rates (Hz) [0.29, 0.46]
+  times (s) 0.9 rates (Hz) [5.6, 5.78]
+  times (s) 0.99 rates (Hz) [6.42, 10.27]
+  times (s) 1.08 rates (Hz) [6.45, 10.4]
+  times (s) 1.17 rates (Hz) [6.5, 10.47]
+  times (s) 1.26 rates (Hz) [6.54, 10.51]
+  times (s) 1.35 rates (Hz) [6.51, 10.47]
+  times (s) 1.44 rates (Hz) [6.5, 10.47]
+  times (s) 1.53 rates (Hz) [6.47, 10.45]
+  times (s) 1.62 rates (Hz) [6.43, 10.42]
+  times (s) 1.71 rates (Hz) [6.43, 10.42]
+  times (s) 1.8 rates (Hz) [6.45, 10.44]
+  times (s) 1.89 rates (Hz) [6.45, 10.44]
+  times (s) 1.98 rates (Hz) [6.48, 10.46]
+  times (s) 2.07 rates (Hz) [6.48, 10.47]
+  times (s) 2.16 rates (Hz) [6.48, 10.47]
+  times (s) 2.25 rates (Hz) [6.49, 10.48]
+  times (s) 2.34 rates (Hz) [6.47, 10.47]
+  times (s) 2.43 rates (Hz) [6.43, 10.43]
+  times (s) 2.52 rates (Hz) [6.44, 10.42]
+  times (s) 2.61 rates (Hz) [6.45, 10.43]
+  times (s) 2.7 rates (Hz) [6.44, 10.44]
+  times (s) 2.79 rates (Hz) [6.45, 10.44]
+  times (s) 2.88 rates (Hz) [6.47, 10.46]
+  times (s) 2.97 rates (Hz) [6.51, 10.49]
+  times (s) 3.06 rates (Hz) [6.53, 10.51]
+  times (s) 3.15 rates (Hz) [6.52, 10.48]
+  times (s) 3.24 rates (Hz) [6.42, 10.4]
+  times (s) 3.33 rates (Hz) [6.37, 10.36]
+  times (s) 3.42 rates (Hz) [6.4, 10.39]
+  times (s) 3.51 rates (Hz) [6.45, 10.43]
+  times (s) 3.6 rates (Hz) [6.44, 10.42]
+  times (s) 3.69 rates (Hz) [6.44, 10.42]
+  times (s) 3.78 rates (Hz) [6.46, 10.44]
+  times (s) 3.87 rates (Hz) [6.45, 10.44]
+  times (s) 3.96 rates (Hz) [6.45, 10.44]
+  times (s) 4.05 rates (Hz) [6.45, 10.45]
+  times (s) 4.14 rates (Hz) [6.45, 10.45]
+  times (s) 4.23 rates (Hz) [6.44, 10.43]
+  times (s) 4.32 rates (Hz) [6.44, 10.42]
+  times (s) 4.41 rates (Hz) [6.49, 10.45]
+  times (s) 4.5 rates (Hz) [6.5, 10.47]
+  times (s) 4.59 rates (Hz) [6.49, 10.48]
+  times (s) 4.68 rates (Hz) [6.48, 10.47]
+  times (s) 4.77 rates (Hz) [6.46, 10.46]
+  times (s) 4.86 rates (Hz) [6.48, 10.47]
+  times (s) 4.95 rates (Hz) [6.46, 10.46]
+  times (s) 5.05 rates (Hz) [6.45, 10.44]
+  times (s) 5.14 rates (Hz) [6.44, 10.43]
+  times (s) 5.23 rates (Hz) [6.44, 10.44]
+  times (s) 5.32 rates (Hz) [6.45, 10.44]
+  times (s) 5.41 rates (Hz) [6.48, 10.48]
+  times (s) 5.5 rates (Hz) [6.49, 10.49]
+  times (s) 5.59 rates (Hz) [6.45, 10.45]
+  times (s) 5.68 rates (Hz) [6.42, 10.43]
+  times (s) 5.77 rates (Hz) [6.42, 10.43]
+  times (s) 5.86 rates (Hz) [6.46, 10.46]
+  times (s) 5.95 rates (Hz) [6.46, 10.45]
+  times (s) 6.04 rates (Hz) [6.44, 10.43]
+  times (s) 6.13 rates (Hz) [6.45, 10.44]
+  times (s) 6.22 rates (Hz) [6.45, 10.43]
+  times (s) 6.31 rates (Hz) [6.46, 10.41]
+  times (s) 6.4 rates (Hz) [6.47, 10.43]
+  times (s) 6.49 rates (Hz) [6.48, 10.45]
+  times (s) 6.58 rates (Hz) [6.46, 10.45]
+  times (s) 6.67 rates (Hz) [6.47, 10.46]
+  times (s) 6.76 rates (Hz) [6.45, 10.44]
+  times (s) 6.85 rates (Hz) [6.43, 10.43]
+  times (s) 6.94 rates (Hz) [6.41, 10.4]
+  times (s) 7.03 rates (Hz) [6.45, 10.43]
+  times (s) 7.12 rates (Hz) [6.44, 10.43]
+  times (s) 7.21 rates (Hz) [6.44, 10.43]
+  times (s) 7.3 rates (Hz) [6.48, 10.46]
+  times (s) 7.39 rates (Hz) [6.48, 10.46]
+  times (s) 7.48 rates (Hz) [6.43, 10.42]
+  times (s) 7.57 rates (Hz) [6.41, 10.4]
+  times (s) 7.66 rates (Hz) [6.44, 10.43]
+  times (s) 7.75 rates (Hz) [6.45, 10.45]
+  times (s) 7.84 rates (Hz) [6.46, 10.46]
+  times (s) 7.93 rates (Hz) [6.47, 10.47]
+  times (s) 8.02 rates (Hz) [6.47, 10.47]
+  times (s) 8.11 rates (Hz) [6.47, 10.46]
+  times (s) 8.2 rates (Hz) [6.44, 10.44]
+  times (s) 8.29 rates (Hz) [6.43, 10.44]
+  times (s) 8.38 rates (Hz) [6.44, 10.45]
+  times (s) 8.47 rates (Hz) [6.46, 10.45]
+  times (s) 8.56 rates (Hz) [6.46, 10.44]
+  times (s) 8.65 rates (Hz) [6.43, 10.41]
+  times (s) 8.74 rates (Hz) [6.42, 10.41]
+  times (s) 8.83 rates (Hz) [6.42, 10.42]
+  times (s) 8.92 rates (Hz) [6.43, 10.43]
+  times (s) 9.01 rates (Hz) [6.45, 10.45]
+  Elapsed (with compilation) = 10.97294133901596s
+#+end_example
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  r_max = 30
+  ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_xlabel('Step')
+
+  ax[1].imshow(rates_stp[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+  ax[1].set_ylabel('Neuron #')
+  ax[1].set_xlabel('Step')
+
+  # plt.colorbar()
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/77412603f9a920772f4d9b0065006fb1648f3fd4.png]]
+
+#+begin_src ipython
+  model.IF_STP = 1
+  model.TAU_FAC = 0.5
+  
+  model.USE = torch.linspace(0.025, 0.1, 10, device='cuda')
+  model.N_BATCH = model.USE.shape[0]
+
+  rates_use = model().cpu().detach().numpy()
+  print(rates_use.shape)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  Generating ff input
+  times (s) 0.0 rates (Hz) [0.09, 0.27]
+  times (s) 0.09 rates (Hz) [0.09, 0.27]
+  times (s) 0.18 rates (Hz) [0.09, 0.27]
+  times (s) 0.27 rates (Hz) [0.09, 0.27]
+  times (s) 0.36 rates (Hz) [0.09, 0.27]
+  times (s) 0.45 rates (Hz) [0.09, 0.27]
+  times (s) 0.54 rates (Hz) [0.09, 0.27]
+  times (s) 0.63 rates (Hz) [0.09, 0.27]
+  times (s) 0.72 rates (Hz) [0.09, 0.27]
+  times (s) 0.81 rates (Hz) [0.09, 0.27]
+  times (s) 0.9 rates (Hz) [5.42, 5.6]
+  times (s) 0.99 rates (Hz) [2.08, 5.92]
+  times (s) 1.08 rates (Hz) [2.07, 5.95]
+  times (s) 1.17 rates (Hz) [2.06, 5.96]
+  times (s) 1.26 rates (Hz) [2.07, 5.96]
+  times (s) 1.35 rates (Hz) [2.07, 5.96]
+  times (s) 1.44 rates (Hz) [2.07, 5.96]
+  times (s) 1.53 rates (Hz) [2.07, 5.96]
+  times (s) 1.62 rates (Hz) [2.07, 5.96]
+  times (s) 1.71 rates (Hz) [2.07, 5.97]
+  times (s) 1.8 rates (Hz) [2.07, 5.97]
+  times (s) 1.89 rates (Hz) [2.07, 5.97]
+  times (s) 1.98 rates (Hz) [2.07, 5.97]
+  times (s) 2.07 rates (Hz) [2.07, 5.97]
+  times (s) 2.16 rates (Hz) [2.07, 5.97]
+  times (s) 2.25 rates (Hz) [2.07, 5.97]
+  times (s) 2.34 rates (Hz) [2.07, 5.97]
+  times (s) 2.43 rates (Hz) [2.07, 5.97]
+  times (s) 2.52 rates (Hz) [2.07, 5.97]
+  times (s) 2.61 rates (Hz) [2.07, 5.96]
+  times (s) 2.7 rates (Hz) [2.07, 5.96]
+  times (s) 2.79 rates (Hz) [2.07, 5.96]
+  times (s) 2.88 rates (Hz) [2.07, 5.97]
+  times (s) 2.97 rates (Hz) [2.07, 5.97]
+  times (s) 3.06 rates (Hz) [2.07, 5.97]
+  times (s) 3.15 rates (Hz) [2.06, 5.96]
+  times (s) 3.24 rates (Hz) [2.07, 5.97]
+  times (s) 3.33 rates (Hz) [2.07, 5.97]
+  times (s) 3.42 rates (Hz) [2.07, 5.97]
+  times (s) 3.51 rates (Hz) [2.08, 5.97]
+  times (s) 3.6 rates (Hz) [2.08, 5.98]
+  times (s) 3.69 rates (Hz) [2.07, 5.97]
+  times (s) 3.78 rates (Hz) [2.07, 5.97]
+  times (s) 3.87 rates (Hz) [2.08, 5.97]
+  times (s) 3.96 rates (Hz) [2.08, 5.97]
+  times (s) 4.05 rates (Hz) [2.08, 5.97]
+  times (s) 4.14 rates (Hz) [2.08, 5.97]
+  times (s) 4.23 rates (Hz) [2.08, 5.97]
+  times (s) 4.32 rates (Hz) [2.08, 5.97]
+  times (s) 4.41 rates (Hz) [2.07, 5.97]
+  times (s) 4.5 rates (Hz) [2.07, 5.97]
+  times (s) 4.59 rates (Hz) [2.07, 5.96]
+  times (s) 4.68 rates (Hz) [2.07, 5.97]
+  times (s) 4.77 rates (Hz) [2.07, 5.97]
+  times (s) 4.86 rates (Hz) [2.07, 5.97]
+  times (s) 4.95 rates (Hz) [2.08, 5.97]
+  times (s) 5.05 rates (Hz) [2.07, 5.97]
+  times (s) 5.14 rates (Hz) [2.07, 5.97]
+  times (s) 5.23 rates (Hz) [2.07, 5.97]
+  times (s) 5.32 rates (Hz) [2.07, 5.97]
+  times (s) 5.41 rates (Hz) [2.07, 5.97]
+  times (s) 5.5 rates (Hz) [2.07, 5.96]
+  times (s) 5.59 rates (Hz) [2.07, 5.96]
+  times (s) 5.68 rates (Hz) [2.07, 5.96]
+  times (s) 5.77 rates (Hz) [2.07, 5.97]
+  times (s) 5.86 rates (Hz) [2.07, 5.97]
+  times (s) 5.95 rates (Hz) [2.07, 5.97]
+  times (s) 6.04 rates (Hz) [2.07, 5.97]
+  times (s) 6.13 rates (Hz) [2.07, 5.97]
+  times (s) 6.22 rates (Hz) [2.07, 5.97]
+  times (s) 6.31 rates (Hz) [2.07, 5.97]
+  times (s) 6.4 rates (Hz) [2.07, 5.97]
+  times (s) 6.49 rates (Hz) [2.07, 5.97]
+  times (s) 6.58 rates (Hz) [2.07, 5.97]
+  times (s) 6.67 rates (Hz) [2.07, 5.97]
+  times (s) 6.76 rates (Hz) [2.07, 5.97]
+  times (s) 6.85 rates (Hz) [2.07, 5.97]
+  times (s) 6.94 rates (Hz) [2.07, 5.97]
+  times (s) 7.03 rates (Hz) [2.07, 5.97]
+  times (s) 7.12 rates (Hz) [2.07, 5.97]
+  times (s) 7.21 rates (Hz) [2.07, 5.97]
+  times (s) 7.3 rates (Hz) [2.07, 5.97]
+  times (s) 7.39 rates (Hz) [2.07, 5.97]
+  times (s) 7.48 rates (Hz) [2.07, 5.97]
+  times (s) 7.57 rates (Hz) [2.07, 5.97]
+  times (s) 7.66 rates (Hz) [2.07, 5.97]
+  times (s) 7.75 rates (Hz) [2.07, 5.97]
+  times (s) 7.84 rates (Hz) [2.07, 5.97]
+  times (s) 7.93 rates (Hz) [2.07, 5.97]
+  times (s) 8.02 rates (Hz) [2.07, 5.97]
+  times (s) 8.11 rates (Hz) [2.08, 5.97]
+  times (s) 8.2 rates (Hz) [2.08, 5.97]
+  times (s) 8.29 rates (Hz) [2.08, 5.97]
+  times (s) 8.38 rates (Hz) [2.07, 5.97]
+  times (s) 8.47 rates (Hz) [2.07, 5.97]
+  times (s) 8.56 rates (Hz) [2.07, 5.97]
+  times (s) 8.65 rates (Hz) [2.07, 5.97]
+  times (s) 8.74 rates (Hz) [2.07, 5.97]
+  times (s) 8.83 rates (Hz) [2.07, 5.97]
+  times (s) 8.92 rates (Hz) [2.07, 5.97]
+  times (s) 9.01 rates (Hz) [2.07, 5.97]
+  Elapsed (with compilation) = 23.327585767023265s
+  (10, 101, 8000)
+#+end_example
+
+#+begin_src ipython
+  model.IF_STP=1
+  model.USE = 0.05
+
+  model.TAU_FAC = torch.linspace(0.25, 1.0, 10, device='cuda')
+  model.N_BATCH = model.TAU_FAC.shape[0]
+
+  rates_fac = model().cpu().detach().numpy()
+  print(rates_fac.shape)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  Generating ff input
+  times (s) 0.0 rates (Hz) [0.09, 0.27]
+  times (s) 0.09 rates (Hz) [0.09, 0.27]
+  times (s) 0.18 rates (Hz) [0.09, 0.27]
+  times (s) 0.27 rates (Hz) [0.09, 0.27]
+  times (s) 0.36 rates (Hz) [0.09, 0.27]
+  times (s) 0.45 rates (Hz) [0.09, 0.27]
+  times (s) 0.54 rates (Hz) [0.09, 0.27]
+  times (s) 0.63 rates (Hz) [0.09, 0.27]
+  times (s) 0.72 rates (Hz) [0.09, 0.27]
+  times (s) 0.81 rates (Hz) [0.09, 0.27]
+  times (s) 0.9 rates (Hz) [5.42, 5.6]
+  times (s) 0.99 rates (Hz) [2.08, 5.92]
+  times (s) 1.08 rates (Hz) [2.07, 5.95]
+  times (s) 1.17 rates (Hz) [2.06, 5.96]
+  times (s) 1.26 rates (Hz) [2.07, 5.96]
+  times (s) 1.35 rates (Hz) [2.07, 5.96]
+  times (s) 1.44 rates (Hz) [2.07, 5.96]
+  times (s) 1.53 rates (Hz) [2.07, 5.96]
+  times (s) 1.62 rates (Hz) [2.07, 5.96]
+  times (s) 1.71 rates (Hz) [2.07, 5.97]
+  times (s) 1.8 rates (Hz) [2.07, 5.97]
+  times (s) 1.89 rates (Hz) [2.07, 5.97]
+  times (s) 1.98 rates (Hz) [2.07, 5.97]
+  times (s) 2.07 rates (Hz) [2.07, 5.97]
+  times (s) 2.16 rates (Hz) [2.07, 5.97]
+  times (s) 2.25 rates (Hz) [2.07, 5.97]
+  times (s) 2.34 rates (Hz) [2.07, 5.97]
+  times (s) 2.43 rates (Hz) [2.07, 5.97]
+  times (s) 2.52 rates (Hz) [2.07, 5.97]
+  times (s) 2.61 rates (Hz) [2.07, 5.96]
+  times (s) 2.7 rates (Hz) [2.07, 5.96]
+  times (s) 2.79 rates (Hz) [2.07, 5.96]
+  times (s) 2.88 rates (Hz) [2.07, 5.97]
+  times (s) 2.97 rates (Hz) [2.07, 5.97]
+  times (s) 3.06 rates (Hz) [2.07, 5.97]
+  times (s) 3.15 rates (Hz) [2.06, 5.96]
+  times (s) 3.24 rates (Hz) [2.07, 5.97]
+  times (s) 3.33 rates (Hz) [2.07, 5.97]
+  times (s) 3.42 rates (Hz) [2.07, 5.97]
+  times (s) 3.51 rates (Hz) [2.08, 5.97]
+  times (s) 3.6 rates (Hz) [2.08, 5.98]
+  times (s) 3.69 rates (Hz) [2.07, 5.97]
+  times (s) 3.78 rates (Hz) [2.07, 5.97]
+  times (s) 3.87 rates (Hz) [2.08, 5.97]
+  times (s) 3.96 rates (Hz) [2.08, 5.97]
+  times (s) 4.05 rates (Hz) [2.08, 5.97]
+  times (s) 4.14 rates (Hz) [2.08, 5.97]
+  times (s) 4.23 rates (Hz) [2.08, 5.97]
+  times (s) 4.32 rates (Hz) [2.08, 5.97]
+  times (s) 4.41 rates (Hz) [2.07, 5.97]
+  times (s) 4.5 rates (Hz) [2.07, 5.97]
+  times (s) 4.59 rates (Hz) [2.07, 5.96]
+  times (s) 4.68 rates (Hz) [2.07, 5.97]
+  times (s) 4.77 rates (Hz) [2.07, 5.97]
+  times (s) 4.86 rates (Hz) [2.07, 5.97]
+  times (s) 4.95 rates (Hz) [2.08, 5.97]
+  times (s) 5.05 rates (Hz) [2.07, 5.97]
+  times (s) 5.14 rates (Hz) [2.07, 5.97]
+  times (s) 5.23 rates (Hz) [2.07, 5.97]
+  times (s) 5.32 rates (Hz) [2.07, 5.97]
+  times (s) 5.41 rates (Hz) [2.07, 5.97]
+  times (s) 5.5 rates (Hz) [2.07, 5.96]
+  times (s) 5.59 rates (Hz) [2.07, 5.96]
+  times (s) 5.68 rates (Hz) [2.07, 5.96]
+  times (s) 5.77 rates (Hz) [2.07, 5.97]
+  times (s) 5.86 rates (Hz) [2.07, 5.97]
+  times (s) 5.95 rates (Hz) [2.07, 5.97]
+  times (s) 6.04 rates (Hz) [2.07, 5.97]
+  times (s) 6.13 rates (Hz) [2.07, 5.97]
+  times (s) 6.22 rates (Hz) [2.07, 5.97]
+  times (s) 6.31 rates (Hz) [2.07, 5.97]
+  times (s) 6.4 rates (Hz) [2.07, 5.97]
+  times (s) 6.49 rates (Hz) [2.07, 5.97]
+  times (s) 6.58 rates (Hz) [2.07, 5.97]
+  times (s) 6.67 rates (Hz) [2.07, 5.97]
+  times (s) 6.76 rates (Hz) [2.07, 5.97]
+  times (s) 6.85 rates (Hz) [2.07, 5.97]
+  times (s) 6.94 rates (Hz) [2.07, 5.97]
+  times (s) 7.03 rates (Hz) [2.07, 5.97]
+  times (s) 7.12 rates (Hz) [2.07, 5.97]
+  times (s) 7.21 rates (Hz) [2.07, 5.97]
+  times (s) 7.3 rates (Hz) [2.07, 5.97]
+  times (s) 7.39 rates (Hz) [2.07, 5.97]
+  times (s) 7.48 rates (Hz) [2.07, 5.97]
+  times (s) 7.57 rates (Hz) [2.07, 5.97]
+  times (s) 7.66 rates (Hz) [2.07, 5.97]
+  times (s) 7.75 rates (Hz) [2.07, 5.97]
+  times (s) 7.84 rates (Hz) [2.07, 5.97]
+  times (s) 7.93 rates (Hz) [2.07, 5.97]
+  times (s) 8.02 rates (Hz) [2.07, 5.97]
+  times (s) 8.11 rates (Hz) [2.08, 5.97]
+  times (s) 8.2 rates (Hz) [2.08, 5.97]
+  times (s) 8.29 rates (Hz) [2.08, 5.97]
+  times (s) 8.38 rates (Hz) [2.07, 5.97]
+  times (s) 8.47 rates (Hz) [2.07, 5.97]
+  times (s) 8.56 rates (Hz) [2.07, 5.97]
+  times (s) 8.65 rates (Hz) [2.07, 5.97]
+  times (s) 8.74 rates (Hz) [2.07, 5.97]
+  times (s) 8.83 rates (Hz) [2.07, 5.97]
+  times (s) 8.92 rates (Hz) [2.07, 5.97]
+  times (s) 9.01 rates (Hz) [2.07, 5.97]
+  Elapsed (with compilation) = 23.41483762860298s
+  (10, 101, 8000)
+#+end_example
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].plot(rates_use[:, -1].mean(-1))
+  ax[0].set_ylabel('Rates')
+  ax[0].set_xlabel('Use')
+  
+  ax[1].plot(rates_fac[:, -1].mean(-1))
+  ax[1].set_ylabel('Rates')
+  ax[1].set_xlabel('tau_fac')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/100907e70863aebba1e428d18989765ffbc3274d.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
