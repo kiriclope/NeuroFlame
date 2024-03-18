@@ -208,7 +208,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/aa0561cfc33537288d69976fa04fff445f1fdb3c.png]]
+[[file:./.ob-jupyter/18699c34590a451b8e59246a6df563ecf984cd02.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates, axis=-1)
@@ -243,6 +243,43 @@ This is what we expect!
 #+RESULTS:
 
 #+begin_src ipython
+  model = Network('config_2pop.yml', 'None', REPO_ROOT, IF_STP=1, DT=0.001, GAIN=1.0, VERBOSE=0, TASK='odr')
+  model.LIVE_FF_UPDATE = 1
+  PHI0 = model.PHI0.unsqueeze(0).unsqueeze(-1).repeat((8, 1, 1))
+  PHI0[:, -1] = torch.linspace(45, 360, 8).unsqueeze(1)
+  print(PHI0.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([8, 3, 1])
+
+#+begin_src ipython
+  model.PHI0 = PHI0
+  model.N_BATCH = 8
+  rates = model().cpu().detach().numpy()
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (8, 151, 8000)
+
+#+begin_src ipython
+  m0, m1, phi = decode_bump(rates, axis=-1)
+  print(phi.shape)
+#+end_src
+
+#+RESULTS:
+: (8, 151)
+
+#+begin_src ipython
+  plt.plot(phi.T)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/b00e56f1b8c00e03e8fad8d07b8d6197dc8aad10.png]]
+
+#+begin_src ipython
   PHI1_list = np.linspace(45, 360, 8)
   print(PHI1_list)
 
@@ -267,7 +304,9 @@ This is what we expect!
 
 #+RESULTS:
 
+
 *** Rates vs Ie
+
 
 #+begin_src ipython
   model = Network('config_2pop.yml', 'None', REPO_ROOT, IF_STP=1, DT=0.001, GAIN=0.5, VERBOSE=0)
@@ -430,12 +469,12 @@ This is what we expect!
   model.USE = torch.linspace(0.01, 0.1, 10, device='cuda')
   model.N_BATCH = model.USE.shape[0]
   
-  rates_use = model().cpu().detach().numpy()
+  rates_use = model(RET_STP=1).cpu().detach().numpy()
   print(rates_use.shape)
 #+end_src
 
 #+RESULTS:
-: (10, 101, 8000)
+: (10, 111, 8000)
 
 #+begin_src ipython
   u_list = model.u_list.cpu().numpy()
@@ -444,7 +483,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-: (10, 101, 8000) (10, 101, 8000)
+: (10, 111, 8000) (10, 111, 8000)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -457,14 +496,14 @@ This is what we expect!
   # ax[0].set_ylim([0, 60])
 
   ax[1].plot(rates_use.mean(-1).T)
-  ax[1].set_xlabel('Use')
+  ax[1].set_xlabel('Step')
   ax[1].set_ylabel('Rates')
   # ax[1].set_ylim([0, 60])
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/19aaad3742fc9302b874a5f0309a3edc715261f4.png]]
+[[file:./.ob-jupyter/210f918f209eeabf5c220d886f499b6ca9fb1886.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -475,7 +514,7 @@ This is what we expect!
   ax[0].set_xlabel('$Use$')
   ax[0].set_ylabel('$A_{ux}$')
 
-  ax[1].plot(u_list.mean(-1).T * x_list.mean(-1).T)
+  ax[1].plot(model.USE.cpu().numpy(), u_list.mean(-1).T * x_list.mean(-1).T)
   ax[1].set_xlabel('Step')
   ax[1].set_ylabel('$A_{ux}$')
   
@@ -483,7 +522,49 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/4323871bb1165d4ceafb792b6b04612c826456a4.png]]
+:RESULTS:
+# [goto error]
+#+begin_example
+  ---------------------------------------------------------------------------
+  ValueError                                Traceback (most recent call last)
+  Cell In[13], line 9
+        6 ax[0].set_xlabel('$Use$')
+        7 ax[0].set_ylabel('$A_{ux}$')
+  ----> 9 ax[1].plot(model.USE.cpu().numpy(), u_list.mean(-1).T * x_list.mean(-1).T)
+       10 ax[1].set_xlabel('Step')
+       11 ax[1].set_ylabel('$A_{ux}$')
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_axes.py:1721, in Axes.plot(self, scalex, scaley, data, *args, **kwargs)
+     1478 """
+     1479 Plot y versus x as lines and/or markers.
+     1480 
+     (...)
+     1718 (``'green'``) or hex strings (``'#008000'``).
+     1719 """
+     1720 kwargs = cbook.normalize_kwargs(kwargs, mlines.Line2D)
+  -> 1721 lines = [*self._get_lines(self, *args, data=data, **kwargs)]
+     1722 for line in lines:
+     1723     self.add_line(line)
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_base.py:303, in _process_plot_var_args.__call__(self, axes, data, *args, **kwargs)
+      301     this += args[0],
+      302     args = args[1:]
+  --> 303 yield from self._plot_args(
+      304     axes, this, kwargs, ambiguous_fmt_datakey=ambiguous_fmt_datakey)
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_base.py:499, in _process_plot_var_args._plot_args(self, axes, tup, kwargs, return_kwargs, ambiguous_fmt_datakey)
+      496     axes.yaxis.update_units(y)
+      498 if x.shape[0] != y.shape[0]:
+  --> 499     raise ValueError(f"x and y must have same first dimension, but "
+      500                      f"have shapes {x.shape} and {y.shape}")
+      501 if x.ndim > 2 or y.ndim > 2:
+      502     raise ValueError(f"x and y can be no greater than 2D, but have "
+      503                      f"shapes {x.shape} and {y.shape}")
+
+  ValueError: x and y must have same first dimension, but have shapes (10,) and (111, 10)
+#+end_example
+[[file:./.ob-jupyter/751c99235b607aee645de484e4b8bdbe04028faf.png]]
+:END:
 
 #+begin_src ipython
 

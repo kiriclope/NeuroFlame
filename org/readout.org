@@ -72,7 +72,7 @@
   def get_idx(model):
       ksi = model.PHI0.cpu().detach().numpy()
       print(ksi.shape)
-
+      
       theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
       return theta.argsort()
 #+end_src
@@ -85,9 +85,6 @@
       return rates @ ksi.T / rates.shape[-1]
 
 #+end_src
-
-#+RESULTS:
-
 
 #+RESULTS:
 
@@ -104,18 +101,19 @@
 #+end_src
 
 #+RESULTS:
-: 8
+: 63
 
-** Simulation
+** Fixed Points
+*** Simulation
 
 #+begin_src ipython
   n_ini  = 50
-
+  
   LR_COV = [[1.0, 0.8, 0.0, 0.0],
             [0.8, 1.0, 0.0, 0.0],
             [0.0, 0.0, 1.0, 0.8],
             [0.0, 0.0, 0.8, 1.0]]
-  
+
   start = perf_counter()
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                   N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
@@ -129,10 +127,10 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 3m 6s
+: Elapsed (with compilation) = 0h 1m 14s
 : rates (100, 8000)
 
-** Readout
+*** Readout
 
 #+begin_src ipython
   Ne = model.Na[0].detach().cpu().numpy()
@@ -195,10 +193,10 @@
 
 #+RESULTS:
 : (100, 2)
-: Cluster Centers: [[-0.92998152  0.60549115]
-:  [-0.03556429 -0.97649856]]
-: mean phi 27.42345151917421
-: dphi -62.57654848082579
+: Cluster Centers: [[ 0.55616174  0.7309976 ]
+:  [-0.37845416 -0.87152394]]
+: mean phi 149.6312890710454
+: dphi 59.63128907104539
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -234,13 +232,65 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e3d7f81311ba70501584ef351214c89650f3e166.png]]
+[[file:./.ob-jupyter/29fc4869d714523c5cd83faa377fd1675c096917.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
+
+*** Single trial
+
+#+begin_src ipython
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
+                  N_BATCH=2, SEED=seed, LR_COV=LR_COV,
+                  TASK='dual', LIVE_FF_UPDATE=1, DURATION=10,
+                  TAU_NMDA=[.5, .5], I0=[0.1, 0.1])
+  
+  model.PHI1 = torch.tensor([0, 90-d_phi], device='cuda:1')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  rates = model().detach().cpu().numpy()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(figsize=(height, height))
+  x = m1 / m0 * np.cos(phi[:,-1])
+  y = m1 / m0 * np.sin(phi[:,-1])
+
+  ax.plot(x, y, 'ob', alpha=.5)
+
+  mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
+
+  x = 2 * np.cos(mean)
+  y = 2 * np.sin(mean)
+  ax.plot(x, y, '--b')
+
+  x = m1[:,-1] / m0[:,-1] * np.cos(phi[:,-1] - d_phi * np.pi / 180)
+  y = m1[:,-1] / m0[:,-1] * np.sin(phi[:,-1] - d_phi * np.pi / 180)
+
+  # ax.plot(x, y, 'sr', alpha=1)
+
+  mean = np.array([mean_phi - d_phi , mean_phi - d_phi - 180]) * np.pi/180
+  x = 2 * np.cos(mean)
+  y = 2 * np.sin(mean)
+
+  # ax.plot(x, y, '--r')
+
+  ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
+  ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
+
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+
+  plt.show()
+#+end_src
 
 ** Naive
 
@@ -249,11 +299,6 @@
                   N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
                   TASK='dual', LIVE_FF_UPDATE=1, DURATION=10,
                   TAU_NMDA=[.5, .5], I0=[0.1, 0.1])
-  
-  # model.TASK = 'dual'
-  # model.DURATION = 10
-  # model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
-  # model.I0 = [0.1, 0.1]
 #+end_src
 
 #+RESULTS:
@@ -308,7 +353,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/cfa601cff871858ef03279f787e2b74b0930aabd.png]]
+[[file:./.ob-jupyter/4d5970b349349662ed0d69a98cc314fc45791854.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -343,7 +388,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5354a1c1af4fef1d918c1d588b00cdb93e8b3a1f.png]]
+[[file:./.ob-jupyter/fc2c24ea048fab341b34a4796c5f213af5c65728.png]]
 
 #+begin_src ipython
   readoutA = overlap[:n_ini, -5:, 0]
@@ -364,7 +409,7 @@
 #+end_src
 
 #+RESULTS:
-: performance 79.80000000000001
+: performance 83.4
 
 #+begin_src ipython
   def get_correct_perf(rates, n_ini=50):
@@ -384,7 +429,7 @@
 #+end_src
 
 #+RESULTS:
-: performance 64.0
+: performance 57.0
 
 #+begin_src ipython
   print(phi.shape)
@@ -427,13 +472,19 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/56278135642f89930130836623297995dc993fc1.png]]
+[[file:./.ob-jupyter/a30c07d456192fb4b358f0d3fcbeb1407da2e93c.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 ** Trained
 
 #+begin_src ipython
-  model.PHI1 = torch.tensor([d_phi, mean_phi], device='cuda:1')
-  model.I0 = [0.5, 0.5]
+  model.PHI1 = torch.tensor([0, mean_phi], device='cuda:1')
+  model.I0 = [0.1, 0.1]
   model.TASK = 'dual_odr'
   model.GAIN = 3
 #+end_src
@@ -485,7 +536,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/3249bd4ae61aec81f616149051cb6596486b9033.png]]
+[[file:./.ob-jupyter/5f35f8e126ee97a2de30be86ba86cd426eabe44f.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -513,7 +564,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f0463c5e081c471f04d57338efaacdfdee827efa.png]]
+[[file:./.ob-jupyter/1b4fe2f3c1b06d0458127c8b58798e9563d4ebd3.png]]
 
 #+begin_src ipython
   readoutA = overlap[:n_ini, -5:, 0]
@@ -534,7 +585,7 @@
 #+end_src
 
 #+RESULTS:
-: perf 50.0
+: perf 55.2
 
 #+begin_src ipython
   perf = get_correct_perf(rates_ordered)
@@ -542,7 +593,7 @@
 #+end_src
 
 #+RESULTS:
-: performance 53.0
+: performance 55.0
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -578,7 +629,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c73e8108d876a57285e4103ce457230fadd0a976.png]]
+[[file:./.ob-jupyter/9e6e70d99c85e5de5cd0c5a7813fd30c8ad7fc0d.png]]
 
 #+begin_src ipython
 

@@ -190,7 +190,7 @@ class Network(nn.Module):
         
         return rates, rec_input
 
-    def forward(self, ff_input=None, REC_LAST_ONLY=0, RET_FF=0):
+    def forward(self, ff_input=None, REC_LAST_ONLY=0, RET_FF=0, RET_STP=0):
         '''
         Main method of Network class, runs networks dynamics over set of timesteps
         and returns rates at each time point or just the last time point.
@@ -215,9 +215,9 @@ class Network(nn.Module):
             self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC,
                                   self.DT, (self.N_BATCH, self.Na[0]),
                                   FLOAT=self.FLOAT, device=self.device)
-            
-            self.x_list = []
-            self.u_list = []
+            if RET_STP:
+                self.x_list = []
+                self.u_list = []
             
             self.W_stp_T = self.Wab_T[self.slices[0],self.slices[0]] / 0.1
         
@@ -263,7 +263,7 @@ class Network(nn.Module):
                         output.append(mv_rates[..., self.slices[0]] / self.N_WINDOW)
                         if self.LIVE_FF_UPDATE and RET_FF:
                             ff_output.append(mv_ff[..., self.slices[0]] / self.N_WINDOW)
-                        if self.IF_STP:
+                        if self.IF_STP and RET_STP:
                             self.x_list.append(self.stp.x_stp)
                             self.u_list.append(self.stp.u_stp)
                             
@@ -277,7 +277,7 @@ class Network(nn.Module):
             if self.LIVE_FF_UPDATE and RET_FF:
                 self.ff_input = torch.stack(ff_output, dim=1)
                 del ff_output
-            if self.IF_STP:
+            if self.IF_STP and RET_STP:
                 self.u_list = torch.stack(self.u_list, dim=1)
                 self.x_list = torch.stack(self.x_list, dim=1)
         
@@ -420,6 +420,8 @@ class Network(nn.Module):
         self.SIGMA = torch.tensor(self.SIGMA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
         self.KAPPA = torch.tensor(self.KAPPA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
         self.PHASE = torch.tensor(self.PHASE * torch.pi / 180.0, dtype=self.FLOAT, device=self.device)
+
+        self.PHI0 = torch.tensor(self.PHI0, dtype=self.FLOAT, device=self.device).unsqueeze(0)
         
         if self.PROBA_TYPE[0][0] == 'lr':
             mean_ = torch.tensor(self.LR_MEAN, dtype=self.FLOAT, device=self.device)
@@ -452,20 +454,22 @@ class Network(nn.Module):
         
         # now inputs are scaled in init_ff_input unless live update
         if self.LIVE_FF_UPDATE:
-            self.Ja0.mul_(self.M0 * torch.sqrt(self.Ka[0]))
+            self.Ja0 = self.M0 * torch.sqrt(self.Ka[0]) * self.Ja0
+            
+            # print('scaled Ja0', self.Ja0, self.M0, self.Ka[0])
         
         # scaling variance as 1 / sqrt(K0)
         self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
         self.VAR_FF.mul_(self.M0 / torch.sqrt(self.Ka[0]))
 
     def live_ff_input(self, step, ff_input):
-
+        
         noise = 0
         if self.VAR_FF[0]>0:
             noise = torch.randn((self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
             for i_pop in range(self.N_POP):
                 noise[:, self.slices[i_pop]].mul_(self.VAR_FF[i_pop])
-
+        
         if step==0:
             for i_pop in range(self.N_POP):
                 if self.BUMP_SWITCH[i_pop]:
@@ -494,7 +498,7 @@ class Network(nn.Module):
                                                                             rnd_phase=1,
                                                                             theta_list=theta)
                         del theta
-                        
+                    
                     elif 'odr' in self.TASK:
                         theta = get_theta(self.PHI0[0], self.PHI0[2])
                         phase = torch.ones(size[0], device=self.device)
@@ -525,10 +529,9 @@ class Network(nn.Module):
                 else:
                     stimulus = Stimuli(self.TASK, size)(self.I0[i],
                                                         self.SIGMA0[i],
-                                                        self.PHI0[i],
-                                                        rnd_phase=0)
-                
-                ff_input[:, self.slices[0]] = self.Ja0[:, 0] + stimulus * torch.sqrt(self.Ka[0]) * self.M0
+                                                        self.PHI0[:, i])
+                    
+                ff_input[:, self.slices[0]] = self.Ja0[:, 0] + torch.sqrt(self.Ka[0]) * self.M0 * stimulus
                 # del stimulus
                 
             if step in self.N_STIM_OFF:
@@ -573,7 +576,7 @@ class Network(nn.Module):
                 ff_input[:, :self.N_STIM_ON[0], self.slices[i_pop]].add_(self.Ja0[:, i_pop] / torch.sqrt(self.Ka[0]))
             else:
                 ff_input[:, :self.N_STIM_ON[0], self.slices[i_pop]].add_(self.Ja0[:, i_pop])
-
+        
         for i_pop in range(self.N_POP):
             ff_input[:, self.N_STIM_ON[0]:, self.slices[i_pop]].add_(self.Ja0[:, i_pop])
         
@@ -595,10 +598,10 @@ class Network(nn.Module):
                         stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])
 
                 else:
-                    stimulus = Stimuli(self.TASK, size, device=self.device)(self.I0[i], self.SIGMA0[i], self.PHI0[i])
-
+                    stimulus = Stimuli(self.TASK, size, device=self.device)(self.I0[i], self.SIGMA0[i], self.PHI0[:, i])
+                    
                 ff_input[:, self.N_STIM_ON[i]:self.N_STIM_OFF[i], self.slices[0]].add_(stimulus)
-
+                
                 del stimulus
 
         return ff_input * torch.sqrt(self.Ka[0]) * self.M0
