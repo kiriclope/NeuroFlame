@@ -38,6 +38,7 @@
 #+end_src
 
 #+RESULTS:
+
 * Helpers
 
 #+begin_src ipython
@@ -71,8 +72,6 @@
 #+begin_src ipython 
   def get_idx(model):
       ksi = model.PHI0.cpu().detach().numpy()
-      print(ksi.shape)
-      
       theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
       return theta.argsort()
 #+end_src
@@ -88,6 +87,19 @@
 
 #+RESULTS:
 
+#+begin_src ipython
+  def get_correct_perf(rates, d_phi, n_ini=50):
+      m0, m1, phi = decode_bump(rates, axis=-1)
+      x = m1[..., -1] / m0[..., -1] * np.cos(phi[..., -1] - d_phi * np.pi / 180)
+      performance = (x[:n_ini] < 0).mean() * 100
+      performance += (x[n_ini:] > 0).mean() * 100
+
+      return performance / 2
+#+end_src
+
+#+RESULTS:
+
+
 * Dual task with rotating readout
 ** Parameters
 
@@ -101,33 +113,36 @@
 #+end_src
 
 #+RESULTS:
-: 63
+: 30
 
 ** Fixed Points
 *** Simulation
 
 #+begin_src ipython
   n_ini  = 50
-  
-  LR_COV = [[1.0, 0.8, 0.0, 0.0],
-            [0.8, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.8],
+
+  LR_COV = [[1.0, 1.0, 0.0, 0.0],
+            [0.8, 1.0, 0.1, 0.0],
+            [0.0, 0.1, 1.0, 0.8],
             [0.0, 0.0, 0.8, 1.0]]
 
   start = perf_counter()
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                   N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
-                  TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=30, TAU_NMDA=[.5, .5])
+                  TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=30, TAU_NMDA=[.1, .1])
 
-  rates = model(REC_LAST_ONLY=1).detach().cpu().numpy()
+  rates_fp = model(REC_LAST_ONLY=1).detach().cpu().numpy()
   end = perf_counter()
 
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
-  print('rates', rates.shape)
+  print('rates', rates_fp.shape)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 14s
+: tensor([[1., 0.],
+:         [0., 1.]], device='cuda:1')
+: torch.Size([4, 8000])
+: Elapsed (with compilation) = 0h 3m 8s
 : rates (100, 8000)
 
 *** Readout
@@ -141,12 +156,11 @@
 
 #+begin_src ipython
   idx = get_idx(model)
-  rates_ordered = rates[:, idx]
+  rates_ordered = rates_fp[:, idx]
   print(rates_ordered.shape)
 #+end_src
 
 #+RESULTS:
-: (4, 8000)
 : (100, 8000)
 
 #+begin_src ipython
@@ -193,17 +207,17 @@
 
 #+RESULTS:
 : (100, 2)
-: Cluster Centers: [[ 0.55616174  0.7309976 ]
-:  [-0.37845416 -0.87152394]]
-: mean phi 149.6312890710454
-: dphi 59.63128907104539
+: Cluster Centers: [[-0.02658858 -1.48497095]
+:  [-1.1926028   0.06519158]]
+: mean phi 42.92268040904239
+: dphi -47.07731959095761
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
   x = m1 / m0 * np.cos(phi)
   y = m1 / m0 * np.sin(phi)
 
-  ax.plot(x, y, 'ob', alpha=.5)
+  ax.plot(x, y, 'ob', alpha=.25)
 
   mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
 
@@ -211,11 +225,11 @@
   y = 2 * np.sin(mean)
   ax.plot(x, y, '--b')
 
-  x = m1 / m0 * np.cos(phi - d_phi * np.pi / 180)
-  y = m1 / m0 * np.sin(phi - d_phi * np.pi / 180)
+  # x = m1 / m0 * np.cos(phi - d_phi * np.pi / 180)
+  # y = m1 / m0 * np.sin(phi - d_phi * np.pi / 180)
 
-  ax.plot(x, y, 'sr', alpha=1)
-
+  # ax.plot(x, y, 'sr', alpha=.25)
+  
   mean = np.array([mean_phi - d_phi , mean_phi - d_phi - 180]) * np.pi/180
   x = 2 * np.cos(mean)
   y = 2 * np.sin(mean)
@@ -227,89 +241,29 @@
 
   ax.set_xlim([-2, 2])
   ax.set_ylim([-2, 2])
-  
+
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/29fc4869d714523c5cd83faa377fd1675c096917.png]]
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
+[[file:./.ob-jupyter/67a55e610f2aa19c7dd7ece1ae15316af696058f.png]]
 
 *** Single trial
 
 #+begin_src ipython
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
-                  N_BATCH=2, SEED=seed, LR_COV=LR_COV,
-                  TASK='dual', LIVE_FF_UPDATE=1, DURATION=10,
-                  TAU_NMDA=[.5, .5], I0=[0.1, 0.1])
-  
-  model.PHI1 = torch.tensor([0, 90-d_phi], device='cuda:1')
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  rates = model().detach().cpu().numpy()
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  fig, ax = plt.subplots(figsize=(height, height))
-  x = m1 / m0 * np.cos(phi[:,-1])
-  y = m1 / m0 * np.sin(phi[:,-1])
-
-  ax.plot(x, y, 'ob', alpha=.5)
-
-  mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
-
-  x = 2 * np.cos(mean)
-  y = 2 * np.sin(mean)
-  ax.plot(x, y, '--b')
-
-  x = m1[:,-1] / m0[:,-1] * np.cos(phi[:,-1] - d_phi * np.pi / 180)
-  y = m1[:,-1] / m0[:,-1] * np.sin(phi[:,-1] - d_phi * np.pi / 180)
-
-  # ax.plot(x, y, 'sr', alpha=1)
-
-  mean = np.array([mean_phi - d_phi , mean_phi - d_phi - 180]) * np.pi/180
-  x = 2 * np.cos(mean)
-  y = 2 * np.sin(mean)
-
-  # ax.plot(x, y, '--r')
-
-  ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
-  ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
-
-  ax.set_xlim([-2, 2])
-  ax.set_ylim([-2, 2])
-
-  plt.show()
-#+end_src
-
-** Naive
-
-#+begin_src ipython
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                   N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
-                  TASK='dual', LIVE_FF_UPDATE=1, DURATION=10,
-                  TAU_NMDA=[.5, .5], I0=[0.1, 0.1])
+                  TASK='dual_odr', LIVE_FF_UPDATE=1, DURATION=10,
+                  TAU_NMDA=[.1, .1], I0=[.1, .1])
+  
+  model.PHI1 = torch.tensor([0, 90 - d_phi], device='cuda:1')
 #+end_src
 
 #+RESULTS:
+: Using Hopfield like low rank
 
 #+begin_src ipython
   rates = model().detach().cpu().numpy()
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
   print(rates.shape)
 #+end_src
 
@@ -317,22 +271,22 @@
 : (100, 101, 8000)
 
 #+begin_src ipython
-  idx = get_idx(model)
-  rates_ordered = rates[..., idx]
-  print(rates_ordered.shape)
-#+end_src
-
-#+RESULTS:
-: (4, 8000)
-: (100, 101, 8000)
-
-#+begin_src ipython
   overlap = get_overlap(model, rates)
   print(overlap.T.shape)
+  
+  idx = get_idx(model)
+
+  rates_ordered = rates[..., idx]
+  print(rates_ordered.shape)
+
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
 #+end_src
 
 #+RESULTS:
 : (4, 101, 100)
+: (100, 101, 8000)
+: (100, 101)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -353,15 +307,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/4d5970b349349662ed0d69a98cc314fc45791854.png]]
-
-#+begin_src ipython
-  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
-  print(m0.shape)
-#+end_src
-
-#+RESULTS:
-: (100, 101)
+[[file:./.ob-jupyter/e53c3913acee3f31a20f56bfb87ab64ee9719d71.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -378,7 +324,7 @@
   ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
   ax[1].set_xlabel('Step')
   
-  ax[2].plot(phi.T * 180 / np.pi, alpha=0.1)
+  ax[2].plot(phi.T * 180 / np.pi, alpha=0.25)
   ax[2].set_ylim([0, 360])
   ax[2].set_yticks([0, 90, 180, 270, 360])
   ax[2].set_ylabel('Phase (°)')
@@ -388,7 +334,68 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/fc2c24ea048fab341b34a4796c5f213af5c65728.png]]
+[[file:./.ob-jupyter/e06019252d83262d3a4915ff3bcb1a40fdafe7fa.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(figsize=(height, height))
+  x = m1 / m0 * np.cos(phi)
+  y = m1 / m0 * np.sin(phi)
+  
+  ax.plot(x.T[0], y.T[0], 'o', alpha=.25, ms=10)
+  ax.plot(x.T, y.T, '-', alpha=.25)
+  ax.plot(x.T[-1], y.T[-1], 's', alpha=.25, ms=10)
+
+  mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
+
+  x = 2 * np.cos(mean)
+  y = 2 * np.sin(mean)
+  ax.plot(x, y, '--b')
+
+  ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
+  ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
+
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/3890eefe6a641e1670e91bd4452b23495b6cd851.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(figsize=(height, height))
+
+  x = m1[:n_ini, -1] / m0[:n_ini, -1] * np.cos(phi[:n_ini, -1])
+  y = m1[:n_ini, -1] / m0[:n_ini, -1] * np.sin(phi[:n_ini, -1])
+
+  ax.plot(x, y, 'ob', alpha=.5)
+  
+  x = m1[n_ini:, -1] / m0[n_ini:, -1] * np.cos(phi[n_ini:, -1])
+  y = m1[n_ini:, -1] / m0[n_ini:, -1] * np.sin(phi[n_ini:, -1])
+
+  ax.plot(x, y, 'or', alpha=.5)
+
+  mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
+
+  x = 2 * np.cos(mean)
+  y = 2 * np.sin(mean)
+  ax.plot(x, y, '--')
+
+  mean = np.array([mean_phi - d_phi , mean_phi - d_phi - 180]) * np.pi/180
+  x = 2 * np.cos(mean)
+  y = 2 * np.sin(mean)
+
+  ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
+  ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
+
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/0118fda9a693aa3f679b4d33a3bc60b55baafe27.png]]
 
 #+begin_src ipython
   readoutA = overlap[:n_ini, -5:, 0]
@@ -409,232 +416,12 @@
 #+end_src
 
 #+RESULTS:
-: performance 83.4
+: performance 49.0
 
 #+begin_src ipython
-  def get_correct_perf(rates, n_ini=50):
-      m0, m1, phi = decode_bump(rates, axis=-1)
-      x = m1[..., -1] / m0[..., -1] * np.cos(phi[..., -1] + d_phi * np.pi / 180)
-      performance = (x[:n_ini] < 0).mean() * 100
-      performance += (x[n_ini:] > 0).mean() * 100
-      
-      return performance / 2
+  perf = get_correct_perf(rates_ordered, -d_phi, n_ini)
+  print('corrected performance', perf)
 #+end_src
 
 #+RESULTS:
-
-#+begin_src ipython
-  perf = get_correct_perf(rates_ordered)
-  print('performance', perf)
-#+end_src
-
-#+RESULTS:
-: performance 57.0
-
-#+begin_src ipython
-  print(phi.shape)
-#+end_src
-
-#+RESULTS:
-: (100, 101)
-
-#+begin_src ipython
-  fig, ax = plt.subplots(figsize=(height, height))
-  x = m1[:,-1] / m0[:,-1] * np.cos(phi[:,-1])
-  y = m1[:,-1] / m0[:,-1] * np.sin(phi[:,-1])
-
-  ax.plot(x, y, 'ob', alpha=.5)
-
-  mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
-
-  x = 2 * np.cos(mean)
-  y = 2 * np.sin(mean)
-  ax.plot(x, y, '--b')
-
-  x = m1[:,-1] / m0[:,-1] * np.cos(phi[:,-1] - d_phi * np.pi / 180)
-  y = m1[:,-1] / m0[:,-1] * np.sin(phi[:,-1] - d_phi * np.pi / 180)
-
-  # ax.plot(x, y, 'sr', alpha=1)
-
-  mean = np.array([mean_phi - d_phi , mean_phi - d_phi - 180]) * np.pi/180
-  x = 2 * np.cos(mean)
-  y = 2 * np.sin(mean)
-
-  # ax.plot(x, y, '--r')
-
-  ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
-  ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
-
-  ax.set_xlim([-2, 2])
-  ax.set_ylim([-2, 2])
-
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/a30c07d456192fb4b358f0d3fcbeb1407da2e93c.png]]
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
-
-** Trained
-
-#+begin_src ipython
-  model.PHI1 = torch.tensor([0, mean_phi], device='cuda:1')
-  model.I0 = [0.1, 0.1]
-  model.TASK = 'dual_odr'
-  model.GAIN = 3
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  rates = model().detach().cpu().numpy()
-  print(rates.shape)  
-#+end_src
-
-#+RESULTS:
-: (100, 101, 8000)
-
-#+begin_src ipython
-  overlap = get_overlap(model, rates)
-  print(overlap.T.shape)
-
-  idx = get_idx(model)
-  rates_ordered = rates[..., idx]
-  print(rates_ordered.shape)
-
-  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
-  print(m0.shape)
-#+end_src
-
-#+RESULTS:
-: (4, 101, 100)
-: (4, 8000)
-: (100, 101, 8000)
-: (100, 101)
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
-
-  ax[0].plot(overlap.T[0], alpha=.25)
-  ax[0].set_ylabel('Overlap on $m_S$ (Hz)')
-  ax[0].set_xlabel('Step')
-
-  ax[1].plot(overlap.T[1], alpha=.25)
-  ax[1].set_ylabel('Overlap on $n_S$ (Hz)')
-  ax[1].set_xlabel('Step')
-
-  ax[2].plot(overlap.T[2])
-  ax[2].set_ylabel('Overlap on $m_D$ (Hz)')
-  ax[2].set_xlabel('Step')
-
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/5f35f8e126ee97a2de30be86ba86cd426eabe44f.png]]
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
-
-  ax[0].plot(m0.T)
-  #ax[0].set_ylim([0, 360])
-  #ax[0].set_yticks([0, 90, 180, 270, 360])
-  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
-  ax[0].set_xlabel('Step')
-
-  ax[1].plot(m1.T)
-  # ax[1].set_ylim([0, 360])
-  # ax[1].set_yticks([0, 90, 180, 270, 360])
-  ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
-  ax[1].set_xlabel('Step')
-
-  ax[2].plot(phi.T * 180 / np.pi, alpha=0.2)
-  ax[2].set_ylim([0, 360])
-  ax[2].set_yticks([0, 90, 180, 270, 360])
-  ax[2].set_ylabel('Phase (°)')
-  ax[2].set_xlabel('Step')
-  
-  ax[2].axhline(y= 360 + d_phi, xmin=0, xmax=100, color='k',ls='--')
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/1b4fe2f3c1b06d0458127c8b58798e9563d4ebd3.png]]
-
-#+begin_src ipython
-  readoutA = overlap[:n_ini, -5:, 0]
-  readoutB = overlap[n_ini:, -5:, 0]
-
-  readout = np.stack((readoutA, readoutB))
-  print(readout.shape)
-#+end_src
-
-#+RESULTS:
-: (2, 50, 5)
-
-#+begin_src ipython
-  perf = (readout[0]>0).mean((0, 1))
-  perf += (readout[1]<0).mean((0,1))
-
-  print('perf', perf/2 * 100)
-#+end_src
-
-#+RESULTS:
-: perf 55.2
-
-#+begin_src ipython
-  perf = get_correct_perf(rates_ordered)
-  print('performance', perf)
-#+end_src
-
-#+RESULTS:
-: performance 55.0
-
-#+begin_src ipython
-  fig, ax = plt.subplots(figsize=(height, height))
-  x = m1[:,-1] / m0[:,-1] * np.cos(phi[:,-1])
-  y = m1[:,-1] / m0[:,-1] * np.sin(phi[:,-1])
-
-  ax.plot(x, y, 'ob', alpha=.5)
-
-  mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
-
-  x = 2 * np.cos(mean)
-  y = 2 * np.sin(mean)
-  ax.plot(x, y, '--b')
-
-  x = m1[:,-1] / m0[:,-1] * np.cos(phi[:,-1] - d_phi * np.pi / 180)
-  y = m1[:,-1] / m0[:,-1] * np.sin(phi[:,-1] - d_phi * np.pi / 180)
-
-  # ax.plot(x, y, 'sr', alpha=1)
-
-  mean = np.array([mean_phi - d_phi , mean_phi - d_phi - 180]) * np.pi/180
-  x = 2 * np.cos(mean)
-  y = 2 * np.sin(mean)
-
-  # ax.plot(x, y, '--r')
-
-  ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
-  ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
-
-  ax.set_xlim([-2, 2])
-  ax.set_ylim([-2, 2])
-
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/9e6e70d99c85e5de5cd0c5a7813fd30c8ad7fc0d.png]]
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
-
-
+: corrected performance 88.0

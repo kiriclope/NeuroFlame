@@ -343,7 +343,7 @@ class Network(nn.Module):
             ff_input.to(self.device)
             self.N_BATCH = ff_input.shape[0]
         
-        rec_input = torch.randn((self.IF_NMDA+1, self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
+        rec_input = torch.sqrt(self.Ka[0]) * torch.randn((self.IF_NMDA+1, self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
         
         if self.LIVE_FF_UPDATE:
             rates = Activation()(ff_input + rec_input[0], func_name=self.TF_TYPE, thresh=self.THRESH[0])
@@ -426,10 +426,22 @@ class Network(nn.Module):
         if self.PROBA_TYPE[0][0] == 'lr':
             mean_ = torch.tensor(self.LR_MEAN, dtype=self.FLOAT, device=self.device)
             cov_ = torch.tensor(self.LR_COV, dtype=self.FLOAT, device=self.device)
-            multivariate_normal = MultivariateNormal(mean_, cov_)
-
-            self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
             
+            if cov_[0, 0] == cov_[0, 1]:
+                print('Using Hopfield like low rank')
+
+                mean_ = mean_[[0, 2]]
+                cov_ = torch.tensor(([cov_[0,0], cov_[0, 2]], [cov_[2, 0], cov_[2,2]]),
+                                    dtype=self.FLOAT, device=self.device)
+                
+                multivariate_normal = MultivariateNormal(mean_, cov_)            
+                self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
+                self.PHI0 = torch.stack((self.PHI0[0], self.PHI0[0], self.PHI0[1], self.PHI0[1]))
+            else:
+                print('Using Francesca like low rank')
+                multivariate_normal = MultivariateNormal(mean_, cov_)
+                self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
+                
             del mean_, cov_
             del multivariate_normal
             
