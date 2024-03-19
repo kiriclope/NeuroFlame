@@ -27,12 +27,14 @@
   sys.path.insert(0, '../../')
 
   import torch
+  import gc
   from time import perf_counter
 
   from src.network import Network
   from src.plasticity import Plasticity
   from src.decode import decode_bump
- 
+  from src.utils import clear_cache
+
   REPO_ROOT = '/home/leon/models/NeuroTorch/'
 #+end_src
 
@@ -103,7 +105,7 @@ First, I we will plot the dynamics of the stp variables for a neuron with a give
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c9929dad1d5a0b66a32841ce9f5820f9d9cd3d5e.png]]
+[[file:./.ob-jupyter/5753aded24c89d3f8aeb90277d486185dc26d404.png]]
 
 Then I will look at the evolution of the steady state value of A_ux with the rate for different values of tau_fac
 
@@ -163,7 +165,7 @@ Then I will look at the evolution of the steady state value of A_ux with the rat
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/8688901c337d2b99fa61df6bd35f5cdbc9c6d18b.png]]
+[[file:./.ob-jupyter/94d85f0cdf9555535252e14b9cb7a16adcf81725.png]]
 
 This is what we expect!
 
@@ -172,7 +174,7 @@ This is what we expect!
 
 #+begin_src ipython
   model = Network('config_2pop.yml', 'None', REPO_ROOT, IF_STP=1, DT=0.001, GAIN=1.0, VERBOSE=0, TASK='odr')
-  rates = model().cpu().detach().numpy()
+  rates = model(RET_STP=1).cpu().detach().numpy()
 #+end_src
 
 #+RESULTS:
@@ -180,11 +182,12 @@ This is what we expect!
 #+begin_src ipython
   u_list = model.u_list.cpu().numpy()
   x_list = model.x_list.cpu().numpy()
+  Aux = u_list * x_list
   print(u_list.shape, x_list.shape)
 #+end_src
 
 #+RESULTS:
-: (1, 151, 8000) (1, 151, 8000)
+: (1, 101, 8000) (1, 101, 8000)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
@@ -208,7 +211,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/18699c34590a451b8e59246a6df563ecf984cd02.png]]
+[[file:./.ob-jupyter/3ad394da0e7aceb1779608b558fded7f499b8292.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates, axis=-1)
@@ -216,7 +219,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-: (1, 151)
+: (1, 101)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -234,79 +237,30 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2afc52a32714237a3360787a7b2bb30a54c67788.png]]
+[[file:./.ob-jupyter/133b895932e14796ee139b8a6172cdcd74cdedf9.png]]
+
+#+begin_src ipython
+#  plt.plot(rates[-1], Aux[-1], 'o')
+#+end_src
+
+#+begin_src ipython
+  print(torch.cuda.memory_allocated()/100000)
+  del model
+  clear_cache()
+  print(torch.cuda.memory_allocated()/100000)
+#+end_src
+
+#+RESULTS:
+: 48552.22272
+: 44485.23776
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-
-#+begin_src ipython
-  model = Network('config_2pop.yml', 'None', REPO_ROOT, IF_STP=1, DT=0.001, GAIN=1.0, VERBOSE=0, TASK='odr')
-  model.LIVE_FF_UPDATE = 1
-  PHI0 = model.PHI0.unsqueeze(0).unsqueeze(-1).repeat((8, 1, 1))
-  PHI0[:, -1] = torch.linspace(45, 360, 8).unsqueeze(1)
-  print(PHI0.shape)
-#+end_src
-
-#+RESULTS:
-: torch.Size([8, 3, 1])
-
-#+begin_src ipython
-  model.PHI0 = PHI0
-  model.N_BATCH = 8
-  rates = model().cpu().detach().numpy()
-  print(rates.shape)
-#+end_src
-
-#+RESULTS:
-: (8, 151, 8000)
-
-#+begin_src ipython
-  m0, m1, phi = decode_bump(rates, axis=-1)
-  print(phi.shape)
-#+end_src
-
-#+RESULTS:
-: (8, 151)
-
-#+begin_src ipython
-  plt.plot(phi.T)
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/b00e56f1b8c00e03e8fad8d07b8d6197dc8aad10.png]]
-
-#+begin_src ipython
-  PHI1_list = np.linspace(45, 360, 8)
-  print(PHI1_list)
-
-  model.N_BATCH = 10
-
-  ff_inputs = []
-  for i in PHI1_list:
-      model.PHI0[-1] = i  # here we set the ff input to E to value i in 0 .. 10      
-      ff_inputs.append(model.init_ff_input())
-
-  ff_inputs = torch.vstack(ff_inputs)
-  print(ff_inputs.shape)
-#+end_src
-
-#+RESULTS:
-: [ 45.  90. 135. 180. 225. 270. 315. 360.]
-: torch.Size([80, 16100, 1000])
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
-
 
 *** Rates vs Ie
-
 
 #+begin_src ipython
   model = Network('config_2pop.yml', 'None', REPO_ROOT, IF_STP=1, DT=0.001, GAIN=0.5, VERBOSE=0)
@@ -331,7 +285,7 @@ This is what we expect!
 :   6.66666667  7.77777778  8.88888889 10.        ]
 
 #+begin_src ipython
-  rates_Je0 = model(ff_inputs).cpu().detach().numpy()
+  rates_Je0 = model(ff_inputs, RET_STP=1).cpu().detach().numpy()
 #+end_src
 
 #+RESULTS:
@@ -363,7 +317,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/3b23b3fe8a14fbf562cfae9d424325d2ede05f01.png]]
+[[file:./.ob-jupyter/71fe07544041ac44d3c8594ca456649e9a4c3711.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -383,7 +337,18 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/82ef84e46c2014c867a321819310691534dd11ee.png]]
+[[file:./.ob-jupyter/364019780eb44381d02197e9fdc3bf9bdfa035c2.png]]
+
+#+begin_src ipython
+  print(torch.cuda.memory_allocated()/100000)
+  del model
+  clear_cache()
+  print(torch.cuda.memory_allocated()/100000)
+#+end_src
+
+#+RESULTS:
+: 49145.2928
+: 44485.23776
 
 *** Rates vs Jee
 
@@ -403,7 +368,7 @@ This is what we expect!
   model.N_BATCH = model.Jab_batch.shape[0]
   model.VERBOSE = 0
   
-  rates_Jee = model().cpu().detach().numpy()
+  rates_Jee = model(RET_STP=1).cpu().detach().numpy()
 #+end_src
 
 #+RESULTS:
@@ -435,7 +400,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7c1ede7d8c2e79b78d22bca80018dd8da04e4f44.png]]
+[[file:./.ob-jupyter/f7c34f7ba68fdffe51c1d98b5454946b816ea362.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -455,7 +420,18 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c6d1f8e89de31bf25d228386e5afa79602c4f1be.png]]
+[[file:./.ob-jupyter/983116f4c5a05858db64b0da95e8669fc9186747.png]]
+
+#+begin_src ipython
+  print(torch.cuda.memory_allocated()/100000)
+  del model
+  clear_cache()
+  print(torch.cuda.memory_allocated()/100000)
+#+end_src
+
+#+RESULTS:
+: 51705.29792
+: 44485.23776
 
 *** Rates vs Use
 
@@ -474,7 +450,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-: (10, 111, 8000)
+: (10, 101, 8000)
 
 #+begin_src ipython
   u_list = model.u_list.cpu().numpy()
@@ -483,7 +459,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-: (10, 111, 8000) (10, 111, 8000)
+: (10, 101, 8000) (10, 101, 8000)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -503,68 +479,37 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/210f918f209eeabf5c220d886f499b6ca9fb1886.png]]
+[[file:./.ob-jupyter/bc15f6b76a0bfc42a002c7407105f892cb61e639.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
-  mean_rates = u_list[:,-1].mean(-1) * x_list[:,-1].mean(-1)
+  Aux = u_list * x_list
 
-  ax[0].plot(mean_rates)
+  ax[0].plot(model.USE.cpu(), Aux[:, -1].mean(-1))
   ax[0].set_xlabel('$Use$')
   ax[0].set_ylabel('$A_{ux}$')
 
-  ax[1].plot(model.USE.cpu().numpy(), u_list.mean(-1).T * x_list.mean(-1).T)
+  ax[1].plot(Aux.mean(-1).T)
   ax[1].set_xlabel('Step')
   ax[1].set_ylabel('$A_{ux}$')
-  
+
   plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-#+begin_example
-  ---------------------------------------------------------------------------
-  ValueError                                Traceback (most recent call last)
-  Cell In[13], line 9
-        6 ax[0].set_xlabel('$Use$')
-        7 ax[0].set_ylabel('$A_{ux}$')
-  ----> 9 ax[1].plot(model.USE.cpu().numpy(), u_list.mean(-1).T * x_list.mean(-1).T)
-       10 ax[1].set_xlabel('Step')
-       11 ax[1].set_ylabel('$A_{ux}$')
+[[file:./.ob-jupyter/c0c2935b60ba38d3241e43ea055b58a7b02c588e.png]]
 
-  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_axes.py:1721, in Axes.plot(self, scalex, scaley, data, *args, **kwargs)
-     1478 """
-     1479 Plot y versus x as lines and/or markers.
-     1480 
-     (...)
-     1718 (``'green'``) or hex strings (``'#008000'``).
-     1719 """
-     1720 kwargs = cbook.normalize_kwargs(kwargs, mlines.Line2D)
-  -> 1721 lines = [*self._get_lines(self, *args, data=data, **kwargs)]
-     1722 for line in lines:
-     1723     self.add_line(line)
+#+begin_src ipython
+  print(torch.cuda.memory_allocated()/100000)
+  del model
+  clear_cache()
+  print(torch.cuda.memory_allocated()/100000)
+#+end_src
 
-  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_base.py:303, in _process_plot_var_args.__call__(self, axes, data, *args, **kwargs)
-      301     this += args[0],
-      302     args = args[1:]
-  --> 303 yield from self._plot_args(
-      304     axes, this, kwargs, ambiguous_fmt_datakey=ambiguous_fmt_datakey)
-
-  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_base.py:499, in _process_plot_var_args._plot_args(self, axes, tup, kwargs, return_kwargs, ambiguous_fmt_datakey)
-      496     axes.yaxis.update_units(y)
-      498 if x.shape[0] != y.shape[0]:
-  --> 499     raise ValueError(f"x and y must have same first dimension, but "
-      500                      f"have shapes {x.shape} and {y.shape}")
-      501 if x.ndim > 2 or y.ndim > 2:
-      502     raise ValueError(f"x and y can be no greater than 2D, but have "
-      503                      f"shapes {x.shape} and {y.shape}")
-
-  ValueError: x and y must have same first dimension, but have shapes (10,) and (111, 10)
-#+end_example
-[[file:./.ob-jupyter/751c99235b607aee645de484e4b8bdbe04028faf.png]]
-:END:
+#+RESULTS:
+: 49145.29792
+: 44485.23776
 
 #+begin_src ipython
 
@@ -584,7 +529,7 @@ This is what we expect!
   model.TAU_FAC = torch.linspace(0.25, 1.0, 10, device='cuda')
   model.N_BATCH = model.TAU_FAC.shape[0]
 
-  rates_fac = model().cpu().detach().numpy()
+  rates_fac = model(RET_STP=1).cpu().detach().numpy()
   print(rates_fac.shape)
 #+end_src
 
@@ -617,7 +562,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/51d38773e769844a4e5bde4301e1655503b9be32.png]]
+[[file:./.ob-jupyter/d4ed076f62eddf6d09745b1dfd7b73917842cadc.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -636,7 +581,18 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/0ecf55ac7e5b946154764323cc369d94c5aeb9c9.png]]
+[[file:./.ob-jupyter/0c87ed08fc486ef7330a42f7fe64f726bc9d2e74.png]]
+
+#+begin_src ipython
+  print(torch.cuda.memory_allocated()/100000)
+  del model
+  clear_cache()
+  print(torch.cuda.memory_allocated()/100000)
+#+end_src
+
+#+RESULTS:
+: 49145.29792
+: 44485.23776
 
 #+begin_src ipython
 

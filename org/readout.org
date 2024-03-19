@@ -1,5 +1,5 @@
 #+STARTUP: fold
-#+TITLE: RNN with pytorch
+#+TITLE: Dual Task Readout Rotation
 #+PROPERTY: header-args:ipython :results both :exports both :async yes :session readout :kernel torch
 
 * Notebook Settings
@@ -99,7 +99,6 @@
 
 #+RESULTS:
 
-
 * Dual task with rotating readout
 ** Parameters
 
@@ -113,7 +112,7 @@
 #+end_src
 
 #+RESULTS:
-: 30
+: 50
 
 ** Fixed Points
 *** Simulation
@@ -129,7 +128,7 @@
   start = perf_counter()
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                   N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
-                  TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=30, TAU_NMDA=[.1, .1])
+                  TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=60)
 
   rates_fp = model(REC_LAST_ONLY=1).detach().cpu().numpy()
   end = perf_counter()
@@ -139,10 +138,8 @@
 #+end_src
 
 #+RESULTS:
-: tensor([[1., 0.],
-:         [0., 1.]], device='cuda:1')
-: torch.Size([4, 8000])
-: Elapsed (with compilation) = 0h 3m 8s
+: Using Hopfield like low rank
+: Elapsed (with compilation) = 0h 6m 10s
 : rates (100, 8000)
 
 *** Readout
@@ -207,10 +204,10 @@
 
 #+RESULTS:
 : (100, 2)
-: Cluster Centers: [[-0.02658858 -1.48497095]
-:  [-1.1926028   0.06519158]]
-: mean phi 42.92268040904239
-: dphi -47.07731959095761
+: Cluster Centers: [[-1.32774025 -0.66651054]
+:  [ 0.19755827  1.42300143]]
+: mean phi 144.37608081034395
+: dphi 54.37608081034395
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -246,7 +243,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/67a55e610f2aa19c7dd7ece1ae15316af696058f.png]]
+[[file:./.ob-jupyter/836f5d074a648b43874915b739aac43aef04b71d.png]]
 
 *** Single trial
 
@@ -254,8 +251,8 @@
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                   N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
                   TASK='dual_odr', LIVE_FF_UPDATE=1, DURATION=10,
-                  TAU_NMDA=[.1, .1], I0=[.1, .1])
-  
+                  I0=[.1, .1])
+
   model.PHI1 = torch.tensor([0, 90 - d_phi], device='cuda:1')
 #+end_src
 
@@ -307,7 +304,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e53c3913acee3f31a20f56bfb87ab64ee9719d71.png]]
+[[file:./.ob-jupyter/a615871cd42d85d04d6534efb395111436dc11c9.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -334,7 +331,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e06019252d83262d3a4915ff3bcb1a40fdafe7fa.png]]
+[[file:./.ob-jupyter/b14ff69449395eaf04814cbb73d6386079f8e88e.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -360,7 +357,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/3890eefe6a641e1670e91bd4452b23495b6cd851.png]]
+[[file:./.ob-jupyter/432f3c7fdcf81de9cd65c6bc4d4fedeeedef4ccc.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -395,7 +392,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/0118fda9a693aa3f679b4d33a3bc60b55baafe27.png]]
+[[file:./.ob-jupyter/e42c6539b4dbb5f716f6f82dd49e6fa6671c2f30.png]]
 
 #+begin_src ipython
   readoutA = overlap[:n_ini, -5:, 0]
@@ -416,12 +413,18 @@
 #+end_src
 
 #+RESULTS:
-: performance 49.0
+: performance 75.8
 
 #+begin_src ipython
-  perf = get_correct_perf(rates_ordered, -d_phi, n_ini)
+  perf = get_correct_perf(rates_ordered, d_phi, n_ini)
   print('corrected performance', perf)
 #+end_src
 
 #+RESULTS:
-: corrected performance 88.0
+: corrected performance 73.0
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:

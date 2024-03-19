@@ -35,6 +35,8 @@
   from src.plot_utils import plot_con
   from src.decode import decode_bump
   from src.utils import clear_cache
+
+  REPO_ROOT = "/home/leon/models/NeuroTorch/"
 #+end_src
 
 #+RESULTS:
@@ -120,15 +122,8 @@ and also low rank
 where Pij can be as above.
 
 * RNN with torch
-** Parameters
-
-#+begin_src ipython
-  REPO_ROOT = "/home/leon/models/NeuroTorch"
-#+end_src
-
-#+RESULTS:
-
 ** Single Trial
+
 Here we will run a single simulation with the parameters provided in config_2pop.yml
 
 #+begin_src ipython
@@ -155,11 +150,9 @@ Here we will run a single simulation with the parameters provided in config_2pop
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-output torch.Size([1, 101, 8000])
-rates (101, 8000)
-Elapsed (with compilation) = 0h 0m 5s
-:END:
+: output torch.Size([1, 101, 8000])
+: rates (101, 8000)
+: Elapsed (with compilation) = 0h 0m 6s
 
 #+RESULTS:
 
@@ -171,16 +164,14 @@ Elapsed (with compilation) = 0h 0m 5s
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-4125.568
-117.51936
-:END:
+: 55108.07552
+: 51106.39616
 
 #+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+  fig, ax = plt.subplots(1, 3, figsize=(2*width, height))
 
   r_max = 10
-  
+
   ax[0].imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
   ax[0].set_ylabel('Neuron #')
   ax[0].set_xlabel('Step')
@@ -192,16 +183,18 @@ Elapsed (with compilation) = 0h 0m 5s
   ax[1].set_ylabel('$<Rates>_i$')
   ax[1].set_xlabel('Step')
   ax[1].set_ylim([0, r_max])
+  
+  ax[2].hist(rates[-1], density=True, bins='auto')
+  ax[2].set_xlabel('Density')
+  ax[2].set_ylabel('Rates')
   plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-[[file:./.ob-jupyter/a97e6de580a8805ffe782925339c63d0f011cb88.png]]
-:END:
+[[file:./.ob-jupyter/e95a9ddab06f6af54e3a02933d1f9584a33a19a8.png]]
 
 #+begin_src ipython
-
+  
 #+end_src
 
 #+RESULTS:
@@ -211,7 +204,7 @@ Elapsed (with compilation) = 0h 0m 5s
 We can run multiple initializations of the network changing N_BATCH to the number of initializations that we want.
 
 #+begin_src ipython
-  model = Network('config_2pop.yml', '', REPO_ROOT)
+  model = Network('config_2pop.yml', '', REPO_ROOT, GAIN=5)
   
   model.N_BATCH = 10
   rates = model().cpu().numpy()
@@ -220,6 +213,34 @@ We can run multiple initializations of the network changing N_BATCH to the numbe
 
 #+RESULTS:
 : rates (10, 101, 8000)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+  for i in range(rates.shape[0]):
+      ax[0].hist(rates.mean(1)[i], bins='auto', density=True)
+  ax[0].set_ylabel('$<Rates>_i$')
+  ax[0].set_xlabel('Initialization')
+
+  ax[1].plot(rates.mean(-1).T)
+  ax[1].set_ylabel('$<Rates>_i$')
+  ax[1].set_xlabel('Step')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/833022514af715d2f8b469b7c8af3336cf97608c.png]]
+
+#+begin_src ipython
+  print(torch.cuda.memory_allocated()/100000)
+  del model
+  clear_cache()
+  print(torch.cuda.memory_allocated()/100000)
+#+end_src
+
+#+RESULTS:
+: 4092.43648
+: 85.1968
 
 *** Batching feedforward inputs
 To run some parameter searches, we can easily batch over a different set of ff inputs
@@ -271,10 +292,15 @@ Then we path these inputs to the model
 [[file:./.ob-jupyter/f4446ffb202d66a5b264e8572cea6055bae1d071.png]]
 
 #+begin_src ipython
-
+  print(torch.cuda.memory_allocated()/100000)
+  del model
+  clear_cache()
+  print(torch.cuda.memory_allocated()/100000)
 #+end_src
 
 #+RESULTS:
+: 4098.83648
+: 85.20192
 
 **** The hard way (slow but more memory friendly)
 We create a batch of ff inputs that are updated at each time step
@@ -295,15 +321,19 @@ We create a batch of ff inputs that are updated at each time step
 #+RESULTS:
 : original ff_input torch.Size([1, 2, 1])
 : new ff_input torch.Size([10, 4, 1])
-: batched ff_input tensor([   0.0000,  124.2260,  248.4520,  372.6780,  496.9040,  621.1299,
-:          745.3560,  869.5820,  993.8080, 1118.0339], device='cuda:0')
+: batched ff_input tensor([  0.0000,  24.8452,  49.6904,  74.5356,  99.3808, 124.2260, 149.0712,
+:         173.9164, 198.7616, 223.6068], device='cuda:0')
 
 #+begin_src ipython
   model.N_BATCH = N_BATCH
   model.Ja0 = new_Ja0
   model.LIVE_FF_UPDATE = 1
 
+  start = perf_counter()
   rates = model().cpu().numpy()
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+
   print('rates', rates.shape)
 #+end_src
 
@@ -325,10 +355,195 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/835c89743aabce8dbeaaa2b1672d60af4ef65566.png]]
+[[file:./.ob-jupyter/37134eb053b36eac22a6bddbae9a7624787d2a37.png]]
 
 #+begin_src ipython
-
+  print(torch.cuda.memory_allocated()/100000)
+  del model
+  clear_cache()
+  print(torch.cuda.memory_allocated()/100000)
 #+end_src
 
 #+RESULTS:
+
+*** Batching Reccurent Weights Jab
+
+#+begin_src ipython
+  model = Network('config_2pop.yml', 'None', REPO_ROOT, IF_STP=0, DT=0.001, GAIN=0.5, VERBOSE=0)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.IF_BATCH_J = 1
+
+  Jee_list = torch.linspace(0.5, 3, 10, device='cuda')  
+  model.Jab_batch = Jee_list.unsqueeze(-1) * model.Jab[0, 0]
+  print(model.Jab_batch[:, 0])
+
+  model.IF_STP = 1
+  model.N_BATCH = model.Jab_batch.shape[0]
+  model.VERBOSE = 0
+#+end_src
+
+#+RESULTS:
+: tensor([0.0112, 0.0174, 0.0236, 0.0298, 0.0360, 0.0422, 0.0484, 0.0547, 0.0609,
+:         0.0671], device='cuda:0')
+    
+#+begin_src ipython
+    start = perf_counter()
+    rates_Jee = model().cpu().detach().numpy()
+    end = perf_counter()
+    print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+
+    print('rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  
+  mean_rates = rates_Jee[:,-1].mean(-1)
+
+  ax[0].plot(Jee_list.cpu().numpy(), mean_rates)
+  ax[0].set_xlabel('$J_{EE}$')
+  ax[0].set_ylabel('$<Rates>_i$')
+  # ax[0].set_ylim([0, 60])
+
+  ax[1].plot(rates_Jee.mean(-1).T)
+  ax[1].set_xlabel('$J_{EE}$')
+  ax[1].set_ylabel('Rates')
+  # ax[1].set_ylim([0, 60])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/394a49082f9b0f22c696b6160bdfa52d5b78d786.png]]
+
+#+begin_src ipython
+  print(torch.cuda.memory_allocated()/100000)
+  del model
+  clear_cache()
+  print(torch.cuda.memory_allocated()/100000)
+#+end_src
+
+#+RESULTS:
+: 4092.47232
+: 85.22752
+
+*** Batching ff input and weights
+
+#+begin_src ipython
+  model = Network('config_2pop.yml', 'None', REPO_ROOT, IF_STP=0, DT=0.001, GAIN=0.5, LIVE_FF_UPDATE=1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  N_BATCH = 10
+
+  JEE = torch.linspace(0.0, 5.0, N_BATCH, device='cuda')
+  JE0 = torch.linspace(0.0, 5.0, N_BATCH, device='cuda')
+  
+  JEE = JEE.unsqueeze(1).expand(N_BATCH, N_BATCH) 
+  JEE = JEE.reshape((-1, 1)) * model.Jab[0, 0]
+  print('Jee', JEE.shape)
+
+  JE0 = JE0.unsqueeze(0).expand(N_BATCH, N_BATCH)
+  JE0 = JE0.reshape((-1, 1))
+  print('Je0', JE0.shape)
+
+  new_Ja0 = model.Ja0.repeat((N_BATCH*N_BATCH, 1, 1)) 
+
+  print('Ja0', new_Ja0.shape)
+  new_Ja0[:,0] = JE0 * torch.sqrt(model.Ka[0]) * model.M0
+#+end_src
+
+#+RESULTS:
+: Jee torch.Size([100, 1])
+: Je0 torch.Size([100, 1])
+: Ja0 torch.Size([100, 2, 1])
+
+#+begin_src ipython
+  print(JEE[:, 0].reshape(N_BATCH, N_BATCH)[0])
+  print(JEE[:, 0].reshape(N_BATCH, N_BATCH)[:, 0])
+#+end_src
+
+#+RESULTS:
+: tensor([0., 0., 0., 0., 0., 0., 0., 0., 0., 0.], device='cuda:0')
+: tensor([0.0000, 0.0124, 0.0248, 0.0373, 0.0497, 0.0621, 0.0745, 0.0870, 0.0994,
+:         0.1118], device='cuda:0')
+
+#+begin_src ipython
+  print(new_Ja0[..., 0, 0].reshape(N_BATCH, N_BATCH)[0])
+  print(new_Ja0[..., 0, 0].reshape(N_BATCH, N_BATCH)[:, 0])
+#+end_src
+
+#+RESULTS:
+: tensor([  0.0000,  12.4226,  24.8452,  37.2678,  49.6904,  62.1130,  74.5356,
+:          86.9582,  99.3808, 111.8034], device='cuda:0')
+: tensor([0., 0., 0., 0., 0., 0., 0., 0., 0., 0.], device='cuda:0')
+
+#+begin_src ipython
+  model.IF_BATCH_J = 1
+  model.Jab_batch = JEE * model.Jab[0, 0]
+
+  model.Ja0 = new_Ja0
+
+  model.N_BATCH = model.Jab_batch.shape[0]
+  model.VERBOSE = 0
+
+  start = perf_counter()
+  rates = model().cpu().detach().numpy()
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+
+  print('rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: Elapsed (with compilation) = 0h 1m 1s
+: rates (100, 101, 8000)
+
+#+begin_src ipython
+  mean_rates = rates.mean(-1).reshape(N_BATCH, N_BATCH, -1)
+  print(mean_rates[0, :, -1])
+  print(mean_rates[:, 0, -1])
+#+end_src
+
+#+RESULTS:
+: [1.4012985e-44 1.9618179e-44 1.2852698e-04 4.6846923e-01 1.0927485e+00
+:  1.7244009e+00 2.3582206e+00 2.9928999e+00 3.6279502e+00 4.2632470e+00]
+: [1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44
+:  1.4e-44]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].imshow(mean_rates[..., -1].T, cmap='jet', origin='lower', aspect='auto')
+  ax[0].set_xlabel('$J_{EE}$')
+  ax[0].set_ylabel('$J_{E0}$')
+
+  ax[1].plot(mean_rates[-1, :, -1]) # over inputs
+  ax[1].plot(mean_rates[:, -1, -1]) # over Js
+  
+  ax[1].set_xlabel('$J_{EE}$')
+  ax[1].set_ylabel('$J_{E0}$')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/9c4e6a8c1defe763a676b5e6acbaecec7c29deac.png]]
+
+#+begin_src ipython
+  print(torch.cuda.memory_allocated()/100000)
+  del model
+  clear_cache()
+  print(torch.cuda.memory_allocated()/100000)
+#+end_src
+
+#+RESULTS:
+: 6716.4672
+: 85.22752

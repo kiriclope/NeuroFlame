@@ -137,10 +137,10 @@
   start = perf_counter()
 
   model = Network('config_EI.yml', 'dual_rand', REPO_ROOT,
-                  VERBOSE=0, DEVICE='cpu',
-                  LIVE_FF_UPDATE=0, N_BATCH=200)
+                  VERBOSE=0, DEVICE='cuda',
+                  LIVE_FF_UPDATE=0, N_BATCH=1)
   
-  rates = model().cpu().numpy()[0]
+  rates = model(RET_FF=1).cpu().numpy()
 
   end = perf_counter()
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
@@ -152,7 +152,9 @@
 #+end_src
 
 #+RESULTS:
-: 86896cf0-7596-4205-be16-7015b1f29e67
+: Using Hopfield like low rank
+: Elapsed (with compilation) = 0h 0m 7s
+: rates (1, 51, 8000)
 
 #+RESULTS:
 
@@ -161,25 +163,27 @@
   print(overlap.shape)
 
   idx = get_idx(model)
-  rates_ordered = rates[:, idx]
+  rates_ordered = rates[..., idx]
 
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
 #+end_src
 
 #+RESULTS:
-: (101, 4)
+: (1, 51, 4)
 : (4, 8000)
+: (1, 51)
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
-  del model
+  # del model
   clear_cache()
   print(torch.cuda.memory_allocated()/100000)
 #+end_src
 
 #+RESULTS:
-: 4094.52544
-: 85.1968
+: 15779.7888
+: 15779.7888
 
 *** Dynamics
 
@@ -203,15 +207,8 @@
 
 #+RESULTS:
 :RESULTS:
-# [goto error]
-: ---------------------------------------------------------------------------
-: NameError                                 Traceback (most recent call last)
-: Cell In[11], line 1
-: ----> 1 ff_input = model.ff_input.cpu().detach().numpy()
-:       2 print(ff_input.shape)
-:       4 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
-: 
-: NameError: name 'model' is not defined
+: (1, 6100, 8000)
+[[file:./.ob-jupyter/d2cbb2c23c5aaf9733682381ff89018c506852a1.png]]
 :END:
 
 #+begin_src ipython
@@ -219,11 +216,11 @@
 
   r_max = 15 
 
-  ax[0].imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+  ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
   ax[0].set_ylabel('Neuron #')
   ax[0].set_xlabel('Step')
 
-  ax[1].imshow(rates_ordered.T, aspect='auto', cmap='jet', vmin=0, vmax=10)
+  ax[1].imshow(rates_ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=10)
   ax[1].set_ylabel('Pref. Location (°)')
   ax[1].set_xlabel('Step')
   ax[1].set_yticks(np.linspace(0, Ne, 5), np.linspace(0, 360, 5).astype(int))
@@ -233,17 +230,16 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f4f89d9795d8df32e714c0bdeb37d8aded841801.png]]
+[[file:./.ob-jupyter/7d7ebc35ba7f105309a2cf67878c42a471cc5ba6.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 
-  ax[0].plot(overlap[:, :2], 'r')
-  ax[0].plot(overlap[:, 2:], 'b')
+  ax[0].plot((m1.T))
   ax[0].set_xlabel('Step')
-  ax[0].set_ylabel('Overlap')
+  ax[0].set_ylabel('$\mathcal{F}_1$')
 
-  ax[1].plot((phi * 180 / np.pi))
+  ax[1].plot((phi.T * 180 / np.pi))
   ax[1].set_yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
   ax[1].set_xlabel('Step')
   ax[1].set_ylabel('Phase (°)')
@@ -251,7 +247,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/59108ebca78af6fdabaa0875883d9b5764d370ed.png]]
+[[file:./.ob-jupyter/723b19721675e3ba683875192e0107154513cd7e.png]]
 
 #+begin_src ipython
 
@@ -272,12 +268,12 @@
 #+end_src
 
 #+RESULTS:
-: 5
+: 72
 
 *** Simulation
 
 #+begin_src ipython
-  LR_COV = [[1.0, 0.8, 0.0, 0.0],
+  LR_COV = [[1.0, 1.0, 0.0, 0.0],
             [0.8, 1.0, 0., 0.0],
             [0.0, 0., 1.0, 0.8],
             [0.0, 0.0, 0.8, 1.0]]
@@ -295,7 +291,8 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 7s
+: Using Hopfield like low rank
+: Elapsed (with compilation) = 0h 1m 4s
 : rates (100, 101, 8000)
 
 #+begin_src ipython
@@ -327,7 +324,7 @@
   print(ff_input.shape)
 
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
-
+  
   ax[0].plot(ff_input[0, :, :5])
   ax[0].plot(ff_input[1, :, :5])
   ax[0].set_xlabel('Step')
@@ -346,7 +343,7 @@
 #+begin_example
   ---------------------------------------------------------------------------
   AttributeError                            Traceback (most recent call last)
-  Cell In[113], line 4
+  Cell In[255], line 4
         1 Ne = model.Na[0].detach().cpu().numpy()
         2 N = model.N_NEURON
   ----> 4 ff_input = model.ff_input.cpu().detach().numpy()
@@ -373,7 +370,7 @@
 #+RESULTS:
 :RESULTS:
 : (100, 101)
-[[file:./.ob-jupyter/a64e9b9445b0e6eaf4896d7ff6bccdd8b8e78cd1.png]]
+[[file:./.ob-jupyter/7fa6eaa4db467ebafdb1a1a01aee75233c75299e.png]]
 :END:
 
 #+begin_src ipython
@@ -413,7 +410,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e86b21b7a5bae4fa3267e8e49abcf5562fb64115.png]]
+[[file:./.ob-jupyter/09af6a1122a32c733e8ce891beb0adee9c6c5c5f.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -448,7 +445,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/719d9cfecfdb17e4857ea8da7e366573beced021.png]]
+[[file:./.ob-jupyter/f8ce0aea17daa2275cbcfe0cd797cb42a334f856.png]]
 
 #+begin_src ipython
   print(rates_ordered.shape)
@@ -464,7 +461,7 @@
 #+RESULTS:
 :RESULTS:
 : (100, 101, 8000)
-[[file:./.ob-jupyter/d94c04b343657645fd1c6c50e159578f244e9e84.png]]
+[[file:./.ob-jupyter/9be265945c901fd8ab922c92b0e94cd9f4d2ead8.png]]
 :END:
 
 #+begin_src ipython
@@ -482,7 +479,7 @@
 #+RESULTS:
 :RESULTS:
 : (100, 101)
-[[file:./.ob-jupyter/8c94e5b748205ea17ef7f6d1689ec7c30be43dc8.png]]
+[[file:./.ob-jupyter/1a2e1102fb99012a03824a937b2022de0d46e10f.png]]
 :END:
 
 #+begin_src ipython

@@ -140,7 +140,7 @@ class Network(nn.Module):
         # update hidden state
         if self.LR_TRAIN:
             lr = (1.0 + self.mask * self.KAPPA[0][0] * (self.U @ self.U.T) / torch.sqrt(self.Ka[0]))
-            hidden = rates @ (self.Wab_T * lr.T)  
+            hidden = rates @ (self.Wab_T * lr.T)
         elif self.IF_W_BLOCKS:
             EtoE = (rates[:, self.slices[0]]) @ self.Wab_T[self.slices[0], self.slices[0]]
             ItoE = (rates[:, self.slices[1]]) @ self.Wab_T[self.slices[1], self.slices[0]]
@@ -158,8 +158,8 @@ class Network(nn.Module):
         # update stp variables
         if self.IF_STP:
             A_ux = self.stp(rates[:, self.slices[0]])
-            hidden[:, self.slices[0]].add_((A_ux * rates[:, self.slices[0]]) @ self.W_stp_T)
-            
+            hidden[:, self.slices[0]].add_(( A_ux * rates[:, self.slices[0]]) @ self.W_stp_T)
+        
         # update batched EtoE
         if self.IF_BATCH_J:
             hidden[:, self.slices[0]].add_((self.Jab_batch * rates[:, self.slices[0]]) @ self.W_batch_T)
@@ -219,7 +219,7 @@ class Network(nn.Module):
                 self.x_list = []
                 self.u_list = []
             
-            self.W_stp_T = self.Wab_T[self.slices[0],self.slices[0]] / 0.1
+            self.W_stp_T = self.J_STP * self.Wab_T[self.slices[0],self.slices[0]]
         
         if self.IF_BATCH_J or self.IF_STP:
             self.Wab_T[self.slices[0], self.slices[0]] = 0
@@ -228,7 +228,7 @@ class Network(nn.Module):
         mv_rates = 0
         mv_ff = 0
         
-        output = []        
+        output = []
         if self.LIVE_FF_UPDATE:
             ff_output = []
             
@@ -549,7 +549,6 @@ class Network(nn.Module):
             if step in self.N_STIM_OFF:
                 ff_input[:, self.slices[0]] = self.Ja0[:, 0]
                 
-        
         return ff_input, noise
     
     def init_ff_live(self):
