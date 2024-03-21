@@ -105,7 +105,7 @@ First, I we will plot the dynamics of the stp variables for a neuron with a give
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5753aded24c89d3f8aeb90277d486185dc26d404.png]]
+[[file:./.ob-jupyter/bd1c990635acf84072a83e0cbce51b18d86ebc7b.png]]
 
 Then I will look at the evolution of the steady state value of A_ux with the rate for different values of tau_fac
 
@@ -165,19 +165,41 @@ Then I will look at the evolution of the steady state value of A_ux with the rat
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/94d85f0cdf9555535252e14b9cb7a16adcf81725.png]]
+[[file:./.ob-jupyter/d3b7bb20bc21f9db5f59b1b65c6ff91ad3496d06.png]]
 
 This is what we expect!
 
 ** From the Network class in src/network.py
-*** Single Trial
+*** STP shape in the model
 
 #+begin_src ipython
-  model = Network('config_2pop.yml', 'None', REPO_ROOT, IF_STP=1, DT=0.001, GAIN=1.0, VERBOSE=0, TASK='odr')
-  rates = model(RET_STP=1).cpu().detach().numpy()
+  model = Network('config_single.yml', 'None', REPO_ROOT, IF_STP=1, DT=0.001, DURATION=30, VERBOSE=0, N_NEURON=10)
+  model.Wab_T = torch.zeros((model.N_NEURON, model.N_NEURON), dtype=torch.float32, device='cuda')
 #+end_src
 
 #+RESULTS:
+
+#+begin_src ipython
+  Je0_list = np.linspace(0, 100, 50)
+
+  ff_inputs = []
+  for i in Je0_list:
+      model.Ja0[:, 0] = i  # here we set the ff input to E to value i in 0 .. 10
+      model.VAR_FF[:, 0] = np.sqrt(i)
+      ff_inputs.append(model.init_ff_input())
+
+  ff_inputs = torch.vstack(ff_inputs)  
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  rates = model(ff_input=ff_inputs, RET_STP=1).cpu().detach().numpy()
+  print(rates.shape)
+#+end_src  
+
+#+RESULTS:
+: (50, 301, 10)
 
 #+begin_src ipython
   u_list = model.u_list.cpu().numpy()
@@ -187,7 +209,130 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-: (1, 101, 8000) (1, 101, 8000)
+: (50, 301, 10) (50, 301, 10)
+
+#+begin_src ipython 
+  plt.plot(Aux[:, -1].mean(-1))
+  plt.xlabel('Rates')
+  plt.ylabel('Aux')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/fc36b80b28f83459125a35c67e27f76a0db28805.png]]
+
+#+begin_src ipython
+  
+#+end_src
+
+#+RESULTS:
+
+*** Two neurons
+
+#+begin_src ipython
+  model = Network('config_single.yml', 'None', REPO_ROOT, IF_STP=1, DT=0.001, DURATION=10, VERBOSE=0, N_NEURON=2)
+  model.Wab_T = torch.zeros((model.N_NEURON, model.N_NEURON), dtype=torch.float32, device='cuda')
+  model.Wab_T[0, 1] = 1.0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.Ja0 = model.Ja0.repeat(1, 1, 2)
+  model.VAR_FF = model.VAR_FF.repeat(1, 1, 2)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  Je0_list = np.linspace(0, 100, 50)
+
+  model.Ja0[:, 0, 1] = 0  # here we set the ff input to E to value i in 0 .. 10
+  model.VAR_FF[:, 0, 1] = 0
+
+  ff_inputs = []
+  for i in Je0_list:
+      model.Ja0[:, 0, 0] = i  # here we set the ff input to E to value i in 0 .. 10
+      model.VAR_FF[:, 0, 0] = np.sqrt(i)
+
+      ff_inputs.append(model.init_ff_input())
+
+  ff_inputs = torch.vstack(ff_inputs)
+  print(ff_inputs.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([50, 10100, 2])
+
+#+begin_src ipython
+  rates = model(ff_input=ff_inputs, RET_STP=1).cpu().detach().numpy()
+  print(rates.shape)
+#+end_src  
+
+#+RESULTS:
+: tensor([[0., 1.],
+:         [0., 0.]], device='cuda:0')
+: (50, 101, 2)
+
+#+begin_src ipython
+  plt.plot(rates[:,-1])
+  plt.xlabel('FF Input')
+  plt.ylabel('Rates')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/ae814f40e2f6fa8b71e259ad31517400a09b7add.png]]
+
+#+begin_src ipython
+  u_list = model.u_list.cpu().numpy()
+  x_list = model.x_list.cpu().numpy()
+  Aux = u_list * x_list
+  print(u_list.shape, x_list.shape)
+#+end_src
+
+#+RESULTS:
+: (50, 101, 2) (50, 101, 2)
+
+#+begin_src ipython 
+  plt.plot(rates[:, -1, 0], Aux[:, -1], 'o')
+  plt.xlabel('Rates')
+  plt.ylabel('Aux')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/29894beff771480bf3f49fb91a6c9526d3fb1121.png]]
+
+#+begin_src ipython
+  print(model.J_STP)
+  print(model.W_stp_T)
+#+end_src
+
+#+RESULTS:
+: tensor(2., device='cuda:0')
+: tensor([[0., 1.],
+:         [0., 0.]], device='cuda:0')
+
+*** Single Trial
+
+#+begin_src ipython
+  model = Network('config_EI.yml', 'None', REPO_ROOT, IF_STP=1, DT=0.001, VERBOSE=0)
+  rates = model(RET_STP=1).cpu().detach().numpy()
+#+end_src
+
+#+RESULTS:
+: Using Hopfield like low rank
+
+#+begin_src ipython
+  u_list = model.u_list.cpu().numpy()
+  x_list = model.x_list.cpu().numpy()
+  Aux = u_list * x_list
+  print(u_list.shape, x_list.shape)
+#+end_src
+
+#+RESULTS:
+: (1, 51, 8000) (1, 51, 8000)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
@@ -211,7 +356,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/3ad394da0e7aceb1779608b558fded7f499b8292.png]]
+[[file:./.ob-jupyter/7f055e14c644900295ffc4323a05b832f5deaf81.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates, axis=-1)
@@ -219,7 +364,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-: (1, 101)
+: (1, 51)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -237,11 +382,13 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/133b895932e14796ee139b8a6172cdcd74cdedf9.png]]
+[[file:./.ob-jupyter/5ef3f334d51a3a4adb2775911b4b4c91f621eedd.png]]
 
 #+begin_src ipython
 #  plt.plot(rates[-1], Aux[-1], 'o')
 #+end_src
+
+#+RESULTS:
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -251,8 +398,8 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-: 48552.22272
-: 44485.23776
+: 6687.02208
+: 85.1968
 
 #+begin_src ipython
 
@@ -317,7 +464,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/71fe07544041ac44d3c8594ca456649e9a4c3711.png]]
+[[file:./.ob-jupyter/7ee9e9f9460b31a853f30bd3ad2845c2ee6bc04e.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -337,7 +484,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/364019780eb44381d02197e9fdc3bf9bdfa035c2.png]]
+[[file:./.ob-jupyter/0b2804057a75970134c83148ad7817c2da166289.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -347,8 +494,8 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-: 49145.2928
-: 44485.23776
+: 51709.30176
+: 44485.5296
 
 *** Rates vs Jee
 
@@ -400,7 +547,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f7c34f7ba68fdffe51c1d98b5454946b816ea362.png]]
+[[file:./.ob-jupyter/977ff23254abb0dcac713978c522d2b59e08f176.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -420,7 +567,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/983116f4c5a05858db64b0da95e8669fc9186747.png]]
+[[file:./.ob-jupyter/75f62e59896d169a5b5ac638ef597977087649cb.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -430,8 +577,8 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-: 51705.29792
-: 44485.23776
+: 54269.312
+: 44485.53472
 
 *** Rates vs Use
 
@@ -479,7 +626,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/bc15f6b76a0bfc42a002c7407105f892cb61e639.png]]
+[[file:./.ob-jupyter/5a60297686034d6b2d6508a8bbf024679337b494.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -498,7 +645,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c0c2935b60ba38d3241e43ea055b58a7b02c588e.png]]
+[[file:./.ob-jupyter/0ba5b701849aaa8e3d34a6cccc160e891cee367d.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -508,8 +655,8 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-: 49145.29792
-: 44485.23776
+: 51709.312
+: 44485.53472
 
 #+begin_src ipython
 
@@ -562,7 +709,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/d4ed076f62eddf6d09745b1dfd7b73917842cadc.png]]
+[[file:./.ob-jupyter/226f18b3300e5d1bf37985c7d8c3fef66ba7df2e.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -581,7 +728,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/0c87ed08fc486ef7330a42f7fe64f726bc9d2e74.png]]
+[[file:./.ob-jupyter/30bda71961a95fa94425187d717abe024f201058.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -591,8 +738,8 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-: 49145.29792
-: 44485.23776
+: 51709.312
+: 44485.53472
 
 #+begin_src ipython
 

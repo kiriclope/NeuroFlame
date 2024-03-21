@@ -164,8 +164,8 @@ Here we will run a single simulation with the parameters provided in config_2pop
 #+end_src
 
 #+RESULTS:
-: 55108.07552
-: 51106.39616
+: 4124.75904
+: 117.51936
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=(2*width, height))
@@ -191,7 +191,7 @@ Here we will run a single simulation with the parameters provided in config_2pop
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e95a9ddab06f6af54e3a02933d1f9584a33a19a8.png]]
+[[file:./.ob-jupyter/de7f63661ec1db32ab020970f0f803ab6c213fce.png]]
 
 #+begin_src ipython
   
@@ -229,7 +229,7 @@ We can run multiple initializations of the network changing N_BATCH to the numbe
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/833022514af715d2f8b469b7c8af3336cf97608c.png]]
+[[file:./.ob-jupyter/09b05b5846dd6c9f5c1c7204bb10f4b4c00bc270.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -239,8 +239,8 @@ We can run multiple initializations of the network changing N_BATCH to the numbe
 #+end_src
 
 #+RESULTS:
-: 4092.43648
-: 85.1968
+: 4124.75904
+: 117.51936
 
 *** Batching feedforward inputs
 To run some parameter searches, we can easily batch over a different set of ff inputs
@@ -262,7 +262,7 @@ We create a batch of inputs of size (N_BATCH, N_STEPS, N_NEURON)
 #+end_src
 
 #+RESULTS:
-: ff_inputs torch.Size([10, 2220, 10000])
+: ff_inputs torch.Size([10, 11100, 10000])
 
 Then we path these inputs to the model
 
@@ -289,7 +289,7 @@ Then we path these inputs to the model
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f4446ffb202d66a5b264e8572cea6055bae1d071.png]]
+[[file:./.ob-jupyter/98d286989691c458d315b6ee2f17862c4fa87e8e.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -299,8 +299,8 @@ Then we path these inputs to the model
 #+end_src
 
 #+RESULTS:
-: 4098.83648
-: 85.20192
+: 48524.75904
+: 44517.51936
 
 **** The hard way (slow but more memory friendly)
 We create a batch of ff inputs that are updated at each time step
@@ -338,6 +338,7 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
+: Elapsed (with compilation) = 0h 0m 9s
 : rates (10, 101, 8000)
 
 #+begin_src ipython
@@ -355,7 +356,7 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/37134eb053b36eac22a6bddbae9a7624787d2a37.png]]
+[[file:./.ob-jupyter/03fbed52abd8e8861b0af19f521b27bfcc2a3213.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -365,6 +366,8 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
+: 48531.15904
+: 44517.52448
 
 *** Batching Reccurent Weights Jab
 
@@ -377,7 +380,7 @@ We create a batch of ff inputs that are updated at each time step
 #+begin_src ipython
   model.IF_BATCH_J = 1
 
-  Jee_list = torch.linspace(0.5, 3, 10, device='cuda')  
+  Jee_list = torch.linspace(0.0, 1.5, 10, device='cuda')  
   model.Jab_batch = Jee_list.unsqueeze(-1) * model.Jab[0, 0]
   print(model.Jab_batch[:, 0])
 
@@ -387,23 +390,25 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-: tensor([0.0112, 0.0174, 0.0236, 0.0298, 0.0360, 0.0422, 0.0484, 0.0547, 0.0609,
-:         0.0671], device='cuda:0')
+: tensor([0.0000, 0.0037, 0.0075, 0.0112, 0.0149, 0.0186, 0.0224, 0.0261, 0.0298,
+:         0.0335], device='cuda:0')
     
 #+begin_src ipython
-    start = perf_counter()
-    rates_Jee = model().cpu().detach().numpy()
-    end = perf_counter()
-    print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+  start = perf_counter()
+  rates_Jee = model().cpu().detach().numpy()
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
-    print('rates', rates.shape)
+  print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
+: Elapsed (with compilation) = 0h 0m 24s
+: rates (10, 101, 8000)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-  
+
   mean_rates = rates_Jee[:,-1].mean(-1)
 
   ax[0].plot(Jee_list.cpu().numpy(), mean_rates)
@@ -419,7 +424,7 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/394a49082f9b0f22c696b6160bdfa52d5b78d786.png]]
+[[file:./.ob-jupyter/74be1f0d8274c7ca81a8d431d7afca4e52b97cb7.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -429,8 +434,8 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-: 4092.47232
-: 85.22752
+: 53651.19488
+: 44517.5296
 
 *** Batching ff input and weights
 
@@ -442,10 +447,10 @@ We create a batch of ff inputs that are updated at each time step
 
 #+begin_src ipython
   N_BATCH = 10
-
+  
   JEE = torch.linspace(0.0, 5.0, N_BATCH, device='cuda')
   JE0 = torch.linspace(0.0, 5.0, N_BATCH, device='cuda')
-  
+
   JEE = JEE.unsqueeze(1).expand(N_BATCH, N_BATCH) 
   JEE = JEE.reshape((-1, 1)) * model.Jab[0, 0]
   print('Jee', JEE.shape)
@@ -513,8 +518,8 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-: [1.4012985e-44 1.9618179e-44 1.2852698e-04 4.6846923e-01 1.0927485e+00
-:  1.7244009e+00 2.3582206e+00 2.9928999e+00 3.6279502e+00 4.2632470e+00]
+: [1.4012985e-44 1.9618179e-44 1.6705768e-05 4.7168672e-01 1.0980070e+00
+:  1.7318970e+00 2.3675365e+00 3.0038698e+00 3.6404078e+00 4.2769861e+00]
 : [1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44
 :  1.4e-44]
 
@@ -535,7 +540,7 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/9c4e6a8c1defe763a676b5e6acbaecec7c29deac.png]]
+[[file:./.ob-jupyter/666865640538398619d0d4d02677f62bc707ec42.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -545,5 +550,5 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-: 6716.4672
-: 85.22752
+: 51148.78464
+: 44517.54496

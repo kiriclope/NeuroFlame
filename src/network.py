@@ -58,7 +58,7 @@ class Network(nn.Module):
         
         # Reset the seed
         set_seed(0)
-
+    
     def initLR(self):
         # Low rank vector
         self.U = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)),
@@ -133,7 +133,19 @@ class Network(nn.Module):
         
         # if self.CON_TYPE=='sparse':
         #     self.Wab_T = self.Wab_T.to_sparse()
-    
+
+    def initSTP(self):
+        self.J_STP = torch.tensor(self.J_STP, dtype=self.FLOAT, device='cuda')
+        
+        self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC,
+                              self.DT, (self.N_BATCH, self.Na[0]),
+                              FLOAT=self.FLOAT, device=self.device)
+        
+        #################################################
+        # NEED .clone() here otherwise BAD THINGS HAPPEN
+        #################################################
+        self.W_stp_T = self.Wab_T[self.slices[0],self.slices[0]].clone()
+        
     def update_dynamics(self, rates, ff_input, rec_input):
         '''Updates the dynamics of the model at each timestep'''
         
@@ -152,14 +164,12 @@ class Network(nn.Module):
         else:
             hidden = rates @ self.Wab_T
         
-        # if self.CON_TYPE=='sparse':
-        #     hidden = torch.sparse.mm(rates, self.Wab_T)
-        
         # update stp variables
         if self.IF_STP:
-            A_ux = self.stp(rates[:, self.slices[0]])
-            hidden[:, self.slices[0]].add_(( A_ux * rates[:, self.slices[0]]) @ self.W_stp_T)
-        
+            Aux = self.stp(rates[:, self.slices[0]])  # Aux is now u * x * rates
+            hidden_stp = self.J_STP * Aux @ self.W_stp_T
+            hidden[:, self.slices[0]].add_(hidden_stp)
+            
         # update batched EtoE
         if self.IF_BATCH_J:
             hidden[:, self.slices[0]].add_((self.Jab_batch * rates[:, self.slices[0]]) @ self.W_batch_T)
@@ -174,10 +184,14 @@ class Network(nn.Module):
         net_input = ff_input + rec_input[0]
         
         if self.IF_NMDA:
-            hidden =  self.R_NMDA * rates[:, self.slices[0]] @ self.Wab_T[self.slices[0]]
-            rec_input[1] = rec_input[1] * self.EXP_DT_TAU_NMDA + hidden * self.DT_TAU_NMDA
+            hidden = rates[:, self.slices[0]] @ self.Wab_T[self.slices[0]]
+            if self.IF_STP:
+                hidden[:, self.slices[0]].add_(hidden_stp)
+            
+            rec_input[1] = rec_input[1] * self.EXP_DT_TAU_NMDA + self.R_NMDA * hidden * self.DT_TAU_NMDA
             net_input.add_(rec_input[1])
-        
+
+        # compute non linearity
         non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
         
         # update rates
@@ -189,7 +203,7 @@ class Network(nn.Module):
         del hidden, net_input, non_linear
         
         return rates, rec_input
-
+    
     def forward(self, ff_input=None, REC_LAST_ONLY=0, RET_FF=0, RET_STP=0):
         '''
         Main method of Network class, runs networks dynamics over set of timesteps
@@ -207,19 +221,19 @@ class Network(nn.Module):
         # Initialization (if  ff_input is None, ff_input is generated)
         rates, ff_input, rec_input = self.initialization(ff_input)
 
+        #################################################
+        # NEED .clone() here otherwise BAD THINGS HAPPEN
+        #################################################
         if self.IF_BATCH_J:
-            self.W_batch_T = self.Wab_T[self.slices[0], self.slices[0]] / self.Jab[0, 0]
+            self.W_batch_T = self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
         
         # Add STP
         if self.IF_STP:
-            self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC,
-                                  self.DT, (self.N_BATCH, self.Na[0]),
-                                  FLOAT=self.FLOAT, device=self.device)
+            self.initSTP()
+            
             if RET_STP:
                 self.x_list = []
                 self.u_list = []
-            
-            self.W_stp_T = self.J_STP * self.Wab_T[self.slices[0],self.slices[0]]
         
         if self.IF_BATCH_J or self.IF_STP:
             self.Wab_T[self.slices[0], self.slices[0]] = 0
@@ -473,14 +487,16 @@ class Network(nn.Module):
         # scaling variance as 1 / sqrt(K0)
         self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
         self.VAR_FF.mul_(self.M0 / torch.sqrt(self.Ka[0]))
-
+        self.VAR_FF = self.VAR_FF.unsqueeze(0)  # add batch dim
+        self.VAR_FF = self.VAR_FF.unsqueeze(-1) # add neural dim
+        
     def live_ff_input(self, step, ff_input):
         
         noise = 0
-        if self.VAR_FF[0]>0:
+        if self.VAR_FF[0, 0, 0]>0:
             noise = torch.randn((self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
             for i_pop in range(self.N_POP):
-                noise[:, self.slices[i_pop]].mul_(self.VAR_FF[i_pop])
+                noise[:, self.slices[i_pop]].mul_(self.VAR_FF[:, i_pop])
         
         if step==0:
             for i_pop in range(self.N_POP):
@@ -580,8 +596,8 @@ class Network(nn.Module):
         ff_input = torch.randn((self.N_BATCH, self.N_STEPS, self.N_NEURON), dtype=self.FLOAT, device=self.device)
 
         for i_pop in range(self.N_POP):
-            ff_input[..., self.slices[i_pop]].mul_(self.VAR_FF[i_pop] / torch.sqrt(self.Ka[0]))
-
+            ff_input[..., self.slices[i_pop]].mul_(self.VAR_FF[:, i_pop] / torch.sqrt(self.Ka[0]))
+        
         for i_pop in range(self.N_POP):
             if self.BUMP_SWITCH[i_pop]:
                 ff_input[:, :self.N_STIM_ON[0], self.slices[i_pop]].add_(self.Ja0[:, i_pop] / torch.sqrt(self.Ka[0]))
@@ -598,8 +614,11 @@ class Network(nn.Module):
                     if 'rand' in self.TASK:
                         # random phase on the lr ring
                         theta = get_theta(self.PHI0[0], self.PHI0[2])
-                        stimulus = Stimuli('odr', size, device=self.device)(self.I0[i], self.SIGMA0[i], self.PHI0[i],
-                                                                            rnd_phase=1, theta_list=theta)
+                        stimulus = Stimuli('odr', size, device=self.device)(self.I0[i],
+                                                                            self.SIGMA0[i],
+                                                                            self.PHI0[i],
+                                                                            rnd_phase=1,
+                                                                            theta_list=theta)
                         del theta
                         
                         stimulus = stimulus.unsqueeze(1).expand((stimulus.shape[0],
@@ -607,9 +626,11 @@ class Network(nn.Module):
                                                                  stimulus.shape[-1]))
                     else:
                         stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])
-
+                    
                 else:
-                    stimulus = Stimuli(self.TASK, size, device=self.device)(self.I0[i], self.SIGMA0[i], self.PHI0[:, i])
+                    stimulus = Stimuli(self.TASK, size, device=self.device)(self.I0[i],
+                                                                            self.SIGMA0[i],
+                                                                            self.PHI0[:, i])
                     
                 ff_input[:, self.N_STIM_ON[i]:self.N_STIM_OFF[i], self.slices[0]].add_(stimulus)
                 

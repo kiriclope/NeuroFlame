@@ -7,12 +7,11 @@ class Plasticity():
     """
     
     def __init__(self, USE, TAU_FAC, TAU_REC, DT, size, FLOAT=torch.float, device='cuda'):
-        
         N_BATCH = size[0]
         N_NEURON = size[1]
         
         self.DT = DT
-        
+                
         self.USE = torch.tensor(USE, dtype=FLOAT, device=device).unsqueeze(-1)
         # print('USE', self.USE.shape)
         
@@ -35,7 +34,7 @@ class Plasticity():
         self.x_stp = self.x_stp + (1.0 - self.x_stp) * self.DT_TAU_REC - self.DT * u_plus * self.x_stp * rates
         self.u_stp = self.u_stp - self.DT_TAU_FAC * self.u_stp + self.DT * self.USE * (1.0 - self.u_stp) * rates
         
-        return (u_plus * self.x_stp).squeeze(-1)
+        return (u_plus * self.x_stp) * rates
 
     def __call__(self, rates):
         return self.forward(rates)

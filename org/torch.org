@@ -137,9 +137,8 @@
   start = perf_counter()
 
   model = Network('config_EI.yml', 'dual_rand', REPO_ROOT,
-                  VERBOSE=0, DEVICE='cuda',
-                  LIVE_FF_UPDATE=0, N_BATCH=1)
-  
+                  VERBOSE=0, DEVICE='cuda', seed=0, DT=.001)
+
   rates = model(RET_FF=1).cpu().numpy()
 
   end = perf_counter()
@@ -153,8 +152,8 @@
 
 #+RESULTS:
 : Using Hopfield like low rank
-: Elapsed (with compilation) = 0h 0m 7s
-: rates (1, 51, 8000)
+: Elapsed (with compilation) = 0h 0m 12s
+: rates (1, 101, 8000)
 
 #+RESULTS:
 
@@ -170,9 +169,9 @@
 #+end_src
 
 #+RESULTS:
-: (1, 51, 4)
+: (1, 101, 4)
 : (4, 8000)
-: (1, 51)
+: (1, 101)
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -182,8 +181,8 @@
 #+end_src
 
 #+RESULTS:
-: 15779.7888
-: 15779.7888
+: 11100.3392
+: 11100.3392
 
 *** Dynamics
 
@@ -207,8 +206,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (1, 6100, 8000)
-[[file:./.ob-jupyter/d2cbb2c23c5aaf9733682381ff89018c506852a1.png]]
+: (1, 11100, 8000)
+[[file:./.ob-jupyter/0153500a6fcd5b7027c23cf4891532c3f0f59da3.png]]
 :END:
 
 #+begin_src ipython
@@ -230,7 +229,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7d7ebc35ba7f105309a2cf67878c42a471cc5ba6.png]]
+[[file:./.ob-jupyter/8c128db42c4998aaaa9fb4f1551065d0e7cf748b.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -247,7 +246,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/723b19721675e3ba683875192e0107154513cd7e.png]]
+[[file:./.ob-jupyter/628053005bfbed1a7d44c8d6168c5f77aac46966.png]]
 
 #+begin_src ipython
 
