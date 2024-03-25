@@ -314,14 +314,14 @@
 
 #+begin_src ipython
   Con = Connectivity(1000, 1000, 100, verbose=1)
-  Wij = Con('sparse', 'lr', kappa=5, lr_mean=[0, 0], lr_cov=[[1, 0], [0, 1]])
+  Wij = Con('all2all', 'lr', kappa=5, lr_mean=[0, 0], lr_cov=[[1, 0], [0, 1]])
 #+end_src
 
 #+RESULTS:
 : Generating low rank vectors
 : ksi torch.Size([2, 1000])
 : low rank probability
-: Sparse random connectivity
+: All to all connectivity
 : with weak low rank structure, KAPPA 5.00
 
 #+begin_src ipython
@@ -330,16 +330,7 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-: ---------------------------------------------------------------------------
-: AttributeError                            Traceback (most recent call last)
-: Cell In[20], line 1
-: ----> 1 Pij = Con.Pij.cpu().numpy()
-:       2 print(Pij.shape)
-: 
-: AttributeError: 'Connectivity' object has no attribute 'Pij'
-:END:
+: (1000, 1000)
 
 #+begin_src ipython
   Pj = Pij.mean(axis=0)
@@ -348,17 +339,7 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-: ---------------------------------------------------------------------------
-: NameError                                 Traceback (most recent call last)
-: Cell In[21], line 1
-: ----> 1 Pj = Pij.mean(axis=0)
-:       2 plt.plot(Pj)
-:       3 plt.show()
-: 
-: NameError: name 'Pij' is not defined
-:END:
+[[file:./.ob-jupyter/1121dbb947e42fc6d30c5e616d11a1db7dedf6e6.png]]
 
 #+begin_src ipython
   Cij = Wij.cpu().detach().numpy()
@@ -404,14 +385,14 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/9ca2e0ea3a5fd991892e71eb0d1f9bebfa528c60.png]]
+[[file:./.ob-jupyter/6a0df45178cabdf6f93b17680e12a8375ca65433.png]]
 
 #+begin_src ipython
   plot_eigen(1.0 * Wij)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c49ea092c7b6e6ceccf42884f1c2d5ed104c1794.png]]
+[[file:./.ob-jupyter/96deb8001d31e72242353d8ed023a546284188e6.png]]
 
 #+begin_src ipython
   ksi = Con.ksi.cpu().detach().numpy()
@@ -466,7 +447,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/9d0f14947fad15ffd4080efb5777766a1c032ef0.png]]
+[[file:./.ob-jupyter/62cbe8703fd3bed1cfba6c01b5e468a613214425.png]]
 
 #+begin_src ipython
 

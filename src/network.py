@@ -135,7 +135,7 @@ class Network(nn.Module):
         #     self.Wab_T = self.Wab_T.to_sparse()
 
     def initSTP(self):
-        self.J_STP = torch.tensor(self.J_STP, dtype=self.FLOAT, device='cuda')
+        self.J_STP = torch.tensor(self.J_STP, dtype=self.FLOAT, device=self.device)
         
         self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC,
                               self.DT, (self.N_BATCH, self.Na[0]),
@@ -357,7 +357,7 @@ class Network(nn.Module):
             ff_input.to(self.device)
             self.N_BATCH = ff_input.shape[0]
         
-        rec_input = torch.sqrt(self.Ka[0]) * torch.randn((self.IF_NMDA+1, self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
+        rec_input = torch.randn((self.IF_NMDA+1, self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
         
         if self.LIVE_FF_UPDATE:
             rates = Activation()(ff_input + rec_input[0], func_name=self.TF_TYPE, thresh=self.THRESH[0])
@@ -596,7 +596,7 @@ class Network(nn.Module):
         ff_input = torch.randn((self.N_BATCH, self.N_STEPS, self.N_NEURON), dtype=self.FLOAT, device=self.device)
 
         for i_pop in range(self.N_POP):
-            ff_input[..., self.slices[i_pop]].mul_(self.VAR_FF[:, i_pop] / torch.sqrt(self.Ka[0]))
+            ff_input[..., self.slices[i_pop]].mul_(self.VAR_FF[:, i_pop])
         
         for i_pop in range(self.N_POP):
             if self.BUMP_SWITCH[i_pop]:

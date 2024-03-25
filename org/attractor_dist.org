@@ -1,0 +1,313 @@
+#+STARTUP: fold
+#+TITLE: Dual Task Readout Rotation
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session readout :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Imports
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../')
+
+  import torch
+  import gc
+  import pandas as pd
+  from time import perf_counter
+
+  from src.network import Network
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump
+  from src.utils import clear_cache
+#+end_src
+
+#+RESULTS:
+
+* Helpers
+
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython 
+  import numpy as np
+  def get_theta(a, b, GM=0, IF_NORM=0):
+
+      u, v = a, b
+
+      if GM:
+          v = b - np.dot(b, a) / np.dot(a, a) * a
+
+      if IF_NORM:
+          u = a / np.linalg.norm(a)
+          v = b / np.linalg.norm(b)
+
+      return np.arctan2(v, u)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython 
+  def get_idx(model):
+      ksi = model.PHI0.cpu().detach().numpy()
+      theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
+      return theta.argsort()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython 
+  def get_overlap(model, rates):
+      ksi = model.PHI0
+      return rates @ ksi.T / rates.shape[-1]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_correct_perf(rates, d_phi, n_ini=50):
+      m0, m1, phi = decode_bump(rates, axis=-1)
+      x = m1[..., -1] / m0[..., -1] * np.cos(phi[..., -1] - d_phi * np.pi / 180)
+      performance = (x[:n_ini] < 0).mean() * 100
+      performance += (x[n_ini:] > 0).mean() * 100
+
+      return performance / 2
+#+end_src
+
+#+RESULTS:
+
+* Dual task with rotating readout
+** Parameters
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  conf_name = "config_EI.yml"
+  name = "low_rank_ini"
+#+end_src
+
+#+RESULTS:
+
+** Fixed Points
+*** Simulation
+
+#+begin_src ipython
+  n_ini  = 25
+
+  LR_COV = [[1.0, 1.0, 0.0, 0.0],
+            [0.8, 1.0, 0.1, 0.0],
+            [0.0, 0.1, 1.0, 0.8],
+            [0.0, 0.0, 0.8, 1.0]]
+
+  start = perf_counter()
+
+  perf = []
+  perf_cr = []
+  distance = []
+
+  for i in range(10):
+      seed = np.random.randint(10000)
+
+      model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
+                      N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
+                      TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=30)
+
+      idx = get_idx(model)
+
+      dum = model(REC_LAST_ONLY=1)[..., idx]
+      rates_fp.append(dum)
+
+      dist, mean_phi = get_fp_dist(dum.cpu().numpy())
+      distance.append(dist)
+
+      model.TASK = 'dual'
+      model.DURATION = 10
+      model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+
+      rates = model()
+      perf.append(get_perf(model, rates, n_ini))
+      
+      model.PHI1 = torch.tensor([0, 180-mean_phi], device='cuda:1')
+      model.TASK = 'dual_odr'
+
+      rates_cr = model()[..., idx].cpu().numpy()
+      perf_cr.append(get_correct_perf(rates_cr, mean_phi, n_ini))
+
+      del model
+
+  end = perf_counter()
+
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  Using Hopfield like low rank
+  Cluster Centers: [[ 1.23448759 -0.78057172]
+   [-0.91709522  0.88628208]]
+  0.15869618491391096
+  dist [1.3241569627886551, 1.6028313386943838]
+  Using Hopfield like low rank
+  Cluster Centers: [[ 0.20895362  1.24961612]
+   [-0.98118668 -0.39593972]]
+  -0.38611652770759386
+  dist [0.7045745665176739, 1.8375343416791057]
+  Using Hopfield like low rank
+  Cluster Centers: [[ 0.38663877 -1.38999209]
+   [-1.19042074  0.71641058]]
+  -0.40189098774089965
+  dist [1.9666846713732102, 0.9193341532442879]
+  Using Hopfield like low rank
+  Cluster Centers: [[1.26493821 0.46843281]
+   [1.33465536 0.19752419]]
+  1.2997967819944432
+  dist [0.007117832789498839, 2.690657535314258]
+  Using Hopfield like low rank
+  Cluster Centers: [[ 0.25995008  1.34967683]
+   [-1.2430344  -0.63219846]]
+  -0.4915421617548027
+  dist [0.766073278797068, 1.9829649335921866]
+  Using Hopfield like low rank
+  Cluster Centers: [[-0.67369487 -1.04332481]
+   [-1.31655285  0.56962256]]
+  -0.9951238612377128
+  dist [2.2638132861459517, 0.22950416346802438]
+  Using Hopfield like low rank
+  Cluster Centers: [[0.8681938  1.16896518]
+   [1.15617159 0.79931537]]
+  1.0121826917402243
+  dist [0.04454797039212089, 2.8678541394735535]
+  Using Hopfield like low rank
+  Cluster Centers: [[-1.26705426 -0.29402519]
+   [-1.26593055 -0.02340075]]
+  -1.2664924054100983
+  dist [2.5771195748769835, 0.024391835244295057]
+  Using Hopfield like low rank
+  Cluster Centers: [[ 1.17727043  0.64848023]
+   [ 1.13415147 -0.34907083]]
+  1.1557109525875338
+  dist [0.18171259213708474, 2.5092077851438246]
+  Using Hopfield like low rank
+  Cluster Centers: [[-0.64760385 -1.12942242]
+   [ 1.36602482  0.14950056]]
+  0.35921048676777956
+  dist [1.9088646554551016, 0.6959849108601089]
+  Elapsed (with compilation) = 0h 9m 15s
+#+end_example
+
+#+begin_src ipython
+  perf = torch.stack(perf).cpu().numpy()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+print(distance)
+#+end_src
+
+#+RESULTS:
+: [1.909218309092486, 1.4178480669642552, 1.8417310937986833, 0.1703128849932565, 1.74242989057587, 1.1279026754611503, 0.3288138025006508, 0.1358740757338993, 0.5203350136208722, 1.646275824150115]
+
+#+begin_src ipython
+  plt.plot(distance, perf, 'o')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/77fe244702d69301117229871c3a752f89add3e3.png]]
+
+#+begin_src ipython
+  def get_perf(model, rates, n_ini):
+      overlap = get_overlap(model, rates)
+      
+      readoutA = overlap[:n_ini, -5:, 0]
+      readoutB = overlap[n_ini:, -5:, 0]
+
+      readout = torch.stack((readoutA, readoutB))
+
+      perf = (1.0 * (readout[0]>0)).mean((0, 1))
+      perf += (1.0 * (readout[1]<0)).mean((0,1))
+
+      return perf / 2.0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_avg_phi(centers):
+      x_c1, y_c1 = centers[0]
+      x_c2, y_c2 = centers[1]
+
+      radius = np.sqrt(x_c1**2 + y_c1**2)
+
+      # Midpoint M of A and B
+      xM, yM = (x_c1 + x_c2) / 2, (y_c1 + y_c2) / 2
+      print(xM)
+
+      phi1 = np.arctan2(y_c1, x_c1)
+      phi2 = np.arctan2(y_c2, x_c2)
+
+      phi0 = ( (phi1 + phi2) / 2 ) % np.pi
+      psi0 = (phi0 + np.pi) % (2 * np.pi)
+
+      xPhi = radius * np.cos(phi0)
+      yPhi = radius * np.sin(phi0)
+
+      xPsi = radius * np.cos(psi0)
+      yPsi = radius * np.sin(psi0)
+
+      dist = [np.sqrt((xPhi - xM)**2 + (yPhi - yM)**2),
+              np.sqrt((xPsi - xM)**2 + (yPsi - yM)**2)]
+
+      print('dist', dist)
+
+      if dist[0]>dist[1]:
+          mean_phi = phi0 * 180 / np.pi
+      else:
+          mean_phi = psi0 * 180 / np.pi
+
+      return mean_phi
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_fp_dist(rates):
+      m0, m1, phi = decode_bump(rates, axis=-1)
+
+      x = m1 / m0 * np.cos(phi)
+      y = m1 / m0 * np.sin(phi)
+
+      data = np.stack((x,y)).T
+      kmeans.fit(data)
+      centers = kmeans.cluster_centers_
+      print("Cluster Centers:", centers)
+
+      dist = np.sqrt((centers[0] - centers[1])**2).mean(-1)
+      phi0 = get_avg_phi(centers)
+      
+      return dist, phi0 
+#+end_src
+
+#+RESULTS:

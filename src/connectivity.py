@@ -21,14 +21,14 @@ class Connectivity():
         self.verbose = verbose
         self.device = device
         self.dtype = dtype
-            
+    
     def low_rank_proba(self, kappa, lr_mean, lr_cov, ksi=None, **kwargs):
         '''returns Low rank probability of connection'''
         
         if ksi is None:
             if self.verbose:
                 print('Generating low rank vectors')
-
+            
             mean_ = torch.tensor(lr_mean, dtype=self.dtype, device=self.device)
             cov_ = torch.tensor(lr_cov, dtype=self.dtype, device=self.device)
             
@@ -40,7 +40,7 @@ class Connectivity():
             
             del mean_
             del cov_
-            del mv_normal            
+            del mv_normal
         else:
             self.ksi = ksi
         
@@ -50,14 +50,14 @@ class Connectivity():
         if self.ksi.shape[0]==4:
             Lij = torch.outer(self.ksi[0], self.ksi[1])
             Lij = Lij + torch.outer(self.ksi[2], self.ksi[3])
-            
+
             Pij = 1.0 + kappa * Lij / torch.sqrt(self.Kb)
             del Lij
         else:
             Pij = 1.0 + kappa * (self.ksi.T @ self.ksi) / torch.sqrt(self.Kb)
         
         # print(Pij.shape)
-        # self.Pij = Pij     
+        # self.Pij = Pij
         return Pij
     
     def cosine_proba(self, kappa, phase=0):
@@ -131,6 +131,9 @@ class Connectivity():
         :param lr_cov: array
         '''
         
+        if 'all2all' in con_type:
+            self.Kb = 1.0 / self.Nb
+        
         Pij = self.get_con_proba(proba_type=proba_type, **kwargs)
         
         # sparse network with probability of connection Kb/Nb * Pij
@@ -138,26 +141,26 @@ class Connectivity():
             if self.verbose:
                 print('Sparse random connectivity')
             
-            Cij = torch.rand(self.Na, self.Nb, device=self.device) <= (self.Kb / float(self.Nb) * Pij)
+            Cij = torch.rand(self.Na, self.Nb, device=self.device) <= (self.Kb / float(self.Nb) * Pij).clamp_(min=0, max=1)
         
         # fully connected network that scales as 1/Nb
         if 'all2all' in con_type:
             if self.verbose:
                 print('All to all connectivity')
             
-            # Cij = Pij / float(self.Nb)
-            Cij = Pij / torch.sqrt(1.0 * self.Nb)
+            Cij = Pij / float(self.Nb)
+            # Cij = Pij / torch.sqrt(1.0 * self.Nb)
             
             # adds heterogeneity that scales as 1/sqrt(Nb)
-            if 'sigma' in kwargs:
-                if self.verbose:
-                    print('with heterogeneity, SIGMA', kwargs['sigma'])
+            # if 'sigma' in kwargs:
+            #     if self.verbose:
+            #         print('with heterogeneity, SIGMA', kwargs['sigma'])
                 
-                Hij = kwargs['sigma'] * torch.randn((self.Na, self.Nb), dtype=self.dtype, device=self.device)
-                Cij = Cij + Hij / torch.sqrt(self.Nb)
+            #     Hij = kwargs['sigma'] * torch.randn((self.Na, self.Nb), dtype=self.dtype, device=self.device)
+            #     Cij = Cij + Hij / torch.sqrt(self.Nb)
             
-            del Hij
-            
+            # del Hij
+        
         del Pij
         
         if self.verbose:

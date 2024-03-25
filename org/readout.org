@@ -106,16 +106,21 @@
   REPO_ROOT = "/home/leon/models/NeuroTorch"
   conf_name = "config_EI.yml"
   name = "low_rank_ini"
-  seed = np.random.randint(1000)
+#+end_src
+
+#+RESULTS:
+
+** Fixed Points
+*** Simulation
+
+#+begin_src ipython
+  seed = np.random.randint(10000)
   # 34, 53
   print(seed)
 #+end_src
 
 #+RESULTS:
-: 426
-
-** Fixed Points
-*** Simulation
+: 3379
 
 #+begin_src ipython
   n_ini  = 50
@@ -128,19 +133,19 @@
   start = perf_counter()
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                   N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
-                  TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=60)
+                  TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=30)
 
   rates_fp = model(REC_LAST_ONLY=1).detach().cpu().numpy()
   end = perf_counter()
-
+  
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
   print('rates', rates_fp.shape)
 #+end_src
 
 #+RESULTS:
 : Using Hopfield like low rank
-: Elapsed (with compilation) = 0h 0m 22s
-: rates (100, 8000)
+: Elapsed (with compilation) = 0h 0m 40s
+: rates (100, 2000)
 
 *** Readout
 
@@ -158,7 +163,7 @@
 #+end_src
 
 #+RESULTS:
-: (100, 8000)
+: (100, 2000)
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -179,59 +184,76 @@
   print(data.shape)
 
   kmeans.fit(data)
-  labels = kmeans.labels_
-
-  # Getting the cluster centers
   centers = kmeans.cluster_centers_
-
-  # print("Labels:", labels)
   print("Cluster Centers:", centers)
   x_c1, y_c1 = centers[0]
   x_c2, y_c2 = centers[1]
-
+  
   phi1 = np.arctan2(y_c1, x_c1)
   phi2 = np.arctan2(y_c2, x_c2)
-
-  mean_phi = ( (phi1 + phi2) / 2 * 180 / np.pi ) % 180 
-  print('mean phi', mean_phi)
-
-  d_phi = mean_phi - 90
-  # if d_phi<0:
-  #     d_phi = 90-mean_phi
-
-  print('dphi', d_phi)
 #+end_src
 
 #+RESULTS:
 : (100, 2)
-: Cluster Centers: [[ 0.8664712  -0.05958183]
-:  [-0.90971148  0.2492788 ]]
-: mean phi 80.37115101838513
-: dphi -9.628848981614865
+: Cluster Centers: [[-0.85706782  1.32653698]
+:  [-1.01467589  1.17421658]]
 
 #+begin_src ipython
-  fig, ax = plt.subplots(figsize=(height, height))
+  radius = np.sqrt(x_c1**2 + y_c1**2)
+
+  # Midpoint M of A and B
+  xM, yM = (x_c1 + x_c2) / 2, (y_c1 + y_c2) / 2
+  print(xM)
+
+  phi0 = ( (phi1 + phi2) / 2 ) % np.pi
+  psi0 = (phi0 + np.pi) % (2 * np.pi)
+
+  xPhi = radius * np.cos(phi0)
+  yPhi = radius * np.sin(phi0)
+
+  dist = np.sqrt((xPhi - xM)**2 + (yPhi - yM)**2)
+
+  xPsi = radius * np.cos(psi0)
+  yPsi = radius * np.sin(psi0)
+
+  dist = [np.sqrt((xPhi - xM)**2 + (yPhi - yM)**2),
+          np.sqrt((xPsi - xM)**2 + (yPsi - yM)**2)]
+
+  print('dist', dist)
+
+  if dist[0]>dist[1]:
+     mean_phi = phi0 * 180 / np.pi
+  else:
+     mean_phi = psi0 * 180 / np.pi
+     
+  print('mean phi', mean_phi)
+
+#+end_src
+
+#+RESULTS:
+: -0.9358718529006298
+: dist [0.017525340782748974, 3.1411495567350878]
+: mean phi 306.848775070695
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 1, figsize=[height, height])
+
   x = m1 / m0 * np.cos(phi)
   y = m1 / m0 * np.sin(phi)
 
   ax.plot(x, y, 'ob', alpha=.25)
 
+  x = 1.5 * np.cos(mean_phi * np.pi / 180)
+  y = 1.5 * np.sin(mean_phi * np.pi / 180)
+
+  # Draw an arrow using plt.arrow(x, y, dx, dy, **kwargs)
+  plt.arrow(0, 0, x, y, head_width=0.5, head_length=0.5, fc='blue')
+  
   mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
 
   x = 2 * np.cos(mean)
   y = 2 * np.sin(mean)
   ax.plot(x, y, '--b')
-
-  # x = m1 / m0 * np.cos(phi - d_phi * np.pi / 180)
-  # y = m1 / m0 * np.sin(phi - d_phi * np.pi / 180)
-
-  # ax.plot(x, y, 'sr', alpha=.25)
-  
-  mean = np.array([mean_phi - d_phi , mean_phi - d_phi - 180]) * np.pi/180
-  x = 2 * np.cos(mean)
-  y = 2 * np.sin(mean)
-
-  ax.plot(x, y, '--r')
 
   ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
   ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
@@ -240,32 +262,41 @@
   ax.set_ylim([-2, 2])
 
   plt.show()
+  #+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/9ad41270d5a983149072a8b4ce2272813ec15f2f.png]]
+
+#+begin_src ipython
+
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2ddaaf7bf56f6ec6f20083fe2aca6eca0593673e.png]]
 
-*** Single trial
+** Single trial
 
 #+begin_src ipython
+  n_ini=100
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                   N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
-                  TASK='dual_odr', LIVE_FF_UPDATE=1, DURATION=10,
-                  I0=[.1, .1])
-
-  model.PHI1 = torch.tensor([0, 90 - d_phi], device='cuda:1')
+                  TASK='dual', LIVE_FF_UPDATE=1, DURATION=10,
+                  I0=[.2, .2])
 #+end_src
 
 #+RESULTS:
 : Using Hopfield like low rank
 
 #+begin_src ipython
+  start = perf_counter()
   rates = model().detach().cpu().numpy()
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (100, 101, 8000)
+: Elapsed (with compilation) = 0h 0m 16s
+: (200, 101, 2000)
 
 #+begin_src ipython
   overlap = get_overlap(model, rates)
@@ -281,9 +312,9 @@
 #+end_src
 
 #+RESULTS:
-: (4, 101, 100)
-: (100, 101, 8000)
-: (100, 101)
+: (4, 101, 200)
+: (200, 101, 2000)
+: (200, 101)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -304,7 +335,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/b278e6fc647fe386f68d36b19bb261fde32de3a1.png]]
+[[file:./.ob-jupyter/824ac5c701ee3f6dc89269ad4105a0a49768ff98.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -331,30 +362,41 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/18280791405e5432081cd5ed18a0d392d1bbb6cd.png]]
+[[file:./.ob-jupyter/9c1d14f70f1a1efa85cb5d675a1fa877d5028a04.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
+
   x = m1 / m0 * np.cos(phi)
   y = m1 / m0 * np.sin(phi)
 
   x = x[:2]
   y = y[:2]
+
   ax.plot(x.T[0], y.T[0], 'ob', alpha=.25, ms=10)
   ax.plot(x.T, y.T, '-b', alpha=.5)
   ax.plot(x.T[-1], y.T[-1], 'sb', alpha=.25, ms=10)
 
+  x = m1 / m0 * np.cos(phi)
+  y = m1 / m0 * np.sin(phi)
+  
   x = x[-2:]
   y = y[-2:]
   ax.plot(x.T[0], y.T[0], 'or', alpha=.25, ms=10)
   ax.plot(x.T, y.T, '-r', alpha=.5)
   ax.plot(x.T[-1], y.T[-1], 'sr', alpha=.25, ms=10)
-  
+
   mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
 
   x = 2 * np.cos(mean)
   y = 2 * np.sin(mean)
   ax.plot(x, y, '--b')
+  x = 1.5 * np.cos(mean_phi * np.pi / 180)
+  y = 1.5 * np.sin(mean_phi * np.pi / 180)
+
+  # Draw an arrow using plt.arrow(x, y, dx, dy, **kwargs)
+  plt.arrow(0, 0, x, y, head_width=0.5, head_length=0.5, fc='blue')
+  
 
   ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
   ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
@@ -365,7 +407,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ce5842fcd8d28a971d6c814cdfb316f058c3b068.png]]
+[[file:./.ob-jupyter/f6dcce779ab9a7c0af8f855448484b5d69c7cd2a.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -374,7 +416,7 @@
   y = m1[:n_ini, -1] / m0[:n_ini, -1] * np.sin(phi[:n_ini, -1])
 
   ax.plot(x, y, 'ob', alpha=.5)
-  
+
   x = m1[n_ini:, -1] / m0[n_ini:, -1] * np.cos(phi[n_ini:, -1])
   y = m1[n_ini:, -1] / m0[n_ini:, -1] * np.sin(phi[n_ini:, -1])
 
@@ -386,9 +428,15 @@
   y = 2 * np.sin(mean)
   ax.plot(x, y, '--')
 
-  mean = np.array([mean_phi - d_phi , mean_phi - d_phi - 180]) * np.pi/180
-  x = 2 * np.cos(mean)
-  y = 2 * np.sin(mean)
+  x = 1.5 * np.cos(mean_phi * np.pi / 180)
+  y = 1.5 * np.sin(mean_phi * np.pi / 180)
+
+  # Draw an arrow using plt.arrow(x, y, dx, dy, **kwargs)
+  plt.arrow(0, 0, x, y, head_width=0.5, head_length=0.5, fc='blue')
+  
+  # mean = np.array([mean_phi - d_phi , mean_phi - d_phi - 180]) * np.pi/180
+  # x = 2 * np.cos(mean)
+  # y = 2 * np.sin(mean)
 
   ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
   ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
@@ -400,7 +448,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/594d04dbc1905282f1f598f9b9d756c99bfb052a.png]]
+[[file:./.ob-jupyter/0f136c91c54b70566e4c33ab2c067e554b9c2a11.png]]
 
 #+begin_src ipython
   readoutA = overlap[:n_ini, -5:, 0]
@@ -411,7 +459,7 @@
 #+end_src
 
 #+RESULTS:
-: (2, 50, 5)
+: (2, 100, 5)
 
 #+begin_src ipython
   perf = (readout[0]>0).mean((0, 1))
@@ -421,15 +469,248 @@
 #+end_src
 
 #+RESULTS:
-: performance 77.8
+: performance 50.0
 
 #+begin_src ipython
-  perf = get_correct_perf(rates_ordered, d_phi, n_ini)
+  print(mean_phi-90)
+#+end_src
+
+#+RESULTS:
+: 216.848775070695
+
+#+begin_src ipython
+  perf = get_correct_perf(rates_ordered, mean_phi, n_ini)
   print('corrected performance', perf)
 #+end_src
 
 #+RESULTS:
-: corrected performance 77.0
+: corrected performance 50.0
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+** Corrected trial
+
+#+begin_src ipython
+  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
+                  N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
+                  TASK='dual_odr', LIVE_FF_UPDATE=1, DURATION=10,
+                  I0=[.2, .2])
+  
+  model.PHI1 = torch.tensor([0, 180-mean_phi], device='cuda:1')
+#+end_src
+
+#+RESULTS:
+: Using Hopfield like low rank
+
+#+begin_src ipython
+  start = perf_counter()
+  rates = model().detach().cpu().numpy()
+  end = perf_counter()
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (200, 101, 2000)
+
+#+begin_src ipython
+  overlap = get_overlap(model, rates)
+  print(overlap.T.shape)
+  
+  idx = get_idx(model)
+
+  rates_ordered = rates[..., idx]
+  print(rates_ordered.shape)
+
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 101, 200)
+: (200, 101, 2000)
+: (200, 101)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+
+  ax[0].plot(overlap.T[0])
+  ax[0].set_ylabel('Overlap on $m_S$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(overlap.T[1])
+  ax[1].set_ylabel('Overlap on $n_S$ (Hz)')
+  ax[1].set_xlabel('Step')
+
+  ax[2].plot(overlap.T[2])
+  ax[2].set_ylabel('Overlap on $m_D$ (Hz)')
+  ax[2].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/039d3fa0616d8d3761d21a46520ea68421ccd77c.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+
+  ax[0].plot(m0.T)
+  #ax[0].set_ylim([0, 360])
+  #ax[0].set_yticks([0, 90, 180, 270, 360])
+  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(m1.T)
+  # ax[1].set_ylim([0, 360])
+  # ax[1].set_yticks([0, 90, 180, 270, 360])
+  ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
+  ax[1].set_xlabel('Step')
+
+  ax[2].plot(phi.T * 180 / np.pi, alpha=0.25)
+  ax[2].axhline((180 - mean_phi) % 360, 0 , 100, ls='--', color='k')
+
+  ax[2].set_ylim([0, 360])
+  ax[2].set_yticks([0, 90, 180, 270, 360])
+  ax[2].set_ylabel('Phase (°)')
+  ax[2].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/235bac5798c364d881a6fc4fe6beff797caafd1d.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(figsize=(height, height))
+  x = m1 / m0 * np.cos(phi)
+  y = m1 / m0 * np.sin(phi)
+
+  x = x[:10]
+  y = y[:10]
+
+  ax.plot(x.T[0], y.T[0], 'ob', alpha=.25, ms=10)
+  ax.plot(x.T, y.T, '-b', alpha=.25)
+  ax.plot(x.T[-1], y.T[-1], 'sb', alpha=.25, ms=10)
+
+  x = m1 / m0 * np.cos(phi)
+  y = m1 / m0 * np.sin(phi)
+
+  x = x[-10:]
+  y = y[-10:]
+
+  ax.plot(x.T[0], y.T[0], 'or', alpha=.25, ms=10)
+  ax.plot(x.T, y.T, '-r', alpha=.25)
+  ax.plot(x.T[-1], y.T[-1], 'sr', alpha=.25, ms=10)
+  
+  mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
+
+  x = 2 * np.cos(mean)
+  y = 2 * np.sin(mean)
+  ax.plot(x, y, '--b')
+
+  x = 1.5 * np.cos(mean_phi * np.pi / 180)
+  y = 1.5 * np.sin(mean_phi * np.pi / 180)
+
+  # Draw an arrow using plt.arrow(x, y, dx, dy, **kwargs)
+  plt.arrow(0, 0, x, y, head_width=0.5, head_length=0.5, fc='blue', alpha=.2)
+
+
+  ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
+  ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
+
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/7148bc9ece47f62ea9d4fc657d9ae7ed702d620e.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(figsize=(height, height))
+
+  x = m1[:n_ini, -1] / m0[:n_ini, -1] * np.cos(phi[:n_ini, -1])
+  y = m1[:n_ini, -1] / m0[:n_ini, -1] * np.sin(phi[:n_ini, -1])
+
+  ax.plot(x, y, 'ob', alpha=.5)
+
+  x = m1[n_ini:, -1] / m0[n_ini:, -1] * np.cos(phi[n_ini:, -1])
+  y = m1[n_ini:, -1] / m0[n_ini:, -1] * np.sin(phi[n_ini:, -1])
+
+  ax.plot(x, y, 'or', alpha=.5)
+
+  mean = np.array([mean_phi, mean_phi - 180 ]) * np.pi/180
+
+  x = 2 * np.cos(mean)
+  y = 2 * np.sin(mean)
+  ax.plot(x, y, '--')
+
+  x = 1.5 * np.cos(mean_phi * np.pi / 180)
+  y = 1.5 * np.sin(mean_phi * np.pi / 180)
+
+  # Draw an arrow using plt.arrow(x, y, dx, dy, **kwargs)
+  plt.arrow(0, 0, x, y, head_width=0.5, head_length=0.5, fc='blue', alpha=.2)
+
+
+  ax.plot(x_c1, y_c1, 'xk', alpha=1, ms=20)
+  ax.plot(x_c2, y_c2, 'xk', alpha=1, ms=20)
+
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/68d03f1a614d0c0f8b2e8ee331728a2aa103d8d6.png]]
+
+#+begin_src ipython
+  readoutA = overlap[:n_ini, -5:, 0]
+  readoutB = overlap[n_ini:, -5:, 0]
+
+  readout = np.stack((readoutA, readoutB))
+  print(readout.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 100, 5)
+
+#+begin_src ipython
+  perf = (readout[0]>0).mean((0, 1))
+  perf += (readout[1]<0).mean((0,1))
+
+  print('performance', perf/2 * 100)
+#+end_src
+
+#+RESULTS:
+: performance 66.5
+
+#+begin_src ipython
+  print(mean_phi + 90)
+#+end_src
+
+#+RESULTS:
+: 396.848775070695
+
+#+begin_src ipython
+  perf = get_correct_perf(rates_ordered, (180-mean_phi), n_ini)
+  print('corrected performance', perf)
+#+end_src
+
+#+RESULTS:
+: corrected performance 50.5
+
+#+begin_src ipython
+  perf = get_correct_perf(rates_ordered, (180-mean_phi), n_ini)
+  print('corrected performance', perf)
+#+end_src
+
+#+RESULTS:
+: corrected performance 66.5
 
 #+begin_src ipython
 
