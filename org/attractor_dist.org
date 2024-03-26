@@ -179,7 +179,7 @@
   conf_name = "config_EI.yml"
   name = "low_rank_ini"
 
-  n_ini  = 50
+  n_ini  = 32
 
   LR_COV = [[1.0, 1.0, 0.0, 0.0],
             [0.8, 1.0, 0.0, 0.0],
@@ -212,7 +212,7 @@
   centers_list = []
   phi0_list = []
 
-  for i in range(5):
+  for i in range(10):
       seed = np.random.randint(10000)
 
       model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
@@ -220,7 +220,7 @@
                       TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=30)
 
       idx = get_idx(model)
-
+      
       rates = model(REC_LAST_ONLY=1)[..., idx]
       rates_fp.append(rates)
 
@@ -267,7 +267,7 @@
 #+end_src
 
 #+RESULTS:
-: 8f54b925-a05a-42ae-9e74-330870b64b94
+: fbd7f578-b027-4e71-b6ed-ca47b75dad47
 
 #+begin_src ipython
   rates_list = torch.stack(rates_list).cpu().numpy()
@@ -277,14 +277,14 @@
 #+end_src
 
 #+RESULTS:
-: 609f35db-c0d6-47cf-b620-bb23dc4b08b7
+: dd518fa1-4180-47fa-84e8-da48b29acea9
 
 #+begin_src ipython
   print(rates_list.shape)
 #+end_src
 
 #+RESULTS:
-: 47835412-f4b5-41a0-aade-1417f4be5143
+: e02b003a-dd40-4148-84f8-539af411bb2c
 
 #+begin_src ipython
   centers_list = np.array(centers_list)
@@ -293,7 +293,7 @@
 #+end_src
 
 #+RESULTS:
-: 53c4fc0d-22b0-4a07-92b3-7fe0535f0ff4
+: 7782f24f-2b7a-43d6-9d66-65ef29f6479a
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 1, figsize=[height, height])
@@ -336,14 +336,14 @@
   #+end_src
 
   #+RESULTS:
-  : 0310aaa7-94ec-4268-b166-c8b1abf8bbfb
+  : 060a5fe1-7a7a-4dd0-9b81-e1c58ef29f03
 
 #+begin_src ipython
   i = 4
 #+end_src
 
 #+RESULTS:
-: b18d4aff-e1d7-47e8-a81b-0c062dfd6013
+: fd06b27b-b4d0-4140-9aa5-fad2a654f016
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -397,7 +397,7 @@
 #+end_src
 
 #+RESULTS:
-: 0bb6bca1-f935-4407-8327-4d0074879239
+: 554d9e71-4281-40fe-b34e-36a71943ac5c
 
 #+begin_src ipython
   print('dist', distance_list)
@@ -406,7 +406,7 @@
 #+end_src
 
 #+RESULTS:
-: b52cef39-d183-432b-9b72-944a0439bbad
+: 1577c1d0-1ebf-43f2-9eab-a7ca1ec06e97
 
 #+begin_src ipython
   plt.plot(distance_list/2, perf_list*100, 'o')
@@ -417,7 +417,7 @@
 #+end_src
 
 #+RESULTS:
-: eacfdf68-4e0f-4488-92f0-c596553aa7f3
+: 33690586-02d1-429a-86d0-01c48091065c
 
 #+begin_src ipython
   plt.plot(phi0_list % 360, perf_list * 100, 'o')
@@ -426,4 +426,4 @@
 #+end_src
 
 #+RESULTS:
-: 693c109d-558d-4c3c-963e-18f4c43a3404
+: 6c2e0434-56fc-4c61-b200-521580dab264
