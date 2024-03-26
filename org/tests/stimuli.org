@@ -1,0 +1,307 @@
+#+STARTUP: fold
+#+TITLE: Stimuli Test
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session stim :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+The autoreload extension is already loaded. To reload it, use:
+  %reload_ext autoreload
+Python exe
+/home/leon/mambaforge/bin/python
+:END:
+
+* Imports
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../../')
+
+  import torch
+  import pandas as pd
+  from time import perf_counter
+
+  from src.network import Network
+  from src.lif_network import LIFNetwork
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump
+#+end_src
+
+#+RESULTS:
+
+* Helpers
+
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_theta(a, b, GM=0, IF_NORM=0):
+
+      if GM:
+          b = b - np.dot(b, a) / np.dot(a, a) * a
+
+      if IF_NORM:
+          u = a / np.linalg.norm(a)
+          v = b / np.linalg.norm(b)
+      else:
+          u=a
+          v=b
+
+      return np.arctan2(v, u)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def normalize(v):
+      return v / np.linalg.norm(v)
+
+  def project(x, u):
+      return x * u
+  # return np.dot(x, u) * u
+
+  def sort_by_angle(x, u, v):
+      u_hat = normalize(u)
+      v_hat = normalize(v)
+
+      x_proj_u = project(x, u_hat)
+      x_proj_v = project(x, v_hat)
+      # x_proj = x_proj_u + x_proj_v
+      theta = np.arctan2(x_proj_v, x_proj_u) + np.pi
+
+      # cos_theta = np.dot(x_proj, u_hat) / np.linalg.norm(x_proj) * u_hat
+      # sin_theta = np.dot(x_proj, v_hat) / np.linalg.norm(x_proj) * v_hat
+      # theta = np.arctan2(sin_theta, cos_theta)
+
+      # Pair up each element of x with the corresponding angle
+      # x_angle_pairs = list(zip(x, theta))
+
+      # Sort based on the angle
+      # x_angle_pairs.sort(key=lambda pair: pair[1])
+
+      # Extract the sorted elements
+      # sorted_x = [pair[0] for pair in x_angle_pairs]
+
+      return theta
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_idx(model):
+      ksi = model.PHI0.cpu().detach().numpy()
+      print(ksi.shape)
+
+      idx = np.arange(0, len(ksi[0]))
+      theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
+
+      return theta.argsort()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_overlap(model, rates):
+      ksi = model.PHI0.cpu().detach().numpy()
+      return rates @ ksi.T / rates.shape[-1]
+
+#+end_src
+
+#+RESULTS:
+
+* Stimuli
+** Imports
+
+#+begin_src ipython
+  from src.stimuli import Stimuli
+#+end_src
+
+#+RESULTS:
+
+** ODR
+
+#+begin_src ipython
+  ff_input = Stimuli(task='odr', size=(10, 1000))(1, 1, 0, rnd_phase=1).cpu().detach().numpy()
+  print(ff_input.shape)
+  plt.plot(ff_input.T[:, :5])
+  
+  plt.xlabel('Neuron #')
+  plt.ylabel('Input Strength')
+  plt.title('ODR')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+(10, 1000)
+[[file:./.ob-jupyter/8d99a1db447eddadbefbf1818c495d2d6bfe7828.png]]
+:END:
+
+** Dual Task
+
+#+begin_src ipython
+  xi = torch.randn((2, 1000), device='cuda')
+  ff_input = Stimuli(task='dual', size=(10, 1000))(1, 1, xi[0]).cpu().detach().numpy()
+
+  print(ff_input.shape)
+
+  theta = get_theta(xi[0].cpu().numpy(), xi[1].cpu().numpy(), GM=0, IF_NORM=0)
+  theta = np.arctan2(xi[1].cpu().numpy(), xi[0].cpu().numpy())
+  index_order = theta.argsort()
+  
+  ff_input = ff_input[index_order]
+  plt.plot(ff_input)
+  plt.xlabel('Neuron #')
+  plt.ylabel('Input Strength')
+  plt.title('Dual Task')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+(1000,)
+[[file:./.ob-jupyter/0b9f04f3622ab93fe3db5be950dd3e6d30203804.png]]
+:END:
+
+* FF Inputs
+** ODR
+
+#+begin_src ipython
+    REPO_ROOT = "/home/leon/models/NeuroTorch"
+    model = Network('config_EI.yml', 'test', REPO_ROOT, VERBOSE=1, DEVICE='cuda', TASK='odr',
+                    PROBA_TYPE=['cosine', '', '',''])
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+Na tensor([2000,  500], device='cuda:0', dtype=torch.int32) Ka tensor([125., 125.], device='cuda:0') csumNa tensor([   0, 2000, 2500], device='cuda:0')
+Jab [1.0, -1.5, 1, -1]
+Ja0 [2.0, 1.0]
+:END:
+
+#+begin_src ipython
+  ff_input = model.init_ff_input().cpu().detach().numpy()
+  print(ff_input.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+(1, 11100, 2500)
+:END:
+
+#+begin_src ipython
+  plt.plot(ff_input[0, :, :5])
+  plt.plot(ff_input[0, :, -5:])
+  plt.xlabel('Step')
+  plt.ylabel('FF Input')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/4ef0171603151f8c8e0a3030c40ace64947f993f.png]]
+:END:
+
+#+begin_src ipython
+  plt.imshow(ff_input[0].T, cmap='jet', vmin=0, aspect='auto')
+  plt.xlabel('Step')
+  plt.ylabel('Neuron #')
+  plt.ylim([0, 2000])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/7cc46424e3b8691877cfef8c196880e061d7eb30.png]]
+:END:
+
+** Dual Task
+
+#+begin_src ipython
+    REPO_ROOT = "/home/leon/models/NeuroTorch"
+    model = Network('config_EI.yml', 'test', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='dual_rand',
+                    PROBA_TYPE=['lr', '', '',''], LIVE_FF_UPDATE=0)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  ff_input = model.init_ff_input().cpu().detach().numpy()
+  print(ff_input.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+(1, 11100, 2500)
+:END:
+
+#+begin_src ipython 
+  plt.plot(ff_input[0, :, :10])
+  plt.plot(ff_input[0, :, -10:])
+  plt.xlabel('Step')
+  plt.ylabel('FF Input')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/b94c4851688eeb10e1f0d1849fb3aae6c962c896.png]]
+:END:
+
+#+begin_src ipython
+  plt.imshow(ff_input[0].T, cmap='jet', vmin=100, aspect='auto')
+  plt.xlabel('Step')
+  plt.ylabel('Neuron #')
+  plt.ylim([0, 2000])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/a2e3e59f63b42c4b13100bd9904c92eb0e4c9a7f.png]]
+:END:
+
+#+begin_src ipython
+  ksi = model.PHI0.cpu().detach().numpy()
+  theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
+  index_order = theta.argsort()
+  ff_ordered = ff_input[..., index_order]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  plt.imshow(ff_ordered[0].T, cmap='jet', vmin=0, aspect='auto')
+  plt.xlabel('Step')
+  plt.ylabel('Pref Loc. (°)')
+  plt.yticks(np.linspace(0, 2000, 5), np.linspace(0, 360, 5).astype(int))
+  # plt.ylim([0, 10])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/67ac4fbe66b24be5c31ef10899acd684236a528f.png]]
+:END:
+
+#+begin_src ipython
+
+#+end_src

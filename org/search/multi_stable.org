@@ -1,0 +1,443 @@
+#+STARTUP: fold
+#+TITLE: Multistable Balanced State
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session multibal :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Imports
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../../')
+
+  import torch
+  import gc
+  import pandas as pd
+  from time import perf_counter
+
+  from src.network import Network
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump
+  from src.utils import clear_cache
+
+  REPO_ROOT = '/home/leon/models/NeuroTorch/'
+#+end_src
+
+#+RESULTS:
+* Helpers
+
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython :tangle ../src/lr_utils.py
+  import numpy as np
+  def get_theta(a, b, GM=0, IF_NORM=0):
+
+      u, v = a, b
+
+      if GM:
+          v = b - np.dot(b, a) / np.dot(a, a) * a
+
+      if IF_NORM:
+          u = a / np.linalg.norm(a)
+          v = b / np.linalg.norm(b)
+
+      return np.arctan2(v, u)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython :tangle ../src/lr_utils.py
+  def get_idx(model):
+      ksi = model.PHI0.cpu().detach().numpy()
+      print(ksi.shape)
+
+      theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
+      return theta.argsort()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython :tangle ../src/lr_utils.py
+  def get_overlap(model, rates):
+      ksi = model.PHI0.cpu().detach().numpy()
+      return rates @ ksi.T / rates.shape[-1]
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def pretty_size(size):
+      """Pretty prints a torch.Size object"""
+      assert(isinstance(size, torch.Size))
+      return " × ".join(map(str, size))
+
+  def dump_tensors(gpu_only=True):
+      """Prints a list of the Tensors being tracked by the garbage collector."""
+      import gc
+      total_size = 0
+      for obj in gc.get_objects():
+          try:
+              if torch.is_tensor(obj):
+                  if not gpu_only or obj.is_cuda:
+                      print("%s:%s%s %s" % (type(obj).__name__,
+                                            " GPU" if obj.is_cuda else "",
+                                            " pinned" if obj.is_pinned else "",
+                                            pretty_size(obj.size())))
+                      total_size += obj.numel()
+              elif hasattr(obj, "data") and torch.is_tensor(obj.data):
+                  if not gpu_only or obj.is_cuda:
+                      print("%s → %s:%s%s%s%s %s" % (type(obj).__name__,
+                                                     type(obj.data).__name__,
+                                                     " GPU" if obj.is_cuda else "",
+                                                     " pinned" if obj.data.is_pinned else "",
+                                                     " grad" if obj.requires_grad else "",
+                                                     " volatile" if obj.volatile else "",
+                                                     pretty_size(obj.data.size())))
+                      total_size += obj.data.numel()
+              del obj
+              torch.cuda.empty_cache()
+          except Exception as e:
+              pass
+      print("Total size:", total_size)
+
+#+end_src
+
+#+RESULTS:
+
+* Rates vs Jee
+
+#+begin_src ipython
+  model = Network('config_EI.yml', 'None', REPO_ROOT, IF_STP=1, DT=0.001, VERBOSE=0, LIVE_FF_UPDATE=1)
+#+end_src
+
+#+RESULTS:
+: Using Hopfield like low rank
+
+#+begin_src ipython
+  N_BATCH = 10
+  model.J_STP = torch.linspace(0, 10, N_BATCH, dtype=torch.float32, device='cuda').unsqueeze(-1)
+  
+  model.N_BATCH = N_BATCH
+  rates_Jee = model(RET_STP=1).cpu().detach().numpy()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  overlap = get_overlap(model, rates_Jee)
+  print(overlap.shape)
+
+  idx = get_idx(model)
+  rates_ordered = rates_Jee[..., idx]
+
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 101, 4)
+: (4, 8000)
+: (10, 101)
+
+#+begin_src ipython
+  u_list = model.u_list.cpu().numpy()
+  x_list = model.x_list.cpu().numpy()
+  A_ux = u_list * x_list
+  print(u_list.shape, x_list.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 101, 8000) (10, 101, 8000)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  
+  mean_rates = rates_Jee[:,-1].mean(-1)
+
+  ax[0].plot(J_STP.cpu(), mean_rates)
+  ax[0].set_xlabel('$J_{EE}$')
+  ax[0].set_ylabel('$<Rates>_i$')
+  # ax[0].set_ylim([0, 60])
+
+  ax[1].plot(rates_Jee.mean(-1).T)
+  ax[1].set_xlabel('$J_{EE}$')
+  ax[1].set_ylabel('Rates')
+  # ax[1].set_ylim([0, 60])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/db4227503fb6955c2a080d44328ffc66932d1e88.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].plot(J_STP.cpu(), m1[:, -1])
+  ax[0].set_xlabel('$J_{EE}$')
+  ax[0].set_ylabel('$\mathcal{F}_1$')
+  
+  ax[1].plot(m1.T)
+  ax[1].set_xlabel('$Step$')
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/6dd636181d6d08a516c6be2f68f978d8abdfa589.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  mean_rates = A_ux[:,-1].mean(-1) 
+
+  ax[0].plot(J_STP.cpu(), mean_rates)
+  ax[0].set_xlabel('$J_{EE}$')
+  ax[0].set_ylabel('$A_{ux}$')
+
+  ax[1].plot(A_ux.mean(-1).T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$A_{ux}$')
+
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/5cc8d238f77fe96c2568503bacc1f65b09580840.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+* Rates vs Jee vs Ie
+
+#+begin_src ipython
+  model = Network('config_EI.yml', 'None', REPO_ROOT, IF_STP=1, DT=0.001, VERBOSE=0, LIVE_FF_UPDATE=1, N_BATCH=1)
+#+end_src
+
+#+RESULTS:
+: Using Hopfield like low rank
+
+#+begin_src ipython
+  N_BATCH = 10
+
+  J_STP = torch.linspace(1, 10, N_BATCH, device='cuda')
+  JE0 = torch.linspace(2, 4, N_BATCH, device='cuda')
+
+  J_STP = J_STP.unsqueeze(0).expand(N_BATCH, N_BATCH) 
+  J_STP = J_STP.reshape((-1, 1)) # * model.Jab[0, 0]
+  print(J_STP.shape)
+
+  JE0 = JE0.unsqueeze(1).expand(N_BATCH, N_BATCH)
+  JE0 = JE0.reshape((-1, 1)) * torch.sqrt(model.Ka[0]) * model.M0   
+  print(JE0.shape)
+
+  new_Ja0 = model.Ja0.repeat((N_BATCH*N_BATCH, 1, 1))
+
+  print(new_Ja0.shape)
+  new_Ja0[:,0] = JE0
+
+  print(new_Ja0.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([100, 1])
+: torch.Size([100, 1])
+: torch.Size([100, 2, 1])
+: torch.Size([100, 2, 1])
+
+#+begin_src ipython
+  model.N_BATCH = 100
+  model.Ja0 = new_Ja0
+  model.J_STP = J_STP
+
+  start = perf_counter()
+  rates = model().cpu().detach().numpy()
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+#+end_src
+#+RESULTS:
+: Elapsed (with compilation) = 0h 2m 21s
+
+#+begin_src ipython
+  overlap = get_overlap(model, rates)
+  print(overlap.shape)
+
+  idx = get_idx(model)
+  rates_ordered = rates[..., idx]
+
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
+
+  m0 = m0.reshape(N_BATCH, N_BATCH,-1)
+  m1 = m1.reshape(N_BATCH, N_BATCH,-1)
+#+end_src
+
+#+RESULTS:
+: (100, 101, 4)
+: (4, 8000)
+: (100, 101)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].imshow(m0[..., -1], cmap='jet', origin='lower', vmin=0, aspect='auto')
+  ax[0].set_xlabel('$J_{EE}$')
+  ax[0].set_ylabel('$J_{E0}$')
+
+  ax[1].imshow(m1[...,-1]/m0[...,-1], cmap='jet', origin='lower', vmin=0, vmax=1.0, aspect='auto')
+  ax[1].set_xlabel('$J_{EE}$')
+  ax[1].set_ylabel('$J_{E0}$')
+  
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/2817e998b7b1d7171572a087b531d8ba43f09805.png]]
+
+#+begin_src ipython
+  m0 = m0.reshape(N_BATCH, N_BATCH, -1)
+  print(m0.shape)
+  plt.plot(m0[-1, : , -1])
+  plt.plot(m0[:, -1 , -1])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (10, 10, 101)
+[[file:./.ob-jupyter/c5b8b0b0a9f5a07604c81e5981922453c6dd92f7.png]]
+:END:
+
+* Rates vs Tau fac
+
+#+begin_src ipython
+  model = Network('config_EI.yml', 'None', REPO_ROOT, IF_STP=1, DT=0.001, VERBOSE=0, LIVE_FF_UPDATE=1, N_BATCH=1)
+#+end_src
+
+#+RESULTS:
+: Using Hopfield like low rank
+
+#+begin_src ipython
+  model.TAU_FAC = torch.linspace(0.25, 1.0, 10, device='cuda')
+  model.N_BATCH = model.TAU_FAC.shape[0]
+
+  rates_fac = model(RET_STP=1).cpu().detach().numpy()
+  print(rates_fac.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 101, 8000)
+
+#+begin_src ipython
+  u_list = model.u_list.cpu().numpy()
+  x_list = model.x_list.cpu().numpy()
+  Aux = u_list * x_list
+  print(u_list.shape, x_list.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 101, 8000) (10, 101, 8000)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  mean_rates = rates_fac[:,-1].mean(-1)
+
+  ax[0].plot(model.TAU_FAC.cpu().numpy()*1000, mean_rates, 'k')
+  ax[0].plot(model.TAU_FAC.cpu().numpy()*1000, rates_fac[:, -1, :10], alpha=.25)
+  ax[0].set_xlabel('$\\tau_{fac}$')
+  ax[0].set_ylabel('$<Rates>_i$')
+  
+  ax[1].plot(rates_fac.mean(-1).T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('Rates')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/c78d1872c6d42cc4c6651c49e42cc90eaf8671c6.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  mean_Aux = Aux[:,-1].mean(-1)
+
+  ax[0].plot(model.TAU_FAC.cpu().numpy() * 1000, mean_Aux)
+  ax[0].set_xlabel('$\\tau_{fac}$')
+  ax[0].set_ylabel('$A_{ux}$')
+
+  ax[1].plot(Aux.mean(-1).T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$A_{ux}$')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/4f6a48f8c0f56ee09cefea04f8ea7883161022ff.png]]
+
+#+begin_src ipython
+  overlap = get_overlap(model, rates_fac)
+  print(overlap.shape)
+
+  idx = get_idx(model)
+  rates_ordered = rates_fac[..., idx]
+  
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 101, 4)
+: (4, 8000)
+: (10, 101)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].plot(model.TAU_FAC.cpu().numpy()*1000, m1[:, -1], 'k')
+  ax[0].set_xlabel('$\\tau_{fac}$')
+  ax[0].set_ylabel('$\mathcal{F}_1$')
+
+  ax[1].plot(m1.T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/6c98df659e0333362569649deaf70d0673aab94b.png]]
+
+#+RESULTS:
+
+#+begin_src ipython
+
+#+end_src

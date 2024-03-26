@@ -1,0 +1,572 @@
+#+STARTUP: fold
+#+TITLE: Connectivity Test
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session con :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+The autoreload extension is already loaded. To reload it, use:
+  %reload_ext autoreload
+Python exe
+/home/leon/mambaforge/bin/python
+:END:
+
+* Imports
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../../')
+
+  import torch
+  import pandas as pd
+  from time import perf_counter
+
+  from src.network import Network
+  from src.lif_network import LIFNetwork
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump
+#+end_src
+
+#+RESULTS:
+
+* Helpers
+** Connectivity
+
+#+begin_src ipython
+  def plot_eigen(W):
+      # Compute eigenvalues
+      eigenvalues = torch.linalg.eigvals(W).cpu().numpy()
+
+      # Extract real and imaginary parts
+      real_parts = eigenvalues.real
+      imag_parts = eigenvalues.imag
+
+      # Plotting
+      plt.scatter(real_parts, imag_parts)
+      plt.xlabel('Real Part')
+      plt.ylabel('Imaginary Part')
+      plt.axhline(y=0, color='k', linestyle='--')
+      plt.axvline(x=0, color='k', linestyle='--')
+      
+      # plt.grid(True, which='both')
+      plt.show()
+#+end_src
+
+#+RESULTS:
+
+** Random
+
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_theta(a, b, GM=0, IF_NORM=0):
+
+      if GM:
+          b = b - np.dot(b, a) / np.dot(a, a) * a
+
+      if IF_NORM:
+          u = a / np.linalg.norm(a)
+          v = b / np.linalg.norm(b)
+      else:
+          u=a
+          v=b
+
+      return np.arctan2(v, u)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def normalize(v):
+      return v / np.linalg.norm(v)
+
+  def project(x, u):
+      return x * u
+  # return np.dot(x, u) * u
+
+  def sort_by_angle(x, u, v):
+      u_hat = normalize(u)
+      v_hat = normalize(v)
+
+      x_proj_u = project(x, u_hat)
+      x_proj_v = project(x, v_hat)
+      # x_proj = x_proj_u + x_proj_v
+      theta = np.arctan2(x_proj_v, x_proj_u) + np.pi
+
+      # cos_theta = np.dot(x_proj, u_hat) / np.linalg.norm(x_proj) * u_hat
+      # sin_theta = np.dot(x_proj, v_hat) / np.linalg.norm(x_proj) * v_hat
+      # theta = np.arctan2(sin_theta, cos_theta)
+
+      # Pair up each element of x with the corresponding angle
+      # x_angle_pairs = list(zip(x, theta))
+
+      # Sort based on the angle
+      # x_angle_pairs.sort(key=lambda pair: pair[1])
+
+      # Extract the sorted elements
+      # sorted_x = [pair[0] for pair in x_angle_pairs]
+
+      return theta
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_idx(model):
+      ksi = model.PHI0.cpu().detach().numpy()
+      print(ksi.shape)
+
+      idx = np.arange(0, len(ksi[0]))
+      theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
+
+      return theta.argsort()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_overlap(model, rates):
+      ksi = model.PHI0.cpu().detach().numpy()
+      return rates @ ksi.T / rates.shape[-1]
+
+#+end_src
+
+#+RESULTS:
+
+* Connectivity
+** Imports
+
+#+begin_src ipython
+  from src.connectivity import Connectivity
+#+end_src
+
+#+RESULTS:
+
+** Sparse Matrix
+*** Sparse Matrix
+#+begin_src ipython
+  Wij = Connectivity(1000, 1000, 100)('sparse', 'None', kappa=1.0, sigma=0, phase=0)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  Cij = Wij.cpu().detach().numpy()
+  print(Cij.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+(1000, 1000)
+:END:
+
+#+begin_src ipython
+  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
+
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij, cmap='jet', aspect=1)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij, axis=0)  # sum over pres
+  ax2.plot(Kj)
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij, axis=1)  # sum over pres
+  ax3.plot(Kj)
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij.shape[0] / 2)):
+      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/d3a74fa698185a67fe31e662b53937d6fadb7f92.png]]
+:END:
+
+#+begin_src ipython
+  plot_eigen(1.0 * Wij)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/659f5db46b95a077ad16716a035315ff4f631b7e.png]]
+:END:
+
+*** Sparse Matrix with Cosine Structure
+
+#+begin_src ipython
+  Wij = Connectivity(1000, 1000, 100)('sparse', 'cosine', kappa=1.0, sigma=0, phase=0)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  Cij = Wij.cpu().detach().numpy()
+  print(Cij.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+(1000, 1000)
+:END:
+
+#+begin_src ipython
+  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
+
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij, cmap='jet', aspect=1)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij, axis=0)  # sum over pres
+  ax2.plot(Kj)
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij, axis=1)  # sum over pres
+  ax3.plot(Kj)
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij.shape[0] / 2)):
+      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/3b92fbd9466c384b3a5adf2dfe32ad5c30103802.png]]
+:END:
+
+#+begin_src ipython
+  plot_eigen(1.0 * Wij)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/a17bc571bcdac1df7b05997fa22496453bb46783.png]]
+:END:
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+*** Sparse Matrix with Low Rank Structure
+
+#+begin_src ipython
+  Con = Connectivity(1000, 1000, 100, verbose=1)
+  Wij = Con('sparse', 'lr', kappa=5, lr_mean=[0, 0], lr_cov=[[1, 0], [0, 1]])
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+Generating low rank vectors
+ksi torch.Size([2, 1000])
+low rank probability
+Sparse random connectivity
+with weak low rank structure, KAPPA 5.00
+:END:
+
+#+begin_src ipython
+  Cij = Wij.cpu().detach().numpy()
+  print(Cij.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+(1000, 1000)
+:END:
+
+#+begin_src ipython
+  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
+
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij, cmap='jet', aspect=1)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij, axis=0)  # sum over pres
+  ax2.plot(Kj)
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij, axis=1)  # sum over pres
+  ax3.plot(Kj)
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij.shape[0] / 2)):
+      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/fdfd64b2fc73a0c959e42ed56d014d5259a7e9b5.png]]
+:END:
+
+#+begin_src ipython
+  plot_eigen(1.0 * Wij)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/8e2985a679470f8112ecfe9d688b277d61e59c50.png]]
+:END:
+
+#+begin_src ipython
+  ksi = Con.ksi.cpu().detach().numpy()
+  print('ksi', ksi.shape)
+  idx = np.arange(0, len(ksi[0]))
+  # print(theta.shape)
+  theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=1)
+  theta = np.arctan2(ksi[1], ksi[0])
+  index_order = theta.argsort()
+  # print(index_order)
+  Cij_ordered = Cij[:][index_order]
+  print(Cij_ordered.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+ksi (2, 1000)
+(1000, 1000)
+:END:
+
+#+begin_src ipython
+  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
+
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij_ordered, cmap='jet', aspect=1)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij_ordered, axis=0)  # sum over pres
+  ax2.plot(Kj)
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij_ordered, axis=1)  # sum over pres
+  ax3.plot(Kj)
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij_ordered.shape[0] / 2)):
+      diags.append(np.trace(Cij_ordered, offset=i) / Cij_ordered.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/2459232de9eaa38253171cf874c50e2df9d3e005.png]]
+:END:
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+*** Using torch.sparse
+
+#+begin_src ipython
+    REPO_ROOT = "/home/leon/models/NeuroTorch"
+    model = Network('config_EI.yml', 'test', REPO_ROOT, VERBOSE=1, DEVICE='cuda', TASK='odr',
+                    PROBA_TYPE=['cosine', '', '',''], KAPPA=[1, 0, 0, 0])
+#+end_src
+
+#+RESULTS:
+: Na tensor([8000, 2000], device='cuda:0', dtype=torch.int32) Ka tensor([1000., 1000.], device='cuda:0') csumNa tensor([    0,  8000, 10000], device='cuda:0')
+: Jab [1.0, -1.5, 1, -1]
+: Ja0 [0.0, 0.0]
+
+#+begin_src ipython
+  import torch
+
+  # Simulate a large dense matrix
+  # Example is small for demonstration purposes, adjust sizes accordingly
+  # dense_matrix = torch.tensor([[0, 0, 3], [4, 0, 0], [0, 0, 5]], dtype=torch.float32)
+
+  N = 10000
+  K = 1000
+
+  # dense_matrix = 1.0 * (torch.rand(N, N, device='cuda') <= (K / float(N)))
+  dense_matrix = model.Wab_T.T
+
+  # Define variables to store indices and values of non-zero elements
+  nnz_indices = []
+  nnz_values = []
+
+  # Define chunk size (adjust based on your memory constraints)
+  chunk_size = 4  # Here, a chunk consists of 1 row for simplicity
+
+  # Loop through chunks of the matrix
+  for i in range(0, dense_matrix.size(0), chunk_size):
+      # Get the current chunk
+      chunk = dense_matrix[i:i+chunk_size, :]
+
+      # Find non-zero elements in the chunk
+      chunk_nnz_indices = torch.nonzero(chunk, as_tuple=False).t()  # Transpose to match COO format
+      chunk_nnz_values = chunk[chunk_nnz_indices[0], chunk_nnz_indices[1]]
+
+      # Adjust chunk indices to global indices
+      chunk_nnz_indices[0] += i  # Adjust row indices for chunks beyond the first
+
+      # Append current chunk's non-zero elements to the lists
+      nnz_indices.append(chunk_nnz_indices)
+      nnz_values.append(chunk_nnz_values)
+
+  # Concatenate all non-zero indices and values
+  nnz_indices = torch.cat(nnz_indices, dim=1)  # Concatenate along columns
+  nnz_values = torch.cat(nnz_values)
+
+  # Create sparse tensor
+  sparse_matrix = torch.sparse_coo_tensor(nnz_indices, nnz_values, dense_matrix.size())
+
+  print(sparse_matrix)
+#+end_src
+
+#+RESULTS:
+: tensor(indices=tensor([[   0,    0,    0,  ..., 9999, 9999, 9999],
+:                        [   3,    4,   16,  ..., 9995, 9996, 9998]]),
+:        values=tensor([ 0.0316,  0.0316,  0.0316,  ..., -0.0316, -0.0316,
+:                       -0.0316]),
+:        device='cuda:0', size=(10000, 10000), nnz=19997007,
+:        layout=torch.sparse_coo)
+
+#+begin_src ipython
+  plot_con(sparse_matrix.to_dense().cpu().detach().numpy().T)
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/6363b377319641faa39ce199f413c71ee2c5ff40.png]]
+
+** Full Matrix
+*** All to All with Von Mises Shape
+
+#+begin_src ipython
+  Cij = Connectivity(1000, 1000, 1.0)('all2all', 'von_mises', kappa=1.0, sigma=0, phase=0)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  Cij = Cij.cpu().detach().numpy()
+  print(Cij.shape)
+#+end_src
+
+#+RESULTS:
+: (1000, 1000)
+
+#+begin_src ipython
+  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
+
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij, cmap='jet', aspect=1)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij, axis=0)  # sum over pres
+  ax2.plot(Kj)
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij, axis=1)  # sum over pres
+  ax3.plot(Kj)
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij.shape[0] / 2)):
+      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/3035e87f407ba0146c03212c75b6bf0447e550ab.png]]
+
