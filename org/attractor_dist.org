@@ -212,7 +212,7 @@
   centers_list = []
   phi0_list = []
 
-  for i in range(10):
+  for i in range(50):
       seed = np.random.randint(10000)
 
       model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
@@ -267,7 +267,7 @@
 #+end_src
 
 #+RESULTS:
-: fbd7f578-b027-4e71-b6ed-ca47b75dad47
+: 68a54ac3-eeab-4dfe-a81e-cee952371307
 
 #+begin_src ipython
   rates_list = torch.stack(rates_list).cpu().numpy()
@@ -277,14 +277,14 @@
 #+end_src
 
 #+RESULTS:
-: dd518fa1-4180-47fa-84e8-da48b29acea9
+: 7298de56-8181-4394-9ffe-5e388a5bfa7d
 
 #+begin_src ipython
   print(rates_list.shape)
 #+end_src
 
 #+RESULTS:
-: e02b003a-dd40-4148-84f8-539af411bb2c
+: 6f4ecf62-19cb-4815-b175-ffeed5accd08
 
 #+begin_src ipython
   centers_list = np.array(centers_list)
@@ -293,7 +293,7 @@
 #+end_src
 
 #+RESULTS:
-: 7782f24f-2b7a-43d6-9d66-65ef29f6479a
+: e644e412-74f2-459e-b9de-e77f02dc347b
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 1, figsize=[height, height])
@@ -336,14 +336,14 @@
   #+end_src
 
   #+RESULTS:
-  : 060a5fe1-7a7a-4dd0-9b81-e1c58ef29f03
+  : 7853836e-5b65-4c13-ab64-40383b494a92
 
 #+begin_src ipython
-  i = 4
+  i = 7
 #+end_src
 
 #+RESULTS:
-: fd06b27b-b4d0-4140-9aa5-fad2a654f016
+: ef195ad7-af3d-4e17-ba69-344af94d399a
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -369,27 +369,24 @@
   ax.plot(x.T, y.T, '-r', alpha=.5)
   ax.plot(x.T[-1], y.T[-1], 'sr', alpha=.25, ms=10)
 
-  # ax.plot(x_cloud[i], y_cloud[i], 'o', alpha=.25, color=color)
-
   x_c1, y_c1 = centers_list[i, 0]
   x_c2, y_c2 = centers_list[i, 1]
 
-  ax.plot(x_c1, y_c1, 'x', alpha=1, ms=20, color=color, lw=10)
-  ax.plot(x_c2, y_c2, 'x', alpha=1, ms=20, color=color, lw=10)
+  ax.plot(x_c1, y_c1, 'x', alpha=1, ms=20, color='k', lw=10)
+  ax.plot(x_c2, y_c2, 'x', alpha=1, ms=20, color='k', lw=10)
 
   # plot separatrix
   x = 1.75 * np.cos(phi0_list[i] * np.pi / 180)
   y = 1.75 * np.sin(phi0_list[i] * np.pi / 180)
 
   # Draw an arrow using plt.arrow(x, y, dx, dy, **kwargs)
-  plt.arrow(0, 0, x, y, head_width=0.25, head_length=0.25, fc=color)
+  plt.arrow(0, 0, x, y, head_width=0.25, head_length=0.25, fc='k')
 
   mean = np.array([phi0_list[i], phi0_list[i] - 180 ]) * np.pi/180
 
   x = 1.75 * np.cos(mean)
   y = 1.75 * np.sin(mean)
-  ax.plot(x, y, '--', color=color)
-
+  ax.plot(x, y, '--', color='k')
 
   ax.set_xlim([-2, 2])
   ax.set_ylim([-2, 2])
@@ -397,7 +394,7 @@
 #+end_src
 
 #+RESULTS:
-: 554d9e71-4281-40fe-b34e-36a71943ac5c
+: 3dc26ec7-5704-4da9-bfe4-2747219fc824
 
 #+begin_src ipython
   print('dist', distance_list)
@@ -406,24 +403,31 @@
 #+end_src
 
 #+RESULTS:
-: 1577c1d0-1ebf-43f2-9eab-a7ca1ec06e97
+: 24f48734-3e3a-4946-9eef-b2d803e366c0
 
 #+begin_src ipython
-  plt.plot(distance_list/2, perf_list*100, 'o')
-  plt.plot(distance_list/2, perf_cr, 'x')
+  plt.plot(distance_list[distance_list.argsort()]/2, perf_list[distance_list.argsort()]*100, 'b')
+  plt.plot(distance_list[distance_list.argsort()]/2, perf_cr[distance_list.argsort()], 'r')
   plt.xlabel('Distance')
   plt.ylabel('Performance')
   plt.show()
 #+end_src
 
 #+RESULTS:
-: 33690586-02d1-429a-86d0-01c48091065c
+: d466f4e5-353d-44d2-b179-b7b635f41d62
 
 #+begin_src ipython
-  plt.plot(phi0_list % 360, perf_list * 100, 'o')
-  plt.plot(phi0_list % 360, perf_cr, 'o')
+  plt.plot(phi0_list[phi0_list.argsort()], perf_list[phi0_list.argsort()]*100, 'b')
+  plt.plot(phi0_list[phi0_list.argsort()], perf_cr[phi0_list.argsort()], 'r')
   plt.show()
 #+end_src
 
 #+RESULTS:
-: 6c2e0434-56fc-4c61-b200-521580dab264
+: 655fe660-d06f-45d1-b5ba-7374cbf39de0
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+: 8b355964-aa02-4b62-9a60-d949b606ad68
