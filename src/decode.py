@@ -1,4 +1,51 @@
+import torch
 import numpy as np
+
+def decode_bump_torch(signal, axis=-1):
+    """
+    Decode a signal to a phase and magnitude representation using PyTorch.
+    
+    Parameters:
+    signal (Tensor): Input signal to decode.
+    axis (int): The axis along which the operation is performed. Default is -1.
+    
+    Returns:
+    tuple: Returns a tuple of three elements (m0, m1, phi) where:
+             m0 is the mean of the signal,
+             m1 is magnitude of the Fourier transform of the signal,
+             phi is the phase of the Fourier transform of the signal.
+    """
+    
+    # Ensuring the input is a Tensor
+    signal_copy = signal.clone().to(torch.cfloat)
+    
+    # Swapping axes if necessary
+    if axis != -1 and signal_copy.ndim != 1:
+        signal_copy = signal_copy.movedim(axis, -1)
+    
+    # Calculating the mean along the specified (or last) axis
+    m0 = torch.nanmean(signal_copy, dim=-1).real
+    
+    length = signal_copy.shape[-1]
+    dPhi = torch.pi / length
+    
+    # Creating the complex exponential
+    exp_vals = torch.exp(-2.0j * torch.arange(length).to(signal.device) * dPhi)
+    
+    # Computing the discrete Fourier transform manually
+    dft = signal_copy @ exp_vals
+    
+    # If the input signal had more than one dimension and was swapped, swap back
+    if axis != -1 and signal_copy.ndim != 1:
+        dft = dft.movedim(-1, axis)
+
+    # Magnitude of the DFT, adjusted by the signal length
+    m1 = 2.0 * torch.abs(dft) / length
+    
+    # Phase of the DFT
+    phi = torch.atan2(dft.imag, dft.real) % (2 * torch.pi)
+    
+    return m0, m1, phi
 
 
 def decode_bump(signal, axis=-1):

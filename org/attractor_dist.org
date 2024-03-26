@@ -1,6 +1,6 @@
 #+STARTUP: fold
 #+TITLE: Dual Task Readout Rotation
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session readout :kernel torch
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session dist :kernel torch
 
 * Notebook Settings
 
@@ -33,7 +33,7 @@
 
   from src.network import Network
   from src.plot_utils import plot_con
-  from src.decode import decode_bump
+  from src.decode import decode_bump, decode_bump_torch
   from src.utils import clear_cache
 #+end_src
 
@@ -80,8 +80,7 @@
 
 #+begin_src ipython 
   def get_overlap(model, rates):
-      ksi = model.PHI0
-      return rates @ ksi.T / rates.shape[-1]
+      return rates @ model.PHI0.T / rates.shape[-1]
 #+end_src
 
 #+RESULTS:
@@ -97,145 +96,6 @@
 #+end_src
 
 #+RESULTS:
-
-* Dual task with rotating readout
-** Parameters
-
-#+begin_src ipython
-  REPO_ROOT = "/home/leon/models/NeuroTorch"
-  conf_name = "config_EI.yml"
-  name = "low_rank_ini"
-#+end_src
-
-#+RESULTS:
-
-** Fixed Points
-*** Simulation
-
-#+begin_src ipython
-  n_ini  = 25
-
-  LR_COV = [[1.0, 1.0, 0.0, 0.0],
-            [0.8, 1.0, 0.1, 0.0],
-            [0.0, 0.1, 1.0, 0.8],
-            [0.0, 0.0, 0.8, 1.0]]
-
-  start = perf_counter()
-
-  perf = []
-  perf_cr = []
-  distance = []
-
-  for i in range(10):
-      seed = np.random.randint(10000)
-
-      model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
-                      N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
-                      TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=30)
-
-      idx = get_idx(model)
-
-      dum = model(REC_LAST_ONLY=1)[..., idx]
-      rates_fp.append(dum)
-
-      dist, mean_phi = get_fp_dist(dum.cpu().numpy())
-      distance.append(dist)
-
-      model.TASK = 'dual'
-      model.DURATION = 10
-      model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
-
-      rates = model()
-      perf.append(get_perf(model, rates, n_ini))
-      
-      model.PHI1 = torch.tensor([0, 180-mean_phi], device='cuda:1')
-      model.TASK = 'dual_odr'
-
-      rates_cr = model()[..., idx].cpu().numpy()
-      perf_cr.append(get_correct_perf(rates_cr, mean_phi, n_ini))
-
-      del model
-
-  end = perf_counter()
-
-  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
-#+end_src
-
-#+RESULTS:
-#+begin_example
-  Using Hopfield like low rank
-  Cluster Centers: [[ 1.23448759 -0.78057172]
-   [-0.91709522  0.88628208]]
-  0.15869618491391096
-  dist [1.3241569627886551, 1.6028313386943838]
-  Using Hopfield like low rank
-  Cluster Centers: [[ 0.20895362  1.24961612]
-   [-0.98118668 -0.39593972]]
-  -0.38611652770759386
-  dist [0.7045745665176739, 1.8375343416791057]
-  Using Hopfield like low rank
-  Cluster Centers: [[ 0.38663877 -1.38999209]
-   [-1.19042074  0.71641058]]
-  -0.40189098774089965
-  dist [1.9666846713732102, 0.9193341532442879]
-  Using Hopfield like low rank
-  Cluster Centers: [[1.26493821 0.46843281]
-   [1.33465536 0.19752419]]
-  1.2997967819944432
-  dist [0.007117832789498839, 2.690657535314258]
-  Using Hopfield like low rank
-  Cluster Centers: [[ 0.25995008  1.34967683]
-   [-1.2430344  -0.63219846]]
-  -0.4915421617548027
-  dist [0.766073278797068, 1.9829649335921866]
-  Using Hopfield like low rank
-  Cluster Centers: [[-0.67369487 -1.04332481]
-   [-1.31655285  0.56962256]]
-  -0.9951238612377128
-  dist [2.2638132861459517, 0.22950416346802438]
-  Using Hopfield like low rank
-  Cluster Centers: [[0.8681938  1.16896518]
-   [1.15617159 0.79931537]]
-  1.0121826917402243
-  dist [0.04454797039212089, 2.8678541394735535]
-  Using Hopfield like low rank
-  Cluster Centers: [[-1.26705426 -0.29402519]
-   [-1.26593055 -0.02340075]]
-  -1.2664924054100983
-  dist [2.5771195748769835, 0.024391835244295057]
-  Using Hopfield like low rank
-  Cluster Centers: [[ 1.17727043  0.64848023]
-   [ 1.13415147 -0.34907083]]
-  1.1557109525875338
-  dist [0.18171259213708474, 2.5092077851438246]
-  Using Hopfield like low rank
-  Cluster Centers: [[-0.64760385 -1.12942242]
-   [ 1.36602482  0.14950056]]
-  0.35921048676777956
-  dist [1.9088646554551016, 0.6959849108601089]
-  Elapsed (with compilation) = 0h 9m 15s
-#+end_example
-
-#+begin_src ipython
-  perf = torch.stack(perf).cpu().numpy()
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-print(distance)
-#+end_src
-
-#+RESULTS:
-: [1.909218309092486, 1.4178480669642552, 1.8417310937986833, 0.1703128849932565, 1.74242989057587, 1.1279026754611503, 0.3288138025006508, 0.1358740757338993, 0.5203350136208722, 1.646275824150115]
-
-#+begin_src ipython
-  plt.plot(distance, perf, 'o')
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/77fe244702d69301117229871c3a752f89add3e3.png]]
 
 #+begin_src ipython
   def get_perf(model, rates, n_ini):
@@ -263,7 +123,6 @@ print(distance)
 
       # Midpoint M of A and B
       xM, yM = (x_c1 + x_c2) / 2, (y_c1 + y_c2) / 2
-      print(xM)
 
       phi1 = np.arctan2(y_c1, x_c1)
       phi2 = np.arctan2(y_c2, x_c2)
@@ -279,9 +138,7 @@ print(distance)
 
       dist = [np.sqrt((xPhi - xM)**2 + (yPhi - yM)**2),
               np.sqrt((xPsi - xM)**2 + (yPsi - yM)**2)]
-
-      print('dist', dist)
-
+      
       if dist[0]>dist[1]:
           mean_phi = phi0 * 180 / np.pi
       else:
@@ -293,21 +150,280 @@ print(distance)
 #+RESULTS:
 
 #+begin_src ipython
-  def get_fp_dist(rates):
-      m0, m1, phi = decode_bump(rates, axis=-1)
+  from sklearn.cluster import KMeans
+  kmeans = KMeans(n_clusters=2)
 
-      x = m1 / m0 * np.cos(phi)
-      y = m1 / m0 * np.sin(phi)
-
+  def get_centers(x, y):
       data = np.stack((x,y)).T
       kmeans.fit(data)
       centers = kmeans.cluster_centers_
-      print("Cluster Centers:", centers)
 
-      dist = np.sqrt((centers[0] - centers[1])**2).mean(-1)
-      phi0 = get_avg_phi(centers)
-      
-      return dist, phi0 
+      return centers
+
+  def get_coord(rates):
+      m0, m1, phi = decode_bump_torch(rates, axis=-1)
+
+      x = m1 / m0 * torch.cos(phi)
+      y = m1 / m0 * torch.sin(phi)
+
+      return x.real, y.real
 #+end_src
 
 #+RESULTS:
+
+* Dual task with rotating readout
+** Parameters
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  conf_name = "config_EI.yml"
+  name = "low_rank_ini"
+
+  n_ini  = 50
+
+  LR_COV = [[1.0, 1.0, 0.0, 0.0],
+            [0.8, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.8],
+            [0.0, 0.0, 0.8, 1.0]]
+  
+#+end_src
+
+#+RESULTS:
+
+** Fixed Points
+*** Simulation
+
+#+begin_src ipython
+  from sklearn.cluster import KMeans
+  kmeans = KMeans(n_clusters=2)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  start = perf_counter()
+
+  rates_fp = []
+  rates_list = []
+  perf_list = []
+  perf_cr = []
+
+  distance_list = []
+  centers_list = []
+  phi0_list = []
+
+  for i in range(5):
+      seed = np.random.randint(10000)
+
+      model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
+                      N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
+                      TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=30)
+
+      idx = get_idx(model)
+
+      rates = model(REC_LAST_ONLY=1)[..., idx]
+      rates_fp.append(rates)
+
+      x, y = get_coord(rates)
+      centers = get_centers(x.cpu().numpy(), y.cpu().numpy())
+      mean_phi = get_avg_phi(centers)
+
+      centers_list.append(centers)
+      phi0_list.append(mean_phi)
+      distance_list.append(np.linalg.norm(centers))
+
+      model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
+                      N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
+                      TASK='dual', LIVE_FF_UPDATE=1, DURATION=10)
+
+      # model.TASK = 'dual'
+      # model.DURATION = 10
+      # model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+
+      rates = model()
+      rates_list.append(rates[..., idx])
+      perf_list.append(get_perf(model, rates, n_ini))
+
+      # model.PHI1 = torch.tensor([0, 180-mean_phi], device='cuda:1')
+      # model.TASK = 'dual_odr'
+
+      model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
+                      N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
+                      TASK='dual_odr', LIVE_FF_UPDATE=1, DURATION=10)
+
+      rates_cr = model()[..., idx].cpu().numpy()
+
+      perf1 = get_correct_perf(rates_cr, mean_phi, n_ini)
+      perf2 = get_correct_perf(rates_cr, 180-mean_phi, n_ini)
+      perf = np.max((perf1, perf2))
+      perf_cr.append(perf)
+
+      del model
+
+  end = perf_counter()
+
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+
+#+end_src
+
+#+RESULTS:
+: 8f54b925-a05a-42ae-9e74-330870b64b94
+
+#+begin_src ipython
+  rates_list = torch.stack(rates_list).cpu().numpy()
+  perf_list = torch.stack(perf_list).cpu().numpy()
+  perf_cr = np.array(perf_cr)
+  rates_fp = torch.stack(rates_fp).cpu().numpy()
+#+end_src
+
+#+RESULTS:
+: 609f35db-c0d6-47cf-b620-bb23dc4b08b7
+
+#+begin_src ipython
+  print(rates_list.shape)
+#+end_src
+
+#+RESULTS:
+: 47835412-f4b5-41a0-aade-1417f4be5143
+
+#+begin_src ipython
+  centers_list = np.array(centers_list)
+  distance_list = np.array(distance_list)
+  phi0_list = np.array(phi0_list)
+#+end_src
+
+#+RESULTS:
+: 53c4fc0d-22b0-4a07-92b3-7fe0535f0ff4
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 1, figsize=[height, height])
+
+  m0, m1, phi = decode_bump(rates_fp, axis=-1)
+
+  # plot clouds
+  x_cloud = m1 / m0 * np.cos(phi)
+  y_cloud = m1 / m0 * np.sin(phi)
+
+  # plot centers
+  for i in range(centers_list.shape[0]):      
+      color = np.random.rand(3,)
+
+      ax.plot(x_cloud[i], y_cloud[i], 'o', alpha=.25, color=color)
+
+      x_c1, y_c1 = centers_list[i, 0]
+      x_c2, y_c2 = centers_list[i, 1]
+
+      ax.plot(x_c1, y_c1, 'x', alpha=1, ms=20, color=color, lw=10)
+      ax.plot(x_c2, y_c2, 'x', alpha=1, ms=20, color=color, lw=10)
+
+      # plot separatrix
+      x = 1.75 * np.cos(phi0_list[i] * np.pi / 180)
+      y = 1.75 * np.sin(phi0_list[i] * np.pi / 180)
+
+      # Draw an arrow using plt.arrow(x, y, dx, dy, **kwargs)
+      plt.arrow(0, 0, x, y, head_width=0.25, head_length=0.25, fc=color)
+      
+      mean = np.array([phi0_list[i], phi0_list[i] - 180 ]) * np.pi/180
+
+      x = 1.75 * np.cos(mean)
+      y = 1.75 * np.sin(mean)
+      ax.plot(x, y, '--', color=color)
+
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+
+  plt.show()
+  #+end_src
+
+  #+RESULTS:
+  : 0310aaa7-94ec-4268-b166-c8b1abf8bbfb
+
+#+begin_src ipython
+  i = 4
+#+end_src
+
+#+RESULTS:
+: b18d4aff-e1d7-47e8-a81b-0c062dfd6013
+
+#+begin_src ipython
+  fig, ax = plt.subplots(figsize=(height, height))
+
+  m0, m1, phi = decode_bump(rates_list[i], axis=-1)
+
+  x = m1 / m0 * np.cos(phi)
+  y = m1 / m0 * np.sin(phi)
+
+  x = x[:5]
+  y = y[:5]
+
+  ax.plot(x.T[0], y.T[0], 'ob', alpha=.25, ms=10)
+  ax.plot(x.T, y.T, '-b', alpha=.5)
+  ax.plot(x.T[-1], y.T[-1], 'sb', alpha=.25, ms=10)
+
+  x = m1 / m0 * np.cos(phi)
+  y = m1 / m0 * np.sin(phi)
+
+  x = x[-5:]
+  y = y[-5:]
+  ax.plot(x.T[0], y.T[0], 'or', alpha=.25, ms=10)
+  ax.plot(x.T, y.T, '-r', alpha=.5)
+  ax.plot(x.T[-1], y.T[-1], 'sr', alpha=.25, ms=10)
+
+  # ax.plot(x_cloud[i], y_cloud[i], 'o', alpha=.25, color=color)
+
+  x_c1, y_c1 = centers_list[i, 0]
+  x_c2, y_c2 = centers_list[i, 1]
+
+  ax.plot(x_c1, y_c1, 'x', alpha=1, ms=20, color=color, lw=10)
+  ax.plot(x_c2, y_c2, 'x', alpha=1, ms=20, color=color, lw=10)
+
+  # plot separatrix
+  x = 1.75 * np.cos(phi0_list[i] * np.pi / 180)
+  y = 1.75 * np.sin(phi0_list[i] * np.pi / 180)
+
+  # Draw an arrow using plt.arrow(x, y, dx, dy, **kwargs)
+  plt.arrow(0, 0, x, y, head_width=0.25, head_length=0.25, fc=color)
+
+  mean = np.array([phi0_list[i], phi0_list[i] - 180 ]) * np.pi/180
+
+  x = 1.75 * np.cos(mean)
+  y = 1.75 * np.sin(mean)
+  ax.plot(x, y, '--', color=color)
+
+
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+: 0bb6bca1-f935-4407-8327-4d0074879239
+
+#+begin_src ipython
+  print('dist', distance_list)
+  print('perf_list',perf_list*100)
+  print('perf_cr', perf_cr)
+#+end_src
+
+#+RESULTS:
+: b52cef39-d183-432b-9b72-944a0439bbad
+
+#+begin_src ipython
+  plt.plot(distance_list/2, perf_list*100, 'o')
+  plt.plot(distance_list/2, perf_cr, 'x')
+  plt.xlabel('Distance')
+  plt.ylabel('Performance')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+: eacfdf68-4e0f-4488-92f0-c596553aa7f3
+
+#+begin_src ipython
+  plt.plot(phi0_list % 360, perf_list * 100, 'o')
+  plt.plot(phi0_list % 360, perf_cr, 'o')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+: 693c109d-558d-4c3c-963e-18f4c43a3404

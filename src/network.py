@@ -442,7 +442,7 @@ class Network(nn.Module):
             cov_ = torch.tensor(self.LR_COV, dtype=self.FLOAT, device=self.device)
             
             if cov_[0, 0] == cov_[0, 1]:
-                print('Using Hopfield like low rank')
+                # print('Using Hopfield like low rank')
 
                 mean_ = mean_[[0, 2]]
                 cov_ = torch.tensor(([cov_[0,0], cov_[0, 2]], [cov_[2, 0], cov_[2,2]]),
@@ -452,7 +452,7 @@ class Network(nn.Module):
                 self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
                 self.PHI0 = torch.stack((self.PHI0[0], self.PHI0[0], self.PHI0[1], self.PHI0[1]))
             else:
-                print('Using Francesca like low rank')
+                # print('Using Francesca like low rank')
                 multivariate_normal = MultivariateNormal(mean_, cov_)
                 self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
                 

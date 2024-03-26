@@ -306,7 +306,7 @@ Then we path these inputs to the model
 We create a batch of ff inputs that are updated at each time step
 
 #+begin_src ipython
-  model = Network('config_2pop.yml', '', REPO_ROOT)
+  model = Network('config_2pop.yml', '', REPO_ROOT, LIVE_FF_UPDATE=1)
 
   N_BATCH = 10
   print('original ff_input', model.Ja0.shape)
@@ -314,7 +314,7 @@ We create a batch of ff inputs that are updated at each time step
   new_Ja0 = model.Ja0.repeat((N_BATCH, 2, 1))  
   print('new ff_input', new_Ja0.shape)
   
-  new_Ja0[:, 0] = torch.linspace(0, 10, 10, device='cuda').unsqueeze(-1) * model.M0 * torch.sqrt(model.Ka[0])
+  new_Ja0[:, 0] = torch.linspace(0, 10, N_BATCH, device='cuda').unsqueeze(-1) * model.M0 * torch.sqrt(model.Ka[0])
   print('batched ff_input', new_Ja0[:, 0].squeeze(-1))
 #+end_src
 
@@ -372,7 +372,7 @@ We create a batch of ff inputs that are updated at each time step
 *** Batching Reccurent Weights Jab
 
 #+begin_src ipython
-  model = Network('config_2pop.yml', 'None', REPO_ROOT, IF_STP=0, DT=0.001, GAIN=0.5, VERBOSE=0)
+  model = Network('config_2pop.yml', 'None', REPO_ROOT, IF_STP=0, DT=0.001, GAIN=0.5, VERBOSE=0, LIVE_FF_UPDATE=1)
 #+end_src
 
 #+RESULTS:
