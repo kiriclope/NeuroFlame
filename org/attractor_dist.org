@@ -212,7 +212,7 @@
   centers_list = []
   phi0_list = []
 
-  for i in range(50):
+  for i in range(10):
       seed = np.random.randint(10000)
 
       model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
@@ -230,7 +230,7 @@
 
       centers_list.append(centers)
       phi0_list.append(mean_phi)
-      distance_list.append(np.linalg.norm(centers))
+      distance_list.append(np.linalg.norm(centers[0]-centers[1]))
 
       model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                       N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
@@ -267,7 +267,7 @@
 #+end_src
 
 #+RESULTS:
-: 68a54ac3-eeab-4dfe-a81e-cee952371307
+: Elapsed (with compilation) = 0h 3m 15s
 
 #+begin_src ipython
   rates_list = torch.stack(rates_list).cpu().numpy()
@@ -277,14 +277,24 @@
 #+end_src
 
 #+RESULTS:
-: 7298de56-8181-4394-9ffe-5e388a5bfa7d
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: TypeError                                 Traceback (most recent call last)
+: Cell In[264], line 1
+: ----> 1 rates_list = torch.stack(rates_list).cpu().numpy()
+:       2 perf_list = torch.stack(perf_list).cpu().numpy()
+:       3 perf_cr = np.array(perf_cr)
+: 
+: TypeError: stack(): argument 'tensors' (position 1) must be tuple of Tensors, not numpy.ndarray
+:END:
 
 #+begin_src ipython
   print(rates_list.shape)
 #+end_src
 
 #+RESULTS:
-: 6f4ecf62-19cb-4815-b175-ffeed5accd08
+: (10, 64, 101, 2000)
 
 #+begin_src ipython
   centers_list = np.array(centers_list)
@@ -293,7 +303,6 @@
 #+end_src
 
 #+RESULTS:
-: e644e412-74f2-459e-b9de-e77f02dc347b
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 1, figsize=[height, height])
@@ -336,14 +345,13 @@
   #+end_src
 
   #+RESULTS:
-  : 7853836e-5b65-4c13-ab64-40383b494a92
+  [[file:./.ob-jupyter/9f9b9d8c2af5110d83c315d19de3b086e397c539.png]]
 
 #+begin_src ipython
-  i = 7
+  i = 3
 #+end_src
 
 #+RESULTS:
-: ef195ad7-af3d-4e17-ba69-344af94d399a
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -394,7 +402,7 @@
 #+end_src
 
 #+RESULTS:
-: 3dc26ec7-5704-4da9-bfe4-2747219fc824
+[[file:./.ob-jupyter/601ce505450642fc9288fb0be6566f004c86a114.png]]
 
 #+begin_src ipython
   print('dist', distance_list)
@@ -403,7 +411,12 @@
 #+end_src
 
 #+RESULTS:
-: 24f48734-3e3a-4946-9eef-b2d803e366c0
+: dist [2.5623312  0.5491311  1.1142921  0.64215654 2.6371255  2.463511
+:  2.6456704  2.431466   1.9843899  1.8363148 ]
+: perf_list [ 50.      92.5     95.9375  50.     100.      53.125   72.8125 100.
+:  100.      92.1875]
+: perf_cr [ 31.25   100.      56.25    39.0625  81.25    50.      50.      43.75
+:   98.4375  50.    ]
 
 #+begin_src ipython
   plt.plot(distance_list[distance_list.argsort()]/2, perf_list[distance_list.argsort()]*100, 'b')
@@ -414,7 +427,7 @@
 #+end_src
 
 #+RESULTS:
-: d466f4e5-353d-44d2-b179-b7b635f41d62
+[[file:./.ob-jupyter/9835c5b6f06d219352e78ae1a636873487e2ab69.png]]
 
 #+begin_src ipython
   plt.plot(phi0_list[phi0_list.argsort()], perf_list[phi0_list.argsort()]*100, 'b')
@@ -423,11 +436,10 @@
 #+end_src
 
 #+RESULTS:
-: 655fe660-d06f-45d1-b5ba-7374cbf39de0
+[[file:./.ob-jupyter/a1ef3589dd6ff6cc3eacd2dfee5507c5b2d3d5c1.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 8b355964-aa02-4b62-9a60-d949b606ad68
