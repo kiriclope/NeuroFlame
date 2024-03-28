@@ -230,8 +230,8 @@
   distance_list = []
   centers_list = []
   phi0_list = []
-
-  for i in range(50):
+  
+  for i in range(100):
       seed = np.random.randint(10000)
 
       n_ini  = 50
@@ -243,7 +243,7 @@
 
       rates = model(REC_LAST_ONLY=1)[..., idx]
       rates_fp.append(rates)
-      
+
       x, y = get_coord(rates)
       centers = get_centers(x.cpu().numpy(), y.cpu().numpy())
       mean_phi = get_avg_phi(centers)
@@ -255,7 +255,7 @@
       n_ini  = 32
       model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                       N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
-                      TASK='dual', LIVE_FF_UPDATE=1, DURATION=10)
+                      TASK='dual', LIVE_FF_UPDATE=1, DURATION=10, I0=[0.2, 0.2])
 
       # model.TASK = 'dual'
       # model.DURATION = 10
@@ -270,7 +270,7 @@
 
       model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                       N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
-                      TASK='dual_odr', LIVE_FF_UPDATE=1, DURATION=10)
+                      TASK='dual_odr', LIVE_FF_UPDATE=1, DURATION=10, I0=[0.2, 0.2])
 
       rates_cr = model()
       rates_cr_list.append(rates_cr[..., idx])
@@ -287,7 +287,7 @@
 #+end_src
 
 #+RESULTS:
-: cf24d953-6907-45ba-9a53-9ebb05bbf24d
+: Elapsed (with compilation) = 0h 45m 48s
 
 #+begin_src ipython
   rates_list = torch.stack(rates_list).cpu().numpy()
@@ -296,7 +296,6 @@
 #+end_src
 
 #+RESULTS:
-: 1a35bd84-040a-4242-9b1b-0fde324838e2
 
 #+begin_src ipython
   perf_list = torch.stack(perf_list).cpu().numpy()
@@ -304,7 +303,6 @@
 #+end_src
 
 #+RESULTS:
-: cb0dd4eb-e0e0-4c68-8787-0b53124618dc
 
 #+begin_src ipython
   centers_list = np.array(centers_list)
@@ -313,7 +311,6 @@
 #+end_src
 
 #+RESULTS:
-: dceb5c58-cf8f-40fa-8503-3f9906967125
 
 *** plots
 
@@ -346,7 +343,6 @@
 #+end_src
 
 #+RESULTS:
-: fdf12079-80cd-4ae1-bdde-077f024c78a0
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 1, figsize=[height, height])
@@ -366,7 +362,7 @@
   #+end_src
 
   #+RESULTS:
-  : 089c55c5-3cf5-4b43-b57d-e2dcc1bb0dd3
+  [[file:./.ob-jupyter/b688ec2c63861ec777fc36fbe0f8a042be3bcf7d.png]]
 
 #+begin_src ipython
   def plot_trajectory(rates, i, ax):
@@ -427,7 +423,6 @@
 #+end_src
 
 #+RESULTS:
-: 73baca21-b987-4801-ba82-c65d6cad192c
 
 #+begin_src ipython
   i = 4
@@ -446,7 +441,7 @@
 #+end_src
 
 #+RESULTS:
-: 656c5c57-b9c5-4908-8c06-b8f753a0db27
+[[file:./.ob-jupyter/1587bf454ad3bdcc5db2e4cf78f958e12c90bedf.png]]
 
 #+begin_src ipython 
   rates = rates_cr_list[i]
@@ -491,7 +486,13 @@
 #+end_src
 
 #+RESULTS:
-: 5d9f9590-637d-421f-8ee2-1369ef01e385
+: (64, 101, 2000)
+: (2, 64)
+: 350.55975649150446
+: (2,)
+: A perf [ 3 29]
+: B perf [31  1]
+: performance 53.125
 
 *** performance
 
@@ -502,24 +503,83 @@
 #+end_src
 
 #+RESULTS:
-: c0dba269-f92a-4e23-aa6e-4fae60895f73
+#+begin_example
+  dist [2.5422373  1.5583098  1.4090744  2.4617333  1.783738   2.543086
+   2.336324   2.398269   2.1371472  2.9048698  2.9256124  2.5317092
+   2.691419   1.5192612  2.2205324  1.8627285  2.906968   2.4142277
+   0.6477917  1.977871   2.1422615  2.7471917  2.5350084  2.7127745
+   1.60163    2.8680336  2.4903338  2.4094667  2.2524886  0.5003558
+   2.0219383  2.884606   2.3468297  2.5292816  2.8067644  3.0389884
+   1.1580625  1.8991463  0.35927868 1.6431282  2.5252957  2.7266686
+   2.6830583  2.9275603  2.1343498  2.540884   2.9165113  2.8607054
+   2.8628     2.1670663  2.7952013  2.9051108  2.7680073  0.8466251
+   2.7133293  2.7041147  2.1743088  2.611503   1.2339985  2.8742402
+   2.7031207  2.8501868  2.2684762  2.0378194  2.5124516  2.510251
+   2.5820034  2.7159503  2.0516024  2.1123536  2.8742845  2.616953
+   2.2831023  2.3507495  2.2904484  0.46176836 2.372453   2.602506
+   2.4226546  2.3873572  2.7698956  2.5988793  2.5267117  2.8722541
+   0.35973868 2.7505498  2.4345775  2.5386293  3.0384297  2.5902374
+   1.453211   2.0834513  2.9366677  2.427846   2.5118494  2.9957767
+   2.704483   2.1505053  0.6526659  2.0818627 ]
+  perf_list [100.      100.      100.      100.       50.       98.4375  100.
+   100.      100.       89.0625   57.8125  100.       98.4375   53.125
+   100.      100.      100.       96.875    50.      100.       92.1875
+    50.      100.       98.4375  100.      100.       98.4375   85.3125
+   100.       50.       50.      100.      100.      100.      100.
+   100.       50.       98.4375   51.5625   83.75    100.      100.
+    90.625    92.8125   99.0625  100.       98.4375  100.       94.0625
+    80.625   100.      100.      100.       86.875   100.      100.
+    50.      100.       50.      100.       76.875   100.      100.
+   100.       73.125    95.3125  100.      100.       89.0625  100.
+   100.      100.       57.8125   50.       80.3125   50.       96.56251
+   100.      100.      100.      100.      100.      100.      100.
+    95.3125   96.56251 100.      100.      100.      100.       98.4375
+   100.       90.       90.       52.8125   54.6875   90.9375  100.
+    54.6875  100.     ]
+  perf_cr_list [100.     100.     100.     100.      53.125  100.      89.0625  50.
+   100.      95.3125  51.5625 100.      70.3125  81.25    98.4375 100.
+   100.     100.      92.1875 100.      95.3125  50.     100.      98.4375
+    95.3125 100.      93.75    50.     100.      92.1875  93.75   100.
+   100.     100.     100.     100.      51.5625 100.      92.1875  79.6875
+   100.     100.      59.375   54.6875  54.6875 100.      98.4375 100.
+    65.625   51.5625 100.      50.     100.     100.     100.     100.
+    50.     100.      87.5    100.      53.125  100.     100.      98.4375
+    50.      98.4375 100.      64.0625  93.75   100.     100.     100.
+    50.      50.      82.8125  56.25    50.     100.      60.9375 100.
+    98.4375 100.     100.     100.     100.      82.8125 100.     100.
+   100.      50.     100.     100.      50.      50.      51.5625  75.
+   100.     100.      73.4375 100.    ]
+#+end_example
+
+#+begin_src ipython
+  plt.hist(distance_list/2)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/c234711087cb7e5a759449ee5e84c1495b993fdd.png]]
 
 #+begin_src ipython
   idx = distance_list.argsort()
-  plt.plot(distance_list[idx]/2, circcvl(perf_list[idx]*100, 2), '-ob')
-  plt.plot(distance_list[idx]/2, circcvl(perf_cr_list[idx], 2), '-or')
+  window = 10
+
+  plt.plot(distance_list[idx]/2, circcvl(perf_list[idx]*100, window), '-ob')
+  plt.plot(distance_list[idx]/2, circcvl(perf_cr_list[idx], window), '-or')
+
   plt.xlabel('Distance')
   plt.ylabel('Performance')
   plt.show()
 #+end_src
 
 #+RESULTS:
-: 4e1d71eb-c3fe-417a-8a74-ad6e200ae4bf
+[[file:./.ob-jupyter/428c7f62402c04d3e17854c7356b73d1f58e2104.png]]
 
 #+begin_src ipython
   idx = phi0_list.argsort()
-  plt.plot(phi0_list[idx], circcvl(perf_list[idx]*100, 2), '-ob')
-  plt.plot(phi0_list[idx], circcvl(perf_cr_list[idx], 2), '-or')
+  window = 10
+
+  plt.plot(phi0_list[idx], circcvl(perf_list[idx]*100, window), '-ob')
+  plt.plot(phi0_list[idx], circcvl(perf_cr_list[idx], window), '-or')
 
   plt.xticks(np.linspace(0, 360, 5))
   plt.xlabel('Readout Location (°)')
@@ -528,11 +588,10 @@
 #+end_src
 
 #+RESULTS:
-: 6c81f9ba-4c11-4b06-8a52-97f093d8b05c
+[[file:./.ob-jupyter/fba85e1f47900e025c0a840495e33ff0cabdaf67.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: ffb0c94c-a24a-4f27-8352-521f11bf028e

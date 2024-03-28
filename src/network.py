@@ -13,7 +13,7 @@ from src.activation import Activation
 from src.stimuli import Stimuli
 from src.plasticity import Plasticity
 from src.utils import set_seed, clear_cache
-from src.lr_utils import get_theta
+from src.lr_utils import get_theta, get_ortho_pertu
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -55,7 +55,7 @@ class Network(nn.Module):
         # Initialize low rank connectivity
         if self.LR_TRAIN:
             self.initLR()
-        
+
         # Reset the seed
         set_seed(0)
     
@@ -75,7 +75,7 @@ class Network(nn.Module):
         # Linear readout for supervised learning
         self.linear = nn.Linear(self.Na[0], 1, device=self.device, dtype=self.FLOAT, bias=False)
         self.lr_kappa = nn.Parameter(5 * torch.rand(1))
-
+        
         # Window where to evaluate loss
         self.lr_eval_win = int(self.LR_EVAL_WIN / self.DT / self.N_WINDOW)
     
@@ -130,6 +130,23 @@ class Network(nn.Module):
         # self.Wab_T = torch.matmul(U, torch.diag(S_adjusted)) @ V.t()
         
         self.Wab_T = self.Wab_T.T
+
+        if self.PROBA_TYPE[0][0] == 'lr_add':
+
+            eigenvalues, eigenvectors = torch.linalg.eig(self.Wab_T[self.slices[0], self.slices[0]].T)
+            
+            # Eigenvalues are complex, get the eigenvalue with the largest real part
+            max_real_index = torch.argmax(eigenvalues.real)
+            m = eigenvectors[:, max_real_index]
+            
+            self.PHI0[0], self.PHI0[2] = get_ortho_pertu(m, 0.0, dtype=self.FLOAT, device=self.device)
+            
+            Lij = torch.outer(self.PHI0[0], self.PHI0[0])
+            Lij = Lij + torch.outer(self.PHI0[2], self.PHI0[2])
+            
+            self.lr = self.Jab[0][0] * self.KAPPA[0][0] * Lij / torch.sqrt(self.Ka[0])
+            self.Wab_T[self.slices[0], self.slices[0]].add_(self.lr.T)
+            # self.Wab_T[self.slices[0], self.slices[0]].clamp_(min=0.0)
         
         # if self.CON_TYPE=='sparse':
         #     self.Wab_T = self.Wab_T.to_sparse()
@@ -152,8 +169,12 @@ class Network(nn.Module):
         
         # update hidden state
         if self.LR_TRAIN:
-            lr = (1.0 + self.mask * self.KAPPA[0][0] * (self.U @ self.U.T) / torch.sqrt(self.Ka[0]))
+            lr = (1.0 + self.mask * (self.U @ self.U.T) / torch.sqrt(self.Ka[0]))
             hidden = rates @ (self.Wab_T * lr.T)
+            # lr = self.mask * (self.U @ self.U.T) / self.Na[0]
+            # hidden = rates @ (self.Wab_T + lr.T)
+            # lr = (self.U @ self.U.T) / (1.0 * self.Na[0])
+            # hidden = rates @ lr.T
         elif self.IF_W_BLOCKS:
             EtoE = (rates[:, self.slices[0]]) @ self.Wab_T[self.slices[0], self.slices[0]]
             ItoE = (rates[:, self.slices[1]]) @ self.Wab_T[self.slices[1], self.slices[0]]
@@ -438,7 +459,7 @@ class Network(nn.Module):
 
         self.PHI0 = torch.tensor(self.PHI0, dtype=self.FLOAT, device=self.device).unsqueeze(0)
         
-        if self.PROBA_TYPE[0][0] == 'lr':
+        if 'dual' in self.TASK:
             mean_ = torch.tensor(self.LR_MEAN, dtype=self.FLOAT, device=self.device)
             cov_ = torch.tensor(self.LR_COV, dtype=self.FLOAT, device=self.device)
             
@@ -449,14 +470,14 @@ class Network(nn.Module):
                 cov_ = torch.tensor(([cov_[0,0], cov_[0, 2]], [cov_[2, 0], cov_[2,2]]),
                                     dtype=self.FLOAT, device=self.device)
                 
-                multivariate_normal = MultivariateNormal(mean_, cov_)            
+                multivariate_normal = MultivariateNormal(mean_, cov_)
                 self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
                 self.PHI0 = torch.stack((self.PHI0[0], self.PHI0[0], self.PHI0[1], self.PHI0[1]))
             else:
                 # print('Using Francesca like low rank')
                 multivariate_normal = MultivariateNormal(mean_, cov_)
                 self.PHI0 = multivariate_normal.sample((self.Na[0],)).T
-                
+                        
             del mean_, cov_
             del multivariate_normal
             
@@ -645,7 +666,6 @@ class Network(nn.Module):
                     if 'rand' in self.TASK:
                         rnd_phase = 1
                     
-
                     stimulus = Stimuli(self.TASK, size, device=self.device)(self.I0[i],
                                                                             self.SIGMA0[i],
                                                                             self.PHI0[:, i],
