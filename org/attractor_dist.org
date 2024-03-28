@@ -204,12 +204,12 @@
   name = "low_rank_ini"
 
   n_ini  = 32
-
+  
   LR_COV = [[1.0, 1.0, 0.0, 0.0],
             [0.8, 1.0, 0.0, 0.0],
             [0.0, 0.0, 1.0, 0.8],
             [0.0, 0.0, 0.8, 1.0]]
-  
+
 #+end_src
 
 #+RESULTS:
@@ -231,7 +231,7 @@
   centers_list = []
   phi0_list = []
 
-  for i in range(20):
+  for i in range(50):
       seed = np.random.randint(10000)
 
       n_ini  = 50
@@ -243,7 +243,7 @@
 
       rates = model(REC_LAST_ONLY=1)[..., idx]
       rates_fp.append(rates)
-
+      
       x, y = get_coord(rates)
       centers = get_centers(x.cpu().numpy(), y.cpu().numpy())
       mean_phi = get_avg_phi(centers)
@@ -274,7 +274,7 @@
 
       rates_cr = model()
       rates_cr_list.append(rates_cr[..., idx])
-      
+
       perf_cr = get_perf_cr(rates_cr[..., idx], mean_phi, n_ini)
       perf_cr_list.append(perf_cr)
 
@@ -287,7 +287,7 @@
 #+end_src
 
 #+RESULTS:
-: ba446c69-db9a-4223-85be-0dd219e6d80b
+: cf24d953-6907-45ba-9a53-9ebb05bbf24d
 
 #+begin_src ipython
   rates_list = torch.stack(rates_list).cpu().numpy()
@@ -296,7 +296,7 @@
 #+end_src
 
 #+RESULTS:
-: fce18ab3-0252-4f6c-bcb6-15954bf7a2e5
+: 1a35bd84-040a-4242-9b1b-0fde324838e2
 
 #+begin_src ipython
   perf_list = torch.stack(perf_list).cpu().numpy()
@@ -304,7 +304,7 @@
 #+end_src
 
 #+RESULTS:
-: 5bac8157-faca-4d2c-a8c8-d8c9f189c7fd
+: cb0dd4eb-e0e0-4c68-8787-0b53124618dc
 
 #+begin_src ipython
   centers_list = np.array(centers_list)
@@ -313,7 +313,7 @@
 #+end_src
 
 #+RESULTS:
-: 73be77c5-a6a7-483d-b5b3-476bc2f0fd62
+: dceb5c58-cf8f-40fa-8503-3f9906967125
 
 *** plots
 
@@ -346,7 +346,7 @@
 #+end_src
 
 #+RESULTS:
-: 9addd6cf-4137-4710-8c56-6b9625e2362d
+: fdf12079-80cd-4ae1-bdde-077f024c78a0
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 1, figsize=[height, height])
@@ -366,7 +366,7 @@
   #+end_src
 
   #+RESULTS:
-  : 1e7caa98-49b1-4179-b76a-e5c348bb382f
+  : 089c55c5-3cf5-4b43-b57d-e2dcc1bb0dd3
 
 #+begin_src ipython
   def plot_trajectory(rates, i, ax):
@@ -427,7 +427,7 @@
 #+end_src
 
 #+RESULTS:
-: 85af0491-c8b4-4bd8-89a5-94b80c369435
+: 73baca21-b987-4801-ba82-c65d6cad192c
 
 #+begin_src ipython
   i = 4
@@ -446,7 +446,7 @@
 #+end_src
 
 #+RESULTS:
-: 3cfbb08b-54e8-4c2d-8e51-61124ed96620
+: 656c5c57-b9c5-4908-8c06-b8f753a0db27
 
 #+begin_src ipython 
   rates = rates_cr_list[i]
@@ -491,7 +491,7 @@
 #+end_src
 
 #+RESULTS:
-: b96c2442-8e76-4582-bf90-6532b582c02f
+: 5d9f9590-637d-421f-8ee2-1369ef01e385
 
 *** performance
 
@@ -502,7 +502,7 @@
 #+end_src
 
 #+RESULTS:
-: 6a256a19-ad69-4a9b-bcf3-06fcba7e6f96
+: c0dba269-f92a-4e23-aa6e-4fae60895f73
 
 #+begin_src ipython
   idx = distance_list.argsort()
@@ -514,7 +514,7 @@
 #+end_src
 
 #+RESULTS:
-: cf354c8c-2646-44e9-ba5d-346c5fe3c6a5
+: 4e1d71eb-c3fe-417a-8a74-ad6e200ae4bf
 
 #+begin_src ipython
   idx = phi0_list.argsort()
@@ -528,11 +528,11 @@
 #+end_src
 
 #+RESULTS:
-: 76ab9eec-77ff-42fc-a019-7676bc765e33
+: 6c81f9ba-4c11-4b06-8a52-97f093d8b05c
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 3b9488bc-8113-41fa-aca1-cc1f273f0104
+: ffb0c94c-a24a-4f27-8352-521f11bf028e
