@@ -1,27 +1,27 @@
 
 # Table of Contents
 
-1.  [Documentation](#org47df783)
-    1.  [Dynamics](#org4720885)
-        1.  [Currents](#org0e4ffc3)
-        2.  [Rates](#org4270580)
-    2.  [Connectivity](#org59f10f4)
+1.  [Documentation](#org5b3a5ad)
+    1.  [Dynamics](#orgf695b4a)
+        1.  [Currents](#org87e7519)
+        2.  [Rates](#org5306e22)
+    2.  [Connectivity](#orgad172c6)
 
 
 
-<a id="org47df783"></a>
+<a id="org5b3a5ad"></a>
 
 # Documentation
 
 Neurotorch is an implementation of a rate based recurrent neural network trainer and simulator.
 
 
-<a id="org4720885"></a>
+<a id="orgf695b4a"></a>
 
 ## Dynamics
 
 
-<a id="org0e4ffc3"></a>
+<a id="org87e7519"></a>
 
 ### Currents
 
@@ -34,7 +34,7 @@ or not
 $$ h^A_i(t) = \sum_{jB} J^{AB}_{ij} h_j(t) $$
 
 
-<a id="org4270580"></a>
+<a id="org5306e22"></a>
 
 ### Rates
 
@@ -53,7 +53,7 @@ $$ r^A_i(t) = \Phi(\sum_{jB} J^{AB}_{ij} h_j(t) + h^A_{ext}(t)) $$
 Here $\Phi$ is the transfer function defined in **src/activation.py**
 
 
-<a id="org59f10f4"></a>
+<a id="orgad172c6"></a>
 
 ## Connectivity
 
@@ -68,7 +68,7 @@ Probability of connection from population B to A:
     otherwise
     it can be cosine
     
-    $$ P_{ij}^{AB} = ( 1.0 + \KAPPA_B \cos(\theta_i^A - \theta_j^B) ) $$
+    $$ P_{ij}^{AB} = ( 1.0 + \Kappa_B \cos(\theta_i^A - \theta_j^B) ) $$
     
     and also low rank
     
