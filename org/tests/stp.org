@@ -3,7 +3,6 @@
 #+PROPERTY: header-args:ipython :results both :exports both :async yes :session test :kernel torch
 
 * Notebook Settings
-
 #+begin_src ipython
   %load_ext autoreload
   %autoreload 2
@@ -15,10 +14,13 @@
 #+end_src
 
 #+RESULTS:
+:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
+: <Figure size 800x494.427 with 0 Axes>
+:END:
 
 * Imports
 
@@ -61,7 +63,7 @@ First, I we will plot the dynamics of the stp variables for a neuron with a give
   tau_list = torch.tensor([0.5, 0.25])
   N_BATCH = 2
 
-  stp = Plasticity(USE=0.03, TAU_FAC=tau_list, TAU_REC=0.2, DT=0.01, size=(2, 10))
+  stp = Plasticity(USE=0.03, TAU_FAC=tau_list, TAU_REC=0.2, DT=0.01, size=(2, 10), STP_TYPE='hansel')
 
   N_STEPS = 500
 
@@ -105,7 +107,7 @@ First, I we will plot the dynamics of the stp variables for a neuron with a give
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/bd1c990635acf84072a83e0cbce51b18d86ebc7b.png]]
+[[file:./.ob-jupyter/506169d912c808e0172dfddc4dca1d6699ca7fff.png]]
 
 Then I will look at the evolution of the steady state value of A_ux with the rate for different values of tau_fac
 
@@ -113,7 +115,7 @@ Then I will look at the evolution of the steady state value of A_ux with the rat
   tau_list = torch.tensor([1.0, .75, .5, .25])
   N_BATCH = tau_list.shape[0]
   
-  stp = Plasticity(USE=0.03, TAU_FAC=tau_list, TAU_REC=0.2, DT=0.01, size=(N_BATCH, 10))
+  stp = Plasticity(USE=0.03, TAU_FAC=tau_list, TAU_REC=0.2, DT=0.01, size=(N_BATCH, 10), STP_TYPE='hansel')
 #+end_src
 
 #+RESULTS:
@@ -165,7 +167,7 @@ Then I will look at the evolution of the steady state value of A_ux with the rat
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/d3b7bb20bc21f9db5f59b1b65c6ff91ad3496d06.png]]
+[[file:./.ob-jupyter/7ad6c64e738e6fd28d93b91e32a5424f8e8f47a3.png]]
 
 This is what we expect!
 
@@ -219,7 +221,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/fc36b80b28f83459125a35c67e27f76a0db28805.png]]
+[[file:./.ob-jupyter/1caa26861125f155443b98c40a120825e34db6bb.png]]
 
 #+begin_src ipython
   
@@ -270,8 +272,6 @@ This is what we expect!
 #+end_src  
 
 #+RESULTS:
-: tensor([[0., 1.],
-:         [0., 0.]], device='cuda:0')
 : (50, 101, 2)
 
 #+begin_src ipython
@@ -282,7 +282,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ae814f40e2f6fa8b71e259ad31517400a09b7add.png]]
+[[file:./.ob-jupyter/4f28099f2f2432bd4f8440234196e661834b7daf.png]]
 
 #+begin_src ipython
   u_list = model.u_list.cpu().numpy()
@@ -302,7 +302,7 @@ This is what we expect!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/29894beff771480bf3f49fb91a6c9526d3fb1121.png]]
+[[file:./.ob-jupyter/32f4cef323b6e703c799b2b27e26ad18f4a9b6f2.png]]
 
 #+begin_src ipython
   print(model.J_STP)

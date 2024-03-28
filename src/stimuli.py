@@ -45,12 +45,12 @@ class Stimuli():
         return strength * (footprint * phase)
     
     def forward(self, strength, footprint, phase, **kwargs):
-        if self.task=='odr':
+        if 'odr' in self.task:
             return self.odrStim(strength, footprint, phase, **kwargs)
-        elif self.task=='dual':
+        if 'dual' in self.task:
             return self.dualStim(strength, footprint, phase)
-        else:
-            return 0
+
+        return 0
         
     def __call__(self, strength, footprint, phase, **kwargs):
         # This method will be called when you do Conn()()

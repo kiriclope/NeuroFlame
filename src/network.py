@@ -139,6 +139,7 @@ class Network(nn.Module):
         
         self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC,
                               self.DT, (self.N_BATCH, self.Na[0]),
+                              STP_TYPE=self.STP_TYPE,
                               FLOAT=self.FLOAT, device=self.device)
         
         #################################################
@@ -520,10 +521,14 @@ class Network(nn.Module):
                 if 'dual' in self.TASK:
                     if 'rand' in self.TASK:
                         theta = get_theta(self.PHI0[0], self.PHI0[2])
+                        if i==0:
+                            phase = torch.rand(size[0], dtype=self.FLOAT, device=self.device) * 360
+                            self.phase = phase.unsqueeze(1).expand((phase.shape[0], size[-1]))
+                        
                         stimulus = Stimuli('odr', size, device=self.device)(self.I0[i],
                                                                             self.SIGMA0[i],
-                                                                            self.PHI0[i],
-                                                                            rnd_phase=1,
+                                                                            self.phase,
+                                                                            rnd_phase=0,
                                                                             theta_list=theta)
                         del theta
                     
@@ -558,7 +563,7 @@ class Network(nn.Module):
                     rnd_phase = 0
                     if 'rand' in self.TASK:
                         rnd_phase = 1
-                        
+                    
                     stimulus = Stimuli(self.TASK, size)(self.I0[i],
                                                         self.SIGMA0[i],
                                                         self.PHI0[:, i],
@@ -619,10 +624,13 @@ class Network(nn.Module):
                     if 'rand' in self.TASK:
                         # random phase on the lr ring
                         theta = get_theta(self.PHI0[0], self.PHI0[2])
+                        phase = torch.rand(self.size[0], dtype=self.dtype, device=self.device) * 360
+                        self.phase = phase.unsqueeze(1).expand((phase.shape[0], self.size[-1]))
+
                         stimulus = Stimuli('odr', size, device=self.device)(self.I0[i],
                                                                             self.SIGMA0[i],
-                                                                            self.PHI0[i],
-                                                                            rnd_phase=1,
+                                                                            self.phase,
+                                                                            rnd_phase=0,
                                                                             theta_list=theta)
                         del theta
                         
@@ -636,12 +644,13 @@ class Network(nn.Module):
                     rnd_phase = 0
                     if 'rand' in self.TASK:
                         rnd_phase = 1
+                    
 
                     stimulus = Stimuli(self.TASK, size, device=self.device)(self.I0[i],
                                                                             self.SIGMA0[i],
                                                                             self.PHI0[:, i],
-                                                                            rnd_phase=rnd_phase)
-                
+                                                                            rnd_phase=rnd_phase).unsqueeze(1)
+                    
                 ff_input[:, self.N_STIM_ON[i]:self.N_STIM_OFF[i], self.slices[0]].add_(stimulus)
                 
                 del stimulus

@@ -33,7 +33,7 @@
 
   from src.network import Network
   from src.plot_utils import plot_con
-  from src.decode import decode_bump
+  from src.decode import decode_bump, circcvl
   from src.utils import clear_cache
 #+end_src
 
@@ -120,31 +120,31 @@
 #+end_src
 
 #+RESULTS:
-: 6793
+: 9280
 
 #+begin_src ipython
-  n_ini  = 50
+  n_ini  = 1000
 
   LR_COV = [[1.0, 1.0, 0.0, 0.0],
-            [0.8, 1.0, 0.1, 0.0],
-            [0.0, 0.1, 1.0, 0.8],
+            [0.8, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.8],
             [0.0, 0.0, 0.8, 1.0]]
-
+  
   start = perf_counter()
   model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                   N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
-                  TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=30)
+                  TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=10)
 
   rates_fp = model(REC_LAST_ONLY=1).detach().cpu().numpy()
   end = perf_counter()
-  
+
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
   print('rates', rates_fp.shape)
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 12s
-: rates (100, 2000)
+: Elapsed (with compilation) = 0h 0m 41s
+: rates (2000, 2000)
 
 *** Readout
 
@@ -162,7 +162,7 @@
 #+end_src
 
 #+RESULTS:
-: (100, 2000)
+: (2000, 2000)
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -170,7 +170,49 @@
 #+end_src
 
 #+RESULTS:
-: (100,)
+: (2000,)
+
+#+begin_src ipython
+  phi0 = model.phase.cpu().numpy()[:, 0]
+  error = phi * 180 / np.pi - phi0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  ax[0].hist(phi0, bins='auto', density=True)
+  ax[1].hist(phi * 180 / np.pi, bins='auto', density=True)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/96add052fe0711da3a60926de325a49dbcd08eb0.png]]
+
+#+begin_src ipython
+  idx = phi0.argsort()
+  plt.plot(phi0[idx], circcvl(error[idx], 200), '-')
+  plt.xlabel('Stimulus (°)')
+  plt.ylabel('Error (°)')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/6101c6b551b949c46ced9dfc0bea32fc514f4f07.png]]
+
+#+begin_src ipython
+  plt.hist(error, bins='auto')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/1c26db1a1a929b1a90422743054caeda5f60388c.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 #+begin_src ipython
   from sklearn.cluster import KMeans
@@ -193,9 +235,9 @@
 #+end_src
 
 #+RESULTS:
-: (100, 2)
-: Cluster Centers: [[ 0.33698847 -1.37174742]
-:  [-0.19082726  1.30252834]]
+: (2000, 2)
+: Cluster Centers: [[-1.15520233 -0.59249953]
+:  [ 0.64296896  0.61745489]]
 
 #+begin_src ipython
   radius = np.sqrt(x_c1**2 + y_c1**2)
@@ -230,9 +272,9 @@
 #+end_src
 
 #+RESULTS:
-: 0.0730806043867496
-: dist [1.34831173658741, 1.4783900275539876]
-: mean phi 191.06850235703
+: -0.25611668429495005
+: dist [1.1570523510095496, 1.4709959120988136]
+: mean phi 305.49674598513593
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 1, figsize=[height, height])
@@ -264,7 +306,7 @@
   #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/da88b3661e11061cdac3c5a35e31f5b1aea5d33d.png]]
+[[file:./.ob-jupyter/1cc64ea4161db6f825dd61f0a7e8aa5e65601d01.png]]
 
 #+begin_src ipython
 
@@ -333,7 +375,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/b8ea43cfab46bda69a108ea75ba7570a7b3adfe3.png]]
+[[file:./.ob-jupyter/2f8709196fb1d99fa69d5f250c4f9ea65140c246.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -360,7 +402,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f50200e8f87758450c438c61d49428cdb403130a.png]]
+[[file:./.ob-jupyter/429537457ac95434cb8c1c70444c172cf651e68e.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -405,7 +447,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/49212d44e732d23bbe49877131985a933f0c501b.png]]
+[[file:./.ob-jupyter/b5c8fa5689858d0d0f985b4ce29c028179e75e5a.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -446,7 +488,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/567820d90dbf0893626450a582d0d99c48b11d87.png]]
+[[file:./.ob-jupyter/f7aa9060aaf6c3eeba672fbdcc6077eb1201fb51.png]]
 
 #+begin_src ipython
   readoutA = overlap[:n_ini, -5:, 0]
@@ -467,14 +509,14 @@
 #+end_src
 
 #+RESULTS:
-: performance 79.3
+: performance 50.0
 
 #+begin_src ipython
   print(mean_phi-90)
 #+end_src
 
 #+RESULTS:
-: 101.06850235703001
+: 243.53377333829212
 
 #+begin_src ipython
   perf = get_correct_perf(rates_ordered, mean_phi, n_ini)
@@ -482,7 +524,7 @@
 #+end_src
 
 #+RESULTS:
-: corrected performance 7.0
+: corrected performance 51.5
 
 #+begin_src ipython
 
