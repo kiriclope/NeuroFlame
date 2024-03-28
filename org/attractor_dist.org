@@ -289,7 +289,7 @@
 #+end_src
 
 #+RESULTS:
-: e26c6eb9-a101-417f-9390-d31556bb11a3
+: Elapsed (with compilation) = 0h 8m 51s
 
 #+begin_src ipython
   rates_list = torch.stack(rates_list).cpu().numpy()
@@ -298,7 +298,6 @@
 #+end_src
 
 #+RESULTS:
-: 9a251972-1ee1-4e16-85c7-fbf68f32ec57
 
 #+begin_src ipython
   perf_list = torch.stack(perf_list).cpu().numpy()
@@ -306,7 +305,6 @@
 #+end_src
 
 #+RESULTS:
-: 47cb1a9b-3e02-47dd-803f-98c60f1e297c
 
 #+begin_src ipython
   centers_list = np.array(centers_list)
@@ -315,7 +313,6 @@
 #+end_src
 
 #+RESULTS:
-: 0c8e105a-d986-43a0-9843-a76ca59e2e86
 
 *** plots
 
@@ -348,7 +345,6 @@
 #+end_src
 
 #+RESULTS:
-: a2cddf81-b06f-4647-b077-01b5a68079e2
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 1, figsize=[height, height])
@@ -368,7 +364,7 @@
   #+end_src
 
   #+RESULTS:
-  : 2b0648ba-8674-41c3-9565-4da52bdbdd09
+  [[file:./.ob-jupyter/e61303e4ae22532ddb6c25e74b1b327bbb4413af.png]]
 
 #+begin_src ipython
   def plot_trajectory(rates, i, ax):
@@ -429,17 +425,17 @@
 #+end_src
 
 #+RESULTS:
-: 059cca29-9b03-445c-b268-6214bd37ab19
 
 #+begin_src ipython
-  i = 3
+  i = 0
   fig, ax = plt.subplots(1, 3, figsize=(3*height, height))
 
   plot_ring(i, ax[0], 'b')
+  ax[0].set_title('Distance %.1f' % (distance_list[i] / 2))
 
   plot_trajectory(rates_list, i, ax[1])
   ax[1].set_title('Performance %.1f' % (perf_list[i] * 100))
-  
+
   plot_trajectory(rates_cr_list, i, ax[2])
   ax[2].set_title('Performance %.1f' % (perf_cr_list[i]))
 
@@ -447,7 +443,7 @@
 #+end_src
 
 #+RESULTS:
-: 495ce9ae-9898-4f3b-9dda-03caf5bfab02
+[[file:./.ob-jupyter/241226e3d55826a78fd29545a4f231e2b8541e17.png]]
 
 #+begin_src ipython 
   rates = rates_cr_list[i]
@@ -464,7 +460,7 @@
 
   x_c1, y_c1 = centers[0]
   x_c2, y_c2 = centers[1]
-  
+
   # Midpoint M of A and B
   print(phi0)
   # radius = np.sqrt(x_c1**2 + y_c1**2)
@@ -476,8 +472,9 @@
 
   dot = vPhi @ X
 
-  if phi0 > 0 and phi0<180:
-       dot = dot * -1
+  if phi0 > 270 or phi0<90:
+         print('change sign')
+         dot = dot * -1
 
   # print(dot[:n_ini])
   A = (dot[:n_ini]<0).sum()
@@ -493,16 +490,17 @@
 #+end_src
 
 #+RESULTS:
-: 16947266-f3c9-4ed7-a9ef-266cc7dbcc11
-
-#+begin_src ipython
-270-90
-#+end_src
-
-#+RESULTS:
-: 05201a26-5f50-42c9-97cb-d6545ac5ee7f
+: (64, 101, 2000)
+: (2, 64)
+: 310.84713103427185
+: (2,)
+: change sign
+: A perf 1
+: B perf 0
+: performance 1.5625
 
 *** performance
+
 #+begin_src ipython
   print('dist', distance_list)
   print('perf_list',perf_list*100)
@@ -510,7 +508,19 @@
 #+end_src
 
 #+RESULTS:
-: c34bc4f3-dd9c-4d7a-9672-3aea469a8073
+#+begin_example
+  dist [2.1900504  2.5348887  0.32981998 2.6249733  2.707583   2.5819612
+   2.0967252  1.9047275  0.7325225  2.4577513  2.7042248  2.7052925
+   0.29331648 2.736787   1.0029597  2.1997192  1.1466999  1.6720191
+   2.2258713  2.0380952 ]
+  perf_list [ 85.        98.4375    55.        50.        95.00001   65.625
+    99.375     50.        83.4375    54.375     56.875004  49.6875
+    58.749996 100.        77.5       52.8125    84.6875    81.5625
+   100.        69.0625  ]
+  perf_cr_list [ 98.4375 100.      32.8125  62.5     45.3125  50.      85.9375  50.
+   100.      29.6875  50.      73.4375  65.625  100.      98.4375  50.
+    98.4375 100.     100.      50.    ]
+#+end_example
 
 #+begin_src ipython
   plt.plot(distance_list[distance_list.argsort()]/2, perf_list[distance_list.argsort()]*100, '-ob')
@@ -521,7 +531,7 @@
 #+end_src
 
 #+RESULTS:
-: 250b0117-3584-4fad-83dd-c2a9b20a0a9e
+[[file:./.ob-jupyter/8a4846d961b523317896fc0b6c95d6d64f614fac.png]]
 
 #+begin_src ipython
   plt.plot(phi0_list[phi0_list.argsort()], perf_list[phi0_list.argsort()]*100, '-ob')
@@ -534,11 +544,10 @@
 #+end_src
 
 #+RESULTS:
-: 5a406dd1-5eff-40a9-b165-77d3bf039439
+[[file:./.ob-jupyter/1fa651646965dfb39e36b3e6159d06f555b80a46.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: cf9f32ea-4c39-4e52-91fb-22cedaa3bc51

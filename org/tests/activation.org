@@ -1,0 +1,93 @@
+#+STARTUP: fold
+#+TITLE: Activation  Test
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session stim :kernel torch
+
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+The autoreload extension is already loaded. To reload it, use:
+  %reload_ext autoreload
+Python exe
+/home/leon/mambaforge/bin/python
+:END:
+
+* Imports
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../../')
+
+  import torch
+  import pandas as pd
+  from time import perf_counter
+
+  from src.network import Network
+  from src.activation import Activation
+#+end_src
+
+#+RESULTS:
+
+* Activation
+** ReLU
+
+#+begin_src ipython
+  x = torch.linspace(-10, 10, 100)
+  tf = Activation()(x, 'relu')
+  plt.plot(x, tf)
+  plt.xlabel('Input')
+  plt.ylabel('Output')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/c9138d43a5cb149bbeb2b59e0e8ce82b04b7e196.png]]
+:END:
+
+** Sigmoid
+
+#+begin_src ipython
+  x = torch.linspace(-10, 10, 100)
+  tf = Activation()(x, 'erf')
+  plt.plot(x, tf)
+  plt.xlabel('Input')
+  plt.ylabel('Output')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/70ba9db6280772e63187afebf22fa93a1aa7c07f.png]]
+:END:
+
+** Brunel's non linear TF
+
+#+begin_src ipython
+  x = torch.linspace(-10, 10, 100)
+  tf = Activation()(x, 'sqrt')
+  plt.plot(x, tf)
+  plt.xlabel('Input')
+  plt.ylabel('Output')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/8aaf2791347f6b571c72d154e70dc93a7c157a0e.png]]
+:END:
+
+#+begin_src ipython
+
+#+end_src

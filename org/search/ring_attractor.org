@@ -1,0 +1,1058 @@
+#+STARTUP: fold
+#+TITLE:  Ring Attractor
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session multiring :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Imports
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../../')
+
+  import torch
+  import gc
+  import pandas as pd
+  from time import perf_counter
+
+  from src.network import Network
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump
+  from src.utils import clear_cache
+
+  REPO_ROOT = '/home/leon/models/NeuroTorch/'
+#+end_src
+
+#+RESULTS:
+* Helpers
+
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+* Parameters
+
+#+begin_src ipython
+  conf_name = 'config_ringEI.yml'
+#+end_src
+
+#+RESULTS:
+
+* Single Trial
+*** Model
+
+#+begin_src ipython
+  start = perf_counter()
+
+  model = Network(conf_name, 'None', REPO_ROOT, TASK='odr',
+                  VERBOSE=0, DEVICE='cuda', seed=0, N_BATCH=10)
+  
+  rates = model(RET_FF=1).cpu().numpy()
+
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+
+  Ne = model.Na[0].detach().cpu().numpy()
+  N = model.N_NEURON
+
+  print('rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: Elapsed (with compilation) = 0h 0m 9s
+: rates (10, 21, 500)
+
+#+RESULTS:
+
+#+begin_src ipython
+  m0, m1, phi = decode_bump(rates, axis=-1)
+  print('m0', m0.shape)
+#+end_src
+
+#+RESULTS:
+: m0 (10, 21)
+
+*** Dynamics
+
+#+begin_src ipython
+  ff_input = model.ff_input.cpu().detach().numpy()
+  print(ff_input.shape)
+
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+  
+  ax[0].plot(ff_input[0, :, :5])
+  ax[0].plot(ff_input[0, :, -5:])
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('FF Input')
+
+  ax[1].imshow(ff_input[0].T, cmap='jet', vmin=0, aspect='auto')
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('Neuron #')
+  ax[1].set_ylim([0, Ne])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (10, 11500, 500)
+[[file:./.ob-jupyter/d6e50378bbb3b04a75c378d11a78c1460c99d3a3.png]]
+:END:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+  r_max = np.max(rates[0])
+
+  ax[0].plot(rates.mean(-1).T)
+  ax[0].set_ylabel('Rates')
+  ax[0].set_xlabel('Step')
+
+  ax[1].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+  ax[1].set_ylabel('Pref. Location (°)')
+  ax[1].set_xlabel('Step')
+  ax[1].set_yticks(np.linspace(0, Ne, 5), np.linspace(360, 0, 5).astype(int))
+  # ax[0][1].colorbar()
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/617155200b8de4b1ae42409bc1dd52ce982a275a.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+  
+  ax[0].plot((m1.T))
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('$\mathcal{F}_1$')
+
+  ax[1].plot((phi.T * 180 / np.pi))
+  ax[1].set_yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('Phase (°)')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/5eee366215d709f306fa40fa99cac22370d3ce58.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+* Rates vs Jee
+
+#+begin_src ipython
+  model = Network('config_EI.yml', 'None', REPO_ROOT, IF_STP=1, DT=0.001, VERBOSE=0, LIVE_FF_UPDATE=1)
+#+end_src
+
+#+RESULTS:
+: Using Hopfield like low rank
+
+#+begin_src ipython
+  N_BATCH = 10
+  model.J_STP = torch.linspace(0, 10, N_BATCH, dtype=torch.float32, device='cuda').unsqueeze(-1)
+  
+  model.N_BATCH = N_BATCH
+  rates_Jee = model(RET_STP=1).cpu().detach().numpy()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  overlap = get_overlap(model, rates_Jee)
+  print(overlap.shape)
+
+  idx = get_idx(model)
+  rates_ordered = rates_Jee[..., idx]
+
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 101, 4)
+: (4, 8000)
+: (10, 101)
+
+#+begin_src ipython
+  u_list = model.u_list.cpu().numpy()
+  x_list = model.x_list.cpu().numpy()
+  A_ux = u_list * x_list
+  print(u_list.shape, x_list.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 101, 8000) (10, 101, 8000)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  
+  mean_rates = rates_Jee[:,-1].mean(-1)
+
+  ax[0].plot(J_STP.cpu(), mean_rates)
+  ax[0].set_xlabel('$J_{EE}$')
+  ax[0].set_ylabel('$<Rates>_i$')
+  # ax[0].set_ylim([0, 60])
+
+  ax[1].plot(rates_Jee.mean(-1).T)
+  ax[1].set_xlabel('$J_{EE}$')
+  ax[1].set_ylabel('Rates')
+  # ax[1].set_ylim([0, 60])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/db4227503fb6955c2a080d44328ffc66932d1e88.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].plot(J_STP.cpu(), m1[:, -1])
+  ax[0].set_xlabel('$J_{EE}$')
+  ax[0].set_ylabel('$\mathcal{F}_1$')
+  
+  ax[1].plot(m1.T)
+  ax[1].set_xlabel('$Step$')
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/6dd636181d6d08a516c6be2f68f978d8abdfa589.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  mean_rates = A_ux[:,-1].mean(-1) 
+
+  ax[0].plot(J_STP.cpu(), mean_rates)
+  ax[0].set_xlabel('$J_{EE}$')
+  ax[0].set_ylabel('$A_{ux}$')
+
+  ax[1].plot(A_ux.mean(-1).T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$A_{ux}$')
+
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/5cc8d238f77fe96c2568503bacc1f65b09580840.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+* Rates vs Jee vs Ie
+
+#+begin_src ipython
+  model = Network(conf_name, 'None', REPO_ROOT, IF_STP=1, DT=0.001, VERBOSE=0, LIVE_FF_UPDATE=1, N_BATCH=1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  N_BATCH = 10
+
+  J_STP = torch.linspace(1, 10, N_BATCH, device='cuda')
+  print(J_STP)
+  JE0 = torch.linspace(1, 3, N_BATCH, device='cuda')
+  print(JE0)
+
+  J_STP = J_STP.unsqueeze(0).expand(N_BATCH, N_BATCH) 
+  J_STP = J_STP.reshape((-1, 1)) # * model.Jab[0, 0]
+  # print(J_STP.shape)
+
+  JE0 = JE0.unsqueeze(1).expand(N_BATCH, N_BATCH)
+  JE0 = JE0.reshape((-1, 1)) * model.M0
+  # print(JE0.shape)
+
+  new_Ja0 = model.Ja0.repeat((N_BATCH*N_BATCH, 1, 1))
+  # print(new_Ja0.shape)
+
+  new_Ja0[:,0] = JE0
+  # print(new_Ja0.shape)
+#+end_src
+
+#+RESULTS:
+: tensor([ 1.,  2.,  3.,  4.,  5.,  6.,  7.,  8.,  9., 10.], device='cuda:0')
+: tensor([1.0000, 1.2222, 1.4444, 1.6667, 1.8889, 2.1111, 2.3333, 2.5556, 2.7778,
+:         3.0000], device='cuda:0')
+
+#+begin_src ipython
+  model.N_BATCH = 100
+  model.Ja0 = new_Ja0
+  model.J_STP = J_STP
+
+  start = perf_counter()
+  rates = model().cpu().detach().numpy()
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+  print(rates.shape)
+#+end_src
+#+RESULTS:
+: Elapsed (with compilation) = 0h 0m 19s
+: (100, 21, 500)
+
+#+begin_src ipython
+  m0, m1, phi = decode_bump(rates, axis=-1)
+  print(m0.shape)
+
+  m0 = m0.reshape(N_BATCH, N_BATCH,-1)
+  m1 = m1.reshape(N_BATCH, N_BATCH,-1)
+#+end_src
+
+#+RESULTS:
+: (100, 21)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].imshow(m0[..., -1], cmap='jet', origin='lower', vmin=0, aspect='auto')
+  ax[0].set_xlabel('$J_{EE}$')
+  ax[0].set_ylabel('$J_{E0}$')
+
+  ax[1].imshow(m1[...,-1]/m0[...,-1], cmap='jet', origin='lower', vmin=0, vmax=2, aspect='auto')
+  ax[1].set_xlabel('$J_{EE}$')
+  ax[1].set_ylabel('$J_{E0}$')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/ae677617ab88aa33483e9b69e44ee38fec6875c3.png]]
+
+#+begin_src ipython
+  plt.plot(m1[-1].T)
+  plt.ylabel('$\mathcal{F}_1$')
+  plt.xlabel('step')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/9aac4f97fa7e7647bf26b49b665b9f42eb37331a.png]]
+
+#+begin_src ipython
+  rates = rates.reshape(N_BATCH, N_BATCH, rates.shape[1], -1)
+  print(rates.shape)
+
+  Ja0 = model.Ja0.reshape(N_BATCH, N_BATCH, 2, 1).unsqueeze(-1).cpu().numpy()
+  J_STP = model.J_STP.reshape(N_BATCH, N_BATCH, 1).unsqueeze(-1).cpu().numpy()
+#+end_src
+
+ #+RESULTS:
+ : (10, 10, 21, 500)
+
+#+begin_src ipython
+  print(rates.shape)
+#+end_src
+
+ #+RESULTS:
+ : (10, 10, 21, 500)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+  r_max = 30
+  
+  ax[0].imshow(rates[-1, 4].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_xlabel('Step')
+  ax[0].set_title('$ J_{E0} = %.2f \quad J_{EE}= %.2f$' % (Ja0[-1, 4, 0], J_STP[4, -1]))
+
+  ax[1].imshow(rates[-1, 6].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+  ax[1].set_ylabel('Pref. Location (°)')
+  ax[1].set_xlabel('Step')
+  ax[1].set_yticks(np.linspace(0, Ne, 5), np.linspace(360, 0, 5).astype(int))
+  ax[1].set_title('$ J_{E0} = %.2f \quad J_{EE}= %.2f$' % (Ja0[6, -1, 0], J_STP[6, -1]))
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/9c98d8706372a6c7baa317fc6e2bb206fe07a066.png]]
+
+#+begin_src ipython
+  print(model.J_STP.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([100, 1])
+
+#+begin_src ipython
+  J_STP = torch.linspace(1, 10, N_BATCH, device='cuda')
+  print(J_STP)
+  JE0 = torch.linspace(1, 3, N_BATCH, device='cuda')
+  
+  model.Ja0[:, 0, 0] =  JE0[-1] * model.M0
+  model.J_STP[:, 0] = J_STP[7]
+  print(model.Ja0)
+  print(model.J_STP)
+
+  model.N_BATCH=1
+  rates = model().cpu().detach().numpy()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+  r_max = 10
+
+  ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+#+begin_example
+  ---------------------------------------------------------------------------
+  TypeError                                 Traceback (most recent call last)
+  Cell In[162], line 5
+        1 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+        3 r_max = 10
+  ----> 5 ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+        6 ax[0].set_ylabel('Neuron #')
+        7 ax[0].set_xlabel('Step')
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/__init__.py:1465, in _preprocess_data.<locals>.inner(ax, data, *args, **kwargs)
+     1462 @functools.wraps(func)
+     1463 def inner(ax, *args, data=None, **kwargs):
+     1464     if data is None:
+  -> 1465         return func(ax, *map(sanitize_sequence, args), **kwargs)
+     1467     bound = new_sig.bind(ax, *args, **kwargs)
+     1468     auto_label = (bound.arguments.get(label_namer)
+     1469                   or bound.kwargs.get(label_namer))
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_axes.py:5751, in Axes.imshow(self, X, cmap, norm, aspect, interpolation, alpha, vmin, vmax, origin, extent, interpolation_stage, filternorm, filterrad, resample, url, **kwargs)
+     5748 if aspect is not None:
+     5749     self.set_aspect(aspect)
+  -> 5751 im.set_data(X)
+     5752 im.set_alpha(alpha)
+     5753 if im.get_clip_path() is None:
+     5754     # image does not already have clipping set, clip to axes patch
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/image.py:723, in _ImageBase.set_data(self, A)
+      721 if isinstance(A, PIL.Image.Image):
+      722     A = pil_to_array(A)  # Needed e.g. to apply png palette.
+  --> 723 self._A = self._normalize_image_array(A)
+      724 self._imcache = None
+      725 self.stale = True
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/image.py:693, in _ImageBase._normalize_image_array(A)
+      691     A = A.squeeze(-1)  # If just (M, N, 1), assume scalar and apply colormap.
+      692 if not (A.ndim == 2 or A.ndim == 3 and A.shape[-1] in [3, 4]):
+  --> 693     raise TypeError(f"Invalid shape {A.shape} for image data")
+      694 if A.ndim == 3:
+      695     # If the input data has values outside the valid range (after
+      696     # normalisation), we issue a warning and then clip X to the bounds
+      697     # - otherwise casting wraps extreme values, hiding outliers and
+      698     # making reliable interpretation impossible.
+      699     high = 255 if np.issubdtype(A.dtype, np.integer) else 1
+
+  TypeError: Invalid shape (500, 21, 10) for image data
+#+end_example
+[[file:./.ob-jupyter/9da8d42e7c0a102a1560c3186f8bf65c3817fa62.png]]
+:END:
+:RESULTS:
+# [goto error]
+:END:
+
+#+begin_example
+  tensor([ 1.,  2.,  3.,  4.,  5.,  6.,  7.,  8.,  9., 10.], device='cuda:0')
+  tensor([[[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]],
+
+          [[6.],
+           [2.]]], device='cuda:0')
+  tensor([[8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.],
+          [8.]], device='cuda:0')
+#+end_example
+# [goto error]
+#+begin_example
+  ---------------------------------------------------------------------------
+  RuntimeError                              Traceback (most recent call last)
+  Cell In[161], line 11
+        8 print(model.J_STP)
+       10 model.N_BATCH=1
+  ---> 11 rates = model().cpu().detach().numpy()
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/nn/modules/module.py:1511, in Module._wrapped_call_impl(self, *args, **kwargs)
+     1509     return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]
+     1510 else:
+  -> 1511     return self._call_impl(*args, **kwargs)
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/nn/modules/module.py:1520, in Module._call_impl(self, *args, **kwargs)
+     1515 # If we don't have any hooks, we want to skip the rest of the logic in
+     1516 # this function, and just call forward.
+     1517 if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
+     1518         or _global_backward_pre_hooks or _global_backward_hooks
+     1519         or _global_forward_hooks or _global_forward_pre_hooks):
+  -> 1520     return forward_call(*args, **kwargs)
+     1522 try:
+     1523     result = None
+
+  File ~/models/NeuroTorch/org/search/../../src/network.py:222, in Network.forward(self, ff_input, REC_LAST_ONLY, RET_FF, RET_STP)
+      219     start = perf_counter()
+      221 # Initialization (if  ff_input is None, ff_input is generated)
+  --> 222 rates, ff_input, rec_input = self.initialization(ff_input)
+      224 #################################################
+      225 # NEED .clone() here otherwise BAD THINGS HAPPEN
+      226 #################################################
+      227 if self.IF_BATCH_J:
+
+  File ~/models/NeuroTorch/org/search/../../src/network.py:352, in Network.initialization(self, ff_input)
+      349     print('Generating ff input')
+      351 if self.LIVE_FF_UPDATE:
+  --> 352     ff_input = self.init_ff_live()
+      353 else:
+      354     ff_input = self.init_ff_input()
+
+  File ~/models/NeuroTorch/org/search/../../src/network.py:589, in Network.init_ff_live(self)
+      584 self.stim_mask[self.N_BATCH//2:] = -1
+      586 ff_input = torch.zeros((self.N_BATCH, self.N_NEURON),
+      587                        dtype=self.FLOAT, device=self.device)
+  --> 589 ff_input, _ = self.live_ff_input(0, ff_input)
+      591 return ff_input
+
+  File ~/models/NeuroTorch/org/search/../../src/network.py:506, in Network.live_ff_input(self, step, ff_input)
+      504             ff_input[:, self.slices[i_pop]] = self.Ja0[:, i_pop] / torch.sqrt(self.Ka[0])
+      505         else:
+  --> 506             ff_input[:, self.slices[i_pop]] = self.Ja0[:, i_pop]
+      508 if step==self.N_STIM_ON[0]:
+      509     for i_pop in range(self.N_POP):
+
+  RuntimeError: The expanded size of the tensor (1) must match the existing size (100) at non-singleton dimension 0.  Target sizes: [1, 500].  Tensor sizes: [100, 1]
+#+end_example
+:END:
+#+RESULTS:
+
+* Rates vs Tau fac
+
+#+begin_src ipython
+  model = Network(conf_name, 'None', REPO_ROOT, IF_STP=1, DT=0.001, VERBOSE=0, LIVE_FF_UPDATE=1, N_BATCH=1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  N_BATCH = 10
+  N_INI = 1
+
+  model.TAU_FAC = torch.linspace(0.6, 1.0, N_BATCH, device='cuda')
+  model.TAU_FAC = model.TAU_FAC.unsqueeze(0).expand(N_INI, N_BATCH)
+  model.TAU_FAC = model.TAU_FAC.reshape((-1,))
+  print(model.TAU_FAC.shape)
+  
+  model.N_BATCH = N_BATCH * N_INI
+  rates_fac = model(RET_STP=1).cpu().detach().numpy()
+  print(rates_fac.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([10])
+: (10, 21, 500)
+
+#+begin_src ipython
+  u_list = model.u_list.cpu().numpy()
+  x_list = model.x_list.cpu().numpy()
+  Aux = u_list * x_list
+  print(u_list.shape, x_list.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 21, 500) (10, 21, 500)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  mean_rates = rates_fac[:,-1].mean(-1)
+
+  ax[0].plot(model.TAU_FAC.cpu().numpy()*1000, mean_rates, 'k')
+  ax[0].plot(model.TAU_FAC.cpu().numpy()*1000, rates_fac[:, -1, :10], alpha=.25)
+  ax[0].set_xlabel('$\\tau_{fac}$')
+  ax[0].set_ylabel('$<Rates>_i$')
+  
+  ax[1].plot(rates_fac.mean(-1).T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('Rates')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/1e78693e3aa3c803ed7af54f4d04f8f67277cdb3.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  mean_Aux = Aux[:,-1].mean(-1)
+
+  ax[0].plot(model.TAU_FAC.cpu().numpy() * 1000, mean_Aux)
+  ax[0].set_xlabel('$\\tau_{fac}$')
+  ax[0].set_ylabel('$A_{ux}$')
+
+  ax[1].plot(Aux.mean(-1).T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$A_{ux}$')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/3e13fd8abba76f85f035229d5180b58952b52709.png]]
+
+#+begin_src ipython
+  m0, m1, phi = decode_bump(rates_fac, axis=-1)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 21)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].plot(model.TAU_FAC.cpu().numpy()*1000, m1[:, -1], 'ok')
+  ax[0].set_xlabel('$\\tau_{fac}$')
+  ax[0].set_ylabel('$\mathcal{F}_1$')
+  
+  ax[1].plot(m1.T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/b7c83c9f65f5940ba54b434e171ca6edf65c03eb.png]]
+
+#+RESULTS:
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:

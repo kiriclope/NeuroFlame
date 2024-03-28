@@ -190,7 +190,7 @@ class Network(nn.Module):
             
             rec_input[1] = rec_input[1] * self.EXP_DT_TAU_NMDA + self.R_NMDA * hidden * self.DT_TAU_NMDA
             net_input.add_(rec_input[1])
-
+        
         # compute non linearity
         non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
         
@@ -555,10 +555,15 @@ class Network(nn.Module):
                         if i == 0:
                             stimulus = self.stim_mask[:, i] * stimulus
                 else:
+                    rnd_phase = 0
+                    if 'rand' in self.TASK:
+                        rnd_phase = 1
+                        
                     stimulus = Stimuli(self.TASK, size)(self.I0[i],
                                                         self.SIGMA0[i],
-                                                        self.PHI0[:, i])
-                    
+                                                        self.PHI0[:, i],
+                                                        rnd_phase=rnd_phase)
+                
                 ff_input[:, self.slices[0]] = self.Ja0[:, 0] + torch.sqrt(self.Ka[0]) * self.M0 * stimulus
                 # del stimulus
                 
@@ -628,10 +633,15 @@ class Network(nn.Module):
                         stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])
                     
                 else:
+                    rnd_phase = 0
+                    if 'rand' in self.TASK:
+                        rnd_phase = 1
+
                     stimulus = Stimuli(self.TASK, size, device=self.device)(self.I0[i],
                                                                             self.SIGMA0[i],
-                                                                            self.PHI0[:, i])
-                    
+                                                                            self.PHI0[:, i],
+                                                                            rnd_phase=rnd_phase)
+                
                 ff_input[:, self.N_STIM_ON[i]:self.N_STIM_OFF[i], self.slices[0]].add_(stimulus)
                 
                 del stimulus
