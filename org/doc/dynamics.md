@@ -1,27 +1,27 @@
 
 # Table of Contents
 
-1.  [Documentation](#org5b3a5ad)
-    1.  [Dynamics](#orgf695b4a)
-        1.  [Currents](#org87e7519)
-        2.  [Rates](#org5306e22)
-    2.  [Connectivity](#orgad172c6)
+1.  [Documentation](#orgbbae14f)
+    1.  [Dynamics](#org7bec790)
+        1.  [Currents](#orgde50508)
+        2.  [Rates](#org1c33401)
+    2.  [Connectivity](#orgad86fb8)
 
 
 
-<a id="org5b3a5ad"></a>
+<a id="orgbbae14f"></a>
 
 # Documentation
 
 Neurotorch is an implementation of a rate based recurrent neural network trainer and simulator.
 
 
-<a id="orgf695b4a"></a>
+<a id="org7bec790"></a>
 
 ## Dynamics
 
 
-<a id="org87e7519"></a>
+<a id="orgde50508"></a>
 
 ### Currents
 
@@ -34,13 +34,11 @@ or not
 $$ h^A_i(t) = \sum_{jB} J^{AB}_{ij} h_j(t) $$
 
 
-<a id="org5306e22"></a>
+<a id="org1c33401"></a>
 
 ### Rates
 
 The models can have rate dynamics (setting **RATE<sub>DYN</sub>** to 1 in the configuration file):
-
-$$ \tau_A \frac{d r^A_i}{dt}(t) = - r^A_i(t) + \Phi( \sum_{jB} J^{AB}_{ij} h^{AB}_j(t) + h^A_{ext}(t)) $$
 
 $$ \tau_A \frac{d r^A_i}{dt}(t) = - r^A_i(t) + \Phi( \sum_{jB} J^{AB}_{ij} h^{AB}_j(t) + h^A_{ext}(t)) $$
 
@@ -50,10 +48,10 @@ otherwise rates will be instantaneous:
 
 $$ r^A_i(t) = \Phi(\sum_{jB} J^{AB}_{ij} h_j(t) + h^A_{ext}(t)) $$
 
-Here $\Phi$ is the transfer function defined in **src/activation.py**
+Here $\Phi$ is the transfer function defined in **src/activation.py** and can be set to a threshold linear, a sigmoid or a non linear function (Brunel et al., 2003).
 
 
-<a id="orgad172c6"></a>
+<a id="orgad86fb8"></a>
 
 ## Connectivity
 

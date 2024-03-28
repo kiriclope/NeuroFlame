@@ -33,7 +33,7 @@
 
   from src.network import Network
   from src.plot_utils import plot_con
-  from src.decode import decode_bump, decode_bump_torch
+  from src.decode import decode_bump, decode_bump_torch, circcvl
   from src.utils import clear_cache
 
   from sklearn.cluster import KMeans
@@ -205,7 +205,7 @@
 
   n_ini  = 32
 
-  LR_COV = [[1.0, 1.0, 0.0, 0.0],
+  LR_COV = [[1.0, 0.8, 0.0, 0.0],
             [0.8, 1.0, 0.0, 0.0],
             [0.0, 0.0, 1.0, 0.8],
             [0.0, 0.0, 0.8, 1.0]]
@@ -287,7 +287,7 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 4m 34s
+: 0931504a-9206-4184-9fb4-9f66f0e1ffcc
 
 #+begin_src ipython
   rates_list = torch.stack(rates_list).cpu().numpy()
@@ -296,17 +296,7 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-: ---------------------------------------------------------------------------
-: TypeError                                 Traceback (most recent call last)
-: Cell In[41], line 1
-: ----> 1 rates_list = torch.stack(rates_list).cpu().numpy()
-:       2 rates_fp = torch.stack(rates_fp).cpu().numpy()
-:       3 rates_cr_list = torch.stack(rates_cr_list).cpu().numpy()
-: 
-: TypeError: stack(): argument 'tensors' (position 1) must be tuple of Tensors, not numpy.ndarray
-:END:
+: 778af4ee-cf18-4590-b10a-6531be3cab58
 
 #+begin_src ipython
   perf_list = torch.stack(perf_list).cpu().numpy()
@@ -314,6 +304,7 @@
 #+end_src
 
 #+RESULTS:
+: 3fc50d0b-f6b6-47c8-a288-11c7401452e1
 
 #+begin_src ipython
   centers_list = np.array(centers_list)
@@ -322,6 +313,7 @@
 #+end_src
 
 #+RESULTS:
+: 7249b012-f294-4cdd-8ce9-a20aadc48e28
 
 *** plots
 
@@ -354,6 +346,7 @@
 #+end_src
 
 #+RESULTS:
+: 4ca94923-f3ec-44d7-a1bf-57d5831eef60
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 1, figsize=[height, height])
@@ -373,7 +366,7 @@
   #+end_src
 
   #+RESULTS:
-  [[file:./.ob-jupyter/c61e3e2bdec5aa9b0b2634e242016146a9149348.png]]
+  : 2272cf1f-6763-4d15-95ca-d5db1fc54b24
 
 #+begin_src ipython
   def plot_trajectory(rates, i, ax):
@@ -434,6 +427,7 @@
 #+end_src
 
 #+RESULTS:
+: 4de0fc48-7f45-4759-9f3d-b3190a339b13
 
 #+begin_src ipython
   i = 4
@@ -452,7 +446,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/9912938d4f2692e137083ef5f8acc66818841288.png]]
+: b4f595cb-c904-4d95-b619-f75426793ef2
 
 #+begin_src ipython 
   rates = rates_cr_list[i]
@@ -497,13 +491,7 @@
 #+end_src
 
 #+RESULTS:
-: (64, 101, 2000)
-: (2, 64)
-: 159.17936530586817
-: (2,)
-: A perf [ 0 32]
-: B perf [ 9 23]
-: performance 85.9375
+: 044369fb-a21e-4997-a523-5ec90375f0e4
 
 *** performance
 
@@ -514,27 +502,24 @@
 #+end_src
 
 #+RESULTS:
-: dist [2.6514316 1.3263845 2.8296945 2.237578  2.764404  2.2827437 2.5727763
-:  1.2241459 2.3468068 1.9901702]
-: perf_list [ 56.875004  79.6875   100.        76.25001   76.25001   96.5625
-:  100.        55.        97.1875    89.375   ]
-: perf_cr_list [ 59.375   81.25   100.      50.      85.9375 100.      98.4375  89.0625
-:   53.125   93.75  ]
+: 5988530c-5686-4f8a-9310-1fac10c9c543
 
 #+begin_src ipython
-  plt.plot(distance_list[distance_list.argsort()]/2, perf_list[distance_list.argsort()]*100, '-ob')
-  plt.plot(distance_list[distance_list.argsort()]/2, perf_cr_list[distance_list.argsort()], '-or')
+  idx = distance_list.argsort()
+  plt.plot(distance_list[idx]/2, circcvl(perf_list[idx]*100, 2), '-ob')
+  plt.plot(distance_list[idx]/2, circcvl(perf_cr_list[idx], 2), '-or')
   plt.xlabel('Distance')
   plt.ylabel('Performance')
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/957529759616db723192784d9bd63ee5bce7e55d.png]]
+: d893d690-4d79-43c6-8838-559ba76f1159
 
 #+begin_src ipython
-  plt.plot(phi0_list[phi0_list.argsort()], perf_list[phi0_list.argsort()]*100, '-ob')
-  plt.plot(phi0_list[phi0_list.argsort()], perf_cr_list[phi0_list.argsort()], '-or')
+  idx = phi0_list.argsort()
+  plt.plot(phi0_list[idx], circcvl(perf_list[idx]*100, 2), '-ob')
+  plt.plot(phi0_list[idx], circcvl(perf_cr_list[idx], 2), '-or')
 
   plt.xticks(np.linspace(0, 360, 5))
   plt.xlabel('Readout Location (°)')
@@ -543,10 +528,11 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/70bf96bbf0e4f249d895a5cf731a61def36e64af.png]]
+: 3bc97d4f-9fbb-4c60-b21d-95cd6554261f
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
+: c39abad0-ec72-4335-b277-0bf4f958f454
