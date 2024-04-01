@@ -63,7 +63,7 @@ Here we will run a single simulation with the parameters provided in */conf/conf
   REPO_ROOT = "/home/leon/models/NeuroTorch/"
 
   # First we create a network with
-  model = Network('config_2pop.yml', '', REPO_ROOT)
+  model = Network('config_2pop.yml', REPO_ROOT)
 
   # then we run the simulation with
   output = model()
@@ -126,7 +126,7 @@ Let's look at the activities of the neurons
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f77c6af5f305620f953ad25d22232105c3b9418a.png]]
+[[file:./.ob-jupyter/6e46302961110ab1d2ed8d51678a20315a6edf52.png]]
 
 #+begin_src ipython
   
@@ -139,7 +139,7 @@ Let's look at the activities of the neurons
 We can run multiple initializations of the network changing N_BATCH to the number of initializations that we want.
 
 #+begin_src ipython
-  model = Network('config_2pop.yml', '', REPO_ROOT, GAIN=5)
+  model = Network('config_2pop.yml', REPO_ROOT, GAIN=5)
   
   model.N_BATCH = 10
   rates = model().cpu().numpy()
@@ -164,7 +164,7 @@ We can run multiple initializations of the network changing N_BATCH to the numbe
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/47650ba063afe25703168e68db536228cbf252bf.png]]
+[[file:./.ob-jupyter/40298e22701cae639d387f3c7811e84e6c58cae0.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -174,7 +174,7 @@ We can run multiple initializations of the network changing N_BATCH to the numbe
 #+end_src
 
 #+RESULTS:
-: 4124.75904
+: 4119.19872
 : 117.51936
 
 *** Batching Feedforward Inputs
@@ -185,7 +185,7 @@ Let's see an example where we change the ff inputs to the excitatory population
 We create a batch of inputs of size (N_BATCH, N_STEPS, N_NEURON)
 
 #+begin_src ipython
-  model = Network('config_2pop.yml', '', REPO_ROOT)
+  model = Network('config_2pop.yml', REPO_ROOT)
 
   ff_list = np.linspace(0, 10, 10)
   ff_inputs = []
@@ -225,7 +225,7 @@ Then we pass these inputs to the model
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/cfa6b1bf211826cf295be14061550ee9262a1cf7.png]]
+[[file:./.ob-jupyter/3614139b968010c6606a369a4d680ff58f9cebf6.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -235,14 +235,14 @@ Then we pass these inputs to the model
 #+end_src
 
 #+RESULTS:
-: 48524.75904
-: 44517.51936
+: 52526.4384
+: 48519.19872
 
 **** The hard way (slow but more memory friendly)
 We create a batch of ff inputs that are updated at each time step
 
 #+begin_src ipython
-  model = Network('config_2pop.yml', '', REPO_ROOT, LIVE_FF_UPDATE=1)
+  model = Network('config_2pop.yml', REPO_ROOT, LIVE_FF_UPDATE=1)
 
   N_BATCH = 10
   print('original ff_input', model.Ja0.shape)
@@ -292,7 +292,7 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/eebd3d791cf92b4d2a53e1c92e6dc8e47d196cca.png]]
+[[file:./.ob-jupyter/da57b37eead9b0b7c2d0915708301162cd37ca9c.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -301,14 +301,11 @@ We create a batch of ff inputs that are updated at each time step
   print(torch.cuda.memory_allocated()/100000)
 #+end_src
 
-#+RESULTS:
-: 48531.15904
-: 44517.52448
 
 *** Batching Reccurent Weights Jab
 
 #+begin_src ipython
-  model = Network('config_2pop.yml', 'None', REPO_ROOT, IF_STP=0, DT=0.001, GAIN=0.5, VERBOSE=0, LIVE_FF_UPDATE=1)
+  model = Network('config_2pop.yml', REPO_ROOT, IF_STP=0, DT=0.001, GAIN=0.5, VERBOSE=0, LIVE_FF_UPDATE=1)
 #+end_src
 
 #+RESULTS:
@@ -320,7 +317,6 @@ We create a batch of ff inputs that are updated at each time step
   model.Jab_batch = Jee_list.unsqueeze(-1) * model.Jab[0, 0]
   print(model.Jab_batch[:, 0])
 
-  model.IF_STP = 1
   model.N_BATCH = model.Jab_batch.shape[0]
   model.VERBOSE = 0
 #+end_src
@@ -339,7 +335,7 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 25s
+: Elapsed (with compilation) = 0h 0m 16s
 : rates (10, 101, 8000)
 
 #+begin_src ipython
@@ -360,7 +356,7 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/cdc52ca401dc625f3005164ef921a2979d098429.png]]
+[[file:./.ob-jupyter/fb1eadb5b5f885a697ad307062f1da2c8efa1793.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -370,13 +366,13 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-: 53657.59488
+: 51091.1744
 : 44517.5296
 
 *** Batching Feedforward Inputs and Weights
 
 #+begin_src ipython
-  model = Network('config_2pop.yml', 'None', REPO_ROOT, IF_STP=0, DT=0.001, GAIN=0.5, LIVE_FF_UPDATE=1)
+  model = Network('config_2pop.yml', REPO_ROOT, IF_STP=0, DT=0.001, GAIN=0.5, LIVE_FF_UPDATE=1)
 #+end_src
 
 #+RESULTS:
@@ -454,8 +450,8 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-: [1.4012985e-44 2.8025969e-44 7.4241725e-05 4.7060040e-01 1.0950724e+00
-:  1.7271441e+00 2.3613210e+00 2.9962261e+00 3.6313808e+00 4.2667050e+00]
+: [1.4012985e-44 2.8025969e-44 4.2468795e-04 4.7332275e-01 1.0994494e+00
+:  1.7329987e+00 2.3683641e+00 3.0043077e+00 3.6405890e+00 4.2769356e+00]
 : [1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44 1.4e-44
 :  1.4e-44]
 
@@ -476,7 +472,7 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/1b8cfb725ea1f54374086684764988abc25ce423.png]]
+[[file:./.ob-jupyter/607888f36c2dae89e297265e7eb83971fc5192de.png]]
 
 #+begin_src ipython
   print(torch.cuda.memory_allocated()/100000)
@@ -486,5 +482,5 @@ We create a batch of ff inputs that are updated at each time step
 #+end_src
 
 #+RESULTS:
-: 51148.78464
+: 51143.22432
 : 44517.54496

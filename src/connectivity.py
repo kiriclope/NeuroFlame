@@ -1,6 +1,5 @@
 import torch
 from torch.distributions import MultivariateNormal
-from src.utils import clear_cache
 
 class Connectivity():
     def __init__(self, Na, Nb, Kb, device='cuda', dtype=torch.float, verbose=0):
@@ -172,8 +171,6 @@ class Connectivity():
             elif "lr" in proba_type:
                 print('with weak low rank structure, KAPPA %.2f' % kwargs['kappa'])
 
-        clear_cache()
-        
         return Cij
     
     def __call__(self, con_type='sparse', proba_type='unif', **kwargs):

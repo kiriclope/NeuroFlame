@@ -1,5 +1,43 @@
 import torch
 
+# if self.PROBA_TYPE[0][0] == 'lr_add':
+            
+#     eigenvalues, eigenvectors = torch.linalg.eig(self.Wab_T[self.slices[0], self.slices[0]].T)
+            
+#     # Eigenvalues are complex, get the eigenvalue with the largest real part
+#     max_real_index = torch.argmax(eigenvalues.real)
+#     m = eigenvectors[:, max_real_index]
+
+#     self.PHI0[0], self.PHI0[2] = get_ortho_pertu(m, 0.0, dtype=self.FLOAT, device=self.device)
+            
+#     Lij = torch.outer(self.PHI0[0], self.PHI0[0])
+#     Lij = Lij + torch.outer(self.PHI0[2], self.PHI0[2])
+
+#     self.lr = self.Jab[0][0] * self.KAPPA[0][0] * Lij / torch.sqrt(self.Ka[0])
+#     self.Wab_T[self.slices[0], self.slices[0]].add_(self.lr.T)
+#     # self.Wab_T[self.slices[0], self.slices[0]].clamp_(min=0.0)
+
+def initLR(model):
+    # Low rank vector
+    model.U = nn.Parameter(torch.randn((model.N_NEURON, int(model.RANK)),
+                                        device=model.device, dtype=model.FLOAT))
+
+    # model.V = nn.Parameter(torch.randn((model.N_NEURON, int(model.RANK)),
+    # device=model.device, dtype=model.FLOAT))
+
+    # Mask to train excitatory neurons only
+    model.mask = torch.zeros((model.N_NEURON, model.N_NEURON),
+                            device=model.device, dtype=model.FLOAT)
+
+    model.mask[model.slices[0], model.slices[0]] = 1.0
+
+    # Linear readout for supervised learning
+    model.linear = nn.Linear(model.Na[0], 1, device=model.device, dtype=model.FLOAT, bias=False)
+    model.lr_kappa = nn.Parameter(5 * torch.rand(1))
+
+    # Window where to evaluate loss
+    model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
+
 def get_theta(a, b, IF_NORM=0):
 
     u, v = a, b

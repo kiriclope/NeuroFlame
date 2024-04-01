@@ -88,45 +88,6 @@
 
 #+RESULTS:
 
-#+begin_src ipython
-  def pretty_size(size):
-      """Pretty prints a torch.Size object"""
-      assert(isinstance(size, torch.Size))
-      return " × ".join(map(str, size))
-
-  def dump_tensors(gpu_only=True):
-      """Prints a list of the Tensors being tracked by the garbage collector."""
-      import gc
-      total_size = 0
-      for obj in gc.get_objects():
-          try:
-              if torch.is_tensor(obj):
-                  if not gpu_only or obj.is_cuda:
-                      print("%s:%s%s %s" % (type(obj).__name__,
-                                            " GPU" if obj.is_cuda else "",
-                                            " pinned" if obj.is_pinned else "",
-                                            pretty_size(obj.size())))
-                      total_size += obj.numel()
-              elif hasattr(obj, "data") and torch.is_tensor(obj.data):
-                  if not gpu_only or obj.is_cuda:
-                      print("%s → %s:%s%s%s%s %s" % (type(obj).__name__,
-                                                     type(obj.data).__name__,
-                                                     " GPU" if obj.is_cuda else "",
-                                                     " pinned" if obj.data.is_pinned else "",
-                                                     " grad" if obj.requires_grad else "",
-                                                     " volatile" if obj.volatile else "",
-                                                     pretty_size(obj.data.size())))
-                      total_size += obj.data.numel()
-              del obj
-              torch.cuda.empty_cache()
-          except Exception as e:
-              pass
-      print("Total size:", total_size)
-
-#+end_src
-
-#+RESULTS:
-
 * RNN with torch
 ** Single Trial
 *** Model
@@ -136,8 +97,7 @@
 
   start = perf_counter()
 
-  model = Network('config_EI.yml', 'dual', REPO_ROOT,
-                  VERBOSE=1, DEVICE='cuda', seed=0)
+  model = Network('config_EI.yml', REPO_ROOT, VERBOSE=1, DEVICE='cuda', LIVE_FF_UPDATE=0)
   
   rates = model(RET_FF=1).cpu().numpy()
 
@@ -161,107 +121,105 @@
   times (s) 0.18 rates (Hz) [0.65, 1.05]
   times (s) 0.27 rates (Hz) [0.65, 1.05]
   times (s) 0.36 rates (Hz) [0.65, 1.05]
-  times (s) 0.45 rates (Hz) [0.64, 1.05]
+  times (s) 0.45 rates (Hz) [0.65, 1.05]
   times (s) 0.54 rates (Hz) [0.64, 1.05]
-  times (s) 0.63 rates (Hz) [0.63, 1.04]
-  times (s) 0.72 rates (Hz) [0.63, 1.04]
-  times (s) 0.81 rates (Hz) [0.64, 1.04]
+  times (s) 0.63 rates (Hz) [0.64, 1.05]
+  times (s) 0.72 rates (Hz) [0.64, 1.05]
+  times (s) 0.81 rates (Hz) [0.64, 1.05]
   times (s) 0.9 rates (Hz) [6.85, 7.27]
-  times (s) 0.99 rates (Hz) [7.51, 11.69]
-  times (s) 1.08 rates (Hz) [7.42, 11.97]
-  times (s) 1.17 rates (Hz) [7.43, 12.03]
+  times (s) 0.99 rates (Hz) [7.5, 11.69]
+  times (s) 1.08 rates (Hz) [7.41, 11.97]
+  times (s) 1.17 rates (Hz) [7.42, 12.02]
   times (s) 1.26 rates (Hz) [7.6, 12.14]
   times (s) 1.35 rates (Hz) [7.66, 12.17]
-  times (s) 1.44 rates (Hz) [7.52, 12.08]
+  times (s) 1.44 rates (Hz) [7.53, 12.09]
   times (s) 1.53 rates (Hz) [7.52, 12.09]
   times (s) 1.62 rates (Hz) [7.52, 12.12]
-  times (s) 1.71 rates (Hz) [7.46, 12.06]
-  times (s) 1.8 rates (Hz) [7.43, 12.04]
-  times (s) 1.89 rates (Hz) [7.27, 11.77]
+  times (s) 1.71 rates (Hz) [7.46, 12.07]
+  times (s) 1.8 rates (Hz) [7.43, 12.05]
+  times (s) 1.89 rates (Hz) [7.28, 11.78]
   times (s) 1.98 rates (Hz) [7.23, 11.73]
   times (s) 2.07 rates (Hz) [7.16, 11.69]
   times (s) 2.16 rates (Hz) [7.2, 11.73]
   times (s) 2.25 rates (Hz) [7.21, 11.77]
-  times (s) 2.34 rates (Hz) [7.08, 11.69]
+  times (s) 2.34 rates (Hz) [7.09, 11.69]
   times (s) 2.43 rates (Hz) [7.07, 11.65]
   times (s) 2.52 rates (Hz) [7.16, 11.71]
-  times (s) 2.61 rates (Hz) [7.2, 11.74]
+  times (s) 2.61 rates (Hz) [7.21, 11.74]
   times (s) 2.7 rates (Hz) [7.19, 11.72]
-  times (s) 2.79 rates (Hz) [7.19, 11.68]
-  times (s) 2.88 rates (Hz) [7.23, 11.72]
-  times (s) 2.97 rates (Hz) [7.24, 11.75]
-  times (s) 3.06 rates (Hz) [7.22, 11.75]
-  times (s) 3.15 rates (Hz) [7.2, 11.72]
+  times (s) 2.79 rates (Hz) [7.19, 11.69]
+  times (s) 2.88 rates (Hz) [7.24, 11.72]
+  times (s) 2.97 rates (Hz) [7.25, 11.75]
+  times (s) 3.06 rates (Hz) [7.23, 11.76]
+  times (s) 3.15 rates (Hz) [7.2, 11.73]
   times (s) 3.24 rates (Hz) [7.19, 11.71]
   times (s) 3.33 rates (Hz) [7.19, 11.71]
   times (s) 3.42 rates (Hz) [7.2, 11.72]
-  times (s) 3.51 rates (Hz) [7.19, 11.72]
-  times (s) 3.6 rates (Hz) [7.17, 11.72]
-  times (s) 3.69 rates (Hz) [7.14, 11.7]
+  times (s) 3.51 rates (Hz) [7.18, 11.71]
+  times (s) 3.6 rates (Hz) [7.18, 11.72]
+  times (s) 3.69 rates (Hz) [7.14, 11.71]
   times (s) 3.78 rates (Hz) [7.14, 11.72]
-  times (s) 3.87 rates (Hz) [7.16, 11.73]
-  times (s) 3.96 rates (Hz) [7.21, 11.75]
-  times (s) 4.05 rates (Hz) [7.23, 11.74]
-  times (s) 4.14 rates (Hz) [7.22, 11.7]
-  times (s) 4.23 rates (Hz) [7.21, 11.67]
-  times (s) 4.32 rates (Hz) [7.19, 11.64]
-  times (s) 4.41 rates (Hz) [7.19, 11.67]
-  times (s) 4.5 rates (Hz) [7.25, 11.76]
-  times (s) 4.59 rates (Hz) [7.31, 11.82]
-  times (s) 4.68 rates (Hz) [7.31, 11.81]
-  times (s) 4.77 rates (Hz) [7.29, 11.78]
-  times (s) 4.86 rates (Hz) [7.27, 11.75]
-  times (s) 4.95 rates (Hz) [7.24, 11.71]
-  times (s) 5.05 rates (Hz) [7.18, 11.67]
-  times (s) 5.14 rates (Hz) [7.1, 11.63]
-  times (s) 5.23 rates (Hz) [7.09, 11.64]
-  times (s) 5.32 rates (Hz) [7.16, 11.72]
+  times (s) 3.87 rates (Hz) [7.15, 11.72]
+  times (s) 3.96 rates (Hz) [7.19, 11.74]
+  times (s) 4.05 rates (Hz) [7.22, 11.74]
+  times (s) 4.14 rates (Hz) [7.21, 11.7]
+  times (s) 4.23 rates (Hz) [7.2, 11.66]
+  times (s) 4.32 rates (Hz) [7.18, 11.63]
+  times (s) 4.41 rates (Hz) [7.18, 11.66]
+  times (s) 4.5 rates (Hz) [7.24, 11.75]
+  times (s) 4.59 rates (Hz) [7.31, 11.83]
+  times (s) 4.68 rates (Hz) [7.32, 11.84]
+  times (s) 4.77 rates (Hz) [7.29, 11.8]
+  times (s) 4.86 rates (Hz) [7.28, 11.77]
+  times (s) 4.95 rates (Hz) [7.27, 11.74]
+  times (s) 5.05 rates (Hz) [7.22, 11.69]
+  times (s) 5.14 rates (Hz) [7.14, 11.64]
+  times (s) 5.23 rates (Hz) [7.09, 11.62]
+  times (s) 5.32 rates (Hz) [7.13, 11.68]
   times (s) 5.41 rates (Hz) [7.19, 11.75]
-  times (s) 5.5 rates (Hz) [7.2, 11.74]
-  times (s) 5.59 rates (Hz) [7.2, 11.73]
-  times (s) 5.68 rates (Hz) [7.18, 11.7]
-  times (s) 5.77 rates (Hz) [7.19, 11.68]
-  times (s) 5.86 rates (Hz) [7.19, 11.68]
-  times (s) 5.95 rates (Hz) [7.18, 11.69]
-  times (s) 6.04 rates (Hz) [7.15, 11.71]
-  times (s) 6.13 rates (Hz) [7.22, 11.8]
-  times (s) 6.22 rates (Hz) [7.26, 11.83]
-  times (s) 6.31 rates (Hz) [7.2, 11.75]
-  times (s) 6.4 rates (Hz) [7.16, 11.66]
-  times (s) 6.49 rates (Hz) [7.14, 11.63]
-  times (s) 6.58 rates (Hz) [7.14, 11.62]
-  times (s) 6.67 rates (Hz) [7.19, 11.69]
-  times (s) 6.76 rates (Hz) [7.23, 11.78]
-  times (s) 6.85 rates (Hz) [7.18, 11.79]
-  times (s) 6.94 rates (Hz) [7.17, 11.77]
-  times (s) 7.03 rates (Hz) [7.14, 11.74]
-  times (s) 7.12 rates (Hz) [7.12, 11.68]
-  times (s) 7.21 rates (Hz) [7.15, 11.66]
-  times (s) 7.3 rates (Hz) [7.18, 11.67]
-  times (s) 7.39 rates (Hz) [7.18, 11.68]
-  times (s) 7.48 rates (Hz) [7.18, 11.69]
-  times (s) 7.57 rates (Hz) [7.2, 11.73]
-  times (s) 7.66 rates (Hz) [7.23, 11.77]
-  times (s) 7.75 rates (Hz) [7.15, 11.71]
-  times (s) 7.84 rates (Hz) [7.09, 11.65]
-  times (s) 7.93 rates (Hz) [7.07, 11.64]
-  times (s) 8.02 rates (Hz) [7.13, 11.67]
-  times (s) 8.11 rates (Hz) [7.21, 11.74]
-  times (s) 8.2 rates (Hz) [7.21, 11.74]
-  times (s) 8.29 rates (Hz) [7.17, 11.7]
-  times (s) 8.38 rates (Hz) [7.16, 11.67]
-  times (s) 8.47 rates (Hz) [7.17, 11.67]
-  times (s) 8.56 rates (Hz) [7.14, 11.64]
-  times (s) 8.65 rates (Hz) [7.08, 11.6]
-  times (s) 8.74 rates (Hz) [7.09, 11.62]
-  times (s) 8.83 rates (Hz) [7.16, 11.7]
-  times (s) 8.92 rates (Hz) [7.25, 11.78]
-  times (s) 9.01 rates (Hz) [7.26, 11.79]
-  Elapsed (with compilation) = 0.6983191929757595s
-  Elapsed (with compilation) = 0h 0m 3s
+  times (s) 5.5 rates (Hz) [7.24, 11.78]
+  times (s) 5.59 rates (Hz) [7.24, 11.77]
+  times (s) 5.68 rates (Hz) [7.21, 11.74]
+  times (s) 5.77 rates (Hz) [7.2, 11.69]
+  times (s) 5.86 rates (Hz) [7.22, 11.68]
+  times (s) 5.95 rates (Hz) [7.23, 11.71]
+  times (s) 6.04 rates (Hz) [7.18, 11.73]
+  times (s) 6.13 rates (Hz) [7.16, 11.74]
+  times (s) 6.22 rates (Hz) [7.22, 11.78]
+  times (s) 6.31 rates (Hz) [7.19, 11.75]
+  times (s) 6.4 rates (Hz) [7.17, 11.68]
+  times (s) 6.49 rates (Hz) [7.14, 11.62]
+  times (s) 6.58 rates (Hz) [7.16, 11.62]
+  times (s) 6.67 rates (Hz) [7.2, 11.67]
+  times (s) 6.76 rates (Hz) [7.2, 11.71]
+  times (s) 6.85 rates (Hz) [7.15, 11.72]
+  times (s) 6.94 rates (Hz) [7.11, 11.7]
+  times (s) 7.03 rates (Hz) [7.16, 11.73]
+  times (s) 7.12 rates (Hz) [7.11, 11.68]
+  times (s) 7.21 rates (Hz) [7.07, 11.6]
+  times (s) 7.3 rates (Hz) [7.16, 11.63]
+  times (s) 7.39 rates (Hz) [7.19, 11.67]
+  times (s) 7.48 rates (Hz) [7.15, 11.65]
+  times (s) 7.57 rates (Hz) [7.21, 11.73]
+  times (s) 7.66 rates (Hz) [7.27, 11.8]
+  times (s) 7.75 rates (Hz) [7.24, 11.78]
+  times (s) 7.84 rates (Hz) [7.17, 11.72]
+  times (s) 7.93 rates (Hz) [7.13, 11.69]
+  times (s) 8.02 rates (Hz) [7.16, 11.73]
+  times (s) 8.11 rates (Hz) [7.18, 11.76]
+  times (s) 8.2 rates (Hz) [7.16, 11.74]
+  times (s) 8.29 rates (Hz) [7.16, 11.72]
+  times (s) 8.38 rates (Hz) [7.14, 11.68]
+  times (s) 8.47 rates (Hz) [7.15, 11.66]
+  times (s) 8.56 rates (Hz) [7.14, 11.65]
+  times (s) 8.65 rates (Hz) [7.1, 11.63]
+  times (s) 8.74 rates (Hz) [7.03, 11.59]
+  times (s) 8.83 rates (Hz) [7.08, 11.63]
+  times (s) 8.92 rates (Hz) [7.22, 11.76]
+  times (s) 9.01 rates (Hz) [7.24, 11.78]
+  Elapsed (with compilation) = 0h 0m 1s
   rates (1, 101, 2000)
 #+end_example
-
 #+RESULTS:
 
 #+begin_src ipython
@@ -288,8 +246,8 @@
 #+end_src
 
 #+RESULTS:
-: 1510.94784
-: 1510.94784
+: 1033.09824
+: 1033.09824
 
 *** Dynamics
 
@@ -336,7 +294,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ac5a0b65460124308de4dc5e0cb5ac5da20c86e9.png]]
+[[file:./.ob-jupyter/8ea88a008bd5e4e544c22c1c090063e3301b5b1a.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -353,7 +311,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/a13ec9390726e9e26042c3185f4c4d59e1328c19.png]]
+[[file:./.ob-jupyter/a2e6173946dbd28c734f375e5272fc693b33ff56.png]]
 
 #+begin_src ipython
 
@@ -385,7 +343,7 @@
             [0.0, 0.0, 0.8, 1.0]]
 
   start = perf_counter()
-  model = Network(conf_name, name, REPO_ROOT, VERBOSE=0, DEVICE='cuda',
+  model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE='cuda',
                   N_BATCH=100, SEED=seed, LR_COV=LR_COV,
                   TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=10)
   
@@ -562,7 +520,7 @@
 *** Helpers
 
 #+begin_src ipython
-  def run_behavior(conf_name, name, cov_list, n_ini, seed, device='cuda', **kwargs):
+  def run_behavior(conf_name, cov_list, n_ini, seed, device='cuda', **kwargs):
       start = perf_counter()
 
       rates = []
@@ -570,8 +528,7 @@
       with torch.no_grad():
           for cov in cov_list:
 
-              model = Network(conf_name, '%s_cov_%.3f' % (name, cov),
-                              REPO_ROOT, DEVICE=device,
+              model = Network(conf_name, REPO_ROOT, DEVICE=device,
                               LR_COV = [[1.0, 0.9, 0.0, 0.0],
                                         [0.9, 1.0, cov, 0.0],
                                         [0.0, cov, 1.0, 0.9],
@@ -603,7 +560,6 @@
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
   conf_name = "config_EI.yml"
-  name = "low_rank_ini"
 #+end_src
 
 #+RESULTS:
@@ -644,7 +600,7 @@
 
 #+begin_src ipython
   I0 = [.1, 0.0, 0.0]
-  rates, ksi = run_behavior(conf_name, name, cov_list, n_ini, seed, device='cuda', I0=I0)
+  rates, ksi = run_behavior(conf_name, cov_list, n_ini, seed, device='cuda', I0=I0)
 #+end_src
 
 #+RESULTS:
@@ -660,7 +616,7 @@
 
 #+begin_src ipython
   I0 = [.1, .1, 0.0]
-  ratesGo, ksiGo = run_behavior(conf_name, name, cov_list, n_ini, seed, device='cuda', I0=I0)
+  ratesGo, ksiGo = run_behavior(conf_name, cov_list, n_ini, seed, device='cuda', I0=I0)
 #+end_src
 
 #+RESULTS:
@@ -870,7 +826,7 @@
   ksi_list = []
   
   for i in range(10):
-      rates, ksi = run_behavior(conf_name, name, cov_list, n_ini, seed=i, device='cuda', I0=I0)
+      rates, ksi = run_behavior(conf_name, cov_list, n_ini, seed=i, device='cuda', I0=I0)
       rates_list.append(rates)
       ksi_list.append(ksi)
 
@@ -961,7 +917,7 @@
 *** Helpers
 
 #+begin_src ipython
-  def run_X(conf_name, name, real_list, n_ini, device='cuda', **kwargs):
+  def run_X(conf_name, real_list, n_ini, device='cuda', **kwargs):
       start = perf_counter()
 
       rates = []
@@ -969,7 +925,7 @@
       with torch.no_grad():
           for real in real_list:
 
-              model = Network(conf_name, '%s_real_%d' % (name, real),
+              model = Network(conf_name,
                               REPO_ROOT, DEVICE=device,  VERBOSE=0, SEED=0,
                               LIVE_FF_UPDATE=1, N_BATCH=n_ini, **kwargs)
               
@@ -1001,7 +957,6 @@
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
   conf_name = "config_EI.yml"
-  name = "low_rank_ini"
 #+end_src
 
 #+RESULTS:
@@ -1019,7 +974,7 @@
 **** Orthogonal
 
 #+begin_src ipython
-    rates, ksi = run_X(conf_name, name, real_list, n_ini,
+    rates, ksi = run_X(conf_name, real_list, n_ini,
                        device='cuda',
                        LR_COV=[[1.0, 0.9, 0.0, 0.0],
                                [0.9, 1.0, 0.0, 0.0],
@@ -1086,7 +1041,7 @@
 **** xi_S . xi_D >0
 
 #+begin_src ipython
-  rates_cov, ksi_cov = run_X(conf_name, name, real_list, n_ini,
+  rates_cov, ksi_cov = run_X(conf_name, real_list, n_ini,
                              device='cuda',
                              LR_COV=[[1.0, 0.9, 0.0, 0.0],
                                      [0.9, 1.0, 0.1, 0.0],
@@ -1152,7 +1107,7 @@
 **** h_S . xi_D >0
 
 #+begin_src ipython
-  rates_cov2, ksi_cov2 = run_X(conf_name, name, real_list, n_ini,
+  rates_cov2, ksi_cov2 = run_X(conf_name, real_list, n_ini,
                                device='cuda',
                                LR_COV=[[1.0, 0.9, 0.0, 0.0],
                                        [0.9, 1.0, 0.0, 0.0],
@@ -1218,7 +1173,7 @@
 **** h_S . xi_D >0 and xi_S . xi_D>0
 
 #+begin_src ipython
-  rates_cov3, ksi_cov3 = run_X(conf_name, name, real_list, n_ini,
+  rates_cov3, ksi_cov3 = run_X(conf_name, real_list, n_ini,
                                device='cuda',
                                LR_COV=[[1.0, 0.8, 0.2, 0.0],
                                        [0.8, 1.0, 0.2, 0.0],
@@ -1286,7 +1241,7 @@
 **** h_S . xi_D >0 and xi_S . xi_D>0
 
 #+begin_src ipython
-  rates_cov4, ksi_cov4 = run_X(conf_name, name, real_list, n_ini,
+  rates_cov4, ksi_cov4 = run_X(conf_name, real_list, n_ini,
                                device='cuda',
                                LR_COV=[[1.0, 0.9, 0.0, 0.0],
                                        [0.9, 1.0, 0.0, 0.0],
