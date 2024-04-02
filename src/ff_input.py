@@ -81,6 +81,7 @@ def live_ff_input(model, step, ff_input):
                 if 'rand' in model.TASK:
                     rnd_phase = 1
 
+                
                 stimulus = Stimuli(model.TASK, size)(model.I0[i],
                                                     model.SIGMA0[i],
                                                     model.PHI0[:, i],

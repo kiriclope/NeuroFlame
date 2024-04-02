@@ -130,8 +130,8 @@ class Connectivity():
         :param lr_cov: array
         '''
         
-        if 'all2all' in con_type:
-            self.Kb = 1.0 / self.Nb
+        # if 'all2all' in con_type:
+        #     self.Kb = 1.0 / self.Nb
         
         Pij = self.get_con_proba(proba_type=proba_type, **kwargs)
         
@@ -148,7 +148,8 @@ class Connectivity():
                 print('All to all connectivity')
             
             # Cij = Pij.clamp_(min=0, max=1) / float(self.Nb)
-            Cij = Pij / torch.sqrt(1.0 * self.Nb)
+            # Cij = Pij / torch.sqrt(1.0 * self.Nb)
+            Cij = Pij / (1.0 * self.Nb)
             
             # adds heterogeneity that scales as 1/sqrt(Nb)
             # if 'sigma' in kwargs:

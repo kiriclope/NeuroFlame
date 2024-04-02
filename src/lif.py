@@ -13,11 +13,11 @@ from src.lr_utils import initLR
 import warnings
 warnings.filterwarnings("ignore")
 
-class Network(nn.Module):
+class LIFNetwork(nn.Module):
 
     def __init__(self, conf_name, repo_root, **kwargs):
         '''
-        Class: Network
+        Class: LIFNetwork
         Creates a recurrent network of rate units with customizable connectivity and dynamics.
         The network can be trained with standard torch optimization technics.
         Parameters:
@@ -95,7 +95,7 @@ class Network(nn.Module):
     def init_ff_input(self):
         return init_ff_input(self)        
     
-    def initRates(self, ff_input=None):
+    def initVolt(self, ff_input=None):
         if ff_input is None:
             if self.VERBOSE:
                 print('Generating ff input')
@@ -106,64 +106,63 @@ class Network(nn.Module):
             self.N_BATCH = ff_input.shape[0]
         
         rec_input = torch.randn((self.IF_NMDA+1, self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
+        volts = torch.zeros((self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
         
-        if self.LIVE_FF_UPDATE:
-            rates = Activation()(ff_input + rec_input[0], func_name=self.TF_TYPE, thresh=self.THRESH[0])
-        else:
-            rates = Activation()(ff_input[:, 0] + rec_input[0], func_name=self.TF_TYPE, thresh=self.THRESH[0])
-
-        return rates, ff_input, rec_input
-
+        # Update spikes
+        spikes = (volts>=self.V_THRESH)
+        volts[spikes] = self.V_REST
+        spikes = spikes * 1.0
+        
+        return volts, ff_input, rec_input, spikes
+    
     def scaleWeights(self):
 
         # scaling recurrent weights Jab as 1 / sqrt(Kb)
         if self.VERBOSE:
             print("Jab", self.Jab)
 
-        self.Jab = torch.tensor(self.Jab, dtype=self.FLOAT, device=self.device).reshape(self.N_POP, self.N_POP) * self.GAIN
+        self.Jab = torch.tensor(self.Jab, dtype=self.FLOAT, device=self.device)
+        self.Jab = self.Jab.reshape(self.N_POP, self.N_POP) * self.GAIN
+        self.Jab.mul_(self.V_THRESH - self.V_REST)
         
         for i_pop in range(self.N_POP):
-            self.Jab[:, i_pop] = self.Jab[:, i_pop] / torch.sqrt(self.Ka[i_pop])
+            self.Jab[:, i_pop] = self.Jab[:, i_pop] / torch.sqrt(self.Ka[0])
+            self.Jab[:, i_pop] = self.Jab[:, i_pop] / self.Ka[i_pop] / self.TAU_SYN[i_pop]
         
         # scaling FF weights as sqrt(K0)
         if self.VERBOSE:
             print("Ja0", self.Ja0)
         
         self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device)
+        self.Ja0.mul_(self.V_THRESH - self.V_REST)
         self.Ja0 = self.Ja0.unsqueeze(0)  # add batch dim
         self.Ja0 = self.Ja0.unsqueeze(-1) # add neural dim
         
         # now inputs are scaled in init_ff_input unless live update
         if self.LIVE_FF_UPDATE:
-            self.Ja0 = self.M0 * torch.sqrt(self.Ka[0]) * self.Ja0
-
+            self.Ja0.mul_(self.M0 * torch.sqrt(self.Ka[0]))
+        
         # scaling ff variance as 1 / sqrt(K0)
         self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
         self.VAR_FF.mul_(self.M0 / torch.sqrt(self.Ka[0]))
         self.VAR_FF = self.VAR_FF.unsqueeze(0)  # add batch dim
         self.VAR_FF = self.VAR_FF.unsqueeze(-1) # add neural dim
-    
-    def update_dynamics(self, rates, ff_input, rec_input):
-        '''Updates the dynamics of the model at each timestep'''
-
+        
+    def update_dynamics(self, volts, ff_input, rec_input, spikes):
+        '''LIF Dynamics'''
+        
         # update hidden state
-        if self.LR_TRAIN:
-            lr = (1.0 + self.mask * (self.U @ self.U.T))
-            hidden = rates @ (self.Wab_T * lr.T)
-            # lr = self.lr_kappa * (self.U @ self.U.T) / self.Na[0]
-            # hidden = rates @ lr.T
-        else:
-            hidden = rates @ self.Wab_T
-
+        hidden = spikes @ self.Wab_T
+        
         # update stp variables
         if self.IF_STP:
-            Aux = self.stp(rates[:, self.slices[0]])  # Aux is now u * x * rates
+            Aux = self.stp(spikes[:, self.slices[0]])  # Aux is now u * x * rates
             hidden_stp = self.J_STP * Aux @ self.W_stp_T
             hidden[:, self.slices[0]].add_(hidden_stp)
         
         # update batched EtoE
         if self.IF_BATCH_J:
-            hidden[:, self.slices[0]].add_(self.Jab_batch * rates[:, self.slices[0]] @ self.W_batch_T)
+            hidden[:, self.slices[0]].add_(self.Jab_batch * spikes[:, self.slices[0]] @ self.W_batch_T)
         
         # update reccurent input
         if self.SYN_DYN:
@@ -175,25 +174,24 @@ class Network(nn.Module):
         net_input = ff_input + rec_input[0]
         
         if self.IF_NMDA:
-            hidden = rates[:, self.slices[0]] @ self.Wab_T[self.slices[0]]
+            hidden = spikes[:, self.slices[0]] @ self.Wab_T[self.slices[0]]
             if self.IF_STP:
                 hidden[:, self.slices[0]].add_(hidden_stp)
 
             rec_input[1] = rec_input[1] * self.EXP_DT_TAU_NMDA + self.R_NMDA * hidden * self.DT_TAU_NMDA
             net_input.add_(rec_input[1])
 
-        # compute non linearity
-        non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0])
-
-        # update rates
-        if self.RATE_DYN:
-            rates = rates * self.EXP_DT_TAU + non_linear * self.DT_TAU
-        else:
-            rates = non_linear
-
-        del hidden, net_input, non_linear
-
-        return rates, rec_input
+        # Update membrane voltage
+        volts = volts * self.EXP_DT_TAU + self.DT_TAU * net_input
+        
+        # Update spikes
+        spikes = volts>=self.V_THRESH
+        volts[spikes] = self.V_REST
+        spikes = spikes * 1.0
+        
+        # del hidden, net_input
+        
+        return volts, rec_input, spikes
     
     def forward(self, ff_input=None, REC_LAST_ONLY=0, RET_FF=0, RET_STP=0):
         '''
@@ -207,8 +205,8 @@ class Network(nn.Module):
         '''
 
         # Initialization (if  ff_input is None, ff_input is generated)
-        rates, ff_input, rec_input = self.initRates(ff_input)
-
+        volts, ff_input, rec_input, spikes = self.initVolt(ff_input)
+        
         # NEED .clone() here otherwise BAD THINGS HAPPEN
         if self.IF_BATCH_J:
             self.W_batch_T = self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
@@ -222,26 +220,30 @@ class Network(nn.Module):
             self.Wab_T[self.slices[0], self.slices[0]] = 0
 
         # Moving average
-        mv_rates, mv_ff = 0, 0
-        rates_list, ff_list = [], []
-
+        
+        mv_volts, mv_rates, mv_ff = 0, 0, 0
+        volts_list, rates_list, spikes_list, ff_list = [], [], [], []
+        
         # Temporal loop
         for step in range(self.N_STEPS):
 
             # update dynamics
             if self.LIVE_FF_UPDATE:
                 ff_input, noise = live_ff_input(self, step, ff_input)
-                rates, rec_input = self.update_dynamics(rates, ff_input + noise, rec_input)
+                volts, rec_input, spikes = self.update_dynamics(volts, ff_input + noise, rec_input, spikes)
             else:
-                rates, rec_input = self.update_dynamics(rates, ff_input[:, step], rec_input)
-
+                volts, rec_input, spikes = self.update_dynamics(volts, ff_input[:, step], rec_input, spikes)
+                
             # update moving average
-            mv_rates += rates
+            mv_rates += spikes
+            mv_volts += volts
+            
             if self.LIVE_FF_UPDATE and RET_FF:
                 mv_ff += ff_input + noise
-
+            
             # Reset moving average to start at 0
             if step == self.N_STEADY-self.N_WINDOW-1:
+                mv_volts = 0.0
                 mv_rates = 0.0
                 mv_ff = 0.0
 
@@ -249,29 +251,40 @@ class Network(nn.Module):
             if step >= self.N_STEADY:
                 if step % self.N_WINDOW == 0:
 
+                    spikes_list.append(spikes)
+                    
                     if self.VERBOSE:
-                        print_activity(self, step, rates)
+                        print_activity(self, step, mv_rates)
                         
                     if not REC_LAST_ONLY:
-                        rates_list.append(mv_rates[..., self.slices[0]] / self.N_WINDOW)
+                        rates_list.append(mv_rates / self.N_WINDOW)
+                        volts_list.append(mv_volts / self.N_WINDOW)
+                        
                         if self.LIVE_FF_UPDATE and RET_FF:
-                            ff_list.append(mv_ff[..., self.slices[0]] / self.N_WINDOW)
+                            ff_list.append(mv_ff / self.N_WINDOW)
                         if self.IF_STP and RET_STP:
                             self.x_list.append(self.stp.x_stp)
                             self.u_list.append(self.stp.u_stp)
 
                     # Reset moving average
-                    mv_rates = 0
-                    mv_ff = 0
+                    mv_volts, mv_rates, mv_ff = 0, 0, 0
 
         # returns last step
-        rates = rates[..., self.slices[0]]
+        rates = mv_rates
+        volts = mv_volts
+        
         # returns full sequence
         if REC_LAST_ONLY==0:
             # Stack list on 1st dim so that output is (N_BATCH, N_STEPS, N_NEURON)
             rates = torch.stack(rates_list, dim=1)
             del rates_list
 
+            volts = torch.stack(volts_list, dim=1)
+            del volts_list
+
+            spikes = torch.stack(spikes_list, dim=1)
+            del spikes_list
+            
             if self.LIVE_FF_UPDATE and RET_FF:  # returns ff input
                 self.ff_input = torch.stack(ff_list, dim=1)
                 del ff_list
@@ -293,5 +306,4 @@ class Network(nn.Module):
         
         clear_cache()
         
-        return rates
-
+        return rates, volts, spikes

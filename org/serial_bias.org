@@ -176,21 +176,21 @@ array([[[nan, nan, nan, ..., nan, nan, nan],
 :CUSTOM_ID: batching-live-inputs
 :END:
 #+begin_src python
-model = Network('config_2pop.yml', REPO_ROOT, IF_STP=1, DT=0.001, GAIN=1.0, VERBOSE=0, TASK='odr', seed=1, LIVE_FF_UPDATE=1)
+  model = Network('config_2pop.yml', REPO_ROOT, IF_STP=1, DT=0.001, GAIN=1.0, VERBOSE=0, TASK='odr', seed=1, LIVE_FF_UPDATE=1)
 
-#########################################################################################################
-### WARNING ### YOU NEED TO SET LIVE_FF_UPDATE INSIDE THE MODEL DEF OTHERWISE Ja0 WONT BE SCALED PROPERLY
-#########################################################################################################
+  #########################################################################################################
+  ### WARNING ### YOU NEED TO SET LIVE_FF_UPDATE INSIDE THE MODEL DEF OTHERWISE Ja0 WONT BE SCALED PROPERLY
+  #########################################################################################################
 
-N_PHASE = 512
-print(model.PHI0.shape)
+  N_PHASE = 512
+  print(model.PHI0.shape)
 
-PHI0 = model.PHI0.unsqueeze(-1).repeat((N_PHASE, 1, 1))
+  PHI0 = model.PHI0.unsqueeze(-1).repeat((N_PHASE, 1, 1))
 
-print(PHI0.shape)
-PHI0[:, -1] = torch.randint(0, 360, (N_PHASE,)).unsqueeze(1)
-PHI0[:, 0] = torch.randint(0, 360, (N_PHASE,)).unsqueeze(1)
-# print(PHI0[:, :, 0])
+  print(PHI0.shape)
+  PHI0[:, -1] = torch.randint(0, 360, (N_PHASE,)).unsqueeze(1)
+  PHI0[:, 0] = torch.randint(0, 360, (N_PHASE,)).unsqueeze(1)
+  # print(PHI0[:, :, 0])
 #+end_src
 
 #+begin_example
@@ -199,10 +199,10 @@ torch.Size([512, 3, 1])
 #+end_example
 
 #+begin_src python
-model.PHI0 = PHI0
-model.N_BATCH = N_PHASE
-rates = model(RET_FF=0).cpu().numpy()
-print(rates.shape)
+  model.PHI0 = PHI0
+  model.N_BATCH = N_PHASE
+  rates = model(RET_FF=0).cpu().numpy()
+  print(rates.shape)
 #+end_src
 
 #+begin_example
@@ -210,8 +210,8 @@ print(rates.shape)
 #+end_example
 
 #+begin_src python
-m0, m1, phi = decode_bump(rates, axis=-1)
-print(phi.shape)
+  m0, m1, phi = decode_bump(rates, axis=-1)
+  print(phi.shape)
 #+end_src
 
 #+begin_example

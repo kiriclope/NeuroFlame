@@ -1,4 +1,5 @@
 import torch
+from torch import nn
 
 # if self.PROBA_TYPE[0][0] == 'lr_add':
             
@@ -30,11 +31,11 @@ def initLR(model):
                             device=model.device, dtype=model.FLOAT)
 
     model.mask[model.slices[0], model.slices[0]] = 1.0
-
+    
     # Linear readout for supervised learning
     model.linear = nn.Linear(model.Na[0], 1, device=model.device, dtype=model.FLOAT, bias=False)
-    model.lr_kappa = nn.Parameter(5 * torch.rand(1))
-
+    model.lr_kappa = nn.Parameter(5 * torch.rand(1, dtype=model.FLOAT, device=model.device))
+    
     # Window where to evaluate loss
     model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
 
