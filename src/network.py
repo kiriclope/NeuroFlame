@@ -148,10 +148,8 @@ class Network(nn.Module):
 
         # update hidden state
         if self.LR_TRAIN:
-            lr = (1.0 + self.mask * (self.U @ self.U.T))
+            lr = (1.0 + self.lr_kappa * self.mask * (self.U @ self.V.T))
             hidden = rates @ (self.Wab_T * lr.T)
-            # lr = self.lr_kappa * (self.U @ self.U.T) / self.Na[0]
-            # hidden = rates @ lr.T
         else:
             hidden = rates @ self.Wab_T
 
@@ -231,7 +229,11 @@ class Network(nn.Module):
             # update dynamics
             if self.LIVE_FF_UPDATE:
                 ff_input, noise = live_ff_input(self, step, ff_input)
-                rates, rec_input = self.update_dynamics(rates, ff_input + noise, rec_input)
+                if self.RATE_NOISE:
+                    rates, rec_input = self.update_dynamics(rates, ff_input, rec_input)
+                    rates = rates + noise
+                else:
+                    rates, rec_input = self.update_dynamics(rates, ff_input + noise, rec_input)
             else:
                 rates, rec_input = self.update_dynamics(rates, ff_input[:, step], rec_input)
 

@@ -39,6 +39,7 @@
 #+end_src
 
 #+RESULTS:
+
 * Helpers
 
 #+begin_src ipython
@@ -116,7 +117,7 @@
 #+RESULTS:
 :RESULTS:
 : (1, 11, 500)
-[[file:./.ob-jupyter/315f84a74bbb51cf64c7c1e2b1ecfadbb8fceb65.png]]
+[[file:./.ob-jupyter/5f7616811b509905540eda090c29fe2d78fb2b85.png]]
 :END:
 
 #+begin_src ipython
@@ -138,7 +139,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/afd5ae9fae4fb2d7a11cfffeaa43f91619675fa0.png]]
+[[file:./.ob-jupyter/7e809a695917cfe5ab5eae4003471f6af9d97a1c.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -155,7 +156,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/05588c20c4ab0f173879c36b13bc2646798c8194.png]]
+[[file:./.ob-jupyter/944067944cda8486a03bb268ea0435b5af40d8a6.png]]
 
 #+begin_src ipython
 
@@ -166,7 +167,7 @@
 * Rates vs Jee
 
 #+begin_src ipython
-  model = Network(conf_name, REPO_ROOT, IF_STP=1, DT=0.001, VERBOSE=0, LIVE_FF_UPDATE=1)
+  model = Network(conf_name, REPO_ROOT, IF_STP=1, DT=0.001, VERBOSE=0, LIVE_FF_UPDATE=1, I0=[1, 0])
 #+end_src
 
 #+RESULTS:
@@ -182,12 +183,12 @@
 #+RESULTS:
 
 #+begin_src ipython
-  m0, m1, phi = decode_bump(rates, axis=-1)
+  m0, m1, phi = decode_bump(rates_Jee, axis=-1)
   print(m0.shape)
 #+end_src
 
 #+RESULTS:
-: (10, 21)
+: (10, 11)
 
 #+begin_src ipython
   u_list = model.u_list.cpu().numpy()
@@ -197,7 +198,7 @@
 #+end_src
 
 #+RESULTS:
-: (10, 21, 500) (10, 21, 500)
+: (10, 11, 500) (10, 11, 500)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -215,15 +216,22 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f0616a7121f55ba2d4023eef10995777a5167776.png]]
+[[file:./.ob-jupyter/2a84ef9f57dea3f04138c0b056c34f044aa60f9f.png]]
+
+#+begin_src ipython
+  print(model.J_STP.shape, m1.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([10, 1]) (10, 11)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-
-  ax[0].plot(model.J_STP.cpu(), m1[:, -1])
+  
+  ax[0].plot(model.J_STP.cpu()[:, 0], m1[:, -1])
   ax[0].set_xlabel('$J_{EE}$')
   ax[0].set_ylabel('$\mathcal{F}_1$')
-  
+
   ax[1].plot(m1.T)
   ax[1].set_xlabel('$Step$')
   ax[1].set_ylabel('$\mathcal{F}_1$')
@@ -231,7 +239,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c696d297f3a75176097cc0018a06fea46d2f43de.png]]
+[[file:./.ob-jupyter/5acce453525ff5a8ce865dc97848fc48d55a3a61.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -251,7 +259,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ab7ce9362685e4a8e206b0ace4a4709117578067.png]]
+[[file:./.ob-jupyter/c82daed91941c51135995dd1713a3eee5cec134e.png]]
 
 #+begin_src ipython
 
@@ -262,7 +270,7 @@
 * Rates vs Jee vs Ie
 
 #+begin_src ipython
-  model = Network(conf_name, REPO_ROOT, IF_STP=1, DT=0.001, VERBOSE=0, LIVE_FF_UPDATE=1, N_BATCH=1)
+  model = Network(conf_name, REPO_ROOT, IF_STP=1, DT=0.001, VERBOSE=0, LIVE_FF_UPDATE=1, N_BATCH=1, I0=[1, 0])
 #+end_src
 
 #+RESULTS:
@@ -271,9 +279,7 @@
   N_BATCH = 20
 
   J_STP = torch.linspace(5, 10, N_BATCH, device='cuda')
-  print(J_STP)
   JE0 = torch.linspace(0, 10, N_BATCH, device='cuda')
-  print(JE0)
 
   J_STP = J_STP.unsqueeze(0).expand(N_BATCH, N_BATCH)
   print('J_STP', J_STP[1])
@@ -293,22 +299,14 @@
 #+end_src
 
 #+RESULTS:
-#+begin_example
-  tensor([ 5.0000,  5.2632,  5.5263,  5.7895,  6.0526,  6.3158,  6.5789,  6.8421,
-           7.1053,  7.3684,  7.6316,  7.8947,  8.1579,  8.4211,  8.6842,  8.9474,
-           9.2105,  9.4737,  9.7368, 10.0000], device='cuda:0')
-  tensor([ 0.0000,  0.5263,  1.0526,  1.5789,  2.1053,  2.6316,  3.1579,  3.6842,
-           4.2105,  4.7368,  5.2632,  5.7895,  6.3158,  6.8421,  7.3684,  7.8947,
-           8.4211,  8.9474,  9.4737, 10.0000], device='cuda:0')
-  J_STP tensor([ 5.0000,  5.2632,  5.5263,  5.7895,  6.0526,  6.3158,  6.5789,  6.8421,
-           7.1053,  7.3684,  7.6316,  7.8947,  8.1579,  8.4211,  8.6842,  8.9474,
-           9.2105,  9.4737,  9.7368, 10.0000], device='cuda:0')
-  JE0 tensor([0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263,
-          0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263,
-          0.5263, 0.5263], device='cuda:0')
-  torch.Size([400, 1])
-  torch.Size([400, 2, 1])
-#+end_example
+: J_STP tensor([ 5.0000,  5.2632,  5.5263,  5.7895,  6.0526,  6.3158,  6.5789,  6.8421,
+:          7.1053,  7.3684,  7.6316,  7.8947,  8.1579,  8.4211,  8.6842,  8.9474,
+:          9.2105,  9.4737,  9.7368, 10.0000], device='cuda:0')
+: JE0 tensor([0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263,
+:         0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263, 0.5263,
+:         0.5263, 0.5263], device='cuda:0')
+: torch.Size([400, 1])
+: torch.Size([400, 2, 1])
 
 #+begin_src ipython
   model.N_BATCH = N_BATCH * N_BATCH
@@ -368,11 +366,14 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/10be667f9f31f6b92bc6a34c05c21d41ce1585de.png]]
+[[file:./.ob-jupyter/b99c8aa823532dfaf91c2cd952d6062e76967eb0.png]]
 
 #+begin_src ipython
   print(m1.shape)
 #+end_src
+
+#+RESULTS:
+: (20, 20, 21)
 
 #+begin_src ipython
   J_STP = torch.linspace(5, 10, N_BATCH, device='cuda')
@@ -411,11 +412,13 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/d402dbd8815b8de74034ce5ac0ec197cf0df6c43.png]]
+[[file:./.ob-jupyter/a4190c457a31e2524082f9eade2e4b4f68683ed0.png]]
 
 #+begin_src ipython
 
 #+end_src
+
+#+RESULTS:
 
 * Test
 
@@ -431,11 +434,11 @@
 : tensor(10., device='cuda:0')
 
 #+begin_src ipython
-  model = Network(conf_name, REPO_ROOT, TASK='odr_rand',
+  model = Network(conf_name, REPO_ROOT, TASK='odr',
                   VERBOSE=0, DEVICE='cuda', seed=0, N_BATCH=10, LIVE_FF_UPDATE=1)
 
   model.Ja0[:, 0] = JE0[3] * model.M0
-  model.J_STP = J_STP[-1] 
+  model.J_STP = J_STP[-1]
 #+end_src
 
 #+RESULTS:
@@ -470,7 +473,14 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/cacba56855315d9d7d100936047690fd44ec7e08.png]]
+[[file:./.ob-jupyter/572cf118703a32f5b2e3d2a66ba4aab006f74b32.png]]
+
+#+begin_src ipython
+  model.PHI0
+#+end_src
+
+#+RESULTS:
+: tensor([[180.,   0.]], device='cuda:0')
 
 * Serial bias
 
@@ -481,18 +491,22 @@
 
 #+RESULTS:
 
+** Simulations
+
 #+begin_src ipython
-  N_PHASE = 512
+  N_PHASE = 1024
   print(model.PHI0.shape)
 
   PHI0 = model.PHI0.unsqueeze(-1).repeat((N_PHASE, 1, 1))
 
   print(PHI0.shape)
   PHI0[:, -1] = torch.randint(0, 360, (N_PHASE,), device=model.device).unsqueeze(1)
-  PHI0[:, 0] = torch.randint(0, 360, (N_PHASE,)).unsqueeze(1)
+  PHI0[:, 0] = torch.randint(0, 360, (N_PHASE,), device=model.device).unsqueeze(1)
 #+end_src
 
 #+RESULTS:
+: torch.Size([1, 2])
+: torch.Size([1024, 2, 1])
 
 #+begin_src ipython
   model.PHI0 = PHI0
@@ -502,7 +516,7 @@
 #+end_src
 
 #+RESULTS:
-: (512, 11, 500)
+: (1024, 21, 500)
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates, axis=-1)
@@ -510,7 +524,7 @@
 #+end_src
 
 #+RESULTS:
-: (512, 11)
+: (1024, 21)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -529,73 +543,74 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/1b6e58011128a7bafdc4a427ceb920f0d9c40805.png]]
+[[file:./.ob-jupyter/5061ef320f78f4c1bb6feefca54179ac1139bc5b.png]]
 
 #+begin_src ipython
   target_loc = model.PHI0[:, -1].cpu().numpy()
   rel_loc = model.PHI0[:, 0].cpu().numpy() - target_loc
-  rel_loc = (rel_loc/180*np.pi + np.pi) % (2*np.pi) - np.pi
-  errors = phi - target_loc*np.pi/180.
+  rel_loc = (rel_loc / 180 * np.pi + np.pi) % (2*np.pi) - np.pi
+  errors = phi - target_loc * np.pi / 180.0
   errors = (errors + np.pi) % (2*np.pi) - np.pi
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-  plt.hist(rel_loc);
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/5ff30f1b4170acb35ace493b2520db133e2e81a1.png]]
-
-#+begin_src python
-  plt.hist(errors[:, -1], bins='auto')
+  plt.hist(rel_loc * 180 / np.pi)
+  plt.xlabel('Relative Loc (°)')
   plt.show()
 #+end_src
 
 #+RESULTS:
-
-*** Systematic biases
+[[file:./.ob-jupyter/66621213916df13b5504292ad57ac26035ef7a45.png]]
 
 #+begin_src ipython
-  plt.plot(target_loc[:, 0], errors[:,-1], 'o')
-  plt.xlabel('Target Loc. (rad)')
-  plt.ylabel('Error (rad)')
-  #plt.ylim([-60, 60])
-
-  from scipy.stats import binned_statistic
-  stt = binned_statistic(target_loc[:,0], errors[:,-1], statistic='mean', bins=40, range=[0, 360])
-  dstt = np.mean(np.diff(stt.bin_edges))
-  plt.plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
-
-  plt.axhline(color='k', linestyle=":")
+  plt.hist(errors[:, -1] * 180/np.pi, bins='auto')
+  plt.xlabel('errors (°)')
+  plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: <matplotlib.lines.Line2D at 0x7fed5b273880>
-[[file:./.ob-jupyter/c3d8608d32566126b5b3e0b05d92a826aebd7162.png]]
-:END:
+[[file:./.ob-jupyter/4db26d028e80ff878d264ec77794244b39ee9412.png]]
 
-*** Serial biases
+** Systematic biases
 
 #+begin_src ipython
-  plt.plot(rel_loc[:, 0], errors[:,-1], 'o')
-  plt.xlabel('Rel. Loc. (rad)')
-  plt.ylabel('Error (rad)')
-  #plt.ylim([-60, 60])
+  plt.plot(target_loc[:, 0], errors[:,-1] * 180 / np.pi, 'o')
+  plt.xlabel('Target Loc. (°)')
+  plt.ylabel('Error (°)')
 
   from scipy.stats import binned_statistic
-  stt = binned_statistic(rel_loc[:,0], errors[:,-1], statistic='mean', bins=30, range=[-np.pi, np.pi])
+  stt = binned_statistic(target_loc[:,0], errors[:,-1] * 180/np.pi, statistic='mean', bins=30, range=[0, 360])
   dstt = np.mean(np.diff(stt.bin_edges))
   plt.plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
-
+  
   plt.axhline(color='k', linestyle=":")
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/eac7eb19cd568ab68aca5de43f0e3d068b67e109.png]]
+[[file:./.ob-jupyter/a51a4909d2b0a014fc904f4255f18635c34f9c48.png]]
+
+** Serial biases
+
+#+begin_src ipython
+  plt.plot(rel_loc[:, 0] * 180 / np.pi, errors[:,-1] * 180 / np.pi, 'o')
+  plt.xlabel('Rel. Loc. (°)')
+  plt.ylabel('Error (°)')
+  #plt.ylim([-60, 60])
+
+  from scipy.stats import binned_statistic
+  stt = binned_statistic(rel_loc[:,0]*180/np.pi, errors[:,-1]*180/np.pi, statistic='mean', bins=40, range=[-180, 180])
+  dstt = np.mean(np.diff(stt.bin_edges))
+  plt.plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
+
+  plt.axhline(color='k', linestyle=":")
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/e60a870147e8e60c5bb44b7324933a1ed298149c.png]]
 
 #+begin_src ipython
 

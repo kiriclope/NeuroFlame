@@ -1,4 +1,5 @@
 #+STARTUP: fold
+#+TITLE: Training low rank RNNs
 #+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual :kernel torch
 
 * Notebook Settings
@@ -240,11 +241,14 @@
 
 #+begin_src ipython
   def get_idx(model):
-      ksi = model.U.cpu().detach().numpy().T
+      ksi = torch.stack((model.U, model.V))[..., 0]
+      print(ksi.shape)
+
+      ksi = ksi.cpu().detach().numpy()
       # ksi = model.PHI0.cpu().detach().numpy()
 
       print(ksi.shape)
-      
+
       theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=0)
       theta = get_theta(ksi[0][:model.Na[0]], ksi[1][:model.Na[0]], GM=0, IF_NORM=0)
 
@@ -336,121 +340,13 @@
 #+begin_src ipython
 for name, param in model.named_parameters():
     if param.requires_grad:
-        print(name, param.data)
+        print(name, param.shape)
 #+end_src
 
 #+RESULTS:
-#+begin_example
-  U tensor([[ 0.2977,  0.5942],
-          [-0.4112, -0.6682],
-          [-0.2976, -1.4120],
-          ...,
-          [ 1.3492,  1.0612],
-          [ 0.4737,  0.0444],
-          [ 0.8238,  1.1250]], device='cuda:0')
-  lr_kappa tensor([1.2297], device='cuda:0')
-  linear.weight tensor([[-3.1109e-03, -3.4396e-02, -2.5732e-02, -2.2767e-02,  6.7266e-03,
-           -1.5868e-02,  2.3995e-02, -4.0456e-02,  3.2401e-02,  2.5510e-02,
-           -3.1514e-02, -9.5425e-03, -1.1611e-02, -2.3405e-02, -2.3165e-02,
-            1.7676e-02, -3.3339e-02,  3.0477e-02, -2.6717e-02,  3.4337e-02,
-            1.2143e-02,  2.5977e-02,  1.4700e-02, -3.4412e-02, -4.3256e-02,
-            4.3283e-02,  1.0186e-02, -3.0978e-02,  3.0077e-02,  3.4422e-02,
-            2.4860e-02,  3.9334e-02,  2.7227e-02, -1.1319e-02, -3.4972e-02,
-            4.4301e-02,  6.3631e-03,  3.9933e-02,  2.5942e-03, -7.5359e-03,
-            3.8421e-02, -1.7824e-02,  1.1587e-02,  2.5796e-02,  2.8886e-02,
-           -1.1315e-03,  3.9511e-02,  3.5819e-02, -3.6065e-03,  3.4422e-02,
-           -7.9159e-03,  2.1247e-02,  2.6675e-02, -3.4427e-02,  3.3631e-02,
-           -3.9805e-02,  1.0964e-02,  3.6599e-02,  3.5241e-02,  3.1509e-02,
-            3.8964e-02,  1.0944e-02, -3.2410e-02,  5.3459e-03,  1.2457e-02,
-            4.2103e-02, -5.6034e-03, -1.2852e-02,  2.9877e-02, -2.6293e-02,
-           -3.5450e-02, -1.7979e-02, -3.8420e-02, -9.4088e-03,  1.8826e-02,
-           -4.3168e-03, -2.1801e-03, -3.2314e-02,  3.0339e-02, -1.7691e-02,
-           -3.2427e-02, -5.6584e-03, -4.2861e-03,  3.4492e-02,  1.2335e-02,
-            2.0837e-02,  1.1738e-02,  1.0714e-02, -1.9655e-02,  2.7642e-02,
-            3.8008e-02,  4.2055e-02, -4.8671e-03, -2.0728e-02, -1.9289e-02,
-           -4.0297e-02, -2.6153e-02,  2.6294e-02, -1.0171e-02,  5.6483e-03,
-           -1.5890e-02,  1.0694e-02, -1.3883e-02,  7.2346e-03,  1.0904e-04,
-           -1.2608e-03,  2.1107e-02, -1.7534e-02,  1.9312e-02,  1.2001e-02,
-            3.6134e-02, -1.5614e-02,  3.9058e-02, -1.9808e-02, -4.2253e-02,
-           -8.1481e-03, -1.9353e-02,  2.5420e-02,  1.2973e-02,  2.0207e-02,
-            3.5299e-02, -1.7155e-02, -4.2235e-02,  4.3781e-02, -2.9859e-02,
-           -5.3226e-04,  1.2711e-02,  3.8773e-02, -4.7992e-03, -9.1565e-03,
-           -2.8612e-02,  4.7854e-03, -6.6057e-03,  1.5289e-02, -5.8390e-04,
-           -4.3823e-02, -1.6622e-02,  2.0711e-02, -1.9079e-02, -3.1929e-02,
-           -2.1831e-02, -3.7239e-02, -2.6618e-02,  4.3614e-02, -1.9764e-02,
-           -1.7396e-02, -9.5674e-03,  1.5487e-02,  2.6653e-02,  4.3430e-02,
-           -2.4345e-02, -1.8742e-02,  2.3860e-02,  2.5893e-02,  7.1022e-03,
-           -7.0638e-07,  4.2783e-02, -7.9059e-03,  2.5175e-02, -3.1760e-02,
-           -2.3349e-02,  7.1883e-03, -5.6934e-03, -1.8279e-02,  2.0515e-02,
-            2.0768e-03,  1.3729e-02,  4.4014e-02, -5.6042e-03, -3.3291e-02,
-           -1.1257e-02, -3.2675e-03, -3.1741e-02, -7.2530e-03,  2.2922e-02,
-           -4.1396e-02,  3.2534e-02,  5.8436e-03,  1.2483e-02, -2.6934e-02,
-           -3.4476e-02,  3.9452e-02,  1.5173e-02,  1.9482e-02,  3.7145e-02,
-            4.1685e-02, -2.9711e-02,  3.3594e-02, -1.3119e-02,  2.0353e-03,
-           -1.9268e-02, -4.2193e-02,  8.6535e-03, -1.1738e-02, -1.5999e-02,
-            4.2795e-02,  9.8794e-03, -1.4576e-02, -3.2296e-02, -1.5814e-02,
-            3.8083e-02, -1.9685e-02,  1.3351e-03, -4.0986e-02,  3.2264e-02,
-            1.6839e-03, -2.6932e-02,  8.1520e-03,  3.1026e-02,  3.4447e-02,
-            3.7456e-02,  5.9219e-03, -2.9363e-02,  8.0805e-04,  3.7732e-03,
-            2.1809e-02, -2.9398e-04, -5.1553e-03, -2.5436e-02, -8.4269e-03,
-            1.1506e-02,  1.8849e-02, -1.3123e-02,  2.7259e-02,  9.7478e-03,
-            1.7135e-02, -8.3546e-03,  3.3733e-03,  2.2017e-02, -2.5246e-02,
-            2.5938e-02, -4.4711e-02, -4.3730e-02, -3.8831e-02,  4.0565e-02,
-            2.2539e-02,  1.2948e-02, -3.3747e-02, -3.2489e-02, -1.1681e-02,
-           -2.4601e-02, -1.4774e-02,  8.9946e-03, -2.3559e-02, -3.0495e-02,
-           -2.5413e-02,  3.2582e-02,  9.6996e-03,  5.9120e-03,  2.9997e-02,
-           -3.5469e-02,  3.0834e-02, -4.2325e-02,  4.1609e-02,  6.1816e-03,
-           -3.9704e-02,  1.5443e-02, -1.7003e-02, -3.6354e-02,  2.2816e-02,
-            3.8443e-02,  1.3477e-02,  2.8949e-02,  6.4904e-03,  4.1951e-02,
-           -2.9219e-02, -3.6801e-02,  2.0571e-02,  4.2621e-02, -2.0991e-02,
-            4.0333e-02, -4.1121e-02,  2.0255e-02, -1.5394e-02,  3.3942e-02,
-            4.7751e-03,  2.0607e-02, -1.0114e-02,  2.9099e-02,  1.1924e-03,
-           -1.4546e-02,  1.4216e-02, -2.0131e-02,  3.1790e-02,  4.1033e-02,
-            3.4374e-02, -2.0687e-02,  3.0299e-02, -5.6145e-04,  3.7031e-02,
-            2.8111e-02, -1.4274e-02,  3.9585e-02, -1.2333e-02, -2.3264e-02,
-           -3.6607e-02,  5.7014e-03,  4.2453e-02,  3.9873e-02, -2.4969e-02,
-            3.5384e-02,  1.7772e-02, -2.7344e-02,  2.1581e-02, -3.5034e-02,
-            2.2069e-02, -9.5902e-03,  1.5405e-02, -3.0839e-02,  3.6529e-02,
-           -2.7866e-02, -2.2285e-02,  2.6759e-03,  2.4500e-02,  3.8289e-02,
-            2.7548e-02, -2.1370e-02, -6.8878e-04,  2.2297e-02,  1.3590e-02,
-            3.6457e-02, -8.3061e-04, -4.1981e-02,  4.2522e-03, -1.7489e-02,
-           -5.7668e-03, -4.6883e-03,  2.2634e-02, -2.7702e-02,  2.1065e-02,
-           -4.1537e-02,  2.8343e-02,  1.6376e-02, -1.7837e-02, -3.3440e-02,
-            1.4760e-02, -1.3693e-02, -1.6741e-02, -3.1896e-02, -8.8663e-04,
-            1.7179e-02, -2.9593e-02, -1.9872e-02, -2.0368e-02, -6.8316e-03,
-            2.3104e-03,  8.6347e-03, -2.7850e-02,  6.9992e-03, -2.4443e-02,
-            3.2852e-02,  8.6647e-03, -2.2279e-03,  1.4064e-02, -2.4061e-02,
-            2.0431e-02,  3.7490e-02, -2.1713e-02,  6.2708e-03,  1.5459e-02,
-            3.4641e-02, -2.9314e-02,  2.5723e-02,  2.9851e-02,  3.6708e-02,
-            2.4259e-02,  1.1685e-02, -7.3292e-03,  2.4812e-02,  2.4804e-02,
-            9.3713e-03, -3.4392e-02, -4.1620e-02, -1.5304e-02, -1.7071e-02,
-            3.2395e-02, -2.5148e-02, -4.4422e-02, -4.3584e-02, -1.4036e-02,
-            3.7153e-02,  2.8900e-02, -1.1906e-02, -3.9335e-02,  3.9390e-03,
-           -1.1415e-02, -1.3908e-02,  3.7849e-03,  3.8642e-02,  8.1470e-03,
-           -1.9263e-02,  1.3716e-02, -1.5996e-02,  2.3656e-02, -3.0961e-02,
-           -3.3437e-02, -5.9996e-03, -3.5782e-02,  3.4102e-02,  1.1894e-03,
-            2.3032e-02, -1.7130e-02, -3.4730e-02,  2.9674e-02,  1.7247e-02,
-            2.4224e-02, -8.9046e-03, -5.0372e-04, -3.6759e-02, -2.2392e-02,
-           -3.8642e-02,  3.6911e-02,  3.8047e-02,  2.7605e-02, -1.3211e-02,
-            1.6702e-02,  1.2099e-02,  4.5438e-03, -1.4892e-03, -3.5084e-02,
-           -3.1003e-02,  2.9539e-02, -6.5009e-03,  4.1881e-03,  7.8922e-03,
-            4.2246e-02, -4.2929e-02, -2.8917e-02,  9.7259e-04,  3.0485e-02,
-           -1.3063e-02, -4.4163e-02, -4.3819e-02, -3.7422e-02, -2.0687e-03,
-           -2.8172e-02,  2.9118e-03, -1.7128e-02, -1.7965e-02, -4.1408e-02,
-           -3.4438e-02, -3.1606e-02, -1.3605e-02,  3.1203e-02,  3.1148e-02,
-           -1.5195e-02, -7.1566e-03,  3.8548e-02,  1.1666e-02,  6.0899e-03,
-           -5.4576e-03, -2.7121e-02,  3.6052e-02, -3.3468e-02,  3.9629e-03,
-           -3.8267e-02,  3.8597e-02,  1.5494e-02, -2.2654e-02,  3.9652e-02,
-           -1.4014e-02,  2.0798e-02, -2.7300e-02, -3.9297e-02, -2.8413e-02,
-           -2.1422e-02,  2.6151e-02, -1.9526e-02,  3.6530e-02, -1.7642e-02,
-            1.5532e-02, -3.0658e-02, -3.1045e-02, -3.7597e-02, -3.3580e-02,
-            3.3648e-02, -3.3443e-02, -4.4190e-02,  1.1669e-02, -3.7539e-02,
-           -3.9321e-02,  2.6253e-02, -8.1988e-03, -1.0469e-02,  4.3888e-02,
-            6.2491e-03, -2.1774e-02,  3.5552e-02,  2.7851e-02, -3.1863e-02,
-            3.6139e-02,  2.1169e-02,  2.6071e-02,  3.8488e-02, -1.5099e-02,
-           -2.7607e-02, -7.5970e-03,  2.9537e-02,  2.2346e-03, -2.4155e-02]],
-         device='cuda:0')
-#+end_example
+: U torch.Size([1000, 1])
+: V torch.Size([1000, 1])
+: lr_kappa torch.Size([1])
 
 ** Inputs and labels
 
@@ -458,25 +354,25 @@ for name, param in model.named_parameters():
   model.N_BATCH = 16
 
   model.I0[0] = 1
-  model.I0[1] = 0 # 1 
+  model.I0[1] = 1 
 
   AC_pair = model.init_ff_input()
 
   model.I0[0] = 1
-  model.I0[1] = 0 # -1
+  model.I0[1] = -1
 
   AD_pair = model.init_ff_input()
 
   model.I0[0] = -1
-  model.I0[1] = 0 # 1
+  model.I0[1] = 1
 
   BC_pair = model.init_ff_input()
 
   model.I0[0] = -1
-  model.I0[1] = 0 #-1
-
-  BD_pair = model.init_ff_input()
+  model.I0[1] = -1
   
+  BD_pair = model.init_ff_input()
+
   ff_input = torch.cat((AC_pair, BD_pair, AD_pair, BC_pair))
   print(ff_input.shape)
 #+end_src
@@ -493,7 +389,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-: torch.Size([64, 1220, 1000]) torch.Size([64, 10])
+: torch.Size([64, 1220, 1000]) torch.Size([64, 20])
 
 #+begin_src ipython
   # plt.imshow(ff_input[0].T.cpu().detach().numpy(), cmap='jet', aspect='auto')
@@ -517,42 +413,62 @@ for name, param in model.named_parameters():
   # SGD, Adam, AdamW
   optimizer = optim.Adam(model.parameters(), lr=learning_rate)
   
-  num_epochs = 30
+  num_epochs = 50
   loss, val_loss = run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)
 #+End_src
 
 #+RESULTS:
 #+begin_example
-  Epoch 1/30, Training Loss: 4.0994, Validation Loss: 5.8809
-  Epoch 2/30, Training Loss: 0.9136, Validation Loss: 0.0135
-  Epoch 3/30, Training Loss: 1.6247, Validation Loss: 0.1432
-  Epoch 4/30, Training Loss: 0.7629, Validation Loss: 3.4055
-  Epoch 5/30, Training Loss: 1.1101, Validation Loss: 1.9943
-  Epoch 6/30, Training Loss: 0.9773, Validation Loss: 0.8513
-  Epoch 7/30, Training Loss: 0.7978, Validation Loss: 2.7192
-  Epoch 8/30, Training Loss: 0.7426, Validation Loss: 0.4892
-  Epoch 9/30, Training Loss: 0.5730, Validation Loss: 2.8649
-  Epoch 10/30, Training Loss: 0.5611, Validation Loss: 1.7771
-  Epoch 11/30, Training Loss: 0.6323, Validation Loss: 0.5949
-  Epoch 12/30, Training Loss: 0.7374, Validation Loss: 2.0069
-  Epoch 13/30, Training Loss: 1.0896, Validation Loss: 2.1670
-  Epoch 14/30, Training Loss: 0.6998, Validation Loss: 1.8329
-  Epoch 15/30, Training Loss: 0.7409, Validation Loss: 1.4155
-  Epoch 16/30, Training Loss: 0.5580, Validation Loss: 1.0463
-  Epoch 17/30, Training Loss: 0.6240, Validation Loss: 0.9346
-  Epoch 18/30, Training Loss: 0.6564, Validation Loss: 1.0400
-  Epoch 19/30, Training Loss: 0.6361, Validation Loss: 1.2855
-  Epoch 20/30, Training Loss: 0.6466, Validation Loss: 1.5466
-  Epoch 21/30, Training Loss: 0.5096, Validation Loss: 1.8129
-  Epoch 22/30, Training Loss: 0.5849, Validation Loss: 2.0269
-  Epoch 23/30, Training Loss: 0.6594, Validation Loss: 2.1324
-  Epoch 24/30, Training Loss: 0.6791, Validation Loss: 2.0931
-  Epoch 25/30, Training Loss: 0.5914, Validation Loss: 2.0829
-  Epoch 26/30, Training Loss: 0.6047, Validation Loss: 2.0476
-  Epoch 27/30, Training Loss: 0.6559, Validation Loss: 2.0266
-  Epoch 28/30, Training Loss: 0.5619, Validation Loss: 1.9951
-  Epoch 29/30, Training Loss: 0.5650, Validation Loss: 1.9762
-  Epoch 30/30, Training Loss: 0.5253, Validation Loss: 1.9422
+  Epoch 1/50, Training Loss: 0.6054, Validation Loss: 0.8956
+  Epoch 2/50, Training Loss: 0.7693, Validation Loss: 0.9115
+  Epoch 3/50, Training Loss: 0.7363, Validation Loss: 0.9151
+  Epoch 4/50, Training Loss: 0.6771, Validation Loss: 0.9114
+  Epoch 5/50, Training Loss: 0.6908, Validation Loss: 0.9053
+  Epoch 6/50, Training Loss: 0.7028, Validation Loss: 0.8923
+  Epoch 7/50, Training Loss: 0.7079, Validation Loss: 0.8717
+  Epoch 8/50, Training Loss: 0.6223, Validation Loss: 0.8511
+  Epoch 9/50, Training Loss: 0.7042, Validation Loss: 0.8489
+  Epoch 10/50, Training Loss: 0.7141, Validation Loss: 0.8431
+  Epoch 11/50, Training Loss: 0.7689, Validation Loss: 0.8413
+  Epoch 12/50, Training Loss: 0.6704, Validation Loss: 0.8247
+  Epoch 13/50, Training Loss: 0.6586, Validation Loss: 0.8174
+  Epoch 14/50, Training Loss: 0.6818, Validation Loss: 0.8254
+  Epoch 15/50, Training Loss: 0.6914, Validation Loss: 0.8370
+  Epoch 16/50, Training Loss: 0.6874, Validation Loss: 0.8459
+  Epoch 17/50, Training Loss: 0.6362, Validation Loss: 0.8508
+  Epoch 18/50, Training Loss: 0.6844, Validation Loss: 0.8633
+  Epoch 19/50, Training Loss: 0.6283, Validation Loss: 0.8663
+  Epoch 20/50, Training Loss: 0.6608, Validation Loss: 0.8738
+  Epoch 21/50, Training Loss: 0.7004, Validation Loss: 0.8760
+  Epoch 22/50, Training Loss: 0.6625, Validation Loss: 0.8701
+  Epoch 23/50, Training Loss: 0.6770, Validation Loss: 0.8664
+  Epoch 24/50, Training Loss: 0.6672, Validation Loss: 0.8615
+  Epoch 25/50, Training Loss: 0.6290, Validation Loss: 0.8616
+  Epoch 26/50, Training Loss: 0.6805, Validation Loss: 0.8624
+  Epoch 27/50, Training Loss: 0.6825, Validation Loss: 0.8635
+  Epoch 28/50, Training Loss: 0.6462, Validation Loss: 0.8638
+  Epoch 29/50, Training Loss: 0.6528, Validation Loss: 0.8643
+  Epoch 30/50, Training Loss: 0.6828, Validation Loss: 0.8655
+  Epoch 31/50, Training Loss: 0.6310, Validation Loss: 0.8659
+  Epoch 32/50, Training Loss: 0.6474, Validation Loss: 0.8661
+  Epoch 33/50, Training Loss: 0.6871, Validation Loss: 0.8673
+  Epoch 34/50, Training Loss: 0.6599, Validation Loss: 0.8679
+  Epoch 35/50, Training Loss: 0.6701, Validation Loss: 0.8685
+  Epoch 36/50, Training Loss: 0.6703, Validation Loss: 0.8685
+  Epoch 37/50, Training Loss: 0.6930, Validation Loss: 0.8686
+  Epoch 38/50, Training Loss: 0.6740, Validation Loss: 0.8686
+  Epoch 39/50, Training Loss: 0.6634, Validation Loss: 0.8686
+  Epoch 40/50, Training Loss: 0.6314, Validation Loss: 0.8686
+  Epoch 41/50, Training Loss: 0.6080, Validation Loss: 0.8687
+  Epoch 42/50, Training Loss: 0.6768, Validation Loss: 0.8689
+  Epoch 43/50, Training Loss: 0.6884, Validation Loss: 0.8690
+  Epoch 44/50, Training Loss: 0.6584, Validation Loss: 0.8690
+  Epoch 45/50, Training Loss: 0.6659, Validation Loss: 0.8691
+  Epoch 46/50, Training Loss: 0.6884, Validation Loss: 0.8691
+  Epoch 47/50, Training Loss: 0.6346, Validation Loss: 0.8691
+  Epoch 48/50, Training Loss: 0.6359, Validation Loss: 0.8691
+  Epoch 49/50, Training Loss: 0.6969, Validation Loss: 0.8691
+  Epoch 50/50, Training Loss: 0.6273, Validation Loss: 0.8691
 #+end_example
 
 #+begin_src ipython
@@ -571,7 +487,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/38f97d9f18b50d20cd4b4bf9a5bee33f140a33c4.png]]
+[[file:./.ob-jupyter/ff27f25416dae1f03c4fbfdea8dd7cac7d41bf7f.png]]
 
 #+begin_src ipython
 
@@ -580,7 +496,7 @@ for name, param in model.named_parameters():
 #+RESULTS:
 
 * Results
-
+** Connectivity
 #+begin_src ipython
   ksi = model.U.T
   # ksi = torch.stack((model.U.T[0], model.V.T[0]))
@@ -597,9 +513,9 @@ for name, param in model.named_parameters():
 
 #+RESULTS:
 : torch.Size([2, 1000])
-: kappa tensor([1.2297])
-: angle ksi1 vs ksi2 tensor(90.4251)
-: variances tensor([1.0075, 1.0051])
+: kappa tensor([1.7389])
+: angle ksi1 vs ksi2 tensor(90.6940)
+: variances tensor([0.8966, 0.9588])
 
 #+begin_src ipython
   lr = (1.0 + model.U @ model.U.T / torch.sqrt(model.Ka[0]))
@@ -614,7 +530,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f098580a78563d2195853fde63c88b061bc8bcb7.png]]
+[[file:./.ob-jupyter/7400e68e64096ec48610835281a148bcdc58f372.png]]
 
 #+begin_src ipython
   readout = model.linear.weight.data[0]
@@ -632,14 +548,14 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-: angle readout vs ksis 93.46348897975409 115.27968692466509
+: angle readout vs ksis 87.81469713991093 90.13003564589687
 
-** Eval
+** Evaluation
 
 #+begin_src ipython
   model.eval()
 
-  lr = (1.0 + model.mask * (model.U @ model.U.T))  
+  lr = (1.0 + model.mask * (model.U @ model.V.T))  
   model.Wab_T = model.Wab_T * lr.T
 
   model.N_BATCH = 1
@@ -659,57 +575,57 @@ for name, param in model.named_parameters():
 #+RESULTS:
 #+begin_example
   Generating ff input
-  times (s) 0.0 rates (Hz) [1.69, 1.36]
-  times (s) 0.08 rates (Hz) [1.69, 1.36]
-  times (s) 0.16 rates (Hz) [1.69, 1.37]
-  times (s) 0.25 rates (Hz) [1.69, 1.37]
-  times (s) 0.33 rates (Hz) [1.69, 1.37]
-  times (s) 0.41 rates (Hz) [1.69, 1.37]
-  times (s) 0.49 rates (Hz) [1.69, 1.37]
-  times (s) 0.57 rates (Hz) [1.69, 1.37]
-  times (s) 0.66 rates (Hz) [1.69, 1.37]
-  times (s) 0.74 rates (Hz) [1.69, 1.37]
-  times (s) 0.82 rates (Hz) [1.73, 1.37]
-  times (s) 0.9 rates (Hz) [1.7, 1.37]
-  times (s) 0.98 rates (Hz) [1.67, 1.36]
-  times (s) 1.07 rates (Hz) [1.66, 1.35]
-  times (s) 1.15 rates (Hz) [1.65, 1.35]
-  times (s) 1.23 rates (Hz) [1.65, 1.34]
-  times (s) 1.31 rates (Hz) [1.65, 1.34]
-  times (s) 1.39 rates (Hz) [1.64, 1.34]
+  times (s) 0.0 rates (Hz) [1.58, 1.33]
+  times (s) 0.08 rates (Hz) [1.59, 1.32]
+  times (s) 0.16 rates (Hz) [1.58, 1.35]
+  times (s) 0.25 rates (Hz) [1.59, 1.34]
+  times (s) 0.33 rates (Hz) [1.63, 1.33]
+  times (s) 0.41 rates (Hz) [1.64, 1.34]
+  times (s) 0.49 rates (Hz) [1.63, 1.33]
+  times (s) 0.57 rates (Hz) [1.51, 1.33]
+  times (s) 0.66 rates (Hz) [1.57, 1.4]
+  times (s) 0.74 rates (Hz) [1.64, 1.37]
+  times (s) 0.82 rates (Hz) [1.6, 1.35]
+  times (s) 0.9 rates (Hz) [1.64, 1.37]
+  times (s) 0.98 rates (Hz) [1.68, 1.37]
+  times (s) 1.07 rates (Hz) [1.65, 1.29]
+  times (s) 1.15 rates (Hz) [1.68, 1.3]
+  times (s) 1.23 rates (Hz) [1.63, 1.3]
+  times (s) 1.31 rates (Hz) [1.63, 1.39]
+  times (s) 1.39 rates (Hz) [1.69, 1.4]
   times (s) 1.48 rates (Hz) [1.64, 1.34]
-  times (s) 1.56 rates (Hz) [1.65, 1.34]
-  times (s) 1.64 rates (Hz) [1.62, 1.34]
-  times (s) 1.72 rates (Hz) [1.62, 1.33]
-  times (s) 1.8 rates (Hz) [1.63, 1.33]
-  times (s) 1.89 rates (Hz) [1.64, 1.34]
-  times (s) 1.97 rates (Hz) [1.64, 1.34]
-  times (s) 2.05 rates (Hz) [1.65, 1.34]
-  times (s) 2.13 rates (Hz) [1.66, 1.35]
-  times (s) 2.21 rates (Hz) [1.66, 1.35]
-  times (s) 2.3 rates (Hz) [1.67, 1.35]
-  times (s) 2.38 rates (Hz) [1.67, 1.36]
-  times (s) 2.46 rates (Hz) [1.67, 1.36]
-  times (s) 2.54 rates (Hz) [1.68, 1.36]
-  times (s) 2.62 rates (Hz) [1.68, 1.36]
-  times (s) 2.7 rates (Hz) [1.68, 1.36]
-  times (s) 2.79 rates (Hz) [1.68, 1.36]
-  times (s) 2.87 rates (Hz) [1.68, 1.36]
-  times (s) 2.95 rates (Hz) [1.68, 1.36]
-  times (s) 3.03 rates (Hz) [1.68, 1.36]
-  times (s) 3.11 rates (Hz) [1.69, 1.36]
-  times (s) 3.2 rates (Hz) [1.69, 1.36]
-  times (s) 3.28 rates (Hz) [1.69, 1.36]
-  times (s) 3.36 rates (Hz) [1.69, 1.36]
-  times (s) 3.44 rates (Hz) [1.69, 1.36]
-  times (s) 3.52 rates (Hz) [1.69, 1.37]
-  times (s) 3.61 rates (Hz) [1.69, 1.37]
-  times (s) 3.69 rates (Hz) [1.69, 1.37]
-  times (s) 3.77 rates (Hz) [1.69, 1.37]
-  times (s) 3.85 rates (Hz) [1.69, 1.37]
-  times (s) 3.93 rates (Hz) [1.69, 1.37]
-  times (s) 4.02 rates (Hz) [1.69, 1.37]
-  times (s) 4.1 rates (Hz) [1.69, 1.37]
+  times (s) 1.56 rates (Hz) [1.71, 1.5]
+  times (s) 1.64 rates (Hz) [1.56, 1.35]
+  times (s) 1.72 rates (Hz) [1.55, 1.41]
+  times (s) 1.8 rates (Hz) [1.58, 1.34]
+  times (s) 1.89 rates (Hz) [1.57, 1.28]
+  times (s) 1.97 rates (Hz) [1.59, 1.31]
+  times (s) 2.05 rates (Hz) [1.62, 1.45]
+  times (s) 2.13 rates (Hz) [1.62, 1.26]
+  times (s) 2.21 rates (Hz) [1.6, 1.31]
+  times (s) 2.3 rates (Hz) [1.67, 1.31]
+  times (s) 2.38 rates (Hz) [1.48, 1.26]
+  times (s) 2.46 rates (Hz) [1.69, 1.3]
+  times (s) 2.54 rates (Hz) [1.62, 1.27]
+  times (s) 2.62 rates (Hz) [1.68, 1.26]
+  times (s) 2.7 rates (Hz) [1.6, 1.34]
+  times (s) 2.79 rates (Hz) [1.71, 1.32]
+  times (s) 2.87 rates (Hz) [1.62, 1.37]
+  times (s) 2.95 rates (Hz) [1.64, 1.4]
+  times (s) 3.03 rates (Hz) [1.61, 1.32]
+  times (s) 3.11 rates (Hz) [1.62, 1.43]
+  times (s) 3.2 rates (Hz) [1.61, 1.38]
+  times (s) 3.28 rates (Hz) [1.63, 1.29]
+  times (s) 3.36 rates (Hz) [1.56, 1.33]
+  times (s) 3.44 rates (Hz) [1.55, 1.35]
+  times (s) 3.52 rates (Hz) [1.61, 1.34]
+  times (s) 3.61 rates (Hz) [1.57, 1.32]
+  times (s) 3.69 rates (Hz) [1.56, 1.37]
+  times (s) 3.77 rates (Hz) [1.58, 1.32]
+  times (s) 3.85 rates (Hz) [1.57, 1.37]
+  times (s) 3.93 rates (Hz) [1.64, 1.29]
+  times (s) 4.02 rates (Hz) [1.53, 1.39]
+  times (s) 4.1 rates (Hz) [1.63, 1.36]
   (1, 51, 500)
 #+end_example
 
@@ -719,10 +635,10 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e91f0e7308afc5ef30e73b104da102e967df8b36.png]]
+[[file:./.ob-jupyter/c0f24f9605c1b754552bb39016b1b97e927d55f4.png]]
 
 #+begin_src ipython
-  plt.imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=30)
+  plt.imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=4)
   plt.vlines((np.array(model.N_STIM_ON) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
   plt.vlines((np.array(model.N_STIM_OFF) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
   plt.ylabel('Neuron #')
@@ -731,7 +647,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/28e77612398c2537f0fe3542d58e53be4df3d3ae.png]]
+[[file:./.ob-jupyter/6ad7c266a38810c6c021ed12c2d7b97249b5b4a5.png]]
 
 #+begin_src ipython
   idx = get_idx(model)
@@ -740,11 +656,12 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
+: torch.Size([2, 1000])
 : (2, 1000)
 : (1, 51, 500)
 
 #+begin_src ipython
-  plt.imshow(ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=30.0)
+  plt.imshow(ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=4.0)
   plt.yticks(np.linspace(0, model.Na[0].cpu().detach(), 5), np.linspace(0, 360, 5).astype(int))
   plt.vlines((np.array(model.N_STIM_ON) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
   plt.vlines((np.array(model.N_STIM_OFF) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
@@ -754,7 +671,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2e9fa73edb22df6666a117d603f8566e65d1ff2b.png]]
+[[file:./.ob-jupyter/492734a2c9a7eb3f482a30b8ffe7587e3920c965.png]]
 
 #+begin_src ipython
   print(model.N_STIM_ON)
@@ -780,7 +697,7 @@ for name, param in model.named_parameters():
 :RESULTS:
 : (500,)
 : (1, 51)
-[[file:./.ob-jupyter/4f7a86ccc95745e0171d68eebb163c296f0c78b7.png]]
+[[file:./.ob-jupyter/900ada718354bae9f9fb7cf80a3062cd2ddd6c75.png]]
 :END:
 
 #+begin_src ipython
@@ -814,7 +731,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5ee491f4846a9990984ffab4be9fd32f25b1781d.png]]
+[[file:./.ob-jupyter/4fb2c05a68a5843eaae495ea007bf6c9893db8dd.png]]
 
 #+begin_src ipython
 
