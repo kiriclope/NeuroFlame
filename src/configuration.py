@@ -114,8 +114,9 @@ def init_const(model):
     model.KAPPA = torch.tensor(model.KAPPA, dtype=model.FLOAT, device=model.device).view(model.N_POP, model.N_POP)
     model.PHASE = torch.tensor(model.PHASE * torch.pi / 180.0, dtype=model.FLOAT, device=model.device)
     
-    model.PHI0 = torch.tensor(model.PHI0, dtype=model.FLOAT, device=model.device).unsqueeze(0)
-
+    model.PHI0 = torch.tensor(model.PHI0, dtype=model.FLOAT, device=model.device).unsqueeze(0) * torch.pi / 180.0
+    # model.PHI1 = torch.tensor(model.PHI1, dtype=model.FLOAT, device=model.device).unsqueeze(0) * torch.pi / 180.0
+    
     if 'dual' in model.TASK:
         mean_ = torch.tensor(model.LR_MEAN, dtype=model.FLOAT, device=model.device)
         cov_ = torch.tensor(model.LR_COV, dtype=model.FLOAT, device=model.device)

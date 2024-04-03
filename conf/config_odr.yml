@@ -1,44 +1,45 @@
-##########################################
-# Simulation parameters
-##########################################
+###################################################
+# Parameters 
+###################################################
 # output different prompts for debugging purpose
 VERBOSE: 0
-
+# device to be used cuda or cpu
 DEVICE: cuda
+# float precision
+FLOAT_PRECISION: 32
 
-FLOAT_PRECISION: 64
-
-# 1 to save the data to REPO_ROOT/data/simul
-SAVE_DATA: 1
+######################################
+# Simulation Parameters
+#####################################
+# Number of batches (ie initializations)
+N_BATCH: 1
+IF_BATCH_J: 0
 
 # Time step in s
-DT: 0.001
+DT: 0.00025
 # total simulation time in s
-DURATION: 5.0
+DURATION: 10.0
 # time to start saving simulation files
-T_STEADY: 0.0
+T_STEADY: 1.0
 # Saving to files every T_WINDOW
-T_WINDOW: .250
+T_WINDOW: 0.1
 
 ##########################################
 # Parameters for the stimulus presentation
 ##########################################
 # stimulus as a cosine shape
-# time for stimulus onset in s 
-T_STIM_ON: 1.0
-# time for stimulus offset in s 
-T_STIM_OFF: 2.0
-# amplitude of the 1st stimulus
-I0: [2.0, 0.0]
-# amplitude of the 2nd stimulus
-I1: [0.0, 0.0]
-# I1: [0.05, 0.0]
-# Phase of the 1st stimulus
-PHI0: 180.0
-# Tuning of the 1st stimulus
-SIGMA0: 1.0
-# Phase difference between 1st/2nd stimuli
-DPHI: 0.25
+TASK: 'odr'
+# # time for stimuli onset in s 
+T_STIM_ON: [1.0]
+# # time for stimuli offset in s
+T_STIM_OFF: [2.0]
+# stimuli strengths
+I0: [10.0]
+# stimuli phases
+PHI0: [180.0]
+PHI1: [180.0]
+# stimuli tuning
+SIGMA0: [1.0]
 
 ##########################################
 # Network parameters
@@ -46,109 +47,118 @@ DPHI: 0.25
 # number of populations
 N_POP: 2
 # number of neurons
-N_NEURON: 20000
+N_NEURON: 1000
 # number of average presynaptic input (set to 1 if all to all)
-K: 500.0
+K: 50.0
 # fraction of neuron in each population (must sum to 1)
-frac: [0.80, 0.20]
+frac: [0.5, 0.5]
 
 ##########################################
-# Network Dynamic
+# Voltage Dynamics for LIF model
 ##########################################
-# Transfert Function
+# Threshold in mV
+V_THRESH: 1.0
+# Resting potential in mV
+V_REST: 0.0
+
+##########################################
+# Transfert Function for rate model
+##########################################
 # set to 0 for threshold linear, 1 for sigmoid
 TF_TYPE: 'relu'
+# threshold
+THRESH: [1.0, 1.0]
 
+##########################################
 # Dynamics of the rates
+##########################################
 # set to 0 if instantaneous rates, 1 if exponentially decaying
 RATE_DYN: 1
-# rate time constants in s
+RATE_NOISE: 0
+# rate time constants
 TAU: [0.04, 0.02]
 
+##########################################
 # Dynamics of the recurrent inputs
+##########################################
 # set to 0 if instantaneous, 1 if exponentially decaying
 SYN_DYN: 1
 # Synaptic time constants for each population
-TAU_SYN: [0.003, 0.002]
+TAU_SYN: [.004, .002]
 
-# Adding NMDA currents
+##########################################
+# NMDA currents
+##########################################
 IF_NMDA: 0
-# NMDA time constants in s
-TAU_NMDA: [0.2, 0.2]
+R_NMDA: 0.25
+TAU_NMDA: [.3, .2]
 
-# Feedforward inputs dynamics
-# set to 0 for instantaneous, 1 to exp decay, 2 adds gaussian noise
-FF_DYN: 0
-# FF time constants in s
-TAU_FF: [0.003, 0.003]
-# Variance of the noise
-VAR_FF: [0.0, 0.0]
-
-# Threshold dynamics
-# set to 0 constant thresholds, 1 to add adaptative thresholds
-THRESH_DYN: 0
-# threshold
-THRESH: [1.00, 1.00]
-# threshold time constants
-TAU_THRESH: [0.1, 0.1]
-
-# Network's gain
-GAIN: 1.0
-
-# Synaptic strengths 
-Jab: [7.5, -1.35, 1.25, -2.0]
-Ja0: [0.25, 0.175]
+##########################################
+# Feedforward inputs 
+##########################################
+LIVE_FF_UPDATE: 0
+# External inputs strengths
+Ja0: [2.0, 1.0]
 # External rate
-M0: 1.0
-
+M0: 0.15
+# Variance of the noise
+VAR_FF: [0, 0]
 # To add an attentional switch
 # if BUMP_SWITCH[i] == 1 it sets Iext[i] to zero before stimulus presentation
 BUMP_SWITCH: [0, 0]
 
-########################
+##########################################
+# Synaptic strengths 
+##########################################
+# Network's gain
+GAIN: 1.0
+# Synaptic strengths
+Jab: [1., -1.5, 1, -1]
+
+####################
 # Plasticity
-########################
-# adds learning
-IF_LEARNING: 0
+####################
 # adds short term plasticity
 IF_STP: 0
-
+USE: 0.03
+TAU_FAC: 0.5
+TAU_REC: 0.2
+J_STP: 1
+STP_TYPE: 'markram'
 ##############
 # Connectivity
 ##############
-# load connectivity matrix
-# from REPO_PATH/data/matrix
-IF_LOAD_MAT: 0
-
-# save connectivity matrix
-IF_SAVE_MAT: 1
-
+IF_W_BLOCKS: 0
 # seed for connectivity None or float
 SEED: 0
-# connectivity type
-# STRUCTURE can be 'all', 'all_cos', 'cos', 'spec_cos'
-
-# By default the matrix is a random sparse matrix Cij
-# 'cos' gives a sparse matrix with strong cosine structure,
-# Pij = (1 + 2 KAPPA cos(theta_ij) / sqrt(Kb)), Cij = 1 with proba Pij
-# 'spec_cos' gives a sparse matrix with weak cosine structure,
-# Pij = (1 + 2 KAPPA cos(theta_ij) / sqrt(Kb)) , Cij = 1 with proba Pij
-# 'all' gives an all to all matrix, Cij = 1/N
-# 'all_cos' gives an all to all with cosine shape,
-# Cij = (1 + 2 KAPPA cos(theta_ij)) / N
-# any other string gives a sparse matrix,
-# Cij = 1 with proba Ka/Na, 0 otherwise
-
-CONNECTIVITY: 'sparse'
-# sets probabilities of connections' shape
-STRUCTURE: ['None', 'None', 'None', 'None']
-# tuning of the recurrent connections
-KAPPA: [4.5, 0.0, 0.0, 0.0]
-# phase of the connectivity
-PHASE: 0.0
-
-# covariance
-LR_COV: 0.0
+# CON_TYPE can be 'all2all' or 'sparse'
+CON_TYPE: 'sparse'
+# PROBA_TYPE can be 'cosine', 'cosine_spec' or 'lr'
+# PROBA_TYPE: ['cosine', 'cosine', 'cosine', 'cosine']
+PROBA_TYPE: ['', '', '', '']
 
 # strength of the asymmetries if all to all
 SIGMA: [0.0, 0.0, 0.0, 0.0]
+# tuning of the recurrent connections
+KAPPA: [0.5, 0.225, 0.5, 0.5]
+
+# phase of the connectivity
+PHASE: 0.0
+
+##########
+# Low rank
+##########
+LR_EVAL_WIN: 0
+LR_TRAIN: 0
+
+# RANK: 2
+# LR_MEAN: [0.0, 0.0]
+# LR_COV: [[1.0, 0.0],[0.0, 1.0]]
+
+# RANK: 3
+# LR_MEAN: [0.0, 0.0, 0.0]
+# LR_COV: [[1.0, 0.0, 0.0],[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+
+# RANK: 4
+LR_MEAN: [0.0, 0.0, 0.0, 0.0]
+LR_COV: [[1.0, 0.9, 0.0, 0.0],[0.9, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.9], [0.0, 0.0, 0.9, 1.0]]

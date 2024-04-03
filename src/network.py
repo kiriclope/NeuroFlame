@@ -70,7 +70,7 @@ class Network(nn.Module):
                                      kappa=self.KAPPA[i_pop][j_pop], phase=self.PHASE,
                                      sigma=self.SIGMA[i_pop][j_pop], lr_mean= self.LR_MEAN,
                                      lr_cov=self.LR_COV, ksi=self.PHI0)
-
+                
                 self.Wab_T[self.slices[i_pop], self.slices[j_pop]] = self.Jab[i_pop][j_pop] * weights
 
         del weights, weight_mat
@@ -83,7 +83,8 @@ class Network(nn.Module):
     def initSTP(self):
         ''' Creates stp model for population 0'''
         self.J_STP = torch.tensor(self.J_STP, dtype=self.FLOAT, device=self.device)
-
+        self.J_STP.mul_(self.GAIN / torch.sqrt(self.Ka[0]))
+        
         self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC,
                               self.DT, (self.N_BATCH, self.Na[0]),
                               STP_TYPE=self.STP_TYPE,

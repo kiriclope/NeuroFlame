@@ -240,17 +240,18 @@
 #+RESULTS:
 
 #+begin_src ipython
-  def get_idx(model):
-      ksi = torch.stack((model.U, model.V))[..., 0]
-      print(ksi.shape)
+  def get_idx(model, rank=2):
+      print(model.U.shape)
+      ksi = torch.hstack((model.U, model.V)).T
+      print('ksi', ksi.shape)
 
       ksi = ksi.cpu().detach().numpy()
       # ksi = model.PHI0.cpu().detach().numpy()
 
       print(ksi.shape)
 
-      theta = get_theta(ksi[0], ksi[1], GM=0, IF_NORM=0)
-      theta = get_theta(ksi[0][:model.Na[0]], ksi[1][:model.Na[0]], GM=0, IF_NORM=0)
+      theta = get_theta(ksi[0], ksi[rank], GM=0, IF_NORM=0)
+      theta = get_theta(ksi[0][:model.Na[0]], ksi[rank][:model.Na[0]], GM=0, IF_NORM=0)
 
       return theta.argsort()
 #+end_src
@@ -344,9 +345,10 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-: U torch.Size([1000, 1])
-: V torch.Size([1000, 1])
+: U torch.Size([1000, 2])
+: V torch.Size([1000, 2])
 : lr_kappa torch.Size([1])
+: linear.weight torch.Size([1, 500])
 
 ** Inputs and labels
 
@@ -405,7 +407,7 @@ for name, param in model.named_parameters():
   batch_size = 32
   train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
 
-  learning_rate = 0.01
+  learning_rate = 0.001
 
   # CosineLoss, BCELoss, BCEWithLogitLoss
   criterion = nn.BCEWithLogitsLoss()
@@ -419,56 +421,56 @@ for name, param in model.named_parameters():
 
 #+RESULTS:
 #+begin_example
-  Epoch 1/50, Training Loss: 0.6054, Validation Loss: 0.8956
-  Epoch 2/50, Training Loss: 0.7693, Validation Loss: 0.9115
-  Epoch 3/50, Training Loss: 0.7363, Validation Loss: 0.9151
-  Epoch 4/50, Training Loss: 0.6771, Validation Loss: 0.9114
-  Epoch 5/50, Training Loss: 0.6908, Validation Loss: 0.9053
-  Epoch 6/50, Training Loss: 0.7028, Validation Loss: 0.8923
-  Epoch 7/50, Training Loss: 0.7079, Validation Loss: 0.8717
-  Epoch 8/50, Training Loss: 0.6223, Validation Loss: 0.8511
-  Epoch 9/50, Training Loss: 0.7042, Validation Loss: 0.8489
-  Epoch 10/50, Training Loss: 0.7141, Validation Loss: 0.8431
-  Epoch 11/50, Training Loss: 0.7689, Validation Loss: 0.8413
-  Epoch 12/50, Training Loss: 0.6704, Validation Loss: 0.8247
-  Epoch 13/50, Training Loss: 0.6586, Validation Loss: 0.8174
-  Epoch 14/50, Training Loss: 0.6818, Validation Loss: 0.8254
-  Epoch 15/50, Training Loss: 0.6914, Validation Loss: 0.8370
-  Epoch 16/50, Training Loss: 0.6874, Validation Loss: 0.8459
-  Epoch 17/50, Training Loss: 0.6362, Validation Loss: 0.8508
-  Epoch 18/50, Training Loss: 0.6844, Validation Loss: 0.8633
-  Epoch 19/50, Training Loss: 0.6283, Validation Loss: 0.8663
-  Epoch 20/50, Training Loss: 0.6608, Validation Loss: 0.8738
-  Epoch 21/50, Training Loss: 0.7004, Validation Loss: 0.8760
-  Epoch 22/50, Training Loss: 0.6625, Validation Loss: 0.8701
-  Epoch 23/50, Training Loss: 0.6770, Validation Loss: 0.8664
-  Epoch 24/50, Training Loss: 0.6672, Validation Loss: 0.8615
-  Epoch 25/50, Training Loss: 0.6290, Validation Loss: 0.8616
-  Epoch 26/50, Training Loss: 0.6805, Validation Loss: 0.8624
-  Epoch 27/50, Training Loss: 0.6825, Validation Loss: 0.8635
-  Epoch 28/50, Training Loss: 0.6462, Validation Loss: 0.8638
-  Epoch 29/50, Training Loss: 0.6528, Validation Loss: 0.8643
-  Epoch 30/50, Training Loss: 0.6828, Validation Loss: 0.8655
-  Epoch 31/50, Training Loss: 0.6310, Validation Loss: 0.8659
-  Epoch 32/50, Training Loss: 0.6474, Validation Loss: 0.8661
-  Epoch 33/50, Training Loss: 0.6871, Validation Loss: 0.8673
-  Epoch 34/50, Training Loss: 0.6599, Validation Loss: 0.8679
-  Epoch 35/50, Training Loss: 0.6701, Validation Loss: 0.8685
-  Epoch 36/50, Training Loss: 0.6703, Validation Loss: 0.8685
-  Epoch 37/50, Training Loss: 0.6930, Validation Loss: 0.8686
-  Epoch 38/50, Training Loss: 0.6740, Validation Loss: 0.8686
-  Epoch 39/50, Training Loss: 0.6634, Validation Loss: 0.8686
-  Epoch 40/50, Training Loss: 0.6314, Validation Loss: 0.8686
-  Epoch 41/50, Training Loss: 0.6080, Validation Loss: 0.8687
-  Epoch 42/50, Training Loss: 0.6768, Validation Loss: 0.8689
-  Epoch 43/50, Training Loss: 0.6884, Validation Loss: 0.8690
-  Epoch 44/50, Training Loss: 0.6584, Validation Loss: 0.8690
-  Epoch 45/50, Training Loss: 0.6659, Validation Loss: 0.8691
-  Epoch 46/50, Training Loss: 0.6884, Validation Loss: 0.8691
-  Epoch 47/50, Training Loss: 0.6346, Validation Loss: 0.8691
-  Epoch 48/50, Training Loss: 0.6359, Validation Loss: 0.8691
-  Epoch 49/50, Training Loss: 0.6969, Validation Loss: 0.8691
-  Epoch 50/50, Training Loss: 0.6273, Validation Loss: 0.8691
+  Epoch 1/50, Training Loss: 0.6833, Validation Loss: 1.1454
+  Epoch 2/50, Training Loss: 0.6994, Validation Loss: 1.7964
+  Epoch 3/50, Training Loss: 0.7918, Validation Loss: 1.8318
+  Epoch 4/50, Training Loss: 0.6249, Validation Loss: 1.4957
+  Epoch 5/50, Training Loss: 0.7004, Validation Loss: 1.1725
+  Epoch 6/50, Training Loss: 0.6770, Validation Loss: 0.9858
+  Epoch 7/50, Training Loss: 0.6596, Validation Loss: 1.0553
+  Epoch 8/50, Training Loss: 0.6513, Validation Loss: 1.3167
+  Epoch 9/50, Training Loss: 0.7363, Validation Loss: 1.5951
+  Epoch 10/50, Training Loss: 0.6428, Validation Loss: 1.6920
+  Epoch 11/50, Training Loss: 0.6456, Validation Loss: 1.6190
+  Epoch 12/50, Training Loss: 0.7160, Validation Loss: 1.4431
+  Epoch 13/50, Training Loss: 0.6202, Validation Loss: 1.2313
+  Epoch 14/50, Training Loss: 0.6413, Validation Loss: 1.1997
+  Epoch 15/50, Training Loss: 0.6633, Validation Loss: 1.3166
+  Epoch 16/50, Training Loss: 0.7064, Validation Loss: 1.4268
+  Epoch 17/50, Training Loss: 0.6629, Validation Loss: 1.4760
+  Epoch 18/50, Training Loss: 0.6077, Validation Loss: 1.4709
+  Epoch 19/50, Training Loss: 0.6584, Validation Loss: 1.4638
+  Epoch 20/50, Training Loss: 0.6080, Validation Loss: 1.4504
+  Epoch 21/50, Training Loss: 0.6202, Validation Loss: 1.4393
+  Epoch 22/50, Training Loss: 0.6516, Validation Loss: 1.4283
+  Epoch 23/50, Training Loss: 0.6959, Validation Loss: 1.4189
+  Epoch 24/50, Training Loss: 0.5815, Validation Loss: 1.4075
+  Epoch 25/50, Training Loss: 0.6239, Validation Loss: 1.4027
+  Epoch 26/50, Training Loss: 0.6514, Validation Loss: 1.3970
+  Epoch 27/50, Training Loss: 0.6799, Validation Loss: 1.3875
+  Epoch 28/50, Training Loss: 0.5539, Validation Loss: 1.3731
+  Epoch 29/50, Training Loss: 0.6467, Validation Loss: 1.3726
+  Epoch 30/50, Training Loss: 0.6335, Validation Loss: 1.3723
+  Epoch 31/50, Training Loss: 0.6358, Validation Loss: 1.3717
+  Epoch 32/50, Training Loss: 0.5993, Validation Loss: 1.3712
+  Epoch 33/50, Training Loss: 0.6356, Validation Loss: 1.3716
+  Epoch 34/50, Training Loss: 0.6814, Validation Loss: 1.3717
+  Epoch 35/50, Training Loss: 0.5575, Validation Loss: 1.3716
+  Epoch 36/50, Training Loss: 0.5939, Validation Loss: 1.3721
+  Epoch 37/50, Training Loss: 0.7238, Validation Loss: 1.3730
+  Epoch 38/50, Training Loss: 0.6921, Validation Loss: 1.3737
+  Epoch 39/50, Training Loss: 0.6018, Validation Loss: 1.3737
+  Epoch 40/50, Training Loss: 0.5674, Validation Loss: 1.3738
+  Epoch 41/50, Training Loss: 0.6530, Validation Loss: 1.3739
+  Epoch 42/50, Training Loss: 0.5463, Validation Loss: 1.3740
+  Epoch 43/50, Training Loss: 0.6798, Validation Loss: 1.3742
+  Epoch 44/50, Training Loss: 0.6609, Validation Loss: 1.3743
+  Epoch 45/50, Training Loss: 0.6107, Validation Loss: 1.3744
+  Epoch 46/50, Training Loss: 0.6426, Validation Loss: 1.3745
+  Epoch 47/50, Training Loss: 0.6650, Validation Loss: 1.3747
+  Epoch 48/50, Training Loss: 0.5842, Validation Loss: 1.3747
+  Epoch 49/50, Training Loss: 0.5396, Validation Loss: 1.3748
+  Epoch 50/50, Training Loss: 0.6518, Validation Loss: 1.3750
 #+end_example
 
 #+begin_src ipython
@@ -487,7 +489,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ff27f25416dae1f03c4fbfdea8dd7cac7d41bf7f.png]]
+[[file:./.ob-jupyter/a2eea5e98479842b158343251c3c4a01011865f6.png]]
 
 #+begin_src ipython
 
@@ -513,9 +515,9 @@ for name, param in model.named_parameters():
 
 #+RESULTS:
 : torch.Size([2, 1000])
-: kappa tensor([1.7389])
-: angle ksi1 vs ksi2 tensor(90.6940)
-: variances tensor([0.8966, 0.9588])
+: kappa tensor([3.3302])
+: angle ksi1 vs ksi2 tensor(89.0495)
+: variances tensor([0.9857, 0.9905])
 
 #+begin_src ipython
   lr = (1.0 + model.U @ model.U.T / torch.sqrt(model.Ka[0]))
@@ -530,7 +532,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7400e68e64096ec48610835281a148bcdc58f372.png]]
+[[file:./.ob-jupyter/3707dfc97785f885fd897487d51a84aca2255d60.png]]
 
 #+begin_src ipython
   readout = model.linear.weight.data[0]
@@ -548,9 +550,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-: angle readout vs ksis 87.81469713991093 90.13003564589687
-
-** Evaluation
+: angle readout vs ksis 91.11852111314863 93.65459767273104
 
 #+begin_src ipython
   model.eval()
@@ -561,11 +561,11 @@ for name, param in model.named_parameters():
   model.N_BATCH = 1
   model.VERBOSE=1
   model.LR_TRAIN=0
-  # print(model.ff_input.shape)
-  # print(ff_input.shape)
 #+end_src
 
 #+RESULTS:
+
+** Evaluation
 
 #+begin_src ipython
   rates = model.forward(RET_FF=1).cpu().detach().numpy()
@@ -575,57 +575,57 @@ for name, param in model.named_parameters():
 #+RESULTS:
 #+begin_example
   Generating ff input
-  times (s) 0.0 rates (Hz) [1.58, 1.33]
-  times (s) 0.08 rates (Hz) [1.59, 1.32]
-  times (s) 0.16 rates (Hz) [1.58, 1.35]
-  times (s) 0.25 rates (Hz) [1.59, 1.34]
-  times (s) 0.33 rates (Hz) [1.63, 1.33]
-  times (s) 0.41 rates (Hz) [1.64, 1.34]
-  times (s) 0.49 rates (Hz) [1.63, 1.33]
-  times (s) 0.57 rates (Hz) [1.51, 1.33]
-  times (s) 0.66 rates (Hz) [1.57, 1.4]
-  times (s) 0.74 rates (Hz) [1.64, 1.37]
-  times (s) 0.82 rates (Hz) [1.6, 1.35]
-  times (s) 0.9 rates (Hz) [1.64, 1.37]
-  times (s) 0.98 rates (Hz) [1.68, 1.37]
-  times (s) 1.07 rates (Hz) [1.65, 1.29]
-  times (s) 1.15 rates (Hz) [1.68, 1.3]
-  times (s) 1.23 rates (Hz) [1.63, 1.3]
-  times (s) 1.31 rates (Hz) [1.63, 1.39]
-  times (s) 1.39 rates (Hz) [1.69, 1.4]
-  times (s) 1.48 rates (Hz) [1.64, 1.34]
-  times (s) 1.56 rates (Hz) [1.71, 1.5]
-  times (s) 1.64 rates (Hz) [1.56, 1.35]
-  times (s) 1.72 rates (Hz) [1.55, 1.41]
-  times (s) 1.8 rates (Hz) [1.58, 1.34]
-  times (s) 1.89 rates (Hz) [1.57, 1.28]
-  times (s) 1.97 rates (Hz) [1.59, 1.31]
-  times (s) 2.05 rates (Hz) [1.62, 1.45]
-  times (s) 2.13 rates (Hz) [1.62, 1.26]
-  times (s) 2.21 rates (Hz) [1.6, 1.31]
-  times (s) 2.3 rates (Hz) [1.67, 1.31]
-  times (s) 2.38 rates (Hz) [1.48, 1.26]
-  times (s) 2.46 rates (Hz) [1.69, 1.3]
-  times (s) 2.54 rates (Hz) [1.62, 1.27]
-  times (s) 2.62 rates (Hz) [1.68, 1.26]
-  times (s) 2.7 rates (Hz) [1.6, 1.34]
-  times (s) 2.79 rates (Hz) [1.71, 1.32]
-  times (s) 2.87 rates (Hz) [1.62, 1.37]
-  times (s) 2.95 rates (Hz) [1.64, 1.4]
-  times (s) 3.03 rates (Hz) [1.61, 1.32]
-  times (s) 3.11 rates (Hz) [1.62, 1.43]
-  times (s) 3.2 rates (Hz) [1.61, 1.38]
-  times (s) 3.28 rates (Hz) [1.63, 1.29]
-  times (s) 3.36 rates (Hz) [1.56, 1.33]
-  times (s) 3.44 rates (Hz) [1.55, 1.35]
-  times (s) 3.52 rates (Hz) [1.61, 1.34]
-  times (s) 3.61 rates (Hz) [1.57, 1.32]
-  times (s) 3.69 rates (Hz) [1.56, 1.37]
-  times (s) 3.77 rates (Hz) [1.58, 1.32]
-  times (s) 3.85 rates (Hz) [1.57, 1.37]
-  times (s) 3.93 rates (Hz) [1.64, 1.29]
-  times (s) 4.02 rates (Hz) [1.53, 1.39]
-  times (s) 4.1 rates (Hz) [1.63, 1.36]
+  times (s) 0.0 rates (Hz) [1.61, 1.36]
+  times (s) 0.08 rates (Hz) [1.57, 1.33]
+  times (s) 0.16 rates (Hz) [1.7, 1.37]
+  times (s) 0.25 rates (Hz) [1.58, 1.25]
+  times (s) 0.33 rates (Hz) [1.61, 1.38]
+  times (s) 0.41 rates (Hz) [1.52, 1.35]
+  times (s) 0.49 rates (Hz) [1.59, 1.3]
+  times (s) 0.57 rates (Hz) [1.62, 1.4]
+  times (s) 0.66 rates (Hz) [1.57, 1.31]
+  times (s) 0.74 rates (Hz) [1.59, 1.27]
+  times (s) 0.82 rates (Hz) [1.58, 1.22]
+  times (s) 0.9 rates (Hz) [1.77, 1.43]
+  times (s) 0.98 rates (Hz) [1.72, 1.46]
+  times (s) 1.07 rates (Hz) [1.76, 1.38]
+  times (s) 1.15 rates (Hz) [1.63, 1.38]
+  times (s) 1.23 rates (Hz) [1.66, 1.48]
+  times (s) 1.31 rates (Hz) [1.7, 1.46]
+  times (s) 1.39 rates (Hz) [1.67, 1.34]
+  times (s) 1.48 rates (Hz) [1.74, 1.39]
+  times (s) 1.56 rates (Hz) [1.74, 1.52]
+  times (s) 1.64 rates (Hz) [1.63, 1.42]
+  times (s) 1.72 rates (Hz) [1.57, 1.41]
+  times (s) 1.8 rates (Hz) [1.57, 1.31]
+  times (s) 1.89 rates (Hz) [1.68, 1.35]
+  times (s) 1.97 rates (Hz) [1.55, 1.33]
+  times (s) 2.05 rates (Hz) [1.61, 1.4]
+  times (s) 2.13 rates (Hz) [1.64, 1.35]
+  times (s) 2.21 rates (Hz) [1.57, 1.3]
+  times (s) 2.3 rates (Hz) [1.55, 1.37]
+  times (s) 2.38 rates (Hz) [1.65, 1.38]
+  times (s) 2.46 rates (Hz) [1.61, 1.33]
+  times (s) 2.54 rates (Hz) [1.63, 1.24]
+  times (s) 2.62 rates (Hz) [1.6, 1.37]
+  times (s) 2.7 rates (Hz) [1.53, 1.34]
+  times (s) 2.79 rates (Hz) [1.63, 1.33]
+  times (s) 2.87 rates (Hz) [1.71, 1.37]
+  times (s) 2.95 rates (Hz) [1.69, 1.35]
+  times (s) 3.03 rates (Hz) [1.71, 1.41]
+  times (s) 3.11 rates (Hz) [1.63, 1.38]
+  times (s) 3.2 rates (Hz) [1.64, 1.43]
+  times (s) 3.28 rates (Hz) [1.62, 1.37]
+  times (s) 3.36 rates (Hz) [1.63, 1.36]
+  times (s) 3.44 rates (Hz) [1.55, 1.42]
+  times (s) 3.52 rates (Hz) [1.63, 1.37]
+  times (s) 3.61 rates (Hz) [1.67, 1.41]
+  times (s) 3.69 rates (Hz) [1.54, 1.32]
+  times (s) 3.77 rates (Hz) [1.65, 1.33]
+  times (s) 3.85 rates (Hz) [1.56, 1.31]
+  times (s) 3.93 rates (Hz) [1.62, 1.33]
+  times (s) 4.02 rates (Hz) [1.65, 1.35]
+  times (s) 4.1 rates (Hz) [1.65, 1.4]
   (1, 51, 500)
 #+end_example
 
@@ -635,7 +635,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c0f24f9605c1b754552bb39016b1b97e927d55f4.png]]
+[[file:./.ob-jupyter/c91fa79c6547edbda8f39b276ad879190c4fc353.png]]
 
 #+begin_src ipython
   plt.imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=4)
@@ -647,17 +647,18 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/6ad7c266a38810c6c021ed12c2d7b97249b5b4a5.png]]
+[[file:./.ob-jupyter/526a5ebb7b4fa0093a8e01e2a74b19a7819672ab.png]]
 
 #+begin_src ipython
-  idx = get_idx(model)
+  idx = get_idx(model, 2)
   ordered = rates[..., idx]
   print(ordered.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([2, 1000])
-: (2, 1000)
+: torch.Size([1000, 2])
+: ksi torch.Size([4, 1000])
+: (4, 1000)
 : (1, 51, 500)
 
 #+begin_src ipython
@@ -671,7 +672,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/492734a2c9a7eb3f482a30b8ffe7587e3920c965.png]]
+[[file:./.ob-jupyter/b8c3089fd122810a2bf549d465a11cbe362a15f6.png]]
 
 #+begin_src ipython
   print(model.N_STIM_ON)
@@ -697,7 +698,7 @@ for name, param in model.named_parameters():
 :RESULTS:
 : (500,)
 : (1, 51)
-[[file:./.ob-jupyter/900ada718354bae9f9fb7cf80a3062cd2ddd6c75.png]]
+[[file:./.ob-jupyter/6ff06cbcd3fb2babcf237cc3695014032d26b816.png]]
 :END:
 
 #+begin_src ipython
@@ -731,7 +732,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/4fb2c05a68a5843eaae495ea007bf6c9893db8dd.png]]
+[[file:./.ob-jupyter/1f17c1ddbfd84a680a6b57d01b1a97e983c53467.png]]
 
 #+begin_src ipython
 

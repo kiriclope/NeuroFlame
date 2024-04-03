@@ -15,12 +15,10 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-The autoreload extension is already loaded. To reload it, use:
-  %reload_ext autoreload
-Python exe
-/home/leon/mambaforge/bin/python
-:END:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
 
 * Imports
 
@@ -33,8 +31,6 @@ Python exe
   from time import perf_counter
 
   from src.network import Network
-  from src.lif_network import LIFNetwork
-  from src.plot_utils import plot_con
   from src.decode import decode_bump
 #+end_src
 
@@ -139,7 +135,7 @@ Python exe
 ** ODR
 
 #+begin_src ipython
-  ff_input = Stimuli(task='odr', size=(10, 1000))(1, 1, 0, rnd_phase=1).cpu().detach().numpy()
+  ff_input = Stimuli(task='odr', size=(10, 1000))(1, 1, 0, rnd_phase=1).cpu().numpy()
   print(ff_input.shape)
   plt.plot(ff_input.T[:, :5])
   
@@ -151,8 +147,8 @@ Python exe
 
 #+RESULTS:
 :RESULTS:
-(10, 1000)
-[[file:./.ob-jupyter/8d99a1db447eddadbefbf1818c495d2d6bfe7828.png]]
+: (10, 1000)
+[[file:./.ob-jupyter/975d0e75646fd358685de805c19deecd7d46dc28.png]]
 :END:
 
 ** Dual Task
@@ -177,110 +173,108 @@ Python exe
 
 #+RESULTS:
 :RESULTS:
-(1000,)
-[[file:./.ob-jupyter/0b9f04f3622ab93fe3db5be950dd3e6d30203804.png]]
+: (1000,)
+[[file:./.ob-jupyter/6c8c2a76449636e0bfc500e60fec7139ad699adc.png]]
 :END:
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 * FF Inputs
-** ODR
+** SEQ FF UPDATE
+*** ODR
 
 #+begin_src ipython
-    REPO_ROOT = "/home/leon/models/NeuroTorch"
-    model = Network('config_EI.yml', REPO_ROOT, VERBOSE=1, DEVICE='cuda', TASK='odr',
-                    PROBA_TYPE=['cosine', '', '',''])
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  model = Network('config_odr.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='odr_rand', LIVE_FF_UPDATE=0, N_BATCH=30, seed=0)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-Na tensor([2000,  500], device='cuda:0', dtype=torch.int32) Ka tensor([125., 125.], device='cuda:0') csumNa tensor([   0, 2000, 2500], device='cuda:0')
-Jab [1.0, -1.5, 1, -1]
-Ja0 [2.0, 1.0]
-:END:
 
 #+begin_src ipython
-  ff_input = model.init_ff_input().cpu().detach().numpy()
+  Ne = model.Na[0].cpu().numpy()
+  N = model.N_NEURON
+
+  ff_input = model.init_ff_input().cpu().numpy()
   print(ff_input.shape)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-(1, 11100, 2500)
-:END:
+: torch.Size([30, 1, 500])
+: (30, 44400, 1000)
 
 #+begin_src ipython
-  plt.plot(ff_input[0, :, :5])
-  plt.plot(ff_input[0, :, -5:])
-  plt.xlabel('Step')
-  plt.ylabel('FF Input')
+  m0, m1, phase = decode_bump(ff_input[..., model.slices[0]])
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (30, 44400)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=(2.25*width, height))
+
+  ax[0].imshow(ff_input[0].T, cmap='jet', aspect='auto')
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_ylim([0, Ne])
+
+  ax[1].plot(m1.T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+
+  ax[2].plot(phase.T * 180 / np.pi)
+  ax[2].set_xlabel('Step')
+  ax[2].set_ylabel('Phase (°)')
+
   plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-[[file:./.ob-jupyter/4ef0171603151f8c8e0a3030c40ace64947f993f.png]]
-:END:
+[[file:./.ob-jupyter/7bbda54d68ec6df61bf7677ad30d21d6cbf78030.png]]
 
 #+begin_src ipython
-  plt.imshow(ff_input[0].T, cmap='jet', vmin=0, aspect='auto')
-  plt.xlabel('Step')
-  plt.ylabel('Neuron #')
-  plt.ylim([0, 2000])
+  plt.hist(model.phase.cpu().numpy() * 180 / np.pi, bins='auto')
+  plt.hist(360 - phase[:, model.N_STIM_ON[0]]* 180 / np.pi, bins='auto')
   plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-[[file:./.ob-jupyter/7cc46424e3b8691877cfef8c196880e061d7eb30.png]]
-:END:
-
-** Dual Task
+[[file:./.ob-jupyter/97edbdc69846a716650db4b8fd248918ec293ec6.png]]
 
 #+begin_src ipython
-    REPO_ROOT = "/home/leon/models/NeuroTorch"
-    model = Network('config_EI.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='dual_rand',
-                    PROBA_TYPE=['lr', '', '',''], LIVE_FF_UPDATE=0)
+  
+#+end_src
+
+#+RESULTS:
+
+*** Dual Task
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  model = Network('config_EI.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='dual_rand', LIVE_FF_UPDATE=0, N_BATCH=10)
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-  ff_input = model.init_ff_input().cpu().detach().numpy()
+  Ne = model.Na[0].cpu().numpy()
+  N = model.N_NEURON
+  
+  ff_input = model.init_ff_input().cpu().numpy()
   print(ff_input.shape)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-(1, 11100, 2500)
-:END:
-
-#+begin_src ipython 
-  plt.plot(ff_input[0, :, :10])
-  plt.plot(ff_input[0, :, -10:])
-  plt.xlabel('Step')
-  plt.ylabel('FF Input')
-  plt.show()
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-[[file:./.ob-jupyter/b94c4851688eeb10e1f0d1849fb3aae6c962c896.png]]
-:END:
+: torch.Size([10, 1, 2000])
+: torch.Size([10, 1, 2000])
+: (10, 4440, 2500)
 
 #+begin_src ipython
-  plt.imshow(ff_input[0].T, cmap='jet', vmin=100, aspect='auto')
-  plt.xlabel('Step')
-  plt.ylabel('Neuron #')
-  plt.ylim([0, 2000])
-  plt.show()
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-[[file:./.ob-jupyter/a2e3e59f63b42c4b13100bd9904c92eb0e4c9a7f.png]]
-:END:
-
-#+begin_src ipython
-  ksi = model.PHI0.cpu().detach().numpy()
+  ksi = model.PHI0.cpu().numpy()
   theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
   index_order = theta.argsort()
   ff_ordered = ff_input[..., index_order]
@@ -289,19 +283,254 @@ Ja0 [2.0, 1.0]
 #+RESULTS:
 
 #+begin_src ipython
-  plt.imshow(ff_ordered[0].T, cmap='jet', vmin=0, aspect='auto')
-  plt.xlabel('Step')
-  plt.ylabel('Pref Loc. (°)')
-  plt.yticks(np.linspace(0, 2000, 5), np.linspace(0, 360, 5).astype(int))
-  # plt.ylim([0, 10])
+  m0, m1, phase = decode_bump(ff_ordered)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 4440)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=(2.25*width, height))
+
+  ax[0].plot(ff_input[0, :, :5])
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('FF Input')
+
+  ax[1].imshow(ff_input[0].T, cmap='jet', vmin=0, vmax= 400, aspect='auto')
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('Neuron #')
+  ax[1].set_ylim([0, Ne])
+
+  ax[2].imshow(ff_ordered[0].T, cmap='jet', vmin=0, aspect='auto')
+  ax[2].set_xlabel('Step')
+  ax[2].set_ylabel('Pref Loc. (°)')
+  ax[2].set_yticks(np.linspace(0, 2000, 5), np.linspace(0, 360, 5).astype(int))
+  
   plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-[[file:./.ob-jupyter/67ac4fbe66b24be5c31ef10899acd684236a528f.png]]
-:END:
+[[file:./.ob-jupyter/ec111405d098b7648a7fa313515899e7e98f3b88.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=(2.25*width, height))
+
+  ax[0].plot(m0.T)
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('$\mathcal{F}_0$')
+
+  ax[1].plot(m1.T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+
+  ax[2].plot(phase.T * 180 / np.pi)
+  ax[2].set_xlabel('Step')
+  ax[2].set_ylabel('$\Phi$ (°)')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/210bff636d9792c7c7f8b8ee758a4e79707419f0.png]]
+
+#+begin_src ipython
+  plt.hist(model.phase.cpu().numpy() * 180 / np.pi, bins=10, histtype='step')
+  plt.hist(360-phase[:, model.N_STIM_ON[0]]* 180 / np.pi, bins=10, histtype='step')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/e8e1ec0f596be87f052080621893e997414f338f.png]]
 
 #+begin_src ipython
 
 #+end_src
+
+#+RESULTS:
+
+** LIVE FF UPDATE
+*** ODR
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  model = Network('config_odr.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='odr_rand', LIVE_FF_UPDATE=1, N_BATCH=10)
+  rates = model(RET_FF=1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  Ne = model.Na[0].cpu().numpy()
+  N = model.N_NEURON
+  
+  ff_input = model.ff_input.cpu().numpy()
+  print(ff_input.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 101, 500)
+
+#+begin_src ipython
+  m0, m1, phase = decode_bump(ff_input[..., model.slices[0]])
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 101)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=(2.25*width, height))
+
+  ax[0].plot(ff_input[0, :, :5])
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('FF Input')
+
+  ax[1].imshow(ff_input[0].T, cmap='jet', vmin=0, vmax= 400, aspect='auto')
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('Neuron #')
+  ax[1].set_ylim([0, Ne])
+
+  # ax[2].imshow(ff_ordered[0].T, cmap='jet', vmin=0, aspect='auto')
+  # ax[2].set_xlabel('Step')
+  # ax[2].set_ylabel('Pref Loc. (°)')
+  # ax[2].set_yticks(np.linspace(0, 2000, 5), np.linspace(0, 360, 5).astype(int))
+  
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/8828654d37938943658f1e1768605391aaa9fe18.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=(2.25*width, height))
+
+  ax[0].plot(m0.T)
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('$\mathcal{F}_0$')
+
+  ax[1].plot(m1.T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+  
+  ax[2].plot(phase.T * 180 / np.pi)
+  ax[2].set_xlabel('Step')
+  ax[2].set_ylabel('$\Phi$ (°)')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/140c0bee0231159c8c6a9270ba32f156a8c731a2.png]]
+
+#+begin_src ipython
+  plt.hist(model.phase.cpu().numpy() * 180 / np.pi, bins='auto')
+  plt.hist(360 - phase[:, model.N_STIM_ON[0] // model.N_WINDOW]* 180 / np.pi, bins='auto')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/6eb383f6aed69dd097be003620504534f0ccda91.png]]
+
+#+begin_src ipython
+  
+
+#+end_src
+
+#+RESULTS:
+
+*** Dual Task
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  model = Network('config_EI.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='dual_rand', LIVE_FF_UPDATE=1, N_BATCH=10)
+  rates = model(RET_FF=1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  Ne = model.Na[0].cpu().numpy()
+  N = model.N_NEURON
+  
+  ff_input = model.ff_input.cpu().numpy()
+  print(ff_input.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 101, 2000)
+
+#+begin_src ipython
+  ksi = model.PHI0.cpu().numpy()
+  theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
+  index_order = theta.argsort()
+  ff_ordered = ff_input[..., index_order]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  m0, m1, phase = decode_bump(ff_ordered)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 101)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=(2.25*width, height))
+
+  ax[0].plot(ff_input[0, :, :5])
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('FF Input')
+
+  ax[1].imshow(ff_input[0].T, cmap='jet', vmin=0, vmax= 400, aspect='auto')
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('Neuron #')
+  ax[1].set_ylim([0, Ne])
+
+  ax[2].imshow(ff_ordered[0].T, cmap='jet', vmin=0, aspect='auto')
+  ax[2].set_xlabel('Step')
+  ax[2].set_ylabel('Pref Loc. (°)')
+  ax[2].set_yticks(np.linspace(0, 2000, 5), np.linspace(0, 360, 5).astype(int))
+  
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/94d807eb213f2f129cae73ee005ba5f9c27600e9.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=(2.25*width, height))
+
+  ax[0].plot(m0.T)
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('$\mathcal{F}_0$')
+
+  ax[1].plot(m1.T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+  
+  ax[2].plot(phase.T * 180 / np.pi)
+  ax[2].set_xlabel('Step')
+  ax[2].set_ylabel('$\Phi$ (°)')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/ba2550fdd16c634d3b28f46c01e5ebae141ef1d1.png]]
+
+#+begin_src ipython
+  plt.hist(model.phase.cpu().numpy() * 180 / np.pi, bins='auto')
+  plt.hist(phase[:, model.N_STIM_ON[0] // model.N_WINDOW] * 180 / np.pi, bins='auto')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/092a6401b9a721d207b793845be198f647e2b47a.png]]
+
+#+begin_src ipython
+
+#+end_src
+#+RESULTS:

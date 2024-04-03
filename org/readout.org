@@ -105,7 +105,6 @@
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
   conf_name = "config_EI.yml"
-  name = "low_rank_ini"
 #+end_src
 
 #+RESULTS:
@@ -120,7 +119,7 @@
 #+end_src
 
 #+RESULTS:
-: 5712
+: 1290
 
 #+begin_src ipython
   n_ini  = 1000
@@ -143,7 +142,7 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 16s
+: Elapsed (with compilation) = 0h 0m 41s
 : rates (2000, 2000)
 
 *** Readout
@@ -187,7 +186,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/51f7f304a3baa82f5baa474a3abc647bc69806af.png]]
+[[file:./.ob-jupyter/fbbd60e46506fed843424d2dd224f7a1712b39df.png]]
 
 #+begin_src ipython
   idx = phi0.argsort()
@@ -198,7 +197,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c129cd97c012ff17722be78876f221e498c5084d.png]]
+[[file:./.ob-jupyter/6e02b61a6a1e7bdc9e406dbe6b86cb6c856f859d.png]]
 
 #+begin_src ipython
   plt.hist(error, bins='auto')
@@ -206,7 +205,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/b633b548f09e7f47af105e754a8e5430618a9a8c.png]]
+[[file:./.ob-jupyter/5103e2c013c8ab675932d7bf55092b0c14e506fc.png]]
 
 #+begin_src ipython
 
@@ -236,8 +235,8 @@
 
 #+RESULTS:
 : (2000, 2)
-: Cluster Centers: [[-0.08295584 -0.07543262]
-:  [-0.09370489 -0.02575745]]
+: Cluster Centers: [[-0.68058825 -1.21677904]
+:  [-0.12973449  1.35807845]]
 
 #+begin_src ipython
   radius = np.sqrt(x_c1**2 + y_c1**2)
@@ -272,9 +271,9 @@
 #+end_src
 
 #+RESULTS:
-: -0.08833036382202929
-: dist [0.21391049375844579, 0.010489303912367437]
-: mean phi 28.82517459466331
+: -0.4051613708137107
+: dist [0.9832617267511777, 1.8052683554650344]
+: mean phi 348.1184687562623
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 1, figsize=[height, height])
@@ -306,7 +305,7 @@
   #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/81393e7b0a0a5ef9c4fcebe117482abdf2dc5b61.png]]
+[[file:./.ob-jupyter/af750df3a66d1de6c15bc22dc7b2a1de77d061da.png]]
 
 #+begin_src ipython
 
@@ -335,7 +334,7 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 2s
+: Elapsed (with compilation) = 0h 0m 6s
 : (200, 101, 2000)
 
 #+begin_src ipython
@@ -375,7 +374,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/1ddf4682c49dedf7f61accbfec27a9f23c969d39.png]]
+[[file:./.ob-jupyter/6805ceb364d2e7b3363740b5b42045005c94cb45.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -402,7 +401,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/71d9aa79c0c4fe647ee086ccc0fecb3c4fc85945.png]]
+[[file:./.ob-jupyter/5c0e1a52bc3fc05d986ce7aa74e00f9349b6c8b9.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -447,7 +446,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/32361a8150f380d8d82b673c2e38df59873c3028.png]]
+[[file:./.ob-jupyter/9087d4ceb7fe60a57f57856f27f2b883de051463.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -488,7 +487,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7252663b5a9bce4d0d30659780d5255414e41bed.png]]
+[[file:./.ob-jupyter/632f3627ab9e59e78b3ebf41e8048b666c105b00.png]]
 
 #+begin_src ipython
   readoutA = overlap[:n_ini, -5:, 0]
@@ -509,14 +508,14 @@
 #+end_src
 
 #+RESULTS:
-: performance 49.8
+: performance 100.0
 
 #+begin_src ipython
   print(mean_phi-90)
 #+end_src
 
 #+RESULTS:
-: -61.17482540533669
+: 258.1184687562623
 
 #+begin_src ipython
   perf = get_correct_perf(rates_ordered, mean_phi, n_ini)
@@ -538,9 +537,9 @@
   model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                   N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
                   TASK='dual_odr', LIVE_FF_UPDATE=1, DURATION=10,
-                  I0=[.2, .2])
+                  I0=[.2, 2])
   
-  model.PHI1 = torch.tensor([0, 180-mean_phi], device='cuda:1')
+  model.PHI1 = torch.tensor([0, 180-45], device='cuda:1')
 #+end_src
 
 #+RESULTS:
@@ -592,7 +591,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/1ab4f68e3c0817ce335b3d6b457b9e09d4d31261.png]]
+[[file:./.ob-jupyter/1e7598dae525fe7b64e3e454a81f7a930c1411cf.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
@@ -621,7 +620,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/d5393cd02766dbcebad73817038b0469b5e39b3f.png]]
+[[file:./.ob-jupyter/e62036cc885dfcd2097e61978acfee13df81e985.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -667,7 +666,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ffba6a142247e2fae1c525988163dcc329bf642f.png]]
+[[file:./.ob-jupyter/4d8c2201d922cb01ec98ea0bb8d973b1b43f767f.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(figsize=(height, height))
@@ -705,7 +704,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c799fe452f2052d7495c5f27a37b5f9d7a012fc9.png]]
+[[file:./.ob-jupyter/4f728082b53c3af1f8c9a6a85d24b14fbcd2a8c8.png]]
 
 #+begin_src ipython
   readoutA = overlap[:n_ini, -5:, 0]
@@ -726,14 +725,14 @@
 #+end_src
 
 #+RESULTS:
-: performance 100.0
+: performance 50.0
 
 #+begin_src ipython
   print(mean_phi + 90)
 #+end_src
 
 #+RESULTS:
-: 194.47032920354627
+: 438.1184687562623
 
 #+begin_src ipython
   perf = get_correct_perf(rates_ordered, (180-mean_phi), n_ini)
@@ -741,7 +740,7 @@
 #+end_src
 
 #+RESULTS:
-: corrected performance 81.0
+: corrected performance 50.0
 
 #+begin_src ipython
   perf = get_correct_perf(rates_ordered, (180-mean_phi), n_ini)
@@ -749,7 +748,7 @@
 #+end_src
 
 #+RESULTS:
-: corrected performance 81.0
+: corrected performance 50.0
 
 #+begin_src ipython
 
