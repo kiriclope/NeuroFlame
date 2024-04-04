@@ -102,13 +102,9 @@
 *** Model
 
 #+begin_src ipython
-
   start = perf_counter()
-
-  model = Network(conf_name, REPO_ROOT, VERBOSE=1, DEVICE='cuda', LIVE_FF_UPDATE=1, TASK='dual_rand', seed=0)
-  
-  rates = model(RET_FF=1).cpu().numpy()
-
+  model = Network(conf_name, REPO_ROOT, VERBOSE=1, DEVICE='cuda', LIVE_FF_UPDATE=1, TASK='dual_rand', seed=0)  
+  rates = model(RET_FF=1).cpu().numpy()  
   end = perf_counter()
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
@@ -120,111 +116,111 @@
 
 #+RESULTS:
 #+begin_example
-  Na tensor([2000,  500], device='cuda:0', dtype=torch.int32) Ka tensor([125., 125.], device='cuda:0') csumNa tensor([   0, 2000, 2500], device='cuda:0')
+  Na tensor([2000,  500], device='cuda:0', dtype=torch.int32) Ka tensor([250., 250.], device='cuda:0') csumNa tensor([   0, 2000, 2500], device='cuda:0')
   Jab [1.0, -1.5, 1, -1]
-  Ja0 [2.0, 1.0]
+  Ja0 [1.3, 1.0]
   Generating ff input
-  times (s) 0.0 rates (Hz) [0.0, 0.84]
-  times (s) 0.09 rates (Hz) [0.0, 0.84]
-  times (s) 0.18 rates (Hz) [0.0, 0.84]
-  times (s) 0.27 rates (Hz) [0.0, 0.84]
-  times (s) 0.36 rates (Hz) [0.0, 0.84]
-  times (s) 0.45 rates (Hz) [0.0, 0.84]
-  times (s) 0.54 rates (Hz) [0.0, 0.84]
-  times (s) 0.63 rates (Hz) [0.0, 0.84]
-  times (s) 0.72 rates (Hz) [0.0, 0.84]
-  times (s) 0.81 rates (Hz) [0.0, 0.84]
-  times (s) 0.9 rates (Hz) [0.54, 0.84]
-  times (s) 0.99 rates (Hz) [1.61, 3.09]
-  times (s) 1.08 rates (Hz) [2.04, 3.82]
-  times (s) 1.17 rates (Hz) [2.46, 4.52]
-  times (s) 1.26 rates (Hz) [2.6, 4.92]
-  times (s) 1.35 rates (Hz) [2.68, 5.13]
-  times (s) 1.44 rates (Hz) [2.77, 5.31]
-  times (s) 1.53 rates (Hz) [2.8, 5.39]
-  times (s) 1.62 rates (Hz) [2.78, 5.4]
-  times (s) 1.71 rates (Hz) [2.73, 5.35]
-  times (s) 1.8 rates (Hz) [2.64, 5.29]
-  times (s) 1.89 rates (Hz) [1.95, 4.35]
-  times (s) 1.98 rates (Hz) [1.76, 3.93]
-  times (s) 2.07 rates (Hz) [1.67, 3.7]
-  times (s) 2.16 rates (Hz) [1.65, 3.6]
-  times (s) 2.25 rates (Hz) [1.64, 3.55]
-  times (s) 2.34 rates (Hz) [1.68, 3.6]
-  times (s) 2.43 rates (Hz) [1.76, 3.69]
-  times (s) 2.52 rates (Hz) [1.86, 3.82]
-  times (s) 2.61 rates (Hz) [2.02, 4.04]
-  times (s) 2.7 rates (Hz) [2.22, 4.34]
-  times (s) 2.79 rates (Hz) [2.43, 4.68]
-  times (s) 2.88 rates (Hz) [2.62, 4.99]
-  times (s) 2.97 rates (Hz) [2.79, 5.29]
-  times (s) 3.06 rates (Hz) [2.93, 5.55]
-  times (s) 3.15 rates (Hz) [3.01, 5.72]
-  times (s) 3.24 rates (Hz) [3.03, 5.79]
-  times (s) 3.33 rates (Hz) [2.99, 5.77]
-  times (s) 3.42 rates (Hz) [2.91, 5.68]
-  times (s) 3.51 rates (Hz) [2.82, 5.56]
-  times (s) 3.6 rates (Hz) [2.73, 5.41]
-  times (s) 3.69 rates (Hz) [2.62, 5.23]
-  times (s) 3.78 rates (Hz) [2.54, 5.07]
-  times (s) 3.87 rates (Hz) [2.5, 4.96]
-  times (s) 3.96 rates (Hz) [2.47, 4.89]
-  times (s) 4.05 rates (Hz) [2.45, 4.86]
-  times (s) 4.14 rates (Hz) [2.48, 4.88]
-  times (s) 4.23 rates (Hz) [2.52, 4.94]
-  times (s) 4.32 rates (Hz) [2.55, 5.0]
-  times (s) 4.41 rates (Hz) [2.54, 5.01]
-  times (s) 4.5 rates (Hz) [2.5, 4.97]
-  times (s) 4.59 rates (Hz) [2.46, 4.9]
-  times (s) 4.68 rates (Hz) [2.41, 4.83]
-  times (s) 4.77 rates (Hz) [2.35, 4.75]
-  times (s) 4.86 rates (Hz) [2.31, 4.67]
-  times (s) 4.95 rates (Hz) [2.28, 4.62]
-  times (s) 5.05 rates (Hz) [2.26, 4.59]
-  times (s) 5.14 rates (Hz) [2.24, 4.55]
-  times (s) 5.23 rates (Hz) [2.21, 4.5]
-  times (s) 5.32 rates (Hz) [2.2, 4.47]
-  times (s) 5.41 rates (Hz) [2.2, 4.46]
-  times (s) 5.5 rates (Hz) [2.22, 4.49]
-  times (s) 5.59 rates (Hz) [2.25, 4.53]
-  times (s) 5.68 rates (Hz) [2.28, 4.57]
-  times (s) 5.77 rates (Hz) [2.29, 4.61]
-  times (s) 5.86 rates (Hz) [2.29, 4.62]
-  times (s) 5.95 rates (Hz) [2.31, 4.63]
-  times (s) 6.04 rates (Hz) [2.34, 4.68]
-  times (s) 6.13 rates (Hz) [2.39, 4.75]
-  times (s) 6.22 rates (Hz) [2.44, 4.83]
-  times (s) 6.31 rates (Hz) [2.48, 4.9]
-  times (s) 6.4 rates (Hz) [2.51, 4.95]
-  times (s) 6.49 rates (Hz) [2.52, 4.98]
-  times (s) 6.58 rates (Hz) [2.53, 4.99]
-  times (s) 6.67 rates (Hz) [2.53, 4.99]
-  times (s) 6.76 rates (Hz) [2.53, 4.98]
-  times (s) 6.85 rates (Hz) [2.53, 4.97]
-  times (s) 6.94 rates (Hz) [2.53, 4.96]
-  times (s) 7.03 rates (Hz) [2.53, 4.96]
-  times (s) 7.12 rates (Hz) [2.53, 4.96]
-  times (s) 7.21 rates (Hz) [2.54, 4.97]
-  times (s) 7.3 rates (Hz) [2.52, 4.96]
-  times (s) 7.39 rates (Hz) [2.48, 4.91]
-  times (s) 7.48 rates (Hz) [2.45, 4.86]
-  times (s) 7.57 rates (Hz) [2.45, 4.83]
-  times (s) 7.66 rates (Hz) [2.47, 4.83]
-  times (s) 7.75 rates (Hz) [2.51, 4.88]
-  times (s) 7.84 rates (Hz) [2.54, 4.93]
-  times (s) 7.93 rates (Hz) [2.56, 4.97]
-  times (s) 8.02 rates (Hz) [2.55, 4.98]
-  times (s) 8.11 rates (Hz) [2.54, 4.98]
-  times (s) 8.2 rates (Hz) [2.53, 4.97]
-  times (s) 8.29 rates (Hz) [2.53, 4.97]
-  times (s) 8.38 rates (Hz) [2.53, 4.98]
-  times (s) 8.47 rates (Hz) [2.52, 4.97]
-  times (s) 8.56 rates (Hz) [2.51, 4.96]
-  times (s) 8.65 rates (Hz) [2.5, 4.93]
-  times (s) 8.74 rates (Hz) [2.48, 4.9]
-  times (s) 8.83 rates (Hz) [2.47, 4.86]
-  times (s) 8.92 rates (Hz) [2.47, 4.85]
-  times (s) 9.01 rates (Hz) [2.47, 4.84]
+  times (s) 0.0 rates (Hz) [0.03, 1.27]
+  times (s) 0.07 rates (Hz) [0.07, 2.05]
+  times (s) 0.13 rates (Hz) [0.04, 1.23]
+  times (s) 0.2 rates (Hz) [0.05, 1.81]
+  times (s) 0.26 rates (Hz) [0.07, 1.34]
+  times (s) 0.33 rates (Hz) [0.05, 1.58]
+  times (s) 0.4 rates (Hz) [0.06, 1.76]
+  times (s) 0.46 rates (Hz) [0.08, 2.19]
+  times (s) 0.53 rates (Hz) [0.05, 1.32]
+  times (s) 0.6 rates (Hz) [0.05, 1.91]
+  times (s) 0.66 rates (Hz) [0.46, 1.36]
+  times (s) 0.73 rates (Hz) [0.75, 2.3]
+  times (s) 0.79 rates (Hz) [0.72, 2.37]
+  times (s) 0.86 rates (Hz) [0.75, 2.49]
+  times (s) 0.93 rates (Hz) [0.87, 2.74]
+  times (s) 0.99 rates (Hz) [1.23, 3.39]
+  times (s) 1.06 rates (Hz) [1.93, 4.52]
+  times (s) 1.13 rates (Hz) [2.43, 5.57]
+  times (s) 1.19 rates (Hz) [2.3, 5.86]
+  times (s) 1.26 rates (Hz) [2.19, 5.93]
+  times (s) 1.32 rates (Hz) [2.03, 6.12]
+  times (s) 1.39 rates (Hz) [0.67, 4.05]
+  times (s) 1.46 rates (Hz) [1.17, 4.32]
+  times (s) 1.52 rates (Hz) [1.42, 4.67]
+  times (s) 1.59 rates (Hz) [1.18, 4.35]
+  times (s) 1.66 rates (Hz) [1.19, 4.29]
+  times (s) 1.72 rates (Hz) [1.25, 4.33]
+  times (s) 1.79 rates (Hz) [1.22, 4.28]
+  times (s) 1.85 rates (Hz) [1.2, 4.23]
+  times (s) 1.92 rates (Hz) [1.2, 4.2]
+  times (s) 1.99 rates (Hz) [1.19, 4.19]
+  times (s) 2.05 rates (Hz) [1.15, 4.13]
+  times (s) 2.12 rates (Hz) [1.11, 4.06]
+  times (s) 2.19 rates (Hz) [1.1, 4.01]
+  times (s) 2.25 rates (Hz) [1.13, 4.04]
+  times (s) 2.32 rates (Hz) [1.19, 4.11]
+  times (s) 2.38 rates (Hz) [1.27, 4.22]
+  times (s) 2.45 rates (Hz) [1.29, 4.27]
+  times (s) 2.52 rates (Hz) [1.23, 4.21]
+  times (s) 2.58 rates (Hz) [1.19, 4.16]
+  times (s) 2.65 rates (Hz) [1.22, 4.19]
+  times (s) 2.72 rates (Hz) [1.26, 4.24]
+  times (s) 2.78 rates (Hz) [1.25, 4.26]
+  times (s) 2.85 rates (Hz) [1.23, 4.25]
+  times (s) 2.91 rates (Hz) [1.26, 4.29]
+  times (s) 2.98 rates (Hz) [1.31, 4.37]
+  times (s) 3.05 rates (Hz) [1.34, 4.41]
+  times (s) 3.11 rates (Hz) [1.37, 4.46]
+  times (s) 3.18 rates (Hz) [1.38, 4.5]
+  times (s) 3.25 rates (Hz) [1.36, 4.48]
+  times (s) 3.31 rates (Hz) [1.32, 4.45]
+  times (s) 3.38 rates (Hz) [1.29, 4.4]
+  times (s) 3.44 rates (Hz) [1.29, 4.38]
+  times (s) 3.51 rates (Hz) [1.3, 4.37]
+  times (s) 3.58 rates (Hz) [1.32, 4.39]
+  times (s) 3.64 rates (Hz) [1.26, 4.34]
+  times (s) 3.71 rates (Hz) [1.2, 4.27]
+  times (s) 3.77 rates (Hz) [1.21, 4.27]
+  times (s) 3.84 rates (Hz) [1.2, 4.27]
+  times (s) 3.91 rates (Hz) [1.1, 4.14]
+  times (s) 3.97 rates (Hz) [1.04, 4.01]
+  times (s) 4.04 rates (Hz) [1.1, 4.03]
+  times (s) 4.11 rates (Hz) [1.15, 4.05]
+  times (s) 4.17 rates (Hz) [1.19, 4.08]
+  times (s) 4.24 rates (Hz) [1.27, 4.17]
+  times (s) 4.3 rates (Hz) [1.32, 4.27]
+  times (s) 4.37 rates (Hz) [1.35, 4.36]
+  times (s) 4.44 rates (Hz) [1.36, 4.42]
+  times (s) 4.5 rates (Hz) [1.41, 4.52]
+  times (s) 4.57 rates (Hz) [1.45, 4.59]
+  times (s) 4.64 rates (Hz) [1.49, 4.68]
+  times (s) 4.7 rates (Hz) [1.48, 4.7]
+  times (s) 4.77 rates (Hz) [1.46, 4.68]
+  times (s) 4.83 rates (Hz) [1.47, 4.69]
+  times (s) 4.9 rates (Hz) [1.45, 4.68]
+  times (s) 4.97 rates (Hz) [1.37, 4.59]
+  times (s) 5.03 rates (Hz) [1.36, 4.55]
+  times (s) 5.1 rates (Hz) [1.42, 4.62]
+  times (s) 5.17 rates (Hz) [1.44, 4.66]
+  times (s) 5.23 rates (Hz) [1.4, 4.64]
+  times (s) 5.3 rates (Hz) [1.35, 4.58]
+  times (s) 5.36 rates (Hz) [1.34, 4.56]
+  times (s) 5.43 rates (Hz) [1.35, 4.57]
+  times (s) 5.5 rates (Hz) [1.37, 4.59]
+  times (s) 5.56 rates (Hz) [1.37, 4.59]
+  times (s) 5.63 rates (Hz) [1.38, 4.6]
+  times (s) 5.7 rates (Hz) [1.4, 4.63]
+  times (s) 5.76 rates (Hz) [1.41, 4.64]
+  times (s) 5.83 rates (Hz) [1.4, 4.64]
+  times (s) 5.89 rates (Hz) [1.41, 4.64]
+  times (s) 5.96 rates (Hz) [1.4, 4.63]
+  times (s) 6.03 rates (Hz) [1.42, 4.64]
+  times (s) 6.09 rates (Hz) [1.55, 4.78]
+  times (s) 6.16 rates (Hz) [1.63, 4.92]
+  times (s) 6.23 rates (Hz) [1.65, 4.99]
+  times (s) 6.29 rates (Hz) [1.63, 5.0]
+  times (s) 6.36 rates (Hz) [1.62, 5.01]
+  times (s) 6.42 rates (Hz) [1.63, 5.04]
+  times (s) 6.49 rates (Hz) [1.64, 5.07]
+  times (s) 6.56 rates (Hz) [1.63, 5.06]
+  times (s) 6.62 rates (Hz) [1.62, 5.03]
   Elapsed (with compilation) = 0h 0m 2s
   rates (1, 101, 2000)
 #+end_example
@@ -254,8 +250,8 @@
 #+end_src
 
 #+RESULTS:
-: 597.56544
-: 597.56544
+: 504.63744
+: 504.63744
 
 *** Dynamics
 
@@ -273,14 +269,14 @@
   ax[1].imshow(ff_input[0].T, cmap='jet', vmin=0, aspect='auto')
   ax[1].set_xlabel('Step')
   ax[1].set_ylabel('Neuron #')
-  ax[1].set_ylim([0, N])
+  ax[1].set_ylim([0, Ne])
   plt.show()
 #+end_src
 
 #+RESULTS:
 :RESULTS:
 : (1, 101, 2000)
-[[file:./.ob-jupyter/7dabc87a91244b0f2579abe0b8c8d6d7b634017c.png]]
+[[file:./.ob-jupyter/846369fe05516f54e1f251110e90b68dcb083020.png]]
 :END:
 
 #+begin_src ipython
@@ -302,12 +298,12 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/a0119db873b66f847c1bc0eb1286822789886aa4.png]]
+[[file:./.ob-jupyter/c178d80d4b1f26b7856a6fb8543f17733732ccc3.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 
-  ax[0].plot((m1.T))
+  ax[0].plot((m1.T/m0.T))
   ax[0].set_xlabel('Step')
   ax[0].set_ylabel('$\mathcal{F}_1$')
 
@@ -319,7 +315,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/03a6bafef528b00e80eda5e991975d079aed7051.png]]
+[[file:./.ob-jupyter/46ba83d3ffba49e1f39f83ac0cd9bac732c2664a.png]]
 
 #+begin_src ipython
 
@@ -336,7 +332,7 @@
 #+end_src
 
 #+RESULTS:
-: 56
+: 31
 
 *** Simulation
 
@@ -359,7 +355,7 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 2s
+: Elapsed (with compilation) = 0h 0m 4s
 : rates (100, 101, 2000)
 
 #+begin_src ipython
@@ -368,7 +364,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/55df2bcd3147f31ab841903df65c9b6c430fd143.png]]
+[[file:./.ob-jupyter/a23fdd97997a51b90ba42cc11eb636faafae58f3.png]]
 
 *** Results
 
@@ -380,9 +376,9 @@
   print(ff_input.shape)
 
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
-  
+
   ax[0].plot(ff_input[0, :, :5])
-  ax[0].plot(ff_input[1, :, :5], 'o')
+  ax[0].plot(ff_input[1, :, :5])
   ax[0].set_xlabel('Step')
   ax[0].set_ylabel('FF Input')
 
@@ -396,7 +392,7 @@
 #+RESULTS:
 :RESULTS:
 : (100, 101, 2000)
-[[file:./.ob-jupyter/f0133daae5017d56b8e8dfb179a5051df7d46e7a.png]]
+[[file:./.ob-jupyter/afc9b1ec7c9d389abfd4260ad80059c47b9a9abc.png]]
 :END:
 
 #+begin_src ipython
@@ -410,7 +406,7 @@
 #+RESULTS:
 :RESULTS:
 : (100, 101)
-[[file:./.ob-jupyter/1aa2e4fa159b5c2c941401d1a96b926e72a31ca5.png]]
+[[file:./.ob-jupyter/ec059fdacc7f3c7152163300e6bd88fd503ce8fe.png]]
 :END:
 
 #+begin_src ipython
@@ -450,7 +446,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/12f4390b34f79fbab68dc132d6d4c85e2491c8ee.png]]
+[[file:./.ob-jupyter/8dc0c0cb320b68f0c81b93eca96d2aad5dadd7a7.png]]
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
@@ -485,7 +481,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/044d6c060796aed8ced94d5870acf0c9a0d25403.png]]
+[[file:./.ob-jupyter/b363b34a295bed22ea6701db44a6488e93376f38.png]]
 
 #+begin_src ipython
   print(rates_ordered.shape)
@@ -501,7 +497,7 @@
 #+RESULTS:
 :RESULTS:
 : (100, 101, 2000)
-[[file:./.ob-jupyter/3f1c74288fd21290a2dc9e545d2cd021b4c28a90.png]]
+[[file:./.ob-jupyter/8381ed2588ff1814158643dcc64d58856bed3503.png]]
 :END:
 
 #+begin_src ipython
@@ -519,7 +515,7 @@
 #+RESULTS:
 :RESULTS:
 : (100, 101)
-[[file:./.ob-jupyter/40d56d490daac5e2b6bfdb5be805391a73752f8c.png]]
+[[file:./.ob-jupyter/d65ce0a8a00b8d155a46d6d9de5445acbe188dee.png]]
 :END:
 
 #+begin_src ipython

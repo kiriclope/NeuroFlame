@@ -231,7 +231,7 @@
   centers_list = []
   phi0_list = []
   
-  for i in range(10):
+  for i in range(100):
       seed = np.random.randint(10000)
 
       n_ini  = 50
@@ -255,7 +255,7 @@
       n_ini  = 32
       model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                       N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
-                      TASK='dual', LIVE_FF_UPDATE=1, DURATION=10, I0=[0.2, 0.2])
+                      TASK='dual', LIVE_FF_UPDATE=1, DURATION=10, I0=[0.5, 0.5])
 
       # model.TASK = 'dual'
       # model.DURATION = 10
@@ -270,7 +270,7 @@
 
       model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
                       N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
-                      TASK='dual_odr', LIVE_FF_UPDATE=1, DURATION=10, I0=[0.2, 0.2])
+                      TASK='dual_odr', LIVE_FF_UPDATE=1, DURATION=10, I0=[0.5, 0.5])
 
       rates_cr = model()
       rates_cr_list.append(rates_cr[..., idx])
@@ -287,7 +287,7 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 10s
+: Elapsed (with compilation) = 0h 26m 24s
 
 #+begin_src ipython
   rates_list = torch.stack(rates_list).cpu().numpy()
@@ -320,7 +320,7 @@
 
       x_c1, y_c1 = centers_list[i, 0]
       x_c2, y_c2 = centers_list[i, 1]
-
+      
       ax.plot(x_c1, y_c1, 'x', alpha=1, ms=20, color=color, lw=10)
       ax.plot(x_c2, y_c2, 'x', alpha=1, ms=20, color=color, lw=10)
 
@@ -362,7 +362,7 @@
   #+end_src
 
   #+RESULTS:
-  [[file:./.ob-jupyter/4630fdc256d287a2a90774f7c1e0f585bf1a6c60.png]]
+  [[file:./.ob-jupyter/d2a1975ef060d7e73bbbaeff58d6f870589478f0.png]]
 
 #+begin_src ipython
   def plot_trajectory(rates, i, ax):
@@ -425,7 +425,7 @@
 #+RESULTS:
 
 #+begin_src ipython
-  i = 4
+  i = 9
   fig, ax = plt.subplots(1, 3, figsize=(3*height, height))
 
   plot_ring(i, ax[0], 'b')
@@ -441,7 +441,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/026058e962992fa2fdb332cf98b2e1603fde45ec.png]]
+[[file:./.ob-jupyter/7ce4bd207ed36f616cbaf925c5a3f18ba808c890.png]]
 
 #+begin_src ipython 
   rates = rates_cr_list[i]
@@ -463,7 +463,7 @@
 
   # Midpoint M of A and B
   print(phi0)
-  # radius = np.sqrt(x_c1**2 + y_c1**2)
+  radius = np.sqrt(x_c1**2 + y_c1**2)
   xPhi =  np.cos(np.pi / 2 + phi0 * np.pi / 180)
   yPhi =  np.sin(np.pi / 2 + phi0 * np.pi / 180)
 
@@ -488,66 +488,66 @@
 #+RESULTS:
 : (64, 101, 2000)
 : (2, 64)
-: 23.873939281444503
+: 300.6935835499952
 : (2,)
-: A perf [ 0 32]
-: B perf [ 0 32]
-: performance 100.0
+: A perf [18 14]
+: B perf [32  0]
+: performance 78.125
 
 *** performance
 
 #+begin_src ipython
-  print('dist', distance_list)
-  print('perf_list',perf_list*100)
-  print('perf_cr_list', perf_cr_list)
+  # print('dist', distance_list)
+  # print('perf_list',perf_list*100)
+  # print('perf_cr_list', perf_cr_list)
 #+end_src
 
 #+RESULTS:
-: dist [1.8399285 2.218542  0.3519693 0.7020852 2.0858371 1.2318438 1.3763872
-:  2.2978969 0.5388459 0.6880943]
-: perf_list [ 26.875002 100.        50.        55.624996  50.        50.
-:   56.25      68.4375    50.        35.      ]
-: perf_cr_list [ 50.     100.      51.5625  81.25   100.     100.      50.     100.
-:   76.5625  93.75  ]
 
 #+begin_src ipython
-  plt.hist(distance_list/2)
+  fig, ax = plt.subplots(1, 2, figsize=[2 * width, height])
+
+  ax[0].hist(distance_list / 2 / radius, density=True)
+  ax[0].set_xlabel('Distance')
+  ax[0].set_ylabel('Density')
+
+  ax[1].hist(phi0_list, density='True')
+  ax[1].set_xlabel('Location (°)')
+  ax[1].set_ylabel('Density')
+
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ef91bf7ef64e222dcec4025aa6684c41c8a5fc86.png]]
+[[file:./.ob-jupyter/ffcc2e3a7f5b071e8328a18aceef65c9e9c098ce.png]]
+
 
 #+begin_src ipython
+  window = 20
+
+  fig, ax = plt.subplots(1, 2, figsize=[2 * width, height])
+
   idx = distance_list.argsort()
-  window = 10
 
-  plt.plot(distance_list[idx]/2, circcvl(perf_list[idx]*100, window), '-ob')
-  plt.plot(distance_list[idx]/2, circcvl(perf_cr_list[idx], window), '-or')
+  ax[0].plot(distance_list[idx] / 2 / radius, circcvl(perf_list[idx]*100, window), '-ob')
+  ax[0].plot(distance_list[idx] / 2 / radius, circcvl(perf_cr_list[idx], window), '-or')
+  ax[0].set_xlabel('Distance')
+  ax[0].set_ylabel('Performance')
 
-  plt.xlabel('Distance')
-  plt.ylabel('Performance')
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/afeab889ffa4c51efc049c90b11f3f7ea1c243db.png]]
-
-#+begin_src ipython
   idx = phi0_list.argsort()
-  window = 10
 
-  plt.plot(phi0_list[idx], circcvl(perf_list[idx]*100, window), '-ob')
-  plt.plot(phi0_list[idx], circcvl(perf_cr_list[idx], window), '-or')
-
-  plt.xticks(np.linspace(0, 360, 5))
-  plt.xlabel('Readout Location (°)')
-  plt.ylabel('Performance')
+  ax[1].plot(phi0_list[idx], circcvl(perf_list[idx]*100, window), '-ob', label='uncorrected')
+  ax[1].plot(phi0_list[idx], circcvl(perf_cr_list[idx], window), '-or', label='corrected')
+  ax[1].set_xticks(np.linspace(0, 360, 5))
+  ax[1].set_xlabel('Readout Location (°)')
+  ax[1].set_ylabel('Performance')
+  ax[1].legend(frameon=0, fontsize=14, loc='best')
+  
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/3c1b09a3f9e2005396f065f6820e1e671035b315.png]]
+[[file:./.ob-jupyter/5751a6d01b386681a4bc4bca62915abd03364ac9.png]]
 
 #+begin_src ipython
 

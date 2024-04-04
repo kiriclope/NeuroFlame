@@ -42,7 +42,7 @@ def live_ff_input(model, step, ff_input):
             theta = None
             if 'dual' in model.TASK:
                 theta = get_theta(model.PHI0[0], model.PHI0[2]).unsqueeze(0)
-
+            
             if 'rand' in model.TASK:
                 Stimulus.task = 'odr'
                 stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.phase, theta=theta)

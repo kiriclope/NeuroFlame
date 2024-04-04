@@ -1,0 +1,471 @@
+#+STARTUP: fold
+#+TITLE:  Dual Task Ring Attractor
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session balring :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Imports
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../../')
+
+  import torch
+  import gc
+  import pandas as pd
+  from time import perf_counter
+
+  from src.network import Network
+  from src.decode import decode_bump
+  from src.utils import clear_cache
+#+end_src
+
+#+RESULTS:
+
+* Helpers
+
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython :tangle ../src/lr_utils.py
+  import numpy as np
+  def get_theta(a, b, GM=0, IF_NORM=0):
+
+      u, v = a, b
+
+      if GM:
+          v = b - np.dot(b, a) / np.dot(a, a) * a
+
+      if IF_NORM:
+          u = a / np.linalg.norm(a)
+          v = b / np.linalg.norm(b)
+
+      return np.arctan2(v, u)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython :tangle ../src/lr_utils.py
+  def get_idx(model):
+      ksi = model.PHI0.cpu().detach().numpy()
+      print(ksi.shape)
+
+      theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
+      return theta.argsort()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython :tangle ../src/lr_utils.py
+  def get_overlap(model, rates):
+      ksi = model.PHI0.cpu().detach().numpy()
+      return rates @ ksi.T / rates.shape[-1]
+
+#+end_src
+
+#+RESULTS:
+
+* Parameters
+
+#+begin_src ipython
+  REPO_ROOT = '/home/leon/models/NeuroTorch/'
+  conf_name = 'config_EI.yml'
+#+end_src
+
+#+RESULTS:
+
+* Exploring Parameter Space
+
+To find parameters for which we have a multistable ring attractor, we use torch *batching* capabilities to run parallel simulations across the parameter space. The idea is that we will create "batches" of parameters and pass them to the model.
+
+** Batching a single parameter
+
+#+begin_src ipython
+  model = Network(conf_name, REPO_ROOT, IF_STP=1, DT=0.001, VERBOSE=0, LIVE_FF_UPDATE=1, I0=[1, 0])
+#+end_src
+
+#+RESULTS:
+
+With torch we can easily pass lists of parameters or batches to the model.
+Here, let's batch the recurrent strenght $J_{EE}$.
+
+#+begin_src ipython  
+  N_BATCH = 20
+  # Here we pass a list of parameters to J_STP which is JEE for the model with stp
+  model.J_STP = torch.linspace(0, 10, N_BATCH, dtype=torch.float32, device='cuda')
+
+  # For consistency we need to add a dummy extra dimension
+  # This is so that the models performs dot products correctly
+  # In the model J_STP is multiplied by rates of size (N_BATCH * N_NEURON)
+  # (N_BATCH * 1) * (N_BATCH * N_NEURON) = (N_BATCH * N_NEURON)
+  
+  model.J_STP = model.J_STP.unsqueeze(-1)
+  # we need to scale J_STP correctly 1/sqrt(K)
+  model.J_STP = model.J_STP * model.Jab[0, 0]  
+  print('Jee', model.J_STP.shape)
+
+  # We set the number of batches
+  model.N_BATCH = N_BATCH
+  # and run the model
+
+  start = perf_counter()
+  rates_Jee = model().cpu().detach().numpy()
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+  print('rates', rates_Jee.shape)
+#+end_src
+
+#+RESULTS:
+: Jee torch.Size([20, 1])
+: Elapsed (with compilation) = 0h 0m 10s
+: rates (20, 101, 2000)
+
+#+begin_src ipython
+  idx = get_idx(model)
+  rates_ordered = rates_Jee[..., idx]
+
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 2000)
+: (20, 101)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  
+  ax[0].plot(model.J_STP.cpu(), m0[:, -1], '-o')
+  ax[0].set_xlabel('$J_{EE}$')
+  ax[0].set_ylabel('$<Rates>_i$')
+
+  ax[1].plot(rates_Jee.mean(-1).T)
+  ax[1].set_xlabel('$J_{EE}$')
+  ax[1].set_ylabel('Rates')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/881d329389b2201ad22faaa16b42d8d56a8d9060.png]]
+
+#+begin_src ipython
+  print(model.J_STP.shape, m1.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([20, 1]) (20, 101)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  
+  ax[0].plot(model.J_STP.cpu(), m1[:, -1])
+  ax[0].set_xlabel('$J_{EE}$')
+  ax[0].set_ylabel('$\mathcal{F}_1$')
+
+  ax[1].plot(m1.T)
+  ax[1].set_xlabel('$Step$')
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/3dedb5db205c1486c4adfe1f294263488880c774.png]]
+
+Here, for example, with J_STP=10 we have a ring attractor!
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+** Batching multiple parameters
+*** Simuls
+Sometimes we won't be so lucky and need to search harder over multiple parameters.
+In order to *batch* over multiple parameters, we need to carefully create each parameter batch. 
+Here, let's batch the recurrent strenght $J_{EE}$ and the feedforward strength $J_{E0}$.
+
+#+begin_src ipython
+  model = Network(conf_name, REPO_ROOT, IF_STP=1, VERBOSE=0, LIVE_FF_UPDATE=1, N_BATCH=1, I0=[.2, 0])
+#+end_src
+
+#+RESULTS:
+
+First we create the lists of parameters to sweep
+
+#+begin_src ipython
+  N_JEE = 20
+  N_JE0 = 20
+
+  JEE_list = np.linspace(0, 20, N_JEE).astype(np.float32)
+  print('Jee list', JEE_list)
+
+  JE0_list = np.linspace(1, 3, N_JE0).astype(np.float32)
+  print('Je0 list', JE0_list)
+
+  JEE = torch.from_numpy(JEE_list).to('cuda')
+  JE0 = torch.from_numpy(JE0_list).to('cuda')
+#+end_src
+
+#+RESULTS:
+: Jee list [ 0.         1.0526316  2.1052632  3.1578948  4.2105265  5.263158
+:   6.3157897  7.368421   8.421053   9.473684  10.526316  11.578947
+:  12.631579  13.684211  14.736842  15.789474  16.842106  17.894737
+:  18.947369  20.       ]
+: Je0 list [1.        1.1052631 1.2105263 1.3157895 1.4210526 1.5263158 1.6315789
+:  1.7368422 1.8421053 1.9473684 2.0526316 2.1578948 2.2631578 2.368421
+:  2.4736843 2.5789473 2.6842105 2.7894738 2.8947368 3.       ]
+
+Now we need to expand these lists into tensors with the correct shapes.
+To do so we create a two new tensors J_EE and J_E0 of size (N_JEE, N_JE0)
+where each row of J_{EE} is a repetition of Jee list and each column of Je0 is a copy of Je0 list.
+In that way, all the values of J_{EE} are associated once with a value of Je0.
+
+#+begin_src ipython
+  JEE = JEE.unsqueeze(0).expand(N_JE0, N_JEE)
+  print('JEE first col', JEE[0])
+  
+  JE0 = JE0.unsqueeze(1).expand(N_JE0, N_JEE)
+  print('JE0 first row', JE0[:, 0])
+#+end_src
+
+#+RESULTS:
+: JEE first col tensor([ 0.0000,  1.0526,  2.1053,  3.1579,  4.2105,  5.2632,  6.3158,  7.3684,
+:          8.4211,  9.4737, 10.5263, 11.5789, 12.6316, 13.6842, 14.7368, 15.7895,
+:         16.8421, 17.8947, 18.9474, 20.0000], device='cuda:0')
+: JE0 first row tensor([1.0000, 1.1053, 1.2105, 1.3158, 1.4211, 1.5263, 1.6316, 1.7368, 1.8421,
+:         1.9474, 2.0526, 2.1579, 2.2632, 2.3684, 2.4737, 2.5789, 2.6842, 2.7895,
+:         2.8947, 3.0000], device='cuda:0')
+
+Torch models need a single batch dimension so we concatenate the two dimensions into tensors of size (N_BATCH=N_JEE*N_JE0, 1)
+We need the extra dummy dimension so that in the model dot products are done properly.
+
+#+begin_src ipython
+  JEE = JEE.reshape((-1, 1)) 
+  print('JEE', JEE.shape)
+
+  JE0 = JE0.reshape((-1, 1)) 
+  print('JE0', JE0.shape)
+#+end_src
+#+RESULTS:
+: JEE torch.Size([400, 1])
+: JE0 torch.Size([400, 1])
+
+Now we need to set the number of batches and copy our tensors to the model
+
+#+begin_src ipython
+  N_BATCH = N_JE0 * N_JEE
+  # Here we need to do some work on Ja0 first,
+  # since it has two dimensions for E and I and we need to repeat the I values
+  Ja0 = model.Ja0.repeat((N_BATCH, 1, 1))
+  print('Ja0', Ja0.shape)
+
+  # now we can pass JE0 to Ja0
+  # we need to scale JaE properly
+  Ja0[:,0] = JE0 * model.M0 * torch.sqrt(model.Ka[0])
+  
+  # and pass N_BATCH, Ja0 and Jee to the model
+  model.N_BATCH = N_BATCH
+  # copy Ja0
+  model.Ja0 = Ja0 
+  # in the model with stp, JEE is J_STP
+  model.J_STP = JEE # * model.Jab[0, 0]
+#+end_src
+
+#+RESULTS:
+: Ja0 torch.Size([400, 2, 1])
+
+Let's run the simulations
+
+#+begin_src ipython
+  start = perf_counter()
+  rates = model().cpu().detach().numpy()
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+  print('rates', rates.shape)
+#+end_src
+#+RESULTS:
+: Elapsed (with compilation) = 0h 1m 14s
+: rates (400, 101, 2000)
+
+Let's compute the fourier moments of the population activity and reshape them
+
+#+begin_src ipython
+  idx = get_idx(model)
+  rates_ordered = rates[..., idx]
+  
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 2000)
+: (400, 101)
+
+#+begin_src ipython
+  m0 = m0.reshape(N_JE0, N_JEE, -1)
+  m1 = m1.reshape(N_JE0, N_JEE, -1)  
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].imshow(m0[..., -5:].mean(-1),
+               cmap='jet', origin='lower', vmin=0, vmax=20, aspect='auto',
+               extent=[JEE_list[0], JEE_list[-1], JE0_list[0], JE0_list[-1]])
+
+  ax[0].set_xlabel('$J_{EE}$')
+  ax[0].set_ylabel('$J_{E0}$')
+
+  ax[1].imshow((m1[...,-5:].mean(-1) - m1[..., :model.N_STIM_ON[0]].mean(-1))
+               / m0[...,-5:].mean(-1),
+               cmap='jet', origin='lower', vmin=0, vmax=1, aspect='auto',
+               extent=[JEE_list[0], JEE_list[-1], JE0_list[0], JE0_list[-1]])
+
+  ax[1].set_xlabel('$J_{EE}$')
+  ax[1].set_ylabel('$J_{E0}$')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/417b40213e825fd27e5e67f1057107cc5419852f.png]]
+
+#+begin_src ipython
+  idx = 6
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+  ax[0].plot(m1[idx].T, alpha=.3)
+  ax[0].set_ylabel('$\mathcal{F}_1$')
+  ax[0].set_xlabel('step')
+  ax[0].set_title('Varying $J_{EE}$')
+
+  ax[1].plot(m1[:, idx].T)
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+  ax[1].set_xlabel('step')
+  ax[1].set_title('Varying $J_{E0}$')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/5b33caa5981019baa2c129e466073b01cabde683.png]]
+
+The parameters corresponding to (row 3, col -1) work!
+
+We can get their values from their matrix form
+
+#+begin_src ipython
+  JEE = JEE.reshape((N_JE0, N_JEE))
+  JE0 = JE0.reshape((N_JE0, N_JEE))  
+
+  print('JE0', JE0[3, -1].item())
+  print('JEE', JEE[3, -1].item())
+#+end_src
+#+RESULTS:
+: JE0 1.3157894611358643
+: JEE 20.0
+
+or directly from the original lists
+
+#+begin_src ipython
+  print('JE0', JE0_list[-1])
+  print('JEE', JEE_list[-1])
+#+end_src
+
+#+RESULTS:
+: JE0 3.0
+: JEE 20.0
+
+*** Test
+Let's test them.
+
+#+begin_src ipython
+  idx = [3, 10]
+
+  model = Network(conf_name, REPO_ROOT, TASK='dual_rand',
+                  VERBOSE=0, DEVICE='cuda', seed=0, N_BATCH=1, LIVE_FF_UPDATE=1)
+
+  # model.Ja0[:, 0] = JE0[idx[0], idx[1]] * model.M0 * torch.sqrt(model.Ka[0])
+  # model.J_STP = JEE[idx[0], idx[1]]
+
+  print(JE0[idx[0], idx[1]].item(), JEE[idx[0], idx[1]].item())
+#+end_src
+
+#+RESULTS:
+: 1.3157894611358643 10.526315689086914
+
+#+begin_src ipython
+  rates_test = model().cpu().numpy()
+#+end_src
+#+RESULTS:
+
+#+begin_src ipython
+  idx = get_idx(model)
+  rates_ordered = rates_test[..., idx]
+  
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 2000)
+: (1, 101)
+
+#+begin_src ipython
+  m0, m1, phi = decode_bump(rates_test, axis=-1)
+  print('m0', m0.shape)
+#+end_src
+
+#+RESULTS:
+: m0 (1, 101)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+  r_max = 10
+
+  ax[0].imshow(rates_ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_xlabel('Step')
+  
+  ax[1].plot(m1.T)
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+  ax[1].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/2d4dca564c9409d38356181c666c6d7cf3f67757.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:

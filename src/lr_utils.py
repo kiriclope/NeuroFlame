@@ -21,23 +21,23 @@ from torch import nn
 def initLR(model):
     # Low rank vector
     model.U = nn.Parameter(torch.randn((model.N_NEURON, int(model.RANK)),
-                                        device=model.device, dtype=model.FLOAT))
+                                        device=model.device, dtype=model.FLOAT) * 0.01)
 
     model.V = nn.Parameter(torch.randn((model.N_NEURON, int(model.RANK)),
-                                       device=model.device, dtype=model.FLOAT))
+                                       device=model.device, dtype=model.FLOAT) * 0.01) 
     
     # Mask to train excitatory neurons only
-    model.mask = torch.zeros((model.N_NEURON, model.N_NEURON),
-                            device=model.device, dtype=model.FLOAT)
+    model.lr_mask = torch.zeros((model.N_NEURON, model.N_NEURON),
+                                device=model.device, dtype=model.FLOAT)
 
-    model.mask[model.slices[0], model.slices[0]] = 1.0
+    model.lr_mask[model.slices[0], model.slices[0]] = 1.0
     
     # Linear readout for supervised learning
-    model.linear = nn.Linear(model.Na[0], 1, device=model.device, dtype=model.FLOAT, bias=False)
+    model.linear = nn.Linear(model.Na[0], 1, device=model.device, dtype=model.FLOAT)
     # for param in model.linear.parameters():
     #     param.requires_grad = False
     
-    model.lr_kappa = nn.Parameter(5 * torch.rand(1, dtype=model.FLOAT, device=model.device))
+    # model.lr_kappa = nn.Parameter(5 * torch.rand(1, dtype=model.FLOAT, device=model.device))
     
     # Window where to evaluate loss
     model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)

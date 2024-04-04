@@ -118,6 +118,7 @@ def init_const(model):
     # model.PHI1 = torch.tensor(model.PHI1, dtype=model.FLOAT, device=model.device).unsqueeze(0) * torch.pi / 180.0
     
     if 'dual' in model.TASK:
+    # if 'lr' in model.PROBA_TYPE[0, 0]:
         mean_ = torch.tensor(model.LR_MEAN, dtype=model.FLOAT, device=model.device)
         cov_ = torch.tensor(model.LR_COV, dtype=model.FLOAT, device=model.device)
 
