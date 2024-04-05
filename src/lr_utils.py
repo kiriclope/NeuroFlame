@@ -1,22 +1,23 @@
+import time
 import torch
 from torch import nn
 
-# if self.PROBA_TYPE[0][0] == 'lr_add':
+def ortho_quench_lr(model):
             
-#     eigenvalues, eigenvectors = torch.linalg.eig(self.Wab_T[self.slices[0], self.slices[0]].T)
+    eigenvalues, eigenvectors = torch.linalg.eig(model.Wab_T[model.slices[0], model.slices[0]].T)
             
-#     # Eigenvalues are complex, get the eigenvalue with the largest real part
-#     max_real_index = torch.argmax(eigenvalues.real)
-#     m = eigenvectors[:, max_real_index]
+    # Eigenvalues are complex, get the eigenvalue with the largest real part
+    max_real_index = torch.argmax(eigenvalues.real)
+    m = eigenvectors[:, max_real_index]
 
-#     self.PHI0[0], self.PHI0[2] = get_ortho_pertu(m, 0.0, dtype=self.FLOAT, device=self.device)
-            
-#     Lij = torch.outer(self.PHI0[0], self.PHI0[0])
-#     Lij = Lij + torch.outer(self.PHI0[2], self.PHI0[2])
-
-#     self.lr = self.Jab[0][0] * self.KAPPA[0][0] * Lij / torch.sqrt(self.Ka[0])
-#     self.Wab_T[self.slices[0], self.slices[0]].add_(self.lr.T)
-#     # self.Wab_T[self.slices[0], self.slices[0]].clamp_(min=0.0)
+    model.PHI0[0], model.PHI0[2] = get_ortho_pertu(m, 0.0, dtype=model.FLOAT, device=model.device)
+    
+    Lij = torch.outer(model.PHI0[0], model.PHI0[0])
+    Lij = Lij + torch.outer(model.PHI0[2], model.PHI0[2])
+    
+    model.lr = model.Jab[0][0] * model.KAPPA[0][0] * Lij / torch.sqrt(model.Ka[0])
+    model.Wab_T[model.slices[0], model.slices[0]].add_(model.lr.T)
+    model.Wab_T[model.slices[0], model.slices[0]].clamp_(min=0.0)
 
 def initLR(model):
     # Low rank vector
@@ -66,7 +67,7 @@ def get_ortho_pertu(m, s, dtype, device):
     N = m.shape[0]
     # Covariance matrix for u and v
     C = torch.tensor([[1, s], [s, 1]], dtype=dtype, device=device)
-
+    
     # Cholesky decomposition
     L = torch.linalg.cholesky(C)
 
@@ -94,3 +95,47 @@ def get_ortho_pertu(m, s, dtype, device):
     v = transformed[1] * b
     
     return u.squeeze(-1), v.squeeze(-1)
+
+def gen_ortho_vec(m, desired_cov, random_seed=None, dtype=torch.float32, device='cuda'):
+    if random_seed is not None:
+        torch.manual_seed(random_seed)  # For reproducibility
+        
+    N = m.size(0)
+    # Step 1: Generate a random vector u and make it orthogonal to m
+    u = torch.randn(N, dtype=dtype, device=device)
+    # u -= u.dot(m) / m.dot(m) * m
+
+    # Step 2: Generate a random vector v that is orthogonal to both m and u
+    v = torch.randn(N, dtype=dtype, device=device)
+    # v -= v.dot(m) / m.dot(m) * m
+    # v -= v.dot(u) / u.dot(u) * u
+    
+    # Normalize u and v to ensure they are unit vectors (optional)
+    # u = u / u.norm()
+    # v = v / v.norm()
+    
+    # Step 3: Construct the desired covariance matrix
+    cov_matrix = torch.tensor([[1, desired_cov], [desired_cov, 1]])
+
+    # Step 4: Obtain the Cholesky decomposition of the covariance matrix
+    L = torch.linalg.cholesky(cov_matrix)
+    
+    # Step 5: Use L to generate vectors with the desired covariance
+    u_prime = L[0, 0] * u + L[0, 1] * v
+    v_prime = L[1, 0] * u + L[1, 1] * v
+
+    return u_prime, v_prime
+
+def gen_v_cov(u, cov, dtype=torch.float32, device='cuda'):
+    seed = int(time.time())        
+    torch.manual_seed(seed)
+    
+    N = u.size(0)
+    
+    v = torch.randn(N, dtype=dtype, device=device)
+    v -= v.dot(u) / u.dot(u) * u
+    
+    a = cov
+    b = torch.sqrt(1.0 - cov**2)
+    
+    return a * u + b * v

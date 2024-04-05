@@ -1,0 +1,813 @@
+#+STARTUP: fold
+#+TITLE: Low Rank Spectrum
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session spectrum :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  pal = sns.color_palette("tab10")
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Helpers
+
+#+begin_src ipython
+  def get_theta(a, b, GM=0, IF_NORM=0):
+
+      u, v = a, b
+
+      if GM:          
+          v = b - np.dot(b, a) / np.dot(a, a) * a
+          
+      if IF_NORM:
+          u = a / np.linalg.norm(a)
+          v = b / np.linalg.norm(b)
+
+      return np.arctan2(v, u)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_idx(ksi, rank=2):
+      ksi = ksi.cpu().detach().numpy()      
+      theta = get_theta(ksi[0], ksi[rank], GM=0, IF_NORM=0)
+      
+      return theta.argsort()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_overlap(ksi, rates):
+      return rates @ ksi.T / rates.shape[-1]  
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  import scipy.stats as stats
+
+  def plot_smooth(data, ax, color):
+      mean = data.mean(axis=0)  
+      ci = smooth.std(axis=0, ddof=1) * 1.96
+      
+      # Plot
+      ax.plot(mean, color=color)
+      ax.fill_between(range(data.shape[1]), mean - ci, mean + ci, alpha=0.25, color=color)
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+* Imports
+
+#+begin_src ipython
+  import torch
+  import torch.nn as nn
+  import torch.optim as optim
+  from torch.utils.data import Dataset, TensorDataset, DataLoader
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../')
+
+  import pandas as pd
+  import torch.nn as nn
+  from time import perf_counter  
+  from scipy.stats import circmean
+
+  from src.network import Network
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump, circcvl
+#+end_src
+
+#+RESULTS:
+
+* Spectrum
+** Sparse Matrix Spectrum
+
+#+begin_src ipython
+  from src.connectivity import Connectivity
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  Wij = Connectivity(1000, 1000, 100)('sparse', 'None', kappa=1.0, sigma=0, phase=0)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  eigenvalues, eigenvectors = torch.linalg.eig(1.0 * Wij)
+  max_real_index = torch.argmax(eigenvalues.real)
+  lead_eig_vec = eigenvectors[:, max_real_index]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  plt.plot(eigenvalues.real.cpu().numpy(), eigenvalues.imag.cpu().numpy(), 'o')
+  plt.xlabel('Real')
+  plt.ylabel('Im')
+  # plt.xlim([-10, 10])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/d732f5f6e8333f2bb68e39adf9be84cd320ddcb8.png]]
+
+** Orthogonal LR
+
+#+begin_src ipython
+  from src.lr_utils import get_ortho_pertu, gen_ortho_vec
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  # u, v = get_ortho_pertu(lead_eig_vec, 0.0, dtype=torch.float32, device='cuda')
+  u, v = gen_ortho_vec(lead_eig_vec.real, 0.5, dtype=torch.float32, device='cuda')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  print(u.shape, v.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([1000]) torch.Size([1000])
+
+#+begin_src ipython
+  Lij = u.unsqueeze(-1) @ u.unsqueeze(-1).T
+  Lij = Lij + v.unsqueeze(-1) @ v.unsqueeze(-1).T
+  print(Lij.shape)
+  Jij = Wij + Lij * torch.sqrt(torch.tensor(100.0 / 1000.0, dtype=torch.float32, device='cuda'))
+#+end_src
+
+#+RESULTS:
+: torch.Size([1000, 1000])
+
+K/N (1 + 1/sqrt(K)) = K/N + sqrt(K) / N
+
+#+RESULTS:
+: torch.Size([1000, 1000])
+
+#+begin_src ipython
+  eig_val, eig_vec = torch.linalg.eig(1.0 * Lij)
+  max_real_idx = torch.argmax(eig_val.real)
+  lead_eig_vec = eig_vec[:, max_real_idx]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  plt.plot(eig_val.real.cpu().numpy(), eig_val.imag.cpu().numpy(), 'ro')
+  plt.xlabel('Real')
+  plt.ylabel('Im')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/8346793c4c2ff6be7eb29b69411f2eec41e39e15.png]]
+
+#+begin_src ipython
+  eig_val, eig_vec = torch.linalg.eig(1.0 * Jij)
+  max_real_idx = torch.argmax(eig_val.real)
+  lead_eig_vec = eig_vec[:, max_real_idx]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  plt.plot(eigenvalues.real.cpu().numpy(), eigenvalues.imag.cpu().numpy(), 'bo')
+  plt.plot(eig_val.real.cpu().numpy(), eig_val.imag.cpu().numpy(), 'ro')
+  plt.xlabel('Real')
+  plt.ylabel('Im')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/1bee146e5d180f2c37df6be0f4c943ceb2ee04c2.png]]
+
+** Random LR
+
+#+begin_src ipython
+  from torch.distributions import MultivariateNormal
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  lr_mean = [0.0, 0.0]
+  lr_cov = [[1.0, 0.0],[0.0, 1.0]]
+
+  mean_ = torch.tensor(lr_mean, dtype=torch.float32, device='cuda')
+  cov_ = torch.tensor(lr_cov, dtype=torch.float32, device='cuda')
+
+  mv_normal = MultivariateNormal(mean_, cov_)
+  ksi = mv_normal.sample((1000,)).T
+  print(ksi.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([2, 1000])
+
+#+begin_src ipython
+  # Lij = ksi[0].unsqueeze(-1) @ ksi[1].unsqueeze(-1).T
+  Lij = ksi[0].unsqueeze(-1) @ ksi[0].unsqueeze(-1).T
+  Lij = Lij + ksi[1].unsqueeze(-1) @ ksi[1].unsqueeze(-1).T
+  print(Lij.shape)
+  Gij = Wij + Lij * torch.sqrt(torch.tensor(100.0 / 1000.0, dtype=torch.float32, device='cuda'))
+#+end_src
+
+#+RESULTS:
+: torch.Size([1000, 1000])
+
+#+begin_src ipython
+  eig_val, eig_vec = torch.linalg.eig(1.0 * Lij)
+  max_real_idx = torch.argmax(eig_val.real)
+  lead_eig_vec = eig_vec[:, max_real_idx]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  plt.plot(eig_val.real.cpu().numpy(), eig_val.imag.cpu().numpy(), 'ro')
+  plt.xlabel('Real')
+  plt.ylabel('Im')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/3cadfcffd716345abca2d27450a2c3fd5549539c.png]]
+
+#+begin_src ipython
+  eig_val, eig_vec = torch.linalg.eig(1.0 * Gij)
+  max_real_idx = torch.argmax(eig_val.real)
+  lead_eig_vec = eig_vec[:, max_real_idx]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  plt.plot(eigenvalues.real.cpu().numpy(), eigenvalues.imag.cpu().numpy(), 'bo')
+  plt.plot(eig_val.real.cpu().numpy(), eig_val.imag.cpu().numpy(), 'ro')
+  plt.xlabel('Real')
+  plt.ylabel('Im')
+  # plt.xlim([-10, 10])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/30c973ed2b03140bf3f7e677dbc8a5bf8913a947.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+* Model
+
+#+begin_src ipython
+  u = torch.randn(model.Na[0], dtype=torch.float32, device='cuda')
+  u = u / u.std()
+#+end_src
+
+#+RESULTS:
+
+** Single Trial
+*** Model
+
+#+begin_src ipython
+  from src.network import Network
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  conf_name = "config_EI.yml"
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  start = perf_counter()
+  model = Network(conf_name, REPO_ROOT, VERBOSE=1, DEVICE='cuda', LIVE_FF_UPDATE=1, TASK='dual_rand', seed=1, PROBA_TYPE=['','','',''], N_BATCH=100, DURATION=30)
+#+end_src
+
+#+RESULTS:
+: Na tensor([2000,  500], device='cuda:0', dtype=torch.int32) Ka tensor([250., 250.], device='cuda:0') csumNa tensor([   0, 2000, 2500], device='cuda:0')
+: Jab [1.0, -1.5, 1, -1]
+: Ja0 [1.3, 1.0]
+
+#+begin_src ipython
+  Wij = model.Wab_T.clone()
+
+  # eigenvalues, eigenvectors = torch.linalg.eig(Wij.T)
+  eigenvalues, eigenvectors = torch.linalg.eig(Wij[model.slices[0], model.slices[0]].T)
+  max_real_index = torch.argmax(eigenvalues.real)
+  lead_eig_vec = eigenvectors[:, max_real_index]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  plt.plot(eigenvalues.real.cpu().numpy(), eigenvalues.imag.cpu().numpy(), 'o')
+  plt.xlabel('Real')
+  plt.ylabel('Im')
+  # plt.xlim([-10, 10])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/85037554a4c9d4192b2d5f7841304756b94f05fe.png]]
+
+*** ortho LR
+
+#+begin_src ipython
+  from src.lr_utils import gen_v_cov
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  cov = torch.tensor(0.0, dtype=torch.float32, device='cuda')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  v = gen_v_cov(u, cov, dtype=torch.float32, device='cuda')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  # u, v = gen_ortho_vec(lead_eig_vec.real, 0.0, dtype=torch.float32, device='cuda')
+  print(u.shape, v.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([2000]) torch.Size([2000])
+
+K/N * 1 / sqrt(K) * Jij + Lij / N = sqrt(K) Jij / N + Lij / N
+
+#+begin_src ipython
+  Lij = u.unsqueeze(-1) @ u.unsqueeze(-1).T
+  Lij = Lij + v.unsqueeze(-1) @ v.unsqueeze(-1).T
+  Lij = Lij / model.Ka[0]
+  print(Lij.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([2000, 2000])
+
+#+begin_src ipython
+  ksi = torch.stack((u, v))
+  print(torch.cov(ksi))
+  print(ksi.shape)
+#+end_src
+
+#+RESULTS:
+: tensor([[ 1.0000, -0.0020],
+:         [-0.0020,  0.9914]], device='cuda:0')
+: torch.Size([2, 2000])
+
+#+begin_src ipython
+  model.Wab_T = Wij.clone()
+  model.Wab_T[model.slices[0], model.slices[0]] = (Wij[model.slices[0], model.slices[0]] + Lij).T.clamp_(min=0, max=1.0 * model.Jab[0, 0])
+#+end_src
+
+#+RESULTS:
+
+*** Dynamics
+
+#+begin_src ipython
+
+  model.PHI0[0] = ksi[0]
+  model.PHI0[1] = ksi[0]
+  model.PHI0[1] = ksi[1]
+  model.PHI0[2] = ksi[1]
+  
+  rates = model()
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+
+  Ne = model.Na[0].detach().cpu().numpy()
+  N = model.N_NEURON
+
+  print('rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  Generating ff input
+  times (s) 0.0 rates (Hz) [0.15, 2.16]
+  times (s) 0.09 rates (Hz) [0.15, 2.17]
+  times (s) 0.17 rates (Hz) [0.15, 2.16]
+  times (s) 0.26 rates (Hz) [0.15, 2.16]
+  times (s) 0.34 rates (Hz) [0.15, 2.14]
+  times (s) 0.43 rates (Hz) [0.15, 2.12]
+  times (s) 0.51 rates (Hz) [0.15, 2.17]
+  times (s) 0.6 rates (Hz) [0.15, 2.13]
+  times (s) 0.68 rates (Hz) [0.15, 2.12]
+  times (s) 0.77 rates (Hz) [0.14, 2.1]
+  times (s) 0.85 rates (Hz) [1.31, 2.12]
+  times (s) 0.94 rates (Hz) [1.96, 3.85]
+  times (s) 1.03 rates (Hz) [5.08, 6.82]
+  times (s) 1.11 rates (Hz) [11.06, 13.71]
+  times (s) 1.2 rates (Hz) [6.89, 8.87]
+  times (s) 1.28 rates (Hz) [6.48, 8.61]
+  times (s) 1.37 rates (Hz) [6.77, 8.92]
+  times (s) 1.45 rates (Hz) [6.9, 9.04]
+  times (s) 1.54 rates (Hz) [6.97, 9.11]
+  times (s) 1.62 rates (Hz) [7.02, 9.16]
+  times (s) 1.71 rates (Hz) [6.58, 9.2]
+  times (s) 1.79 rates (Hz) [7.26, 9.25]
+  times (s) 1.88 rates (Hz) [4.97, 6.9]
+  times (s) 1.97 rates (Hz) [4.5, 6.65]
+  times (s) 2.05 rates (Hz) [5.76, 8.02]
+  times (s) 2.14 rates (Hz) [6.76, 8.86]
+  times (s) 2.22 rates (Hz) [5.66, 7.61]
+  times (s) 2.31 rates (Hz) [4.81, 6.91]
+  times (s) 2.39 rates (Hz) [5.57, 7.78]
+  times (s) 2.48 rates (Hz) [6.25, 8.39]
+  times (s) 2.56 rates (Hz) [6.11, 8.15]
+  times (s) 2.65 rates (Hz) [5.42, 7.49]
+  times (s) 2.74 rates (Hz) [5.57, 7.72]
+  times (s) 2.82 rates (Hz) [5.83, 7.96]
+  times (s) 2.91 rates (Hz) [6.12, 8.24]
+  times (s) 2.99 rates (Hz) [5.93, 8.02]
+  times (s) 3.08 rates (Hz) [5.86, 7.94]
+  times (s) 3.16 rates (Hz) [5.59, 7.7]
+  times (s) 3.25 rates (Hz) [5.95, 8.11]
+  times (s) 3.33 rates (Hz) [6.17, 8.28]
+  times (s) 3.42 rates (Hz) [6.13, 8.2]
+  times (s) 3.5 rates (Hz) [5.58, 7.67]
+  times (s) 3.59 rates (Hz) [5.89, 8.05]
+  times (s) 3.68 rates (Hz) [6.26, 8.38]
+  times (s) 3.76 rates (Hz) [6.13, 8.21]
+  times (s) 3.85 rates (Hz) [5.75, 7.84]
+  times (s) 3.93 rates (Hz) [5.93, 8.11]
+  times (s) 4.02 rates (Hz) [6.35, 8.45]
+  times (s) 4.1 rates (Hz) [6.02, 8.1]
+  times (s) 4.19 rates (Hz) [5.8, 7.92]
+  times (s) 4.27 rates (Hz) [6.1, 8.26]
+  times (s) 4.36 rates (Hz) [6.47, 8.56]
+  times (s) 4.44 rates (Hz) [5.93, 7.99]
+  times (s) 4.53 rates (Hz) [5.72, 7.85]
+  times (s) 4.62 rates (Hz) [6.32, 8.5]
+  times (s) 4.7 rates (Hz) [6.53, 8.6]
+  times (s) 4.79 rates (Hz) [6.02, 8.08]
+  times (s) 4.87 rates (Hz) [5.65, 7.77]
+  times (s) 4.96 rates (Hz) [6.29, 8.5]
+  times (s) 5.04 rates (Hz) [6.65, 8.71]
+  times (s) 5.13 rates (Hz) [6.09, 8.18]
+  times (s) 5.21 rates (Hz) [5.78, 7.87]
+  times (s) 5.3 rates (Hz) [6.18, 8.37]
+  times (s) 5.38 rates (Hz) [6.62, 8.71]
+  times (s) 5.47 rates (Hz) [6.13, 8.22]
+  times (s) 5.56 rates (Hz) [6.08, 8.19]
+  times (s) 5.64 rates (Hz) [6.16, 8.31]
+  times (s) 5.73 rates (Hz) [6.4, 8.51]
+  times (s) 5.81 rates (Hz) [6.21, 8.3]
+  times (s) 5.9 rates (Hz) [6.18, 8.32]
+  times (s) 5.98 rates (Hz) [6.41, 8.5]
+  times (s) 6.07 rates (Hz) [6.23, 8.34]
+  times (s) 6.15 rates (Hz) [6.09, 8.21]
+  times (s) 6.24 rates (Hz) [6.28, 8.41]
+  times (s) 6.32 rates (Hz) [6.57, 8.69]
+  times (s) 6.41 rates (Hz) [6.27, 8.35]
+  times (s) 6.5 rates (Hz) [5.96, 8.06]
+  times (s) 6.58 rates (Hz) [6.24, 8.41]
+  times (s) 6.67 rates (Hz) [6.54, 8.66]
+  times (s) 6.75 rates (Hz) [6.52, 8.61]
+  times (s) 6.84 rates (Hz) [5.94, 8.02]
+  times (s) 6.92 rates (Hz) [6.07, 8.23]
+  times (s) 7.01 rates (Hz) [6.53, 8.65]
+  times (s) 7.09 rates (Hz) [6.49, 8.62]
+  times (s) 7.18 rates (Hz) [6.29, 8.33]
+  times (s) 7.26 rates (Hz) [5.97, 8.11]
+  times (s) 7.35 rates (Hz) [6.38, 8.53]
+  times (s) 7.44 rates (Hz) [6.45, 8.55]
+  times (s) 7.52 rates (Hz) [6.45, 8.56]
+  times (s) 7.61 rates (Hz) [6.15, 8.22]
+  times (s) 7.69 rates (Hz) [6.2, 8.35]
+  times (s) 7.78 rates (Hz) [6.51, 8.61]
+  times (s) 7.86 rates (Hz) [6.29, 8.41]
+  times (s) 7.95 rates (Hz) [6.42, 8.52]
+  times (s) 8.03 rates (Hz) [6.16, 8.28]
+  times (s) 8.12 rates (Hz) [6.51, 8.64]
+  times (s) 8.21 rates (Hz) [6.25, 8.34]
+  times (s) 8.29 rates (Hz) [6.25, 8.38]
+  times (s) 8.38 rates (Hz) [6.36, 8.47]
+  times (s) 8.46 rates (Hz) [6.49, 8.63]
+  times (s) 8.55 rates (Hz) [6.4, 8.47]
+  times (s) 8.63 rates (Hz) [6.1, 8.19]
+  times (s) 8.72 rates (Hz) [6.2, 8.36]
+  times (s) 8.8 rates (Hz) [6.64, 8.78]
+  times (s) 8.89 rates (Hz) [6.64, 8.71]
+  times (s) 8.97 rates (Hz) [6.07, 8.14]
+  times (s) 9.06 rates (Hz) [5.89, 8.04]
+  times (s) 9.15 rates (Hz) [6.63, 8.82]
+  times (s) 9.23 rates (Hz) [6.95, 9.02]
+  times (s) 9.32 rates (Hz) [6.17, 8.22]
+  times (s) 9.4 rates (Hz) [5.73, 7.84]
+  times (s) 9.49 rates (Hz) [6.35, 8.57]
+  times (s) 9.57 rates (Hz) [7.19, 9.31]
+  times (s) 9.66 rates (Hz) [6.36, 8.39]
+  times (s) 9.74 rates (Hz) [5.72, 7.81]
+  times (s) 9.83 rates (Hz) [6.06, 8.27]
+  times (s) 9.91 rates (Hz) [7.19, 9.37]
+  times (s) 10.0 rates (Hz) [6.6, 8.61]
+  times (s) 10.09 rates (Hz) [5.79, 7.87]
+  times (s) 10.17 rates (Hz) [5.89, 8.08]
+  times (s) 10.26 rates (Hz) [7.04, 9.24]
+  times (s) 10.34 rates (Hz) [6.75, 8.77]
+  times (s) 10.43 rates (Hz) [5.86, 7.94]
+  times (s) 10.51 rates (Hz) [5.89, 8.05]
+  times (s) 10.6 rates (Hz) [6.89, 9.09]
+  times (s) 10.68 rates (Hz) [6.75, 8.78]
+  times (s) 10.77 rates (Hz) [5.92, 8.0]
+  times (s) 10.85 rates (Hz) [6.02, 8.17]
+  times (s) 10.94 rates (Hz) [6.82, 9.01]
+  times (s) 11.03 rates (Hz) [6.63, 8.67]
+  times (s) 11.11 rates (Hz) [5.94, 8.03]
+  times (s) 11.2 rates (Hz) [6.13, 8.29]
+  times (s) 11.28 rates (Hz) [6.86, 9.02]
+  times (s) 11.37 rates (Hz) [6.47, 8.51]
+  times (s) 11.45 rates (Hz) [5.91, 8.01]
+  times (s) 11.54 rates (Hz) [6.19, 8.36]
+  times (s) 11.62 rates (Hz) [6.98, 9.12]
+  times (s) 11.71 rates (Hz) [6.34, 8.36]
+  times (s) 11.79 rates (Hz) [5.8, 7.92]
+  times (s) 11.88 rates (Hz) [6.22, 8.41]
+  times (s) 11.97 rates (Hz) [7.09, 9.22]
+  times (s) 12.05 rates (Hz) [6.27, 8.28]
+  times (s) 12.14 rates (Hz) [5.7, 7.82]
+  times (s) 12.22 rates (Hz) [6.21, 8.41]
+  times (s) 12.31 rates (Hz) [7.14, 9.27]
+  times (s) 12.39 rates (Hz) [6.26, 8.26]
+  times (s) 12.48 rates (Hz) [5.67, 7.79]
+  times (s) 12.56 rates (Hz) [6.15, 8.36]
+  times (s) 12.65 rates (Hz) [7.13, 9.27]
+  times (s) 12.74 rates (Hz) [6.28, 8.28]
+  times (s) 12.82 rates (Hz) [5.68, 7.79]
+  times (s) 12.91 rates (Hz) [6.09, 8.29]
+  times (s) 12.99 rates (Hz) [7.06, 9.21]
+  times (s) 13.08 rates (Hz) [6.35, 8.34]
+  times (s) 13.16 rates (Hz) [5.69, 7.79]
+  times (s) 13.25 rates (Hz) [6.02, 8.21]
+  times (s) 13.33 rates (Hz) [6.91, 9.06]
+  times (s) 13.42 rates (Hz) [6.44, 8.45]
+  times (s) 13.5 rates (Hz) [5.73, 7.82]
+  times (s) 13.59 rates (Hz) [5.91, 8.08]
+  times (s) 13.68 rates (Hz) [6.71, 8.88]
+  times (s) 13.76 rates (Hz) [6.54, 8.57]
+  times (s) 13.85 rates (Hz) [5.85, 7.92]
+  times (s) 13.93 rates (Hz) [5.79, 7.93]
+  times (s) 14.02 rates (Hz) [6.47, 8.65]
+  times (s) 14.1 rates (Hz) [6.63, 8.68]
+  times (s) 14.19 rates (Hz) [6.01, 8.07]
+  times (s) 14.27 rates (Hz) [5.75, 7.85]
+  times (s) 14.36 rates (Hz) [6.17, 8.35]
+  times (s) 14.44 rates (Hz) [6.66, 8.75]
+  times (s) 14.53 rates (Hz) [6.18, 8.23]
+  times (s) 14.62 rates (Hz) [5.74, 7.82]
+  times (s) 14.7 rates (Hz) [5.91, 8.09]
+  times (s) 14.79 rates (Hz) [6.6, 8.74]
+  times (s) 14.87 rates (Hz) [6.34, 8.39]
+  times (s) 14.96 rates (Hz) [5.78, 7.84]
+  times (s) 15.04 rates (Hz) [5.76, 7.92]
+  times (s) 15.13 rates (Hz) [6.47, 8.63]
+  times (s) 15.21 rates (Hz) [6.49, 8.54]
+  times (s) 15.3 rates (Hz) [5.85, 7.9]
+  times (s) 15.38 rates (Hz) [5.66, 7.79]
+  times (s) 15.47 rates (Hz) [6.3, 8.47]
+  times (s) 15.56 rates (Hz) [6.6, 8.67]
+  times (s) 15.64 rates (Hz) [5.89, 7.93]
+  times (s) 15.73 rates (Hz) [5.61, 7.73]
+  times (s) 15.81 rates (Hz) [6.12, 8.29]
+  times (s) 15.9 rates (Hz) [6.62, 8.71]
+  times (s) 15.98 rates (Hz) [5.99, 8.02]
+  times (s) 16.07 rates (Hz) [5.63, 7.74]
+  times (s) 16.15 rates (Hz) [5.95, 8.11]
+  times (s) 16.24 rates (Hz) [6.53, 8.66]
+  times (s) 16.32 rates (Hz) [6.14, 8.18]
+  times (s) 16.41 rates (Hz) [5.69, 7.78]
+  times (s) 16.5 rates (Hz) [5.84, 7.98]
+  times (s) 16.58 rates (Hz) [6.36, 8.51]
+  times (s) 16.67 rates (Hz) [6.3, 8.34]
+  times (s) 16.75 rates (Hz) [5.78, 7.86]
+  times (s) 16.84 rates (Hz) [5.77, 7.9]
+  times (s) 16.92 rates (Hz) [6.19, 8.34]
+  times (s) 17.01 rates (Hz) [6.38, 8.45]
+  times (s) 17.09 rates (Hz) [5.89, 7.96]
+  times (s) 17.18 rates (Hz) [5.77, 7.88]
+  times (s) 17.26 rates (Hz) [6.05, 8.2]
+  times (s) 17.35 rates (Hz) [6.37, 8.47]
+  times (s) 17.44 rates (Hz) [5.99, 8.05]
+  times (s) 17.52 rates (Hz) [5.8, 7.9]
+  times (s) 17.61 rates (Hz) [5.96, 8.09]
+  times (s) 17.69 rates (Hz) [6.28, 8.41]
+  times (s) 17.78 rates (Hz) [6.1, 8.16]
+  times (s) 17.86 rates (Hz) [5.83, 7.93]
+  times (s) 17.95 rates (Hz) [5.91, 8.03]
+  times (s) 18.03 rates (Hz) [6.15, 8.28]
+  times (s) 18.12 rates (Hz) [6.22, 8.28]
+  times (s) 18.21 rates (Hz) [5.86, 7.95]
+  times (s) 18.29 rates (Hz) [5.9, 8.02]
+  times (s) 18.38 rates (Hz) [6.04, 8.17]
+  times (s) 18.46 rates (Hz) [6.26, 8.35]
+  times (s) 18.55 rates (Hz) [5.93, 8.01]
+  times (s) 18.63 rates (Hz) [5.88, 7.99]
+  times (s) 18.72 rates (Hz) [5.98, 8.1]
+  times (s) 18.8 rates (Hz) [6.22, 8.33]
+  times (s) 18.89 rates (Hz) [6.04, 8.11]
+  times (s) 18.97 rates (Hz) [5.86, 7.96]
+  times (s) 19.06 rates (Hz) [5.93, 8.04]
+  times (s) 19.15 rates (Hz) [6.14, 8.26]
+  times (s) 19.23 rates (Hz) [6.17, 8.24]
+  times (s) 19.32 rates (Hz) [5.88, 7.97]
+  times (s) 19.4 rates (Hz) [5.86, 7.97]
+  times (s) 19.49 rates (Hz) [6.07, 8.19]
+  times (s) 19.57 rates (Hz) [6.24, 8.33]
+  times (s) 19.66 rates (Hz) [5.95, 8.02]
+  times (s) 19.74 rates (Hz) [5.81, 7.91]
+  times (s) 19.83 rates (Hz) [5.96, 8.09]
+  times (s) 19.91 rates (Hz) [6.25, 8.36]
+  times (s) 20.0 rates (Hz) [6.07, 8.13]
+  times (s) 20.09 rates (Hz) [5.81, 7.9]
+  times (s) 20.17 rates (Hz) [5.87, 7.99]
+  times (s) 20.26 rates (Hz) [6.16, 8.29]
+  times (s) 20.34 rates (Hz) [6.21, 8.28]
+  times (s) 20.43 rates (Hz) [5.85, 7.93]
+  times (s) 20.51 rates (Hz) [5.81, 7.92]
+  times (s) 20.6 rates (Hz) [6.03, 8.16]
+  times (s) 20.68 rates (Hz) [6.29, 8.38]
+  times (s) 20.77 rates (Hz) [5.96, 8.02]
+  times (s) 20.85 rates (Hz) [5.78, 7.88]
+  times (s) 20.94 rates (Hz) [5.92, 8.05]
+  times (s) 21.03 rates (Hz) [6.23, 8.35]
+  times (s) 21.11 rates (Hz) [6.11, 8.17]
+  times (s) 21.2 rates (Hz) [5.8, 7.89]
+  times (s) 21.28 rates (Hz) [5.85, 7.96]
+  times (s) 21.37 rates (Hz) [6.12, 8.25]
+  times (s) 21.45 rates (Hz) [6.24, 8.31]
+  times (s) 21.54 rates (Hz) [5.85, 7.93]
+  times (s) 21.62 rates (Hz) [5.8, 7.91]
+  times (s) 21.71 rates (Hz) [6.0, 8.13]
+  times (s) 21.79 rates (Hz) [6.27, 8.37]
+  times (s) 21.88 rates (Hz) [5.96, 8.03]
+  times (s) 21.97 rates (Hz) [5.78, 7.88]
+  times (s) 22.05 rates (Hz) [5.91, 8.03]
+  times (s) 22.14 rates (Hz) [6.21, 8.33]
+  times (s) 22.22 rates (Hz) [6.11, 8.17]
+  times (s) 22.31 rates (Hz) [5.8, 7.88]
+  times (s) 22.39 rates (Hz) [5.84, 7.95]
+  times (s) 22.48 rates (Hz) [6.1, 8.23]
+  times (s) 22.56 rates (Hz) [6.23, 8.3]
+  times (s) 22.65 rates (Hz) [5.85, 7.93]
+  times (s) 22.74 rates (Hz) [5.79, 7.9]
+  times (s) 22.82 rates (Hz) [5.99, 8.12]
+  times (s) 22.91 rates (Hz) [6.27, 8.36]
+  times (s) 22.99 rates (Hz) [5.95, 8.01]
+  times (s) 23.08 rates (Hz) [5.78, 7.88]
+  times (s) 23.16 rates (Hz) [5.9, 8.02]
+  times (s) 23.25 rates (Hz) [6.21, 8.33]
+  times (s) 23.33 rates (Hz) [6.08, 8.14]
+  times (s) 23.42 rates (Hz) [5.8, 7.88]
+  times (s) 23.5 rates (Hz) [5.84, 7.95]
+  times (s) 23.59 rates (Hz) [6.11, 8.24]
+  times (s) 23.68 rates (Hz) [6.18, 8.25]
+  times (s) 23.76 rates (Hz) [5.85, 7.93]
+  times (s) 23.85 rates (Hz) [5.8, 7.91]
+  times (s) 23.93 rates (Hz) [6.01, 8.13]
+  times (s) 24.02 rates (Hz) [6.2, 8.3]
+  times (s) 24.1 rates (Hz) [5.94, 8.01]
+  times (s) 24.19 rates (Hz) [5.79, 7.89]
+  times (s) 24.27 rates (Hz) [5.92, 8.04]
+  times (s) 24.36 rates (Hz) [6.14, 8.26]
+  times (s) 24.44 rates (Hz) [6.06, 8.13]
+  times (s) 24.53 rates (Hz) [5.82, 7.91]
+  times (s) 24.62 rates (Hz) [5.87, 7.98]
+  times (s) 24.7 rates (Hz) [6.04, 8.16]
+  times (s) 24.79 rates (Hz) [6.15, 8.23]
+  times (s) 24.87 rates (Hz) [5.87, 7.95]
+  times (s) 24.96 rates (Hz) [5.84, 7.94]
+  times (s) 25.04 rates (Hz) [5.94, 8.06]
+  times (s) 25.13 rates (Hz) [6.16, 8.26]
+  times (s) 25.21 rates (Hz) [5.97, 8.04]
+  times (s) 25.3 rates (Hz) [5.84, 7.93]
+  times (s) 25.38 rates (Hz) [5.87, 7.98]
+  times (s) 25.47 rates (Hz) [6.09, 8.21]
+  times (s) 25.56 rates (Hz) [6.09, 8.16]
+  times (s) 25.64 rates (Hz) [5.87, 7.95]
+  Elapsed (with compilation) = 0h 0m 9s
+  rates torch.Size([100, 301, 2000])
+#+end_example
+
+#+begin_src ipython
+  overlap = get_overlap(ksi, rates)
+  print(overlap.shape)
+
+  idx = get_idx(ksi, rank=1)
+  rates_ordered = rates[..., idx].cpu().numpy()
+  
+  m0, m1, phi = decode_bump(rates_ordered, axis=-1)
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([100, 301, 2])
+: (100, 301)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+  
+  r_max = 5
+
+  ax[0].imshow(rates[0].T.cpu().numpy(), aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_xlabel('Step')
+
+  ax[1].imshow(rates_ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+  ax[1].set_ylabel('Pref. Location (°)')
+  ax[1].set_xlabel('Step')
+  ax[1].set_yticks(np.linspace(0, Ne, 5), np.linspace(360, 0, 5).astype(int))
+  # ax[0][1].colorbar()
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/3f5cbee4882e36ab9e62722978db8030d3abe28e.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+  ax[0].plot((m1.T/m0.T))
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('$\mathcal{F}_1$')
+
+  ax[1].plot((phi.T * 180 / np.pi))
+  ax[1].set_yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('Phase (°)')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/a598e97b2e3d08f3a6946c3014e7ae0c0c7d809c.png]]
+
+#+begin_src ipython
+  x = m1[:, -1]/ m0[:, -1] * np.cos(phi[:, -1])
+  y = m1[:, -1] / m0[:, -1] * np.sin(phi[:, -1])
+
+  fig, ax = plt.subplots(figsize=(height, height))
+  ax.plot(x, y, 'o')
+  ax.set_xlim([-2, 2])
+  ax.set_ylim([-2, 2])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/8713f121e89e57bc802b8d845eca7a2ba40299d7.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
