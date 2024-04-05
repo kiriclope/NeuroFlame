@@ -38,7 +38,7 @@ def initLR(model):
     # for param in model.linear.parameters():
     #     param.requires_grad = False
     
-    # model.lr_kappa = nn.Parameter(5 * torch.rand(1, dtype=model.FLOAT, device=model.device))
+    model.lr_kappa = nn.Parameter(5 * torch.rand(1, dtype=model.FLOAT, device=model.device))
     
     # Window where to evaluate loss
     model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)

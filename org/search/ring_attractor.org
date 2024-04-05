@@ -101,7 +101,7 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 #+end_src
 
 #+RESULTS:
-: (20, 21)
+: (20, 25)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -119,14 +119,14 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/eca116a63067421d6b7767f7a5c65695d424504d.png]]
+[[file:./.ob-jupyter/7ef2dd1df070ce142a065ef3ffcc38800fae239f.png]]
 
 #+begin_src ipython
   print(model.J_STP.shape, m1.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([20, 1]) (20, 21)
+: torch.Size([20, 1]) (20, 25)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -142,7 +142,7 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/75fbb3f003086d45e5ad460fe3d8a451072ea35b.png]]
+[[file:./.ob-jupyter/3ea54fa19ecdffa8aee5f21e617641f15e937151.png]]
 
 Here, for example, with J_STP=10 we have a ring attractor!
 
@@ -252,8 +252,8 @@ Let's run the simulations
   print('rates', rates.shape)
 #+end_src
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 11s
-: rates (400, 21, 500)
+: Elapsed (with compilation) = 0h 0m 26s
+: rates (400, 25, 500)
 
 Let's compute the fourier moments of the population activity and reshape them
 #+begin_src ipython
@@ -287,7 +287,7 @@ Let's compute the fourier moments of the population activity and reshape them
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e0d09959860d78589f1d66ac56095f823aff2633.png]]
+[[file:./.ob-jupyter/79bac36b30930bbd29016be85099a8c5df84c9a8.png]]
 
 #+begin_src ipython
   idx=9
@@ -308,7 +308,7 @@ Let's compute the fourier moments of the population activity and reshape them
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/6b17eb0e6e7d705579b95b7f7a24328865f83da4.png]]
+[[file:./.ob-jupyter/c9cceb3dd2ea7c0b556a15888c6343506b102f3e.png]]
 
 The parameters corresponding to (row 3, col -1) work!
 
@@ -358,6 +358,7 @@ Let's test them.
   rates_test = model().cpu().numpy()
 #+end_src
 #+RESULTS:
+: ca715d44-0b48-415a-b8fa-66eff307575b
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates_test, axis=-1)
@@ -365,7 +366,7 @@ Let's test them.
 #+end_src
 
 #+RESULTS:
-: m0 (1, 21)
+: f6ffd055-5ba6-4cbc-92a1-a65cedd94b19
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -384,7 +385,7 @@ Let's test them.
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/631a6e87cbff9ede7895bdd163769d9d555c37d4.png]]
+: 98b4c4c3-54c5-4769-99ab-028de858298d
 
 * Serial bias
 
@@ -412,7 +413,7 @@ Now that we have found a ring attractor we can investigate the biases in the mod
 
   print(PHI0.shape)
   PHI0[:, -1] = torch.randint(0, 360, (N_PHASE,), device=model.device).unsqueeze(1)
-  PHI0[:, 0] = torch.randint(0, 360, (N_PHASE,), device=model.device).unsqueeze(1)
+  # PHI0[:, 0] = torch.randint(0, 360, (N_PHASE,), device=model.device).unsqueeze(1)
 #+end_src
 
 #+RESULTS:
@@ -427,10 +428,7 @@ Now that we have found a ring attractor we can investigate the biases in the mod
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-:
 : (512, 25, 500)
-:END:
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates, axis=-1)
@@ -438,10 +436,7 @@ Now that we have found a ring attractor we can investigate the biases in the mod
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-:
 : (512, 25)
-:END:
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -460,10 +455,7 @@ Now that we have found a ring attractor we can investigate the biases in the mod
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-[[file:./.ob-jupyter/754d29a5545832a2db0b3ceadd4b449f239ba7ad.png]]
-[[file:./.ob-jupyter/72563be7137c6dae3b9cb35eccdc2519b81d7b10.png]]
-:END:
+[[file:./.ob-jupyter/7082b19f8cc107ade2a9e1a0a34c75485042e595.png]]
 
 #+begin_src ipython
   target_loc = model.PHI0[:, -1].cpu().numpy()
@@ -482,10 +474,7 @@ Now that we have found a ring attractor we can investigate the biases in the mod
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-[[file:./.ob-jupyter/1509977f8e9eef2342500c2ca120c51eb8876b91.png]]
-[[file:./.ob-jupyter/b5652a6ef497aa14255e8ee320eed8ad649a016c.png]]
-:END:
+[[file:./.ob-jupyter/d64f9aa643715128e7fe2cf58fc67dc50bfbd522.png]]
 
 #+begin_src ipython
   plt.hist(errors[:, -1] * 180/np.pi, bins='auto')
@@ -494,10 +483,7 @@ Now that we have found a ring attractor we can investigate the biases in the mod
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c5f43873495fe0e081a9e18e6449e0349c799539.png]]
-:RESULTS:
-[[file:./.ob-jupyter/095f878b2fee1ec89a74ab99ba6276203f85fc81.png]]
-:END:
+[[file:./.ob-jupyter/6c3d51d9eacaf770c1f141816f0cac51df6a484e.png]]
 
 ** Systematic biases
 
@@ -516,7 +502,7 @@ Now that we have found a ring attractor we can investigate the biases in the mod
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/40747d9c315e150848b14a87a6f5a307df5beb67.png]]
+[[file:./.ob-jupyter/89f44db4e662eaaa8b5221227ce833dfd3de4490.png]]
 
 ** Serial biases
 
@@ -524,10 +510,10 @@ Now that we have found a ring attractor we can investigate the biases in the mod
   plt.plot(rel_loc[:, 0] * 180 / np.pi, errors[:,-1] * 180 / np.pi, 'o')
   plt.xlabel('Rel. Loc. (°)')
   plt.ylabel('Error (°)')
-  plt.ylim([-60, 60])
+  # plt.ylim([-60, 60])
   
   from scipy.stats import binned_statistic
-  stt = binned_statistic(rel_loc[:,0]*180/np.pi, errors[:,-1]*180/np.pi, statistic='mean', bins=30, range=[-360, 360])
+  stt = binned_statistic(rel_loc[:,0]*180/np.pi, errors[:,-1]*180/np.pi, statistic='mean', bins=40, range=[-360, 360])
   dstt = np.mean(np.diff(stt.bin_edges))
   plt.plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
 
@@ -536,7 +522,7 @@ Now that we have found a ring attractor we can investigate the biases in the mod
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5e23d5737ba135cad4b203c4b27f67d7353e889c.png]]
+[[file:./.ob-jupyter/cc4de125786bfbd9f99d567dc0f84673a9b96fbe.png]]
 
 #+begin_src ipython
 
