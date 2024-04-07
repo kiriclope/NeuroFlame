@@ -185,7 +185,8 @@ class Network(nn.Module):
         # update hidden state
         if self.LR_TRAIN:
             # lr = self.lr_mask * (self.U @ self.V.T) / (1.0 * self.Na[0])
-            self.lr = self.lr_mask * self.lr_kappa * (self.U @ self.V.T) / (1.0 * self.Na[0])
+            self.lr = self.lr_kappa * (self.lr_mask * (self.U @ self.V.T)) / (1.0 * self.Na[0])
+            # self.lr = self.lr.clamp(min=0.0)
             # lr = self.lr_mask * (self.U @ self.V.T)
             hidden = rates @ (self.Wab_T + self.lr.T)
             # lr = (1.0 + self.lr_mask * (self.U @ self.V.T))
