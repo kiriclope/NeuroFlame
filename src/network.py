@@ -95,7 +95,7 @@ class Network(nn.Module):
         """Creates stp model for population 0"""
         self.J_STP = torch.tensor(self.J_STP, dtype=self.FLOAT, device=self.device)
         self.J_STP.mul_(self.GAIN / torch.sqrt(self.Ka[0]))
-        
+
         self.stp = Plasticity(
             self.USE,
             self.TAU_FAC,
@@ -106,7 +106,7 @@ class Network(nn.Module):
             FLOAT=self.FLOAT,
             device=self.device,
         )
-        
+
         # NEED .clone() here otherwise BAD THINGS HAPPEN
         self.W_stp_T = (
             self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
@@ -185,22 +185,25 @@ class Network(nn.Module):
         # update hidden state
         if self.LR_TRAIN:
             # lr = self.lr_mask * (self.U @ self.V.T) / (1.0 * self.Na[0])
-            self.lr = self.lr_kappa * self.U @ self.V.T / (1.0 * self.Na[0])
+            self.lr = self.lr_mask * self.lr_kappa * (self.U @ self.V.T) / (1.0 * self.Na[0])
             # lr = self.lr_mask * (self.U @ self.V.T)
             hidden = rates @ (self.Wab_T + self.lr.T)
             # lr = (1.0 + self.lr_mask * (self.U @ self.V.T))
-            # hidden = rates @ (self.Wab_T * lr.T)                
+            # hidden = rates @ (self.Wab_T * lr.T)
 
             # update stp variables
             if self.IF_STP:
                 Aux = self.stp(rates[:, self.slices[0]])  # Aux is now u * x * rates
-                hidden_stp = self.J_STP * Aux @ (self.W_stp_T
-                                                 + self.lr[self.slices[0], self.slices[0]].T)
+                hidden_stp = (
+                    self.J_STP
+                    * Aux
+                    @ (self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T)
+                )
                 hidden[:, self.slices[0]].add_(hidden_stp)
-                
+
         else:
             hidden = rates @ self.Wab_T
-            
+
             # update stp variables
             if self.IF_STP:
                 Aux = self.stp(rates[:, self.slices[0]])  # Aux is now u * x * rates
@@ -226,7 +229,7 @@ class Network(nn.Module):
             hidden = rates[:, self.slices[0]] @ self.Wab_T[self.slices[0]]
             if self.IF_STP:
                 hidden[:, self.slices[0]].add_(hidden_stp)
-            
+
             rec_input[1] = (
                 rec_input[1] * self.EXP_DT_TAU_NMDA
                 + self.R_NMDA * hidden * self.DT_TAU_NMDA

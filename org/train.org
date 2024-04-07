@@ -113,8 +113,8 @@
 
 #+begin_src ipython
   def run_optim(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100, penalty=None, lbd=1):
-      # scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
-      scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.1, verbose=True)
+      scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+      # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.1, verbose=True)
       # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 
       device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -310,7 +310,7 @@
 * Train RNN
 ** Parameters
 
-#+Begin_src ipython
+#+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
   conf_name = "config_train.yml"
 #+end_src
@@ -337,23 +337,22 @@ for name, param in model.named_parameters():
 : V torch.Size([1000, 2])
 : lr_kappa torch.Size([1])
 : linear.weight torch.Size([1, 800])
-: linear.bias torch.Size([1])
 
 ** Inputs and labels
 *** Samples
 
 #+begin_src ipython
-  model.LR_EVAL_WIN = 1
+  model.LR_EVAL_WIN = 2
   model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
 
-  model.DURATION = 2
+  model.DURATION = 3
   model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-  model.N_BATCH = 32
+  model.N_BATCH = 64
 
   model.I0[0] = 1
   model.I0[1] = 0 
@@ -370,7 +369,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-: torch.Size([64, 310, 1000])
+: torch.Size([128, 82, 1000])
 
 #+begin_src ipython
   labels_A = torch.zeros((model.N_BATCH, model.lr_eval_win))
@@ -381,29 +380,140 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-: labels torch.Size([64, 10])
+: labels torch.Size([128, 20])
 
 #+begin_src ipython
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-  batch_size = 16
+  batch_size = 32
   train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
-  
-  learning_rate = 0.1
+
+  learning_rate = 0.05
 
   # CosineLoss, BCELoss, BCEWithLogitLoss
   criterion = nn.BCEWithLogitsLoss()
 
   # SGD, Adam, AdamW
-  optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+  optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
   num_epochs = 100
   loss, val_loss = run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)
 #+End_src
 
 #+RESULTS:
-: Epoch 1/100, Training Loss: 0.0000, Validation Loss: 0.0000
-: Stopping training as loss has fallen below the threshold: 0.0
+#+begin_example
+  Epoch 1/100, Training Loss: 97.5130, Validation Loss: 75.0575
+  Epoch 2/100, Training Loss: 44.0095, Validation Loss: 0.0000
+  Epoch 3/100, Training Loss: 6.4587, Validation Loss: 33.5080
+  Epoch 4/100, Training Loss: 21.7898, Validation Loss: 37.9368
+  Epoch 5/100, Training Loss: 1.0982, Validation Loss: 0.2403
+  Epoch 6/100, Training Loss: 0.0540, Validation Loss: 0.2973
+  Epoch 7/100, Training Loss: 3.4054, Validation Loss: 8.1161
+  Epoch 8/100, Training Loss: 1.4501, Validation Loss: 0.3311
+  Epoch 9/100, Training Loss: 1.4816, Validation Loss: 4.7944
+  Epoch 10/100, Training Loss: 2.7011, Validation Loss: 3.6679
+  Epoch 11/100, Training Loss: 0.7142, Validation Loss: 0.6252
+  Epoch 12/100, Training Loss: 0.9878, Validation Loss: 4.3385
+  Epoch 13/100, Training Loss: 1.0522, Validation Loss: 1.3159
+  Epoch 14/100, Training Loss: 1.1502, Validation Loss: 1.4592
+  Epoch 15/100, Training Loss: 0.7816, Validation Loss: 1.9939
+  Epoch 16/100, Training Loss: 0.8735, Validation Loss: 2.4005
+  Epoch 17/100, Training Loss: 1.1141, Validation Loss: 2.3019
+  Epoch 18/100, Training Loss: 0.9200, Validation Loss: 1.7877
+  Epoch 19/100, Training Loss: 0.9660, Validation Loss: 1.4648
+  Epoch 20/100, Training Loss: 1.0854, Validation Loss: 1.5743
+  Epoch 21/100, Training Loss: 0.5191, Validation Loss: 1.9460
+  Epoch 22/100, Training Loss: 1.3783, Validation Loss: 2.1762
+  Epoch 23/100, Training Loss: 0.7553, Validation Loss: 1.8467
+  Epoch 24/100, Training Loss: 0.9585, Validation Loss: 1.6009
+  Epoch 25/100, Training Loss: 0.6043, Validation Loss: 1.5995
+  Epoch 26/100, Training Loss: 0.5311, Validation Loss: 1.6252
+  Epoch 27/100, Training Loss: 0.4494, Validation Loss: 1.6624
+  Epoch 28/100, Training Loss: 0.5646, Validation Loss: 1.6954
+  Epoch 29/100, Training Loss: 0.8846, Validation Loss: 1.7390
+  Epoch 30/100, Training Loss: 0.4979, Validation Loss: 1.7603
+  Epoch 31/100, Training Loss: 0.7085, Validation Loss: 1.7851
+  Epoch 32/100, Training Loss: 0.7001, Validation Loss: 1.8053
+  Epoch 33/100, Training Loss: 0.5461, Validation Loss: 1.8317
+  Epoch 34/100, Training Loss: 0.4781, Validation Loss: 1.8320
+  Epoch 35/100, Training Loss: 0.9714, Validation Loss: 1.8508
+  Epoch 36/100, Training Loss: 0.4869, Validation Loss: 1.8540
+  Epoch 37/100, Training Loss: 0.7527, Validation Loss: 1.8574
+  Epoch 38/100, Training Loss: 0.9428, Validation Loss: 1.8602
+  Epoch 39/100, Training Loss: 0.4260, Validation Loss: 1.8536
+  Epoch 40/100, Training Loss: 0.8147, Validation Loss: 1.8519
+  Epoch 41/100, Training Loss: 0.4914, Validation Loss: 1.8522
+  Epoch 42/100, Training Loss: 1.1317, Validation Loss: 1.8470
+  Epoch 43/100, Training Loss: 0.7489, Validation Loss: 1.8423
+  Epoch 44/100, Training Loss: 0.7111, Validation Loss: 1.8453
+  Epoch 45/100, Training Loss: 0.9307, Validation Loss: 1.8373
+  Epoch 46/100, Training Loss: 0.6744, Validation Loss: 1.8351
+  Epoch 47/100, Training Loss: 0.5338, Validation Loss: 1.8317
+  Epoch 48/100, Training Loss: 1.0553, Validation Loss: 1.8354
+  Epoch 49/100, Training Loss: 0.9236, Validation Loss: 1.8282
+  Epoch 50/100, Training Loss: 0.7273, Validation Loss: 1.8362
+  Epoch 51/100, Training Loss: 0.5885, Validation Loss: 1.8350
+  Epoch 52/100, Training Loss: 0.5214, Validation Loss: 1.8327
+  Epoch 53/100, Training Loss: 0.8664, Validation Loss: 1.8373
+  Epoch 54/100, Training Loss: 0.5352, Validation Loss: 1.8311
+  Epoch 55/100, Training Loss: 0.4273, Validation Loss: 1.8375
+  Epoch 56/100, Training Loss: 0.8500, Validation Loss: 1.8341
+  Epoch 57/100, Training Loss: 0.9241, Validation Loss: 1.8325
+  Epoch 58/100, Training Loss: 0.9465, Validation Loss: 1.8335
+  Epoch 59/100, Training Loss: 0.4676, Validation Loss: 1.8341
+  Epoch 60/100, Training Loss: 0.8975, Validation Loss: 1.8313
+  Epoch 61/100, Training Loss: 1.0579, Validation Loss: 1.8349
+  Epoch 62/100, Training Loss: 0.5886, Validation Loss: 1.8352
+  Epoch 63/100, Training Loss: 0.6373, Validation Loss: 1.8331
+  Epoch 64/100, Training Loss: 0.8911, Validation Loss: 1.8341
+  Epoch 65/100, Training Loss: 0.3355, Validation Loss: 1.8270
+  Epoch 66/100, Training Loss: 0.7612, Validation Loss: 1.8289
+  Epoch 67/100, Training Loss: 0.8732, Validation Loss: 1.8318
+  Epoch 68/100, Training Loss: 0.7285, Validation Loss: 1.8327
+  Epoch 69/100, Training Loss: 0.2412, Validation Loss: 1.8279
+  Epoch 70/100, Training Loss: 0.5981, Validation Loss: 1.8261
+  Epoch 71/100, Training Loss: 0.6850, Validation Loss: 1.8284
+  Epoch 72/100, Training Loss: 0.9526, Validation Loss: 1.8338
+  Epoch 73/100, Training Loss: 0.6095, Validation Loss: 1.8309
+  Epoch 74/100, Training Loss: 0.7735, Validation Loss: 1.8293
+  Epoch 75/100, Training Loss: 0.8635, Validation Loss: 1.8324
+  Epoch 76/100, Training Loss: 0.7069, Validation Loss: 1.8327
+  Epoch 77/100, Training Loss: 0.6885, Validation Loss: 1.8353
+  Epoch 78/100, Training Loss: 0.4976, Validation Loss: 1.8326
+  Epoch 79/100, Training Loss: 0.8235, Validation Loss: 1.8365
+  Epoch 80/100, Training Loss: 0.5573, Validation Loss: 1.8329
+  Epoch 81/100, Training Loss: 0.8530, Validation Loss: 1.8323
+  Epoch 82/100, Training Loss: 0.5394, Validation Loss: 1.8283
+  Epoch 83/100, Training Loss: 0.7916, Validation Loss: 1.8331
+  Epoch 84/100, Training Loss: 0.6611, Validation Loss: 1.8346
+  Epoch 85/100, Training Loss: 0.5101, Validation Loss: 1.8344
+  Epoch 86/100, Training Loss: 0.8461, Validation Loss: 1.8289
+  Epoch 87/100, Training Loss: 1.1005, Validation Loss: 1.8358
+  Epoch 88/100, Training Loss: 1.0481, Validation Loss: 1.8260
+  Epoch 89/100, Training Loss: 0.5243, Validation Loss: 1.8305
+  Epoch 90/100, Training Loss: 0.5545, Validation Loss: 1.8390
+  Epoch 91/100, Training Loss: 0.5398, Validation Loss: 1.8302
+  Epoch 92/100, Training Loss: 0.4864, Validation Loss: 1.8330
+  Epoch 93/100, Training Loss: 0.8770, Validation Loss: 1.8349
+  Epoch 94/100, Training Loss: 0.5777, Validation Loss: 1.8288
+  Epoch 95/100, Training Loss: 0.5048, Validation Loss: 1.8359
+  Epoch 96/100, Training Loss: 0.9871, Validation Loss: 1.8343
+  Epoch 97/100, Training Loss: 0.7557, Validation Loss: 1.8323
+  Epoch 98/100, Training Loss: 0.6046, Validation Loss: 1.8320
+  Epoch 99/100, Training Loss: 0.5672, Validation Loss: 1.8344
+  Epoch 100/100, Training Loss: 0.5056, Validation Loss: 1.8329
+#+end_example
+
+#+begin_src ipython
+  plt.plot(loss)
+  plt.plot(val_loss)
+  plt.xlabel('epochs')
+  plt.ylabel('Loss')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/c1cede62fade1f75965fbc5d22631d333f8c85ca.png]]
 
 *** Pairs
 
@@ -447,7 +557,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([128, 510, 1000])
+: ff_input torch.Size([128, 102, 1000])
 
 #+begin_src ipython
   labels_pair = torch.zeros((2 * model.N_BATCH, model.lr_eval_win))
@@ -465,16 +575,16 @@ for name, param in model.named_parameters():
 #+begin_src ipython
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-  batch_size = 16
+  batch_size = 32
   train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
 
-  learning_rate = 0.1
+  learning_rate = 0.05
 
   # CosineLoss, BCELoss, BCEWithLogitLoss
   criterion = nn.BCEWithLogitsLoss()
 
   # SGD, Adam, AdamW
-  optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+  optimizer = optim.Adam(model.parameters(), lr=learning_rate)
   
   num_epochs = 100
   loss, val_loss = run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)
@@ -482,267 +592,133 @@ for name, param in model.named_parameters():
 
 #+RESULTS:
 #+begin_example
-  Epoch 1/100, Training Loss: 22.4326, Validation Loss: 101.3236
-  Epoch 2/100, Training Loss: 13.0152, Validation Loss: 50.1532
-  Epoch 3/100, Training Loss: 4.2491, Validation Loss: 35.1398
-  Epoch 4/100, Training Loss: 1.4131, Validation Loss: 11.6105
-  Epoch 5/100, Training Loss: 6.7720, Validation Loss: 19.2887
-  Epoch 6/100, Training Loss: 1.3635, Validation Loss: 0.0215
-  Epoch 7/100, Training Loss: 1.7811, Validation Loss: 2.1809
-  Epoch 8/100, Training Loss: 0.5546, Validation Loss: 2.9941
-  Epoch 9/100, Training Loss: 1.8645, Validation Loss: 0.1194
-  Epoch 10/100, Training Loss: 0.4512, Validation Loss: 0.7402
-  Epoch 11/100, Training Loss: 0.6287, Validation Loss: 2.5092
-  Epoch 12/100, Training Loss: 0.5926, Validation Loss: 3.0424
-  Epoch 13/100, Training Loss: 1.1326, Validation Loss: 1.5745
-  Epoch 14/100, Training Loss: 1.1647, Validation Loss: 7.2160
-  Epoch 15/100, Training Loss: 0.6531, Validation Loss: 6.8422
-  Epoch 16/100, Training Loss: 5.9375, Validation Loss: 13.9993
-  Epoch 17/100, Training Loss: 2.0641, Validation Loss: 0.0795
-  Epoch 18/100, Training Loss: 1.1799, Validation Loss: 7.6009
-  Epoch 19/100, Training Loss: 0.1616, Validation Loss: 3.7751
-  Epoch 20/100, Training Loss: 1.2264, Validation Loss: 4.6385
-  Epoch 21/100, Training Loss: 0.5489, Validation Loss: 3.1907
-  Epoch 22/100, Training Loss: 0.7007, Validation Loss: 2.0512
-  Epoch 23/100, Training Loss: 0.5897, Validation Loss: 0.8355
-  Epoch 24/100, Training Loss: 0.7266, Validation Loss: 3.2307
-  Epoch 25/100, Training Loss: 0.9016, Validation Loss: 2.2034
-  Epoch 26/100, Training Loss: 0.4602, Validation Loss: 1.2979
-  Epoch 27/100, Training Loss: 0.6256, Validation Loss: 3.3534
-  Epoch 28/100, Training Loss: 0.4022, Validation Loss: 1.4662
-  Epoch 29/100, Training Loss: 0.3446, Validation Loss: 1.8240
-  Epoch 30/100, Training Loss: 0.2953, Validation Loss: 2.6008
-  Epoch 31/100, Training Loss: 0.6034, Validation Loss: 2.8075
-  Epoch 32/100, Training Loss: 0.4788, Validation Loss: 2.4823
-  Epoch 33/100, Training Loss: 0.4856, Validation Loss: 2.2139
-  Epoch 34/100, Training Loss: 0.3055, Validation Loss: 2.0917
-  Epoch 35/100, Training Loss: 0.4286, Validation Loss: 2.0847
-  Epoch 36/100, Training Loss: 0.5081, Validation Loss: 2.1786
-  Epoch 37/100, Training Loss: 0.3959, Validation Loss: 1.9946
-  Epoch 38/100, Training Loss: 0.5071, Validation Loss: 1.9311
-  Epoch 39/100, Training Loss: 0.7490, Validation Loss: 2.1309
-  Epoch 40/100, Training Loss: 0.4050, Validation Loss: 2.1391
-  Epoch 41/100, Training Loss: 0.4034, Validation Loss: 2.1360
-  Epoch 42/100, Training Loss: 0.4579, Validation Loss: 2.1382
-  Epoch 43/100, Training Loss: 0.4195, Validation Loss: 2.1370
-  Epoch 44/100, Training Loss: 0.4165, Validation Loss: 2.1255
-  Epoch 45/100, Training Loss: 0.4566, Validation Loss: 2.1302
-  Epoch 46/100, Training Loss: 0.6087, Validation Loss: 2.1258
-  Epoch 47/100, Training Loss: 0.5090, Validation Loss: 2.1030
-  Epoch 48/100, Training Loss: 0.4526, Validation Loss: 2.0862
-  Epoch 49/100, Training Loss: 0.5281, Validation Loss: 2.0749
-  Epoch 50/100, Training Loss: 0.4924, Validation Loss: 2.0708
-  Epoch 51/100, Training Loss: 0.4976, Validation Loss: 2.0716
-  Epoch 52/100, Training Loss: 0.4020, Validation Loss: 2.0721
-  Epoch 53/100, Training Loss: 0.4893, Validation Loss: 2.0744
-  Epoch 54/100, Training Loss: 0.5602, Validation Loss: 2.0751
-  Epoch 55/100, Training Loss: 0.2995, Validation Loss: 2.0750
-  Epoch 56/100, Training Loss: 0.5148, Validation Loss: 2.0765
-  Epoch 57/100, Training Loss: 0.5124, Validation Loss: 2.0776
-  Epoch 58/100, Training Loss: 0.3713, Validation Loss: 2.0785
-  Epoch 59/100, Training Loss: 0.4256, Validation Loss: 2.0785
-  Epoch 60/100, Training Loss: 0.3494, Validation Loss: 2.0795
-  Epoch 61/100, Training Loss: 0.3763, Validation Loss: 2.0785
-  Epoch 62/100, Training Loss: 0.2979, Validation Loss: 2.0786
-  Epoch 63/100, Training Loss: 0.6520, Validation Loss: 2.0789
-  Epoch 64/100, Training Loss: 0.4175, Validation Loss: 2.0788
-  Epoch 65/100, Training Loss: 0.2967, Validation Loss: 2.0790
-  Epoch 66/100, Training Loss: 0.4353, Validation Loss: 2.0791
-  Epoch 67/100, Training Loss: 0.5247, Validation Loss: 2.0793
-  Epoch 68/100, Training Loss: 0.4010, Validation Loss: 2.0794
-  Epoch 69/100, Training Loss: 0.2926, Validation Loss: 2.0796
-  Epoch 70/100, Training Loss: 0.4322, Validation Loss: 2.0797
-  Epoch 71/100, Training Loss: 0.4340, Validation Loss: 2.0798
-  Epoch 72/100, Training Loss: 0.6487, Validation Loss: 2.0800
-  Epoch 73/100, Training Loss: 0.3735, Validation Loss: 2.0800
-  Epoch 74/100, Training Loss: 0.3880, Validation Loss: 2.0801
-  Epoch 75/100, Training Loss: 0.3318, Validation Loss: 2.0801
-  Epoch 76/100, Training Loss: 0.3779, Validation Loss: 2.0801
-  Epoch 77/100, Training Loss: 0.6139, Validation Loss: 2.0801
-  Epoch 78/100, Training Loss: 0.4881, Validation Loss: 2.0801
-  Epoch 79/100, Training Loss: 0.6006, Validation Loss: 2.0801
-  Epoch 80/100, Training Loss: 0.2923, Validation Loss: 2.0801
-  Epoch 81/100, Training Loss: 0.4081, Validation Loss: 2.0801
-  Epoch 82/100, Training Loss: 0.5209, Validation Loss: 2.0801
-  Epoch 83/100, Training Loss: 0.5288, Validation Loss: 2.0801
-  Epoch 84/100, Training Loss: 0.4223, Validation Loss: 2.0801
-  Epoch 85/100, Training Loss: 0.6857, Validation Loss: 2.0801
-  Epoch 86/100, Training Loss: 0.3398, Validation Loss: 2.0801
-  Epoch 87/100, Training Loss: 0.4975, Validation Loss: 2.0801
-  Epoch 88/100, Training Loss: 0.8143, Validation Loss: 2.0801
-  Epoch 89/100, Training Loss: 0.6155, Validation Loss: 2.0801
-  Epoch 90/100, Training Loss: 0.3560, Validation Loss: 2.0801
-  Epoch 91/100, Training Loss: 0.4246, Validation Loss: 2.0801
-  Epoch 92/100, Training Loss: 0.4264, Validation Loss: 2.0801
-  Epoch 93/100, Training Loss: 0.4429, Validation Loss: 2.0801
-  Epoch 94/100, Training Loss: 0.5240, Validation Loss: 2.0801
-  Epoch 95/100, Training Loss: 0.6356, Validation Loss: 2.0801
-  Epoch 96/100, Training Loss: 0.6166, Validation Loss: 2.0801
-  Epoch 97/100, Training Loss: 0.5022, Validation Loss: 2.0801
-  Epoch 98/100, Training Loss: 0.5956, Validation Loss: 2.0801
-  Epoch 99/100, Training Loss: 0.4927, Validation Loss: 2.0801
-  Epoch 100/100, Training Loss: 0.3684, Validation Loss: 2.0801
+  Epoch 1/100, Training Loss: 2.5802, Validation Loss: 80.1503
+  Epoch 2/100, Training Loss: 7.8107, Validation Loss: 69.1333
+  Epoch 3/100, Training Loss: 9.7015, Validation Loss: 43.6789
+  Epoch 4/100, Training Loss: 10.2445, Validation Loss: 53.0140
+  Epoch 5/100, Training Loss: 4.9829, Validation Loss: 15.2225
+  Epoch 6/100, Training Loss: 5.6433, Validation Loss: 5.8736
+  Epoch 7/100, Training Loss: 2.9586, Validation Loss: 8.5594
+  Epoch 8/100, Training Loss: 2.5856, Validation Loss: 0.3613
+  Epoch 9/100, Training Loss: 1.0415, Validation Loss: 18.4963
+  Epoch 10/100, Training Loss: 0.7971, Validation Loss: 21.3101
+  Epoch 11/100, Training Loss: 0.2413, Validation Loss: 20.1261
+  Epoch 12/100, Training Loss: 0.2516, Validation Loss: 17.1674
+  Epoch 13/100, Training Loss: 0.7220, Validation Loss: 4.8998
+  Epoch 14/100, Training Loss: 0.7800, Validation Loss: 6.9729
+  Epoch 15/100, Training Loss: 0.4338, Validation Loss: 3.5687
+  Epoch 16/100, Training Loss: 0.6099, Validation Loss: 5.1015
+  Epoch 17/100, Training Loss: 0.5226, Validation Loss: 7.2863
+  Epoch 18/100, Training Loss: 0.9419, Validation Loss: 9.0418
+  Epoch 19/100, Training Loss: 0.7249, Validation Loss: 2.9465
+  Epoch 20/100, Training Loss: 0.9206, Validation Loss: 3.3137
+  Epoch 21/100, Training Loss: 0.2463, Validation Loss: 5.0058
+  Epoch 22/100, Training Loss: 0.9027, Validation Loss: 6.2081
+  Epoch 23/100, Training Loss: 0.3802, Validation Loss: 6.0394
+  Epoch 24/100, Training Loss: 0.5073, Validation Loss: 5.4703
+  Epoch 25/100, Training Loss: 0.3640, Validation Loss: 5.2421
+  Epoch 26/100, Training Loss: 0.2189, Validation Loss: 5.4003
+  Epoch 27/100, Training Loss: 0.3569, Validation Loss: 5.5447
+  Epoch 28/100, Training Loss: 0.2038, Validation Loss: 5.6830
+  Epoch 29/100, Training Loss: 0.4947, Validation Loss: 5.4335
+  Epoch 30/100, Training Loss: 0.2473, Validation Loss: 4.9561
+  Epoch 31/100, Training Loss: 0.2920, Validation Loss: 4.9787
+  Epoch 32/100, Training Loss: 0.3916, Validation Loss: 4.9999
+  Epoch 33/100, Training Loss: 0.3838, Validation Loss: 5.0259
+  Epoch 34/100, Training Loss: 0.5256, Validation Loss: 5.0830
+  Epoch 35/100, Training Loss: 0.3948, Validation Loss: 5.1200
+  Epoch 36/100, Training Loss: 0.1996, Validation Loss: 5.1331
+  Epoch 37/100, Training Loss: 0.1909, Validation Loss: 5.1583
+  Epoch 38/100, Training Loss: 0.3810, Validation Loss: 5.1760
+  Epoch 39/100, Training Loss: 0.2505, Validation Loss: 5.1540
+  Epoch 40/100, Training Loss: 0.5505, Validation Loss: 5.1259
+  Epoch 41/100, Training Loss: 0.6509, Validation Loss: 5.0916
+  Epoch 42/100, Training Loss: 0.4387, Validation Loss: 5.0885
+  Epoch 43/100, Training Loss: 0.5421, Validation Loss: 5.0892
+  Epoch 44/100, Training Loss: 0.1832, Validation Loss: 5.0830
+  Epoch 45/100, Training Loss: 0.6178, Validation Loss: 5.0846
+  Epoch 46/100, Training Loss: 0.2570, Validation Loss: 5.0802
+  Epoch 47/100, Training Loss: 0.3158, Validation Loss: 5.0749
+  Epoch 48/100, Training Loss: 0.2662, Validation Loss: 5.0709
+  Epoch 49/100, Training Loss: 0.3737, Validation Loss: 5.0703
+  Epoch 50/100, Training Loss: 0.3539, Validation Loss: 5.0812
+  Epoch 51/100, Training Loss: 0.4402, Validation Loss: 5.0841
+  Epoch 52/100, Training Loss: 0.5032, Validation Loss: 5.0904
+  Epoch 53/100, Training Loss: 0.2284, Validation Loss: 5.0837
+  Epoch 54/100, Training Loss: 0.2862, Validation Loss: 5.0869
+  Epoch 55/100, Training Loss: 0.3713, Validation Loss: 5.0870
+  Epoch 56/100, Training Loss: 0.2048, Validation Loss: 5.0865
+  Epoch 57/100, Training Loss: 0.2163, Validation Loss: 5.0872
+  Epoch 58/100, Training Loss: 0.2531, Validation Loss: 5.0906
+  Epoch 59/100, Training Loss: 0.3063, Validation Loss: 5.0888
+  Epoch 60/100, Training Loss: 0.2845, Validation Loss: 5.0887
+  Epoch 61/100, Training Loss: 0.3161, Validation Loss: 5.0884
+  Epoch 62/100, Training Loss: 0.4563, Validation Loss: 5.0901
+  Epoch 63/100, Training Loss: 0.4170, Validation Loss: 5.0906
+  Epoch 64/100, Training Loss: 0.2673, Validation Loss: 5.0919
+  Epoch 65/100, Training Loss: 0.3730, Validation Loss: 5.0932
+  Epoch 66/100, Training Loss: 0.3264, Validation Loss: 5.0931
+  Epoch 67/100, Training Loss: 0.2079, Validation Loss: 5.0886
+  Epoch 68/100, Training Loss: 0.5881, Validation Loss: 5.0931
+  Epoch 69/100, Training Loss: 0.5774, Validation Loss: 5.0938
+  Epoch 70/100, Training Loss: 0.5023, Validation Loss: 5.0912
+  Epoch 71/100, Training Loss: 0.2867, Validation Loss: 5.0889
+  Epoch 72/100, Training Loss: 0.3650, Validation Loss: 5.0922
+  Epoch 73/100, Training Loss: 0.3014, Validation Loss: 5.0947
+  Epoch 74/100, Training Loss: 0.4035, Validation Loss: 5.0953
+  Epoch 75/100, Training Loss: 0.1987, Validation Loss: 5.0932
+  Epoch 76/100, Training Loss: 0.2490, Validation Loss: 5.0920
+  Epoch 77/100, Training Loss: 0.0913, Validation Loss: 5.0969
+  Epoch 78/100, Training Loss: 0.2121, Validation Loss: 5.0906
+  Epoch 79/100, Training Loss: 0.3351, Validation Loss: 5.0932
+  Epoch 80/100, Training Loss: 0.2238, Validation Loss: 5.0896
+  Epoch 81/100, Training Loss: 0.3651, Validation Loss: 5.0895
+  Epoch 82/100, Training Loss: 0.3113, Validation Loss: 5.0933
+  Epoch 83/100, Training Loss: 0.5586, Validation Loss: 5.0928
+  Epoch 84/100, Training Loss: 0.1734, Validation Loss: 5.0959
+  Epoch 85/100, Training Loss: 0.1751, Validation Loss: 5.0894
+  Epoch 86/100, Training Loss: 0.2355, Validation Loss: 5.0933
+  Epoch 87/100, Training Loss: 0.1991, Validation Loss: 5.0956
+  Epoch 88/100, Training Loss: 0.2711, Validation Loss: 5.0892
+  Epoch 89/100, Training Loss: 0.3770, Validation Loss: 5.0899
+  Epoch 90/100, Training Loss: 0.5681, Validation Loss: 5.0879
+  Epoch 91/100, Training Loss: 0.5121, Validation Loss: 5.0930
+  Epoch 92/100, Training Loss: 0.4834, Validation Loss: 5.0903
+  Epoch 93/100, Training Loss: 0.2199, Validation Loss: 5.0942
+  Epoch 94/100, Training Loss: 0.4171, Validation Loss: 5.0860
+  Epoch 95/100, Training Loss: 0.3148, Validation Loss: 5.0929
+  Epoch 96/100, Training Loss: 0.2730, Validation Loss: 5.0918
+  Epoch 97/100, Training Loss: 0.2172, Validation Loss: 5.0887
+  Epoch 98/100, Training Loss: 0.2137, Validation Loss: 5.0931
+  Epoch 99/100, Training Loss: 0.3493, Validation Loss: 5.0915
+  Epoch 100/100, Training Loss: 0.3234, Validation Loss: 5.0888
 #+end_example
 
-*** Pairs
-
 #+begin_src ipython
-  model.LR_EVAL_WIN = 1
-  model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
-
-  model.DURATION = 5
-  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  model.N_BATCH = 32
-
-  model.I0[0] = 1
-  model.I0[1] = 1 
-
-  AC_pair = model.init_ff_input()
-
-  model.I0[0] = 1
-  model.I0[1] = -1
-
-  AD_pair = model.init_ff_input()
-
-  # ff_input = torch.cat((AC_pair, AD_pair))
-
-  model.I0[0] = -1
-  model.I0[1] = 1
-
-  BC_pair = model.init_ff_input()
-
-  model.I0[0] = -1
-  model.I0[1] = -1
-  
-  BD_pair = model.init_ff_input()
-
-  ff_input = torch.cat((AC_pair, BD_pair, AD_pair, BC_pair))
-  print('ff_input', ff_input.shape)
-#+end_src
-
-#+RESULTS:
-: ff_input torch.Size([128, 610, 1000])
-
-#+begin_src ipython
-  labels_pair = torch.zeros((2 * model.N_BATCH, model.lr_eval_win))
-  labels_unpair = torch.ones((2 * model.N_BATCH, model.lr_eval_win))
-  
-  labels = torch.cat((labels_pair, labels_unpair))
-  print('labels', labels.shape)
-#+end_src
-
-#+RESULTS:
-: labels torch.Size([128, 10])
-
-#+RESULTS:
-
-
-#+begin_src ipython
-  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-  batch_size = 16
-  train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
-
-  learning_rate = 0.1
-
-  # CosineLoss, BCELoss, BCEWithLogitLoss
-  criterion = nn.BCEWithLogitsLoss()
-
-  # SGD, Adam, AdamW
-  optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
-  
-  num_epochs = 100
-  loss, val_loss = run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)
-#+End_src
-
-#+RESULTS:
-: Epoch 1/100, Training Loss: 0.4366, Validation Loss: 0.8944
-: Epoch 2/100, Training Loss: nan, Validation Loss: nan
-: Stopping training as loss is NaN.
-
-#+begin_src ipython
-  plt.plot(loss[:10])
-  plt.plot(val_loss[:10])
+  plt.plot(loss)
+  plt.plot(val_loss)
+  plt.xlabel('epochs')
+  plt.ylabel('Loss')
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/bf9b9bd6dfd67fa030d415c389dceb5e0845b1c0.png]]
+[[file:./.ob-jupyter/b77df341ba40c82ed23b8d7f69855862016ba983.png]]
 
 #+begin_src ipython
-
+  Wij = model.Wab_T.clone()
 #+end_src
 
 #+RESULTS:
-
-* Results
-** Connectivity
-
-#+begin_src ipython
-  # ksi = model.U.T
-  ksi = torch.vstack((model.U.T, model.V.T))
-  print(ksi.shape)
-
-  # print('kappa', model.lr_kappa.cpu().detach())
-
-  angle = torch.arccos(nn.CosineSimilarity(dim=0)(ksi[0], ksi[1])) * 180 / torch.pi
-  print('angle ksi1 vs ksi2', angle.cpu().detach())
-
-  var = torch.var(ksi, axis=-1)
-  print('variances', var.cpu().detach())
-#+end_src
-
-#+RESULTS:
-: torch.Size([4, 1000])
-: angle ksi1 vs ksi2 tensor(11.2796)
-: variances tensor([0.4859, 0.4262, 0.3697, 0.2291])
-
-#+begin_src ipython
-  lr = (1.0 + model.U @ model.V.T)
-  weights = model.Wab_T * lr
-  weights = weights.cpu().detach().numpy()
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython  
-  plot_con(weights)
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/636fea7187f77579d8c58b07e7435bd2bd7a0d31.png]]
-
-#+begin_src ipython
-  readout = model.linear.weight.data[0]
-  print(readout.shape)
-#+end_src
-
-#+RESULTS:
-: torch.Size([800])
-
-#+begin_src ipython
-  read0 = nn.CosineSimilarity(dim=0)(model.U[:model.Na[0],0], readout).cpu().detach().numpy()
-  read1 = nn.CosineSimilarity(dim=0)(model.U[:model.Na[0],1], readout).cpu().detach().numpy()
-
-  print('angle readout vs ksis', np.arccos(read0)*180/np.pi, np.arccos(read1)*180/np.pi)
-#+end_src
-
-#+RESULTS:
-: angle readout vs ksis 84.4116646689788 99.01975907710025
 
 #+begin_src ipython
   model.eval()
 
-  # lr = (1.0 + model.lr_mask * (model.U @ model.V.T))  
+  # lr = (1.0 + model.lr_mask * (model.U @ model.V.T))
   # model.Wab_T = model.Wab_T * lr.T
   # lr = model.lr_mask * (model.U @ model.V.T) / (1.0 * model.Na[0])
-  lr = model.lr_kappa * model.U @ model.V.T / (1.0 * model.Na[0])
-  model.Wab_T = model.Wab_T + lr.T
+  lr = model.lr_kappa * model.lr_mask * (model.U @ model.V.T) / (1.0 * model.Na[0])
+  model.Wab_T = Wij + lr.T
 
   model.N_BATCH = 1
   model.VERBOSE=1
@@ -751,7 +727,7 @@ for name, param in model.named_parameters():
 
 #+RESULTS:
 
-** Evaluation
+* Results
 
 #+begin_src ipython
   model.N_BATCH = 1
@@ -765,7 +741,7 @@ for name, param in model.named_parameters():
   model.N_BATCH = 1
 
   model.I0[0] = 1
-  model.I0[1] = 1 
+  model.I0[1] = 1
 
   AC_pair = model.init_ff_input()
 
@@ -783,7 +759,7 @@ for name, param in model.named_parameters():
 
   model.I0[0] = -1
   model.I0[1] = -1
-  
+
   BD_pair = model.init_ff_input()
 
   ff_input = torch.cat((AC_pair, BD_pair, AD_pair, BC_pair))
@@ -791,7 +767,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([4, 610, 1000])
+: ff_input torch.Size([4, 122, 1000])
 
 #+begin_src ipython
   rates = model.forward(ff_input=ff_input, RET_FF=1).cpu().detach().numpy()
@@ -800,57 +776,57 @@ for name, param in model.named_parameters():
 
 #+RESULTS:
 #+begin_example
-  times (s) 0.0 rates (Hz) [0.15, 2.12]
-  times (s) 0.08 rates (Hz) [0.16, 2.23]
-  times (s) 0.16 rates (Hz) [0.18, 2.11]
-  times (s) 0.25 rates (Hz) [0.2, 2.2]
-  times (s) 0.33 rates (Hz) [0.17, 2.11]
-  times (s) 0.41 rates (Hz) [0.17, 2.21]
-  times (s) 0.49 rates (Hz) [0.18, 2.18]
-  times (s) 0.57 rates (Hz) [0.18, 2.21]
-  times (s) 0.66 rates (Hz) [0.21, 2.23]
-  times (s) 0.74 rates (Hz) [0.2, 2.19]
-  times (s) 0.82 rates (Hz) [0.33, 2.13]
-  times (s) 0.9 rates (Hz) [0.24, 2.27]
-  times (s) 0.98 rates (Hz) [0.28, 2.41]
-  times (s) 1.07 rates (Hz) [0.31, 2.33]
-  times (s) 1.15 rates (Hz) [0.29, 2.27]
-  times (s) 1.23 rates (Hz) [0.25, 2.33]
-  times (s) 1.31 rates (Hz) [0.28, 2.34]
-  times (s) 1.39 rates (Hz) [0.27, 2.37]
-  times (s) 1.48 rates (Hz) [0.28, 2.35]
-  times (s) 1.56 rates (Hz) [0.24, 2.48]
-  times (s) 1.64 rates (Hz) [0.17, 2.38]
-  times (s) 1.72 rates (Hz) [0.17, 2.24]
-  times (s) 1.8 rates (Hz) [0.16, 2.13]
-  times (s) 1.89 rates (Hz) [0.15, 2.25]
-  times (s) 1.97 rates (Hz) [0.13, 2.24]
-  times (s) 2.05 rates (Hz) [0.15, 2.26]
-  times (s) 2.13 rates (Hz) [0.16, 2.19]
-  times (s) 2.21 rates (Hz) [0.12, 2.07]
-  times (s) 2.3 rates (Hz) [0.12, 2.21]
-  times (s) 2.38 rates (Hz) [0.17, 2.26]
-  times (s) 2.46 rates (Hz) [0.25, 2.14]
-  times (s) 2.54 rates (Hz) [0.23, 2.44]
-  times (s) 2.62 rates (Hz) [0.22, 2.48]
-  times (s) 2.7 rates (Hz) [0.24, 2.45]
-  times (s) 2.79 rates (Hz) [0.21, 2.42]
-  times (s) 2.87 rates (Hz) [0.23, 2.41]
-  times (s) 2.95 rates (Hz) [0.26, 2.37]
-  times (s) 3.03 rates (Hz) [0.28, 2.4]
-  times (s) 3.11 rates (Hz) [0.25, 2.41]
-  times (s) 3.2 rates (Hz) [0.23, 2.36]
-  times (s) 3.28 rates (Hz) [0.11, 2.44]
-  times (s) 3.36 rates (Hz) [0.19, 2.22]
-  times (s) 3.44 rates (Hz) [0.2, 2.1]
-  times (s) 3.52 rates (Hz) [0.16, 2.2]
-  times (s) 3.61 rates (Hz) [0.13, 2.19]
-  times (s) 3.69 rates (Hz) [0.17, 2.16]
-  times (s) 3.77 rates (Hz) [0.14, 2.18]
-  times (s) 3.85 rates (Hz) [0.13, 2.21]
-  times (s) 3.93 rates (Hz) [0.15, 2.14]
-  times (s) 4.02 rates (Hz) [0.13, 2.12]
-  times (s) 4.1 rates (Hz) [0.15, 2.11]
+  times (s) 0.0 rates (Hz) [0.69, 2.32]
+  times (s) 0.08 rates (Hz) [0.61, 2.03]
+  times (s) 0.16 rates (Hz) [0.6, 2.27]
+  times (s) 0.25 rates (Hz) [0.54, 2.15]
+  times (s) 0.33 rates (Hz) [0.6, 2.16]
+  times (s) 0.41 rates (Hz) [0.57, 2.0]
+  times (s) 0.49 rates (Hz) [0.57, 2.06]
+  times (s) 0.57 rates (Hz) [0.62, 2.04]
+  times (s) 0.66 rates (Hz) [0.61, 1.93]
+  times (s) 0.74 rates (Hz) [0.64, 1.99]
+  times (s) 0.82 rates (Hz) [0.71, 1.96]
+  times (s) 0.9 rates (Hz) [0.75, 2.0]
+  times (s) 0.98 rates (Hz) [0.72, 1.96]
+  times (s) 1.07 rates (Hz) [0.74, 1.99]
+  times (s) 1.15 rates (Hz) [0.75, 2.13]
+  times (s) 1.23 rates (Hz) [0.74, 2.09]
+  times (s) 1.31 rates (Hz) [0.7, 1.98]
+  times (s) 1.39 rates (Hz) [0.73, 2.01]
+  times (s) 1.48 rates (Hz) [0.73, 1.86]
+  times (s) 1.56 rates (Hz) [0.73, 2.03]
+  times (s) 1.64 rates (Hz) [0.57, 1.94]
+  times (s) 1.72 rates (Hz) [0.52, 1.95]
+  times (s) 1.8 rates (Hz) [0.52, 1.98]
+  times (s) 1.89 rates (Hz) [0.51, 1.95]
+  times (s) 1.97 rates (Hz) [0.56, 1.95]
+  times (s) 2.05 rates (Hz) [0.58, 1.9]
+  times (s) 2.13 rates (Hz) [0.57, 1.91]
+  times (s) 2.21 rates (Hz) [0.6, 1.79]
+  times (s) 2.3 rates (Hz) [0.64, 1.91]
+  times (s) 2.38 rates (Hz) [0.59, 1.84]
+  times (s) 2.46 rates (Hz) [0.73, 1.86]
+  times (s) 2.54 rates (Hz) [0.68, 2.0]
+  times (s) 2.62 rates (Hz) [0.73, 1.94]
+  times (s) 2.7 rates (Hz) [0.74, 1.99]
+  times (s) 2.79 rates (Hz) [0.71, 1.91]
+  times (s) 2.87 rates (Hz) [0.69, 1.91]
+  times (s) 2.95 rates (Hz) [0.66, 1.95]
+  times (s) 3.03 rates (Hz) [0.65, 1.94]
+  times (s) 3.11 rates (Hz) [0.65, 1.85]
+  times (s) 3.2 rates (Hz) [0.7, 1.86]
+  times (s) 3.28 rates (Hz) [0.56, 1.92]
+  times (s) 3.36 rates (Hz) [0.59, 1.84]
+  times (s) 3.44 rates (Hz) [0.59, 2.0]
+  times (s) 3.52 rates (Hz) [0.55, 2.04]
+  times (s) 3.61 rates (Hz) [0.56, 1.95]
+  times (s) 3.69 rates (Hz) [0.59, 1.94]
+  times (s) 3.77 rates (Hz) [0.64, 1.83]
+  times (s) 3.85 rates (Hz) [0.6, 2.02]
+  times (s) 3.93 rates (Hz) [0.58, 1.91]
+  times (s) 4.02 rates (Hz) [0.59, 2.0]
+  times (s) 4.1 rates (Hz) [0.62, 1.91]
   (4, 51, 800)
 #+end_example
 
@@ -860,7 +836,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/0925b1fa7d3021633a47f72b4ebc5252246bdebd.png]]
+[[file:./.ob-jupyter/5cddac4c5e75a1c619ecfe1d568343964c338aa4.png]]
 
 #+begin_src ipython
   r_max = 1.25 * np.max(rates)
@@ -873,7 +849,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/a115f7e9af9a398ca58229ab4da0d8f37038b227.png]]
+[[file:./.ob-jupyter/92da07736ff93f82f0cd6db28ee155ac6452fda4.png]]
 
 #+begin_src ipython
   idx = get_idx(model, 2)
@@ -898,26 +874,26 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/d17aa5ea04eae13ed0d796aa9dcf7d870463af43.png]]
+[[file:./.ob-jupyter/0025cf3f9f484fd143768214a6bc28d7d7b3f5a8.png]]
 
 #+begin_src ipython
-  y_pred = model.linear.weight.data.cpu().detach().numpy()[0]
-  print(y_pred.shape)
-
-  overlap = (rates @ y_pred) / rates.shape[-1]
+  readout = model.linear.weight.data.cpu().detach().numpy()[0]
+  overlap = (rates @ readout) / rates.shape[-1]
   print(overlap.shape)
-  plt.plot(overlap.T)
+
+  plt.plot(overlap.T[..., :2], label='pair')
+  plt.plot(overlap.T[..., 2:], '--', label='unpair')
+  plt.legend(fontsize=10)
   plt.xlabel('Step')
   plt.ylabel('Overlap')
-  
+
   plt.show()
 #+end_src
 
 #+RESULTS:
 :RESULTS:
-: (800,)
 : (4, 51)
-[[file:./.ob-jupyter/945aa0ae8f97b63ec8814ccf57a14a1f6b552cb1.png]]
+[[file:./.ob-jupyter/e0e08ec6964f2e027972306094b674e82f6c81af.png]]
 :END:
 
 #+begin_src ipython
@@ -951,7 +927,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/0d9e4a25c972d811068b93c835510b428e9d321c.png]]
+[[file:./.ob-jupyter/f50152fdc6901fd152ab2c5b0426971374febbe3.png]]
 
 #+begin_src ipython
 

@@ -34,11 +34,11 @@ def initLR(model):
     model.lr_mask[model.slices[0], model.slices[0]] = 1.0
     
     # Linear readout for supervised learning
-    model.linear = nn.Linear(model.Na[0], 1, device=model.device, dtype=model.FLOAT)
+    model.linear = nn.Linear(model.Na[0], 1, device=model.device, dtype=model.FLOAT, bias=False)
     # for param in model.linear.parameters():
     #     param.requires_grad = False
     
-    model.lr_kappa = nn.Parameter(5 * torch.rand(1, dtype=model.FLOAT, device=model.device))
+    model.lr_kappa = nn.Parameter(torch.rand(1, dtype=model.FLOAT, device=model.device) * 0.01)
     
     # Window where to evaluate loss
     model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
