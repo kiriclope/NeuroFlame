@@ -179,43 +179,17 @@ class Network(nn.Module):
         self.VAR_FF = self.VAR_FF.unsqueeze(0)  # add batch dim
         self.VAR_FF = self.VAR_FF.unsqueeze(-1)  # add neural dim
 
-    def update_dynamics(self, rates, ff_input, rec_input):
+    def update_dynamics(self, rates, ff_input, rec_input, Wab_T):
         """Updates the dynamics of the model at each timestep"""
 
         # update hidden state
-        if self.LR_TRAIN:
-            hidden = rates @ self.Wab_T
+        hidden = rates @ Wab_T
 
-            if self.CON_TYPE == 'all2all':
-                self.lr = self.lr_kappa * (self.U @ self.V.T)
-                # if self.LR_MASK:
-                self.lr = self.lr_mask * self.lr
-                self.lr = self.lr / (1.0 * self.Na[0])
-                # self.lr = self.lr.clamp(min=-self.Wab_T[0, 0])
-
-            if self.CON_TYPE == 'sparse':
-                self.lr = self.lr_mask * (self.U @ self.V.T) / torch.sqrt(self.Ka[0])
-
-            # update stp variables
-            if self.IF_STP:
-                Aux = self.stp(rates[:, self.slices[0]])  # Aux is now u * x * rates
-                hidden_stp = (
-                    self.J_STP
-                    * Aux
-                    @ (self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T)
-                )
-                hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
-            else:
-                hidden = hidden + rates @ self.lr.T
-
-        else:
-            hidden = rates @ self.Wab_T
-
-            # update stp variables
-            if self.IF_STP:
-                Aux = self.stp(rates[:, self.slices[0]])  # Aux is now u * x * rates
-                hidden_stp = self.J_STP * Aux @ self.W_stp_T
-                hidden[:, self.slices[0]].add_(hidden_stp)
+        # update stp variables
+        if self.IF_STP:
+            Aux = self.stp(rates[:, self.slices[0]])  # Aux is now u * x * rates
+            hidden_stp = self.J_STP * Aux @ self.W_stp_T
+            hidden[:, self.slices[0]].add_(hidden_stp)
 
         # update batched EtoE
         if self.IF_BATCH_J:
@@ -233,11 +207,7 @@ class Network(nn.Module):
         net_input = ff_input + rec_input[0]
 
         if self.IF_NMDA:
-            if self.LR_TRAIN:
-                hidden = rates[:, self.slices[0]] @ self.Wab_T[self.slices[0]]
-            else:
-                hidden = rates[:, self.slices[0]] @ (self.Wab_T[self.slices[0]]
-                                                     + self.lr.T[self.slices[0]])
+            hidden = rates[:, self.slices[0]] @ Wab_T[self.slices[0]]
 
             if self.IF_STP:
                 hidden[:, self.slices[0]].add_(hidden_stp)
@@ -260,7 +230,7 @@ class Network(nn.Module):
         else:
             rates = non_linear
 
-        del hidden, net_input, non_linear
+        # del hidden, net_input, non_linear
 
         return rates, rec_input
 
@@ -292,6 +262,26 @@ class Network(nn.Module):
         if self.IF_BATCH_J or self.IF_STP:
             self.Wab_T[self.slices[0], self.slices[0]] = 0
 
+        # I moved this outside of the temporal loop
+        # The downside is that I need to pass Wab_T to update_dynamics
+        # not sure it is more efficient
+        if self.LR_TRAIN:
+            if self.CON_TYPE == 'sparse':
+                self.lr = self.lr_mask * (self.U @ self.V.T) / torch.sqrt(self.Ka[0])
+
+            if self.CON_TYPE == 'all2all':
+                self.lr = self.lr_kappa * (self.U @ self.V.T)
+                # if self.LR_MASK:
+                self.lr = self.lr_mask * self.lr
+                self.lr = self.lr / (1.0 * self.Na[0])
+
+            if self.IF_STP:
+                self.W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
+            else:
+                Wab_T = self.Wab_T + self.lr.T
+        else:
+            Wab_T = self.Wab_T
+
         # Moving average
         mv_rates, mv_ff = 0, 0
         rates_list, ff_list = [], []
@@ -302,15 +292,15 @@ class Network(nn.Module):
             if self.LIVE_FF_UPDATE:
                 ff_input, noise = live_ff_input(self, step, ff_input)
                 if self.RATE_NOISE:
-                    rates, rec_input = self.update_dynamics(rates, ff_input, rec_input)
+                    rates, rec_input = self.update_dynamics(rates, ff_input, rec_input, Wab_T)
                     rates = rates + noise
                 else:
                     rates, rec_input = self.update_dynamics(
-                        rates, ff_input + noise, rec_input
+                        rates, ff_input + noise, rec_input, Wab_T
                     )
             else:
                 rates, rec_input = self.update_dynamics(
-                    rates, ff_input[:, step], rec_input
+                    rates, ff_input[:, step], rec_input, Wab_T
                 )
 
             # update moving average
