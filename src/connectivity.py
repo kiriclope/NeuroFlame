@@ -36,9 +36,9 @@ class Connectivity:
                 mv_normal = MultivariateNormal(mean_, cov_)
                 self.ksi = mv_normal.sample((self.Nb,)).T
             else:
-                self.ksi = torch.randn(
-                    (1, self.Nb), device=self.device, dtype=self.dtype
-                )
+                self.ksi = torch.randn((1, self.Nb),
+                                       device=self.device,
+                                       dtype=self.dtype)
 
             del mean_
             del cov_

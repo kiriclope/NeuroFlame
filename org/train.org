@@ -32,12 +32,11 @@
 
   def split_data(X, Y, train_perc=0.8, batch_size=32):
 
-    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, train_size=train_perc, shuffle=True)
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y,
+                                                        train_size=train_perc,
+                                                        shuffle=True)
 
-    # print('X_train', X_train.shape, 'y_train', Y_train.shape)
     train_dataset = TensorDataset(X_train, Y_train)
-
-    # print('X_test', X_test.shape, 'y_test', Y_test.shape)
     val_dataset = TensorDataset(X_test, Y_test)
 
     # Create data loaders
@@ -107,7 +106,7 @@
 #+RESULTS:
 
 #+begin_src ipython
-  def run_optim(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100, penalty=None, lbd=1):
+  def run_optim(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100, penalty=None, lbd=1, thresh=.005):
       scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
       # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.1, verbose=True)
       # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
@@ -123,14 +122,14 @@
           loss = train(train_loader, model, loss_fn, optimizer, penalty, lbd)
           val_loss = test(val_loader, model, loss_fn)
           scheduler.step(val_loss)
-          
+
           loss_list.append(loss.item())
           val_loss_list.append(val_loss)
-          
+
           # if epoch % int(num_epochs  / 10) == 0:
           print(f'Epoch {epoch+1}/{num_epochs}, Training Loss: {loss.item():.4f}, Validation Loss: {val_loss:.4f}')
-          
-          if val_loss < .01:
+
+          if val_loss < thresh:
               print(f'Stopping training as loss has fallen below the threshold: {loss}')
               break
           if torch.isnan(loss):
@@ -302,8 +301,7 @@
 
 #+RESULTS:
 
-* Train RNN
-** Parameters
+* Model
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroTorch"
@@ -311,8 +309,6 @@
 #+end_src
 
 #+RESULTS:
-
-** Model
 
 #+begin_src ipython
   start = perf_counter()
@@ -332,30 +328,34 @@
 : V torch.Size([1000, 2])
 : lr_kappa torch.Size([1])
 : linear.weight torch.Size([1, 800])
+: linear.bias torch.Size([1])
 
-** Inputs and labels
-*** Samples
+* Sample Classification
+** Training
 
 #+begin_src ipython
+  model.LR_TRAIN=1
   model.LR_EVAL_WIN = 2
   model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
 
-  model.DURATION = 4
+  model.DURATION = 3
   model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-  model.N_BATCH = 64
+  model.N_BATCH = 32
 
   model.I0[0] = 1
-  model.I0[1] = 0 
+  model.I0[1] = 0
+  model.I0[2] = 0
 
   A = model.init_ff_input()
 
   model.I0[0] = -1
-  model.I0[1] = 0 
+  model.I0[1] = 0
+  model.I0[2] = 0
 
   B = model.init_ff_input()
 
@@ -364,18 +364,18 @@
 #+end_src
 
 #+RESULTS:
-: torch.Size([128, 102, 1000])
+: torch.Size([64, 510, 1000])
 
 #+begin_src ipython
   labels_A = torch.zeros((model.N_BATCH, model.lr_eval_win))
   labels_B = torch.ones((model.N_BATCH, model.lr_eval_win))
-
   labels = torch.cat((labels_A, labels_B))
+
   print('labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: labels torch.Size([128, 20])
+: labels torch.Size([64, 20])
 
 #+begin_src ipython
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -386,195 +386,120 @@
   learning_rate = 0.1
 
   # CosineLoss, BCELoss, BCEWithLogitLoss
+  # criterion = nn.CrossEntropyLoss()
   criterion = nn.BCEWithLogitsLoss()
 
   # SGD, Adam, AdamW
-  optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+  optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
 
   num_epochs = 100
+  loss, val_loss = 0, 0
   loss, val_loss = run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)
 #+End_src
 
 #+RESULTS:
 #+begin_example
-  Epoch 1/100, Training Loss: 15.8145, Validation Loss: 39.1710
-  Epoch 2/100, Training Loss: 19.6949, Validation Loss: 35.1137
-  Epoch 3/100, Training Loss: 10.3240, Validation Loss: 16.1254
-  Epoch 4/100, Training Loss: 35.7143, Validation Loss: 25.0759
-  Epoch 5/100, Training Loss: 10.0523, Validation Loss: 3.1789
-  Epoch 6/100, Training Loss: 116.8968, Validation Loss: 208.2988
-  Epoch 7/100, Training Loss: 169.3265, Validation Loss: 208.3200
-  Epoch 8/100, Training Loss: 169.4493, Validation Loss: 208.3258
-  Epoch 9/100, Training Loss: 56.5937, Validation Loss: 208.3416
-  Epoch 10/100, Training Loss: 112.3678, Validation Loss: 208.2902
-  Epoch 11/100, Training Loss: 282.5267, Validation Loss: 208.3011
-  Epoch 12/100, Training Loss: 112.9933, Validation Loss: 208.2535
-  Epoch 13/100, Training Loss: 56.0481, Validation Loss: 208.2801
-  Epoch 14/100, Training Loss: 56.3740, Validation Loss: 208.3179
-  Epoch 15/100, Training Loss: 56.8036, Validation Loss: 208.3339
-  Epoch 16/100, Training Loss: 56.4487, Validation Loss: 208.3147
-  Epoch 17/100, Training Loss: 224.7774, Validation Loss: 208.2959
-  Epoch 18/100, Training Loss: 225.0953, Validation Loss: 208.2951
-  Epoch 19/100, Training Loss: 169.5541, Validation Loss: 208.3107
-  Epoch 20/100, Training Loss: 225.3250, Validation Loss: 208.3366
-  Epoch 21/100, Training Loss: 281.1100, Validation Loss: 208.3142
-  Epoch 22/100, Training Loss: 112.6607, Validation Loss: 208.3027
-  Epoch 23/100, Training Loss: 169.4249, Validation Loss: 208.3122
-  Epoch 24/100, Training Loss: 168.9536, Validation Loss: 208.3115
-  Epoch 25/100, Training Loss: 112.4559, Validation Loss: 208.3124
-  Epoch 26/100, Training Loss: 226.0262, Validation Loss: 208.3154
-  Epoch 27/100, Training Loss: 56.0934, Validation Loss: 208.3286
-  Epoch 28/100, Training Loss: 169.4482, Validation Loss: 208.3133
-  Epoch 29/100, Training Loss: 226.0609, Validation Loss: 208.2737
-  Epoch 30/100, Training Loss: 112.2878, Validation Loss: 208.3056
-  Epoch 31/100, Training Loss: 112.1774, Validation Loss: 208.2955
-  Epoch 32/100, Training Loss: 55.9166, Validation Loss: 208.3142
-  Epoch 33/100, Training Loss: 113.2429, Validation Loss: 208.3124
-  Epoch 34/100, Training Loss: 112.9353, Validation Loss: 208.2839
-  Epoch 35/100, Training Loss: 169.1869, Validation Loss: 208.2992
-  Epoch 36/100, Training Loss: 56.1610, Validation Loss: 208.2872
-  Epoch 37/100, Training Loss: 337.7059, Validation Loss: 208.2972
-  Epoch 38/100, Training Loss: 225.4681, Validation Loss: 208.3102
-  Epoch 39/100, Training Loss: 168.9689, Validation Loss: 208.3340
-  Epoch 40/100, Training Loss: 56.7713, Validation Loss: 208.2934
-  Epoch 41/100, Training Loss: 112.6225, Validation Loss: 208.3083
-  Epoch 42/100, Training Loss: 226.1861, Validation Loss: 208.3514
-  Epoch 43/100, Training Loss: 169.1750, Validation Loss: 208.3132
-  Epoch 44/100, Training Loss: 282.3967, Validation Loss: 208.2788
-  Epoch 45/100, Training Loss: 112.5171, Validation Loss: 208.3027
-  Epoch 46/100, Training Loss: 112.8672, Validation Loss: 208.3140
-  Epoch 47/100, Training Loss: 113.1681, Validation Loss: 208.3028
-  Epoch 48/100, Training Loss: 112.6964, Validation Loss: 208.3082
-  Epoch 49/100, Training Loss: 225.0575, Validation Loss: 208.2953
-  Epoch 50/100, Training Loss: 169.0673, Validation Loss: 208.2953
-  Epoch 51/100, Training Loss: 0.0000, Validation Loss: 208.2712
-  Epoch 52/100, Training Loss: 112.5925, Validation Loss: 208.2871
-  Epoch 53/100, Training Loss: 112.1732, Validation Loss: 208.2955
-  Epoch 54/100, Training Loss: 168.8758, Validation Loss: 208.3119
-  Epoch 55/100, Training Loss: 226.3405, Validation Loss: 208.3142
-  Epoch 56/100, Training Loss: 56.5355, Validation Loss: 208.3210
-  Epoch 57/100, Training Loss: 169.1030, Validation Loss: 208.2868
-  Epoch 58/100, Training Loss: 169.1894, Validation Loss: 208.2852
-  Epoch 59/100, Training Loss: 113.0486, Validation Loss: 208.3331
-  Epoch 60/100, Training Loss: 225.9544, Validation Loss: 208.3000
-  Epoch 61/100, Training Loss: 169.6761, Validation Loss: 208.3085
-  Epoch 62/100, Training Loss: 282.8058, Validation Loss: 208.3031
-  Epoch 63/100, Training Loss: 112.9425, Validation Loss: 208.3207
-  Epoch 64/100, Training Loss: 281.8671, Validation Loss: 208.2982
-  Epoch 65/100, Training Loss: 111.7222, Validation Loss: 208.2974
-  Epoch 66/100, Training Loss: 170.1992, Validation Loss: 208.3120
-  Epoch 67/100, Training Loss: 225.3090, Validation Loss: 208.3187
-  Epoch 68/100, Training Loss: 225.1110, Validation Loss: 208.2921
-  Epoch 69/100, Training Loss: 169.2903, Validation Loss: 208.3173
-  Epoch 70/100, Training Loss: 168.7098, Validation Loss: 208.3361
-  Epoch 71/100, Training Loss: 56.6220, Validation Loss: 208.3346
-  Epoch 72/100, Training Loss: 168.9085, Validation Loss: 208.3247
-  Epoch 73/100, Training Loss: 112.7999, Validation Loss: 208.3179
-  Epoch 74/100, Training Loss: 56.6473, Validation Loss: 208.3103
-  Epoch 75/100, Training Loss: 225.0506, Validation Loss: 208.3114
-  Epoch 76/100, Training Loss: 112.7629, Validation Loss: 208.2954
-  Epoch 77/100, Training Loss: 168.8432, Validation Loss: 208.3025
-  Epoch 78/100, Training Loss: 169.3451, Validation Loss: 208.3052
-  Epoch 79/100, Training Loss: 168.5117, Validation Loss: 208.3226
-  Epoch 80/100, Training Loss: 112.7537, Validation Loss: 208.3114
-  Epoch 81/100, Training Loss: 282.2416, Validation Loss: 208.3132
-  Epoch 82/100, Training Loss: 112.8089, Validation Loss: 208.3248
-  Epoch 83/100, Training Loss: 112.9964, Validation Loss: 208.2773
-  Epoch 84/100, Training Loss: 225.4107, Validation Loss: 208.2891
-  Epoch 85/100, Training Loss: 282.1740, Validation Loss: 208.3256
-  Epoch 86/100, Training Loss: 56.0928, Validation Loss: 208.2969
+  Epoch 1/100, Training Loss: 54.5551, Validation Loss: 16.3908
+  Epoch 2/100, Training Loss: 11.7804, Validation Loss: 4.7572
+  Epoch 3/100, Training Loss: 2.7478, Validation Loss: 6.2228
+  Epoch 4/100, Training Loss: 3.2182, Validation Loss: 1.4739
+  Epoch 5/100, Training Loss: 4.0449, Validation Loss: 0.3356
+  Epoch 6/100, Training Loss: 6.8605, Validation Loss: 0.9621
+  Epoch 7/100, Training Loss: 3.1775, Validation Loss: 2.8638
+  Epoch 8/100, Training Loss: 0.0135, Validation Loss: 7.2755
+  Epoch 9/100, Training Loss: 3.7822, Validation Loss: 0.6280
+  Epoch 10/100, Training Loss: 0.4930, Validation Loss: 1.6882
+  Epoch 11/100, Training Loss: 6.5850, Validation Loss: 0.2960
+  Epoch 12/100, Training Loss: 3.1128, Validation Loss: 2.2743
+  Epoch 13/100, Training Loss: 0.3038, Validation Loss: 2.7913
+  Epoch 14/100, Training Loss: 2.0203, Validation Loss: 0.6089
+  Epoch 15/100, Training Loss: 0.8978, Validation Loss: 0.9234
+  Epoch 16/100, Training Loss: 0.8257, Validation Loss: 4.2334
+  Epoch 17/100, Training Loss: 0.5494, Validation Loss: 0.7162
+  Epoch 18/100, Training Loss: 0.0007, Validation Loss: 0.5193
+  Epoch 19/100, Training Loss: 0.2107, Validation Loss: 0.2321
+  Epoch 20/100, Training Loss: 0.5025, Validation Loss: 0.5980
+  Epoch 21/100, Training Loss: 0.2728, Validation Loss: 1.2613
+  Epoch 22/100, Training Loss: 0.2298, Validation Loss: 0.3244
+  Epoch 23/100, Training Loss: 0.5271, Validation Loss: 1.1786
+  Epoch 24/100, Training Loss: 0.3881, Validation Loss: 0.2095
+  Epoch 25/100, Training Loss: 0.2259, Validation Loss: 0.2378
+  Epoch 26/100, Training Loss: 0.9526, Validation Loss: 0.2456
+  Epoch 27/100, Training Loss: 0.2183, Validation Loss: 0.6484
+  Epoch 28/100, Training Loss: 0.2022, Validation Loss: 0.2283
+  Epoch 29/100, Training Loss: 0.5215, Validation Loss: 0.2342
+  Epoch 30/100, Training Loss: 0.0805, Validation Loss: 1.3437
+  Epoch 31/100, Training Loss: 0.2853, Validation Loss: 0.4493
+  Epoch 32/100, Training Loss: 1.5297, Validation Loss: 1.3518
+  Epoch 33/100, Training Loss: 1.5342, Validation Loss: 3.0952
+  Epoch 34/100, Training Loss: 0.2592, Validation Loss: 0.3019
+  Epoch 35/100, Training Loss: 0.3612, Validation Loss: 0.2717
+  Epoch 36/100, Training Loss: 0.8444, Validation Loss: 0.6332
+  Epoch 37/100, Training Loss: 0.3040, Validation Loss: 0.2401
+  Epoch 38/100, Training Loss: 0.4445, Validation Loss: 0.5434
+  Epoch 39/100, Training Loss: 0.2393, Validation Loss: 0.2499
+  Epoch 40/100, Training Loss: 0.2714, Validation Loss: 0.4280
+  Epoch 41/100, Training Loss: 0.1098, Validation Loss: 0.4436
+  Epoch 42/100, Training Loss: 0.2863, Validation Loss: 0.2968
+  Epoch 43/100, Training Loss: 0.3473, Validation Loss: 0.3234
+  Epoch 44/100, Training Loss: 0.2204, Validation Loss: 0.2534
+  Epoch 45/100, Training Loss: 0.2233, Validation Loss: 0.4499
+  Epoch 46/100, Training Loss: 0.2170, Validation Loss: 0.3678
+  Epoch 47/100, Training Loss: 0.3378, Validation Loss: 0.2796
+  Epoch 48/100, Training Loss: 0.2374, Validation Loss: 0.4923
+  Epoch 49/100, Training Loss: 0.2312, Validation Loss: 0.2272
+  Epoch 50/100, Training Loss: 0.2237, Validation Loss: 0.6108
+  Epoch 51/100, Training Loss: 0.4506, Validation Loss: 0.3066
+  Epoch 52/100, Training Loss: 0.2344, Validation Loss: 0.2498
+  Epoch 53/100, Training Loss: 0.4717, Validation Loss: 0.4144
+  Epoch 54/100, Training Loss: 0.3375, Validation Loss: 0.2306
+  Epoch 55/100, Training Loss: 0.2283, Validation Loss: 0.5241
+  Epoch 56/100, Training Loss: 0.2929, Validation Loss: 0.2333
+  Epoch 57/100, Training Loss: 0.2681, Validation Loss: 0.4404
+  Epoch 58/100, Training Loss: 0.8936, Validation Loss: 0.2988
+  Epoch 59/100, Training Loss: 0.8566, Validation Loss: 0.2573
+  Epoch 60/100, Training Loss: 0.4184, Validation Loss: 1.0380
+  Epoch 61/100, Training Loss: 0.2132, Validation Loss: 0.2294
+  Epoch 62/100, Training Loss: 0.5536, Validation Loss: 0.3845
+  Epoch 63/100, Training Loss: 0.4200, Validation Loss: 0.9355
+  Epoch 64/100, Training Loss: 0.2812, Validation Loss: 0.2309
+  Epoch 65/100, Training Loss: 0.4627, Validation Loss: 0.2522
+  Epoch 66/100, Training Loss: 0.6101, Validation Loss: 0.7013
+  Epoch 67/100, Training Loss: 0.2622, Validation Loss: 0.2519
+  Epoch 68/100, Training Loss: 0.4418, Validation Loss: 0.3007
+  Epoch 69/100, Training Loss: 0.2572, Validation Loss: 0.6276
+  Epoch 70/100, Training Loss: 0.4797, Validation Loss: 0.2819
+  Epoch 71/100, Training Loss: 0.2744, Validation Loss: 0.2361
+  Epoch 72/100, Training Loss: 0.2485, Validation Loss: 0.4759
+  Epoch 73/100, Training Loss: 0.7215, Validation Loss: 0.4349
+  Epoch 74/100, Training Loss: 0.5979, Validation Loss: 0.2375
+  Epoch 75/100, Training Loss: 0.3878, Validation Loss: 0.4834
+  Epoch 76/100, Training Loss: 0.3508, Validation Loss: 0.3336
+  Epoch 77/100, Training Loss: 0.4509, Validation Loss: 0.2630
+  Epoch 78/100, Training Loss: 0.1361, Validation Loss: 0.5652
+  Epoch 79/100, Training Loss: 0.7448, Validation Loss: 0.4156
+  Epoch 80/100, Training Loss: 0.4688, Validation Loss: 0.2357
+  Epoch 81/100, Training Loss: 0.2800, Validation Loss: 0.3998
+  Epoch 82/100, Training Loss: 0.2591, Validation Loss: 0.4780
+  Epoch 83/100, Training Loss: 0.2705, Validation Loss: 0.2870
+  Epoch 84/100, Training Loss: 0.2530, Validation Loss: 0.3002
+  Epoch 85/100, Training Loss: 0.2515, Validation Loss: 0.3888
+  Epoch 86/100, Training Loss: 0.2464, Validation Loss: 0.4763
+  Epoch 87/100, Training Loss: 0.2937, Validation Loss: 0.3044
+  Epoch 88/100, Training Loss: 0.2509, Validation Loss: 0.4041
+  Epoch 89/100, Training Loss: 0.1941, Validation Loss: 0.3951
+  Epoch 90/100, Training Loss: 0.3138, Validation Loss: 0.3248
+  Epoch 91/100, Training Loss: 0.2562, Validation Loss: 0.2669
+  Epoch 92/100, Training Loss: 0.2940, Validation Loss: 0.3794
+  Epoch 93/100, Training Loss: 0.3427, Validation Loss: 0.2629
+  Epoch 94/100, Training Loss: 0.3578, Validation Loss: 0.3309
+  Epoch 95/100, Training Loss: 0.0704, Validation Loss: 0.5803
+  Epoch 96/100, Training Loss: 0.2339, Validation Loss: 0.2396
+  Epoch 97/100, Training Loss: 0.3069, Validation Loss: 0.4571
+  Epoch 98/100, Training Loss: 0.5069, Validation Loss: 0.4468
+  Epoch 99/100, Training Loss: 0.4035, Validation Loss: 0.2426
+  Epoch 100/100, Training Loss: 0.2561, Validation Loss: 0.6149
 #+end_example
-
-#+begin_src ipython
-  # plt.plot(loss)
-  # plt.plot(val_loss)
-  plt.xlabel('epochs')
-  plt.ylabel('Loss')
-  plt.show()
-#+end_src
-
-#+RESULTS:
-: da46cf15-7971-4993-a8d3-acf0ee5c77b0
-
-
-*** Pairs
-
-#+begin_src ipython
-  model.LR_EVAL_WIN = 1
-  model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
-
-  model.DURATION = 4
-  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
-#+end_src
-
-#+RESULTS:
-: ff035fef-9118-440a-8bfd-447043bd483b
-
-#+begin_src ipython
-  model.N_BATCH = 32
-
-  model.I0[0] = 1
-  model.I0[1] = 1 
-
-  AC_pair = model.init_ff_input()
-
-  model.I0[0] = 1
-  model.I0[1] = -1
-
-  AD_pair = model.init_ff_input()
-
-  # ff_input = torch.cat((AC_pair, AD_pair))
-
-  model.I0[0] = -1
-  model.I0[1] = 1
-
-  BC_pair = model.init_ff_input()
-
-  model.I0[0] = -1
-  model.I0[1] = -1
-  
-  BD_pair = model.init_ff_input()
-
-  ff_input = torch.cat((AC_pair, BD_pair, AD_pair, BC_pair))
-  print('ff_input', ff_input.shape)
-#+end_src
-
-#+RESULTS:
-: 14dbfd03-022a-4062-9c8b-d80f195e0a08
-
-#+begin_src ipython
-  labels_pair = torch.zeros((2 * model.N_BATCH, model.lr_eval_win))
-  labels_unpair = torch.ones((2 * model.N_BATCH, model.lr_eval_win))
-  
-  labels = torch.cat((labels_pair, labels_unpair))
-  print('labels', labels.shape)
-#+end_src
-
-#+RESULTS:
-: ddefae46-bc81-4e47-b9b6-20314152725c
-
-#+RESULTS:
-
-#+begin_src ipython
-   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-   batch_size = 16
-   train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
-
-   learning_rate = 0.1
-
-   # CosineLoss, BCELoss, BCEWithLogitLoss
-   criterion = nn.BCEWithLogitsLoss()
-
-   # SGD, Adam, AdamW
-   optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
-   num_epochs = 100
-   loss, val_loss = run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)
-#+End_src
-
-#+RESULTS:
-: 7921afad-a09f-40eb-8905-bdc75ec55cef
 
 #+begin_src ipython
   plt.plot(loss)
@@ -585,14 +510,21 @@
 #+end_src
 
 #+RESULTS:
-: be73a957-124e-45b5-ad6e-b185eeedd8bc
+[[file:./.ob-jupyter/fc2a0984f077d7a74fb8ba25711523be4807ddc1.png]]
 
 #+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+** Test
+
+ #+begin_src ipython
   Wij = model.Wab_T.clone()
 #+end_src
 
 #+RESULTS:
-: 637b6090-3efd-4a30-a05a-f0ef57ee839c
 
 #+begin_src ipython
   model.eval()
@@ -601,18 +533,14 @@
   model.Wab_T = Wij + lr.T
 
   model.N_BATCH = 1
-  model.VERBOSE=1
   model.LR_TRAIN=0
 #+end_src
 
 #+RESULTS:
-: e6c535fe-810c-43ba-b15c-6a1dc5d1d856
-
-* Results
 
 #+begin_src ipython
   model.N_BATCH = 1
-  model.DURATION = 5
+  model.DURATION = 6
   model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
 #+end_src
 
@@ -622,148 +550,75 @@
   model.N_BATCH = 1
 
   model.I0[0] = 1
-  model.I0[1] = 1
+  model.I0[1] = 0
+  model.I0[2] = 0
 
-  AC_pair = model.init_ff_input()
+  A = model.init_ff_input()
 
   model.I0[0] = 1
-  model.I0[1] = -1
+  model.I0[1] = 0
+  model.I0[2] = 0
 
-  AD_pair = model.init_ff_input()
+  B = model.init_ff_input()
 
-  # ff_input = torch.cat((AC_pair, AD_pair))
-
-  model.I0[0] = -1
-  model.I0[1] = 1
-
-  BC_pair = model.init_ff_input()
-
-  model.I0[0] = -1
-  model.I0[1] = -1
-
-  BD_pair = model.init_ff_input()
-
-  ff_input = torch.cat((AC_pair, BD_pair, AD_pair, BC_pair))
+  ff_input = torch.cat((A, B))
   print('ff_input', ff_input.shape)
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([4, 122, 1000])
+: ff_input torch.Size([2, 810, 1000])
 
 #+begin_src ipython
+  model.VERBOSE = 0
   rates = model.forward(ff_input=ff_input, RET_FF=1).cpu().detach().numpy()
+  model.Wab_T = Wij
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-#+begin_example
-  times (s) 0.0 rates (Hz) [0.08, 1.3]
-  times (s) 0.08 rates (Hz) [0.08, 1.23]
-  times (s) 0.16 rates (Hz) [0.1, 1.21]
-  times (s) 0.25 rates (Hz) [0.09, 1.16]
-  times (s) 0.33 rates (Hz) [0.1, 1.22]
-  times (s) 0.41 rates (Hz) [0.1, 1.15]
-  times (s) 0.49 rates (Hz) [0.1, 1.1]
-  times (s) 0.57 rates (Hz) [0.11, 1.19]
-  times (s) 0.66 rates (Hz) [0.09, 1.24]
-  times (s) 0.74 rates (Hz) [0.11, 1.2]
-  times (s) 0.82 rates (Hz) [0.41, 1.1]
-  times (s) 0.9 rates (Hz) [0.26, 1.14]
-  times (s) 0.98 rates (Hz) [0.23, 1.18]
-  times (s) 1.07 rates (Hz) [0.21, 1.15]
-  times (s) 1.15 rates (Hz) [0.21, 1.23]
-  times (s) 1.23 rates (Hz) [0.21, 1.1]
-  times (s) 1.31 rates (Hz) [0.2, 1.11]
-  times (s) 1.39 rates (Hz) [0.2, 1.18]
-  times (s) 1.48 rates (Hz) [0.21, 1.17]
-  times (s) 1.56 rates (Hz) [0.21, 1.15]
-  times (s) 1.64 rates (Hz) [0.08, 1.17]
-  times (s) 1.72 rates (Hz) [0.08, 1.15]
-  times (s) 1.8 rates (Hz) [0.09, 1.17]
-  times (s) 1.89 rates (Hz) [0.08, 1.13]
-  times (s) 1.97 rates (Hz) [0.09, 1.13]
-  times (s) 2.05 rates (Hz) [0.09, 1.09]
-  times (s) 2.13 rates (Hz) [0.09, 1.12]
-  times (s) 2.21 rates (Hz) [0.09, 1.13]
-  times (s) 2.3 rates (Hz) [0.11, 1.16]
-  times (s) 2.38 rates (Hz) [0.1, 1.16]
-  times (s) 2.46 rates (Hz) [0.22, 1.15]
-  times (s) 2.54 rates (Hz) [0.17, 1.13]
-  times (s) 2.62 rates (Hz) [0.16, 1.2]
-  times (s) 2.7 rates (Hz) [0.14, 1.1]
-  times (s) 2.79 rates (Hz) [0.14, 1.17]
-  times (s) 2.87 rates (Hz) [0.14, 1.18]
-  times (s) 2.95 rates (Hz) [0.13, 1.13]
-  times (s) 3.03 rates (Hz) [0.13, 1.16]
-  times (s) 3.11 rates (Hz) [0.14, 1.11]
-  times (s) 3.2 rates (Hz) [0.13, 1.13]
-  times (s) 3.28 rates (Hz) [0.05, 1.12]
-  times (s) 3.36 rates (Hz) [0.06, 1.09]
-  times (s) 3.44 rates (Hz) [0.07, 1.12]
-  times (s) 3.52 rates (Hz) [0.07, 1.13]
-  times (s) 3.61 rates (Hz) [0.09, 1.08]
-  times (s) 3.69 rates (Hz) [0.09, 1.09]
-  times (s) 3.77 rates (Hz) [0.11, 1.15]
-  times (s) 3.85 rates (Hz) [0.1, 1.21]
-  times (s) 3.93 rates (Hz) [0.11, 1.21]
-  times (s) 4.02 rates (Hz) [0.1, 1.02]
-  times (s) 4.1 rates (Hz) [0.11, 1.12]
-  (4, 51, 800)
-#+end_example
-
-#+begin_src ipython
-  plt.plot(model.ff_input.cpu().detach().numpy()[0,:, :10])
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/473228d83e605c0ce6441dcb80c016712090b4c6.png]]
-
-#+begin_src ipython
-  r_max = .5 * np.max(rates)
-  plt.imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
-  plt.vlines((np.array(model.N_STIM_ON) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
-  plt.vlines((np.array(model.N_STIM_OFF) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
-  plt.ylabel('Neuron #')
-  plt.xlabel('Step')
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/57f8f9a78eaebc427204e18acd574517483a9ba9.png]]
+: (2, 61, 800)
 
 #+begin_src ipython
   idx = get_idx(model, 2)
   ordered = rates[..., idx]
-  print(ordered.shape)
+  m0, m1, phi = decode_bump(ordered, axis=-1)
 #+end_src
 
 #+RESULTS:
 : torch.Size([1000, 2])
 : ksi torch.Size([4, 1000])
 : (4, 1000)
-: (4, 51, 800)
 
 #+begin_src ipython
-  plt.imshow(ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
-  plt.yticks(np.linspace(0, model.Na[0].cpu().detach(), 5), np.linspace(0, 360, 5).astype(int))
-  plt.vlines((np.array(model.N_STIM_ON) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
-  plt.vlines((np.array(model.N_STIM_OFF) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
-  plt.ylabel('Pref. Location (°)')
-  plt.xlabel('Step')
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  r_max = .5 * np.max(rates)
+
+  ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+  # ax[0].axvline((np.array(model.N_STIM_ON) - model.N_STEADY) / model.N_WINDOW, 0, 360, color='w', ls='--')
+  # ax[0].axvline((np.array(model.N_STIM_OFF) - model.N_STEADY) / model.N_WINDOW, 0, 360, color='w', ls='--')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_xlabel('Step')
+
+  ax[1].imshow(ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+  ax[1].set_yticks(np.linspace(0, model.Na[0].cpu().detach(), 5), np.linspace(0, 360, 5).astype(int))
+  # ax[1].axvline((np.array(model.N_STIM_ON) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
+  # ax[1].axvline((np.array(model.N_STIM_OFF) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
+  ax[1].set_ylabel('Pref. Location (°)')
+  ax[1].set_xlabel('Step')
+
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7593692ca8bc33ba74a26fa48e7bda2cb51b1e26.png]]
+[[file:./.ob-jupyter/a043421e71c728870db6a950795979e45de77add.png]]
 
 #+begin_src ipython
   readout = model.linear.weight.data.cpu().detach().numpy()[0]
-  overlap = (rates @ readout) / rates.shape[-1]
+  overlap = -(rates @ readout) / rates.shape[-1]
   print(overlap.shape)
 
-  plt.plot(overlap.T[..., :2], label='pair')
-  plt.plot(overlap.T[..., 2:], '--', label='unpair')
+  plt.plot(overlap.T[..., :1], label='A')
+  plt.plot(overlap.T[..., 1:], label='B')
   plt.legend(fontsize=10)
   plt.xlabel('Step')
   plt.ylabel('Overlap')
@@ -773,21 +628,13 @@
 
 #+RESULTS:
 :RESULTS:
-: (4, 51)
-[[file:./.ob-jupyter/6c7cb7b121c1008e3cc089ba85177a02438e72ed.png]]
+: (2, 61)
+[[file:./.ob-jupyter/26f4852ac96450afcde2029d72bc38c90620074c.png]]
 :END:
 
 #+begin_src ipython
-  m0, m1, phi = decode_bump(ordered, axis=-1)
-  print(m0.shape)
-#+end_src
-
-#+RESULTS:
-: (4, 51)
-
-#+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
-  
+
   ax[0].plot(m0[:2].T)
   ax[0].plot(m0[2:].T, '--')
   #ax[0].set_ylim([0, 360])
@@ -813,10 +660,899 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ec9b761945499e6fc8b9a9eb4860c2a7b8d118cb.png]]
+[[file:./.ob-jupyter/53020ae72eb6422016371b4c2e21cfed76532a8b.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
+
+* DPA
+** Training
+
+#+begin_src ipython
+  model.LR_TRAIN = 1
+  model.LR_EVAL_WIN = 1
+  model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
+
+  model.DURATION = 6.0
+  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.N_BATCH = 96
+
+  model.I0[0] = 1
+  model.I0[1] = 0
+  model.I0[2] = 1
+
+  AC_pair = model.init_ff_input()
+
+  model.I0[0] = 1
+  model.I0[1] = 0
+  model.I0[2] = -1
+
+  AD_pair = model.init_ff_input()
+
+  # ff_input = torch.cat((AC_pair, AD_pair))
+
+  model.I0[0] = -1
+  model.I0[1] = 0
+  model.I0[2] = 1
+
+  BC_pair = model.init_ff_input()
+
+  model.I0[0] = -1
+  model.I0[1] = 0
+  model.I0[2] = -1
+
+  BD_pair = model.init_ff_input()
+
+  ff_input = torch.cat((AC_pair, BD_pair, AD_pair, BC_pair))
+  print('ff_input', ff_input.shape)
+#+end_src
+
+#+RESULTS:
+: ff_input torch.Size([384, 162, 1000])
+
+#+begin_src ipython
+  labels_pair = torch.zeros((2 * model.N_BATCH, model.lr_eval_win))
+  labels_unpair = torch.ones((2 * model.N_BATCH, model.lr_eval_win))
+
+  labels = torch.cat((labels_pair, labels_unpair))
+  print('labels', labels.shape)
+#+end_src
+
+#+RESULTS:
+: labels torch.Size([384, 10])
+
+#+RESULTS:
+
+#+begin_src ipython
+  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+  batch_size = 16
+  train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
+
+  learning_rate = 0.1
+
+  # CosineLoss, BCELoss, BCEWithLogitLoss
+  # criterion = nn.CrossEntropyLoss()
+  criterion = nn.BCEWithLogitsLoss()
+
+  # SGD, Adam, AdamW
+  optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+
+  num_epochs = 100
+  loss, val_loss = run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)
+#+End_src
+
+#+RESULTS:
+#+begin_example
+  Epoch 1/100, Training Loss: 8.3444, Validation Loss: 7.2784
+  Epoch 2/100, Training Loss: 1.5018, Validation Loss: 3.2085
+  Epoch 3/100, Training Loss: 3.0118, Validation Loss: 1.1196
+  Epoch 4/100, Training Loss: 0.0001, Validation Loss: 3.4555
+  Epoch 5/100, Training Loss: 1.0393, Validation Loss: 2.8578
+  Epoch 6/100, Training Loss: 2.0959, Validation Loss: 1.0107
+  Epoch 7/100, Training Loss: 0.4744, Validation Loss: 1.1796
+  Epoch 8/100, Training Loss: 1.2408, Validation Loss: 0.7929
+  Epoch 9/100, Training Loss: 1.1958, Validation Loss: 0.7413
+  Epoch 10/100, Training Loss: 0.4798, Validation Loss: 3.5882
+  Epoch 11/100, Training Loss: 4.8520, Validation Loss: 1.7066
+  Epoch 12/100, Training Loss: 0.8828, Validation Loss: 0.7802
+  Epoch 13/100, Training Loss: 1.1499, Validation Loss: 1.4056
+  Epoch 14/100, Training Loss: 0.6391, Validation Loss: 0.8814
+  Epoch 15/100, Training Loss: 0.7102, Validation Loss: 1.0177
+  Epoch 16/100, Training Loss: 0.9480, Validation Loss: 0.7770
+  Epoch 17/100, Training Loss: 0.6307, Validation Loss: 0.9187
+  Epoch 18/100, Training Loss: 0.6382, Validation Loss: 1.6459
+  Epoch 19/100, Training Loss: 1.0855, Validation Loss: 0.8119
+  Epoch 20/100, Training Loss: 0.4480, Validation Loss: 1.1435
+  Epoch 21/100, Training Loss: 0.9969, Validation Loss: 0.7522
+  Epoch 22/100, Training Loss: 0.4709, Validation Loss: 0.9895
+  Epoch 23/100, Training Loss: 0.7201, Validation Loss: 0.8437
+  Epoch 24/100, Training Loss: 0.2587, Validation Loss: 0.9736
+  Epoch 25/100, Training Loss: 1.1177, Validation Loss: 0.8081
+  Epoch 26/100, Training Loss: 0.3834, Validation Loss: 1.1285
+  Epoch 27/100, Training Loss: 0.4709, Validation Loss: 1.0448
+  Epoch 28/100, Training Loss: 0.6666, Validation Loss: 1.0565
+  Epoch 29/100, Training Loss: 0.5984, Validation Loss: 0.7848
+  Epoch 30/100, Training Loss: 0.6780, Validation Loss: 0.7156
+  Epoch 31/100, Training Loss: 0.5647, Validation Loss: 0.9417
+  Epoch 32/100, Training Loss: 0.8610, Validation Loss: 0.7943
+  Epoch 33/100, Training Loss: 1.2806, Validation Loss: 1.3708
+  Epoch 34/100, Training Loss: 0.6565, Validation Loss: 0.7022
+  Epoch 35/100, Training Loss: 0.7566, Validation Loss: 0.9093
+  Epoch 36/100, Training Loss: 0.8418, Validation Loss: 0.6965
+  Epoch 37/100, Training Loss: 0.9659, Validation Loss: 0.7706
+  Epoch 38/100, Training Loss: 0.8349, Validation Loss: 0.8203
+  Epoch 39/100, Training Loss: 0.8443, Validation Loss: 0.7221
+  Epoch 40/100, Training Loss: 1.4839, Validation Loss: 0.7360
+  Epoch 41/100, Training Loss: 0.8147, Validation Loss: 0.9770
+  Epoch 42/100, Training Loss: 0.8598, Validation Loss: 0.9781
+  Epoch 43/100, Training Loss: 0.7709, Validation Loss: 0.7979
+  Epoch 44/100, Training Loss: 0.3484, Validation Loss: 0.8447
+  Epoch 45/100, Training Loss: 0.9107, Validation Loss: 0.7213
+  Epoch 46/100, Training Loss: 0.9661, Validation Loss: 0.7279
+  Epoch 47/100, Training Loss: 0.6303, Validation Loss: 0.7690
+  Epoch 48/100, Training Loss: 0.5299, Validation Loss: 0.7687
+  Epoch 49/100, Training Loss: 0.7479, Validation Loss: 0.6940
+  Epoch 50/100, Training Loss: 0.6499, Validation Loss: 0.7132
+  Epoch 51/100, Training Loss: 0.2735, Validation Loss: 0.8942
+  Epoch 52/100, Training Loss: 0.8304, Validation Loss: 0.7920
+  Epoch 53/100, Training Loss: 0.5602, Validation Loss: 0.7104
+  Epoch 54/100, Training Loss: 0.6258, Validation Loss: 0.7746
+  Epoch 55/100, Training Loss: 1.0336, Validation Loss: 0.7814
+  Epoch 56/100, Training Loss: 0.9126, Validation Loss: 0.8952
+  Epoch 57/100, Training Loss: 0.7996, Validation Loss: 0.7302
+  Epoch 58/100, Training Loss: 0.4574, Validation Loss: 0.8495
+  Epoch 59/100, Training Loss: 0.7674, Validation Loss: 0.7308
+  Epoch 60/100, Training Loss: 0.3553, Validation Loss: 0.7200
+  Epoch 61/100, Training Loss: 0.9324, Validation Loss: 0.8599
+  Epoch 62/100, Training Loss: 0.8445, Validation Loss: 0.7821
+  Epoch 63/100, Training Loss: 1.1968, Validation Loss: 0.7192
+  Epoch 64/100, Training Loss: 0.8898, Validation Loss: 0.7317
+  Epoch 65/100, Training Loss: 0.8407, Validation Loss: 0.8644
+  Epoch 66/100, Training Loss: 1.8143, Validation Loss: 0.8479
+  Epoch 67/100, Training Loss: 0.5464, Validation Loss: 0.9107
+  Epoch 68/100, Training Loss: 0.2759, Validation Loss: 0.8418
+  Epoch 69/100, Training Loss: 1.4841, Validation Loss: 0.7125
+  Epoch 70/100, Training Loss: 0.8337, Validation Loss: 0.7457
+  Epoch 71/100, Training Loss: 0.7454, Validation Loss: 0.8199
+  Epoch 72/100, Training Loss: 0.6779, Validation Loss: 0.7885
+  Epoch 73/100, Training Loss: 0.7338, Validation Loss: 0.6934
+  Epoch 74/100, Training Loss: 0.8769, Validation Loss: 0.7231
+  Epoch 75/100, Training Loss: 0.7347, Validation Loss: 0.7450
+  Epoch 76/100, Training Loss: 0.8373, Validation Loss: 0.7303
+  Epoch 77/100, Training Loss: 0.7355, Validation Loss: 0.6927
+  Epoch 78/100, Training Loss: 0.8544, Validation Loss: 0.7006
+  Epoch 79/100, Training Loss: 1.0678, Validation Loss: 0.7147
+  Epoch 80/100, Training Loss: 1.0049, Validation Loss: 0.7861
+  Epoch 81/100, Training Loss: 0.5358, Validation Loss: 0.7998
+  Epoch 82/100, Training Loss: 0.4594, Validation Loss: 0.8565
+  Epoch 83/100, Training Loss: 0.4134, Validation Loss: 0.8646
+  Epoch 84/100, Training Loss: 0.7034, Validation Loss: 0.6919
+  Epoch 85/100, Training Loss: 0.4961, Validation Loss: 0.7383
+  Epoch 86/100, Training Loss: 0.9342, Validation Loss: 0.6967
+  Epoch 87/100, Training Loss: 0.5702, Validation Loss: 0.8681
+  Epoch 88/100, Training Loss: 0.5977, Validation Loss: 0.7444
+  Epoch 89/100, Training Loss: 0.5734, Validation Loss: 0.8060
+  Epoch 90/100, Training Loss: 0.6659, Validation Loss: 0.9066
+  Epoch 91/100, Training Loss: 0.6379, Validation Loss: 0.6964
+  Epoch 92/100, Training Loss: 0.7901, Validation Loss: 0.7049
+  Epoch 93/100, Training Loss: 1.2995, Validation Loss: 0.6958
+  Epoch 94/100, Training Loss: 0.6338, Validation Loss: 0.7289
+  Epoch 95/100, Training Loss: 0.4909, Validation Loss: 0.7788
+  Epoch 96/100, Training Loss: 0.7502, Validation Loss: 0.7859
+  Epoch 97/100, Training Loss: 0.7349, Validation Loss: 0.8039
+  Epoch 98/100, Training Loss: 0.6962, Validation Loss: 0.7473
+  Epoch 99/100, Training Loss: 0.4796, Validation Loss: 0.7805
+  Epoch 100/100, Training Loss: 1.0616, Validation Loss: 0.7810
+#+end_example
+
+#+begin_src ipython
+  plt.plot(loss)
+  plt.plot(val_loss)
+  plt.xlabel('epochs')
+  plt.ylabel('Loss')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/7519f077c7a59011059fc64ece74a95b613530e9.png]]
+
+** Test
+
+ #+begin_src ipython
+  Wij = model.Wab_T.clone()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.eval()
+
+  lr = model.lr_kappa * (model.lr_mask * (model.U @ model.V.T)) / (1.0 * model.Na[0])
+  model.Wab_T = Wij + lr.T
+
+  model.N_BATCH = 1
+  model.VERBOSE=1
+  model.LR_TRAIN=0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.N_BATCH = 1
+  model.DURATION = 6
+  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.N_BATCH = 1
+
+  model.I0[0] = 1
+  model.I0[1] = 0
+  model.I0[2] = 1
+
+  AC_pair = model.init_ff_input()
+
+  model.I0[0] = 1
+  model.I0[1] = 0
+  model.I0[2] = -1
+
+  AD_pair = model.init_ff_input()
+
+  model.I0[0] = -1
+  model.I0[1] = 0
+  model.I0[2] = 1
+
+  BC_pair = model.init_ff_input()
+
+  model.I0[0] = -1
+  model.I0[1] = 0
+  model.I0[2] = -1
+
+  BD_pair = model.init_ff_input()
+
+  ff_input = torch.cat((AC_pair, BD_pair, AD_pair, BC_pair))
+  print('ff_input', ff_input.shape)
+#+end_src
+
+#+RESULTS:
+: ff_input torch.Size([4, 162, 1000])
+
+#+begin_src ipython
+  model.VERBOSE = 0
+  rates = model.forward(ff_input=ff_input, RET_FF=1).cpu().detach().numpy()
+  model.Wab_T = Wij
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 61, 800)
+
+#+begin_src ipython
+  idx = get_idx(model, 2)
+  ordered = rates[..., idx]
+  m0, m1, phi = decode_bump(ordered, axis=-1)
+#+end_src
+
+#+RESULTS:
+: torch.Size([1000, 2])
+: ksi torch.Size([4, 1000])
+: (4, 1000)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  r_max = .5 * np.max(rates)
+
+  ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+  # ax[0].axvlines((np.array(model.N_STIM_ON) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
+  # ax[0].axvlines((np.array(model.N_STIM_OFF) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_xlabel('Step')
+
+  ax[1].imshow(ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+  ax[1].set_yticks(np.linspace(0, model.Na[0].cpu().detach(), 5), np.linspace(0, 360, 5).astype(int))
+  # ax[1].axvlines((np.array(model.N_STIM_ON) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
+  # ax[1].axvlines((np.array(model.N_STIM_OFF) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
+  ax[1].set_ylabel('Pref. Location (°)')
+  ax[1].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/95d88d19520b7df9d086e96a2dc1073a959b6406.png]]
+
+#+begin_src ipython
+  readout = model.linear.weight.data.cpu().detach().numpy()[0]
+  overlap = (rates @ readout) / rates.shape[-1]
+  print(overlap.shape)
+
+  plt.plot(overlap.T[..., :2], label='pair')
+  plt.plot(overlap.T[..., 2:], '--', label='unpair')
+  plt.legend(fontsize=10)
+  plt.xlabel('Step')
+  plt.ylabel('Overlap')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (4, 61)
+[[file:./.ob-jupyter/cf07ad790eab00d71f1e9f46bca47af6152f2883.png]]
+:END:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+
+  ax[0].plot(m0[:2].T)
+  ax[0].plot(m0[2:].T, '--')
+  #ax[0].set_ylim([0, 360])
+  #ax[0].set_yticks([0, 90, 180, 270, 360])
+  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(m1[:2].T)
+  ax[1].plot(m1[2:].T, '--')
+  # ax[1].set_ylim([0, 360])
+  # ax[1].set_yticks([0, 90, 180, 270, 360])
+  ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
+  ax[1].set_xlabel('Step')
+
+  ax[2].plot(phi[:2].T * 180 / np.pi)
+  ax[2].plot(phi[2:].T * 180 / np.pi, '--')
+  ax[2].set_ylim([0, 360])
+  ax[2].set_yticks([0, 90, 180, 270, 360])
+  ax[2].set_ylabel('Phase (°)')
+  ax[2].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/eeb593d47abf14370d5b830f352a690f1cc113a3.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+* Go/NoGo
+** Training
+#+begin_src ipython
+  model.LR_TRAIN=1
+  model.LR_EVAL_WIN = 2
+  model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
+
+  model.DURATION = 3
+  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  for param in model.linear.parameters():
+       param.requires_grad = False
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  odors = model.odors.clone()
+  # switching samples and distractors to run short simulations
+  model.odors[0] = odors[1]
+  model.N_BATCH = 96
+
+  model.I0[0] = 1
+  model.I0[1] = 0
+  model.I0[2] = 0
+
+  Go = model.init_ff_input()
+
+  model.I0[0] = -1
+  model.I0[1] = 0
+  model.I0[2] = 0
+
+  NoGo = model.init_ff_input()
+
+  ff_input = torch.cat((Go, NoGo))
+  print(ff_input.shape)
+  model.odors[0] = odors[0]
+#+end_src
+
+#+RESULTS:
+: torch.Size([192, 82, 1000])
+
+#+begin_src ipython
+  labels_Go = torch.zeros((model.N_BATCH, model.lr_eval_win))
+  labels_NoGo = torch.ones((model.N_BATCH, model.lr_eval_win))
+  labels = torch.cat((labels_Go, labels_NoGo))
+
+  print('labels', labels.shape)
+#+end_src
+
+#+RESULTS:
+: labels torch.Size([192, 20])
+
+#+begin_src ipython
+  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+  batch_size = 32
+  train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
+
+  learning_rate = 0.1
+
+  # CosineLoss, BCELoss, BCEWithLogitLoss
+  # criterion = nn.CrossEntropyLoss()
+  criterion = nn.BCEWithLogitsLoss()
+
+  # SGD, Adam, AdamW
+  optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+
+  num_epochs = 100
+  loss, val_loss = 0, 0
+
+  # switching Sample and distractor
+  loss, val_loss = run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)
+  model.odors[0] = odors[0]
+#+End_src
+
+#+RESULTS:
+: Epoch 1/100, Training Loss: 0.6623, Validation Loss: 0.9120
+: Epoch 2/100, Training Loss: 0.3844, Validation Loss: 0.3618
+: Epoch 3/100, Training Loss: 0.2098, Validation Loss: 0.1930
+: Epoch 4/100, Training Loss: 0.1556, Validation Loss: 0.0756
+: Epoch 5/100, Training Loss: 0.0409, Validation Loss: 0.0238
+: Epoch 6/100, Training Loss: 0.0032, Validation Loss: 0.0039
+: Stopping training as loss has fallen below the threshold: 0.0031560794450342655
+
+#+begin_src ipython
+  plt.plot(loss)
+  plt.plot(val_loss)
+  plt.xlabel('epochs')
+  plt.ylabel('Loss')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/fff8e63bc06802028fbe0a7a9241c3b97c99bfde.png]]
+
+** Test
+
+ #+begin_src ipython
+  Wij = model.Wab_T.clone()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.eval()
+
+  lr = model.lr_kappa * (model.lr_mask * (model.U @ model.V.T)) / (1.0 * model.Na[0])
+  model.Wab_T = Wij + lr.T
+
+  model.N_BATCH = 1
+  model.LR_TRAIN=0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.N_BATCH = 1
+  model.DURATION = 3
+  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  odors = model.odors.clone()
+  model.odors[0] = odors[1]
+  model.N_BATCH = 1
+
+  model.I0[0] = 1
+  model.I0[1] = 0
+  model.I0[2] = 0
+
+  A = model.init_ff_input()
+
+  model.I0[0] = -1
+  model.I0[1] = 0
+  model.I0[2] = 0
+
+  B = model.init_ff_input()
+
+  ff_input = torch.cat((A, B))
+  print('ff_input', ff_input.shape)
+  model.odors[0] = odors[0]
+#+end_src
+
+#+RESULTS:
+: ff_input torch.Size([2, 82, 1000])
+
+#+begin_src ipython
+  model.VERBOSE = 0
+  rates = model.forward(ff_input=ff_input, RET_FF=1).cpu().detach().numpy()
+  model.Wab_T = Wij
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 31, 800)
+
+#+begin_src ipython
+  idx = get_idx(model, 2)
+  ordered = rates[..., idx]
+  m0, m1, phi = decode_bump(ordered, axis=-1)
+#+end_src
+
+#+RESULTS:
+: torch.Size([1000, 2])
+: ksi torch.Size([4, 1000])
+: (4, 1000)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  r_max = .5 * np.max(rates)
+
+  ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+  # ax[0].axvline((np.array(model.N_STIM_ON) - model.N_STEADY) / model.N_WINDOW, 0, 360, color='w', ls='--')
+  # ax[0].axvline((np.array(model.N_STIM_OFF) - model.N_STEADY) / model.N_WINDOW, 0, 360, color='w', ls='--')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_xlabel('Step')
+
+  ax[1].imshow(ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+  ax[1].set_yticks(np.linspace(0, model.Na[0].cpu().detach(), 5), np.linspace(0, 360, 5).astype(int))
+  # ax[1].axvline((np.array(model.N_STIM_ON) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
+  # ax[1].axvline((np.array(model.N_STIM_OFF) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
+  ax[1].set_ylabel('Pref. Location (°)')
+  ax[1].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/5c86bcc7db9764f4e16fa254b496cae0b169f0cd.png]]
+
+#+begin_src ipython
+  readout = model.linear.weight.data.cpu().detach().numpy()[0]
+  overlap = -(rates @ readout) / rates.shape[-1]
+  print(overlap.shape)
+
+  plt.plot(overlap.T[..., :1], label='A')
+  plt.plot(overlap.T[..., 1:], label='B')
+  plt.legend(fontsize=10)
+  plt.xlabel('Step')
+  plt.ylabel('Overlap')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (2, 31)
+[[file:./.ob-jupyter/234a0968d1bca05e1940620b84f3e7a8f28248b3.png]]
+:END:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+
+  ax[0].plot(m0[:2].T)
+  ax[0].plot(m0[2:].T, '--')
+  #ax[0].set_ylim([0, 360])
+  #ax[0].set_yticks([0, 90, 180, 270, 360])
+  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(m1[:2].T)
+  ax[1].plot(m1[2:].T, '--')
+  # ax[1].set_ylim([0, 360])
+  # ax[1].set_yticks([0, 90, 180, 270, 360])
+  ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
+  ax[1].set_xlabel('Step')
+
+  ax[2].plot(phi[:2].T * 180 / np.pi)
+  ax[2].plot(phi[2:].T * 180 / np.pi, '--')
+  ax[2].set_ylim([0, 360])
+  ax[2].set_yticks([0, 90, 180, 270, 360])
+  ax[2].set_ylabel('Phase (°)')
+  ax[2].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/870dec8288fa191989c7b67a3ffd4d6c489559fc.png]]
+
+* Dual
+** Test
+
+ #+begin_src ipython
+  Wij = model.Wab_T.clone()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.eval()
+
+  lr = model.lr_kappa * (model.lr_mask * (model.U @ model.V.T)) / (1.0 * model.Na[0])
+  model.Wab_T = Wij + lr.T
+
+  model.N_BATCH = 1
+  model.VERBOSE=1
+  model.LR_TRAIN=0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.N_BATCH = 1
+  model.DURATION = 6
+  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.N_BATCH = 1
+
+  model.I0[0] = 1
+  model.I0[1] = 0
+  model.I0[2] = 1
+
+  AC_pair = model.init_ff_input()
+
+  model.I0[0] = 1
+  model.I0[1] = 0
+  model.I0[2] = -1
+
+  AD_pair = model.init_ff_input()
+
+  model.I0[0] = -1
+  model.I0[1] = 0
+  model.I0[2] = 1
+
+  BC_pair = model.init_ff_input()
+
+  model.I0[0] = -1
+  model.I0[1] = 0
+  model.I0[2] = -1
+
+  BD_pair = model.init_ff_input()
+
+  ff_input = torch.cat((AC_pair, BD_pair, AD_pair, BC_pair))
+  print('ff_input', ff_input.shape)
+#+end_src
+
+#+RESULTS:
+: ff_input torch.Size([4, 142, 1000])
+
+#+begin_src ipython
+  model.VERBOSE = 0
+  rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
+  model.Wab_T = Wij
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 61, 800)
+
+#+begin_src ipython
+  idx = get_idx(model, 2)
+  ordered = rates[..., idx]
+  m0, m1, phi = decode_bump(ordered, axis=-1)
+#+end_src
+
+#+RESULTS:
+: torch.Size([1000, 2])
+: ksi torch.Size([4, 1000])
+: (4, 1000)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  r_max = .5 * np.max(rates)
+
+  ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+  # ax[0].axvlines((np.array(model.N_STIM_ON) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
+  # ax[0].axvlines((np.array(model.N_STIM_OFF) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_xlabel('Step')
+
+  ax[1].imshow(ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+  ax[1].set_yticks(np.linspace(0, model.Na[0].cpu().detach(), 5), np.linspace(0, 360, 5).astype(int))
+  # ax[1].axvlines((np.array(model.N_STIM_ON) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
+  # ax[1].axvlines((np.array(model.N_STIM_OFF) - model.N_STEADY) / model.N_WINDOW, 0, 360, 'w', '--')
+  ax[1].set_ylabel('Pref. Location (°)')
+  ax[1].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/ffcea575581433150cb922d74126d9a35d43fcaa.png]]
+
+#+begin_src ipython
+  readout = model.linear.weight.data.cpu().detach().numpy()[0]
+  overlap = (rates @ readout) / rates.shape[-1]
+  print(overlap.shape)
+
+  plt.plot(overlap.T[..., :2], label='pair')
+  plt.plot(overlap.T[..., 2:], '--', label='unpair')
+  plt.legend(fontsize=10)
+  plt.xlabel('Step')
+  plt.ylabel('Overlap')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (4, 61)
+[[file:./.ob-jupyter/4e1147b71de95c6a567b829636319ac7b5ff49a6.png]]
+:END:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+
+  ax[0].plot(m0[:2].T)
+  ax[0].plot(m0[2:].T, '--')
+  #ax[0].set_ylim([0, 360])
+  #ax[0].set_yticks([0, 90, 180, 270, 360])
+  ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(m1[:2].T)
+  ax[1].plot(m1[2:].T, '--')
+  # ax[1].set_ylim([0, 360])
+  # ax[1].set_yticks([0, 90, 180, 270, 360])
+  ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
+  ax[1].set_xlabel('Step')
+
+  ax[2].plot(phi[:2].T * 180 / np.pi)
+  ax[2].plot(phi[2:].T * 180 / np.pi, '--')
+  ax[2].set_ylim([0, 360])
+  ax[2].set_yticks([0, 90, 180, 270, 360])
+  ax[2].set_ylabel('Phase (°)')
+  ax[2].set_xlabel('Step')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/1fa289ce28f4dd47cf324538d9ba2116447adb39.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+** Training
+
+#+begin_src ipython
+  model.LR_TRAIN = 1
+  model.LR_EVAL_WIN = 1
+  model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
+
+  model.DURATION = 6.0
+  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.N_BATCH = 96
+
+  model.I0[0] = 1
+  model.I0[1] = 0
+  model.I0[2] = 1
+
+  AC_pair = model.init_ff_input()
+
+  model.I0[0] = 1
+  model.I0[1] = 0
+  model.I0[2] = -1
+
+  AD_pair = model.init_ff_input()
+
+  # ff_input = torch.cat((AC_pair, AD_pair))
+
+  model.I0[0] = -1
+  model.I0[1] = 0
+  model.I0[2] = 1
+
+  BC_pair = model.init_ff_input()
+
+  model.I0[0] = -1
+  model.I0[1] = 0
+  model.I0[2] = -1
+
+  BD_pair = model.init_ff_input()
+
+  ff_input = torch.cat((AC_pair, BD_pair, AD_pair, BC_pair))
+  print('ff_input', ff_input.shape)
+#+end_src
+
+#+RESULTS:
+: ff_input torch.Size([384, 142, 1000])
+
+#+begin_src ipython
+  labels_pair = torch.zeros((2 * model.N_BATCH, model.lr_eval_win))
+  labels_unpair = torch.ones((2 * model.N_BATCH, model.lr_eval_win))
+
+  labels = torch.cat((labels_pair, labels_unpair))
+  print('labels', labels.shape)
+#+end_src
+
+#+RESULTS:
+: labels torch.Size([384, 10])
+
+#+RESULTS:
+
+#+begin_src ipython
+  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+  batch_size = 16
+  train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
+
+  learning_rate = 0.1
+
+  # CosineLoss, BCELoss, BCEWithLogitLoss
+  # criterion = nn.CrossEntropyLoss()
+  criterion = nn.BCEWithLogitsLoss()
+
+  # SGD, Adam, AdamW
+  optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+
+  num_epochs = 100
+  loss, val_loss = run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)
+#+End_src
+
+#+RESULTS:
+#+begin_example
+  Epoch 1/100, Training Loss: 6.3473, Validation Loss: 4.4960
+  Epoch 2/100, Training Loss: 0.5083, Validation Loss: 1.2475
+  Epoch 3/100, Training Loss: 0.7945, Validation Loss: 4.4799
+  Epoch 4/100, Training Loss: 2.0577, Validation Loss: 2.5421
+  Epoch 5/100, Training Loss: 2.7975, Validation Loss: 2.9921
+  Epoch 6/100, Training Loss: 3.0394, Validation Loss: 7.0765
+  Epoch 7/100, Training Loss: 6.2724, Validation Loss: 4.9136
+  Epoch 8/100, Training Loss: 5.2531, Validation Loss: 2.0911
+  Epoch 9/100, Training Loss: 12.2469, Validation Loss: 5.7125
+  Epoch 10/100, Training Loss: 2.3129, Validation Loss: 5.2565
+  Epoch 11/100, Training Loss: 6.9419, Validation Loss: 1.5622
+  Epoch 12/100, Training Loss: 8.0773, Validation Loss: 7.1394
+  Epoch 13/100, Training Loss: 5.7514, Validation Loss: 1.6511
+  Epoch 14/100, Training Loss: 10.7142, Validation Loss: 2.2650
+  Epoch 15/100, Training Loss: 1.6346, Validation Loss: 0.9270
+  Epoch 16/100, Training Loss: 1.8334, Validation Loss: 1.1136
+  Epoch 17/100, Training Loss: 2.8010, Validation Loss: 1.0445
+  Epoch 18/100, Training Loss: 0.4948, Validation Loss: 0.4716
+  Epoch 19/100, Training Loss: 0.7490, Validation Loss: 0.2992
+  Epoch 20/100, Training Loss: 0.0658, Validation Loss: 0.0302
+  Epoch 21/100, Training Loss: 0.0068, Validation Loss: 0.0048
+  Stopping training as loss has fallen below the threshold: 0.006834016647189856
+#+end_example
+
+#+begin_src ipython
+  plt.plot(loss)
+  plt.plot(val_loss)
+  plt.xlabel('epochs')
+  plt.ylabel('Loss')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/7cfdf4958ad853b69449b370b492ac8ebbfc566e.png]]

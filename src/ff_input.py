@@ -163,7 +163,10 @@ def init_ff_seq(model):
                     model.I0[i], model.SIGMA0[i], model.phase, theta=theta
                 )
             elif "dual" in model.TASK:
-                stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[2 * i + 1])
+                # if model.LR_TRAIN:
+                stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.odors[i])
+                # else:
+                #     stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[2*i+1])
             else:
                 stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[:, i])
 

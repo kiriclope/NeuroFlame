@@ -184,13 +184,17 @@ class Network(nn.Module):
 
         # update hidden state
         if self.LR_TRAIN:
-            # lr = self.lr_mask * (self.U @ self.V.T) / (1.0 * self.Na[0])
-            self.lr = self.lr_kappa * (self.lr_mask * (self.U @ self.V.T)) / (1.0 * self.Na[0])
-            # self.lr = self.lr.clamp(min=0.0)
-            # lr = self.lr_mask * (self.U @ self.V.T)
-            hidden = rates @ (self.Wab_T + self.lr.T)
-            # lr = (1.0 + self.lr_mask * (self.U @ self.V.T))
-            # hidden = rates @ (self.Wab_T * lr.T)
+            hidden = rates @ self.Wab_T
+
+            if self.CON_TYPE == 'all2all':
+                self.lr = self.lr_kappa * (self.U @ self.V.T)
+                # if self.LR_MASK:
+                self.lr = self.lr_mask * self.lr
+                self.lr = self.lr / (1.0 * self.Na[0])
+                # self.lr = self.lr.clamp(min=-self.Wab_T[0, 0])
+
+            if self.CON_TYPE == 'sparse':
+                self.lr = self.lr_mask * (self.U @ self.V.T) / torch.sqrt(self.Ka[0])
 
             # update stp variables
             if self.IF_STP:
@@ -200,7 +204,9 @@ class Network(nn.Module):
                     * Aux
                     @ (self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T)
                 )
-                hidden[:, self.slices[0]].add_(hidden_stp)
+                hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
+            else:
+                hidden = hidden + rates @ self.lr.T
 
         else:
             hidden = rates @ self.Wab_T
@@ -227,7 +233,12 @@ class Network(nn.Module):
         net_input = ff_input + rec_input[0]
 
         if self.IF_NMDA:
-            hidden = rates[:, self.slices[0]] @ self.Wab_T[self.slices[0]]
+            if self.LR_TRAIN:
+                hidden = rates[:, self.slices[0]] @ self.Wab_T[self.slices[0]]
+            else:
+                hidden = rates[:, self.slices[0]] @ (self.Wab_T[self.slices[0]]
+                                                     + self.lr.T[self.slices[0]])
+
             if self.IF_STP:
                 hidden[:, self.slices[0]].add_(hidden_stp)
 
@@ -235,6 +246,7 @@ class Network(nn.Module):
                 rec_input[1] * self.EXP_DT_TAU_NMDA
                 + self.R_NMDA * hidden * self.DT_TAU_NMDA
             )
+
             net_input.add_(rec_input[1])
 
         # compute non linearity
@@ -349,7 +361,14 @@ class Network(nn.Module):
         if self.LR_TRAIN:
             y_pred = self.linear(rates[:, -self.lr_eval_win :])
             del rates
-            return y_pred.squeeze(-1)
+
+            if self.LR_CLASS==3:
+                # Cross Entropy Loss needs output to be 1D
+                y_pred = y_pred.mean(1)
+                return y_pred
+            else:
+                # BCE can deal with multi dim
+                return y_pred.squeeze(-1)
 
         if self.LIVE_FF_UPDATE == 0 and RET_FF:
             self.ff_input = ff_input[..., self.slices[0]]
