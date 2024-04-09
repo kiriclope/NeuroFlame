@@ -179,7 +179,7 @@ class Network(nn.Module):
         self.VAR_FF = self.VAR_FF.unsqueeze(0)  # add batch dim
         self.VAR_FF = self.VAR_FF.unsqueeze(-1)  # add neural dim
 
-    def update_dynamics(self, rates, ff_input, rec_input, Wab_T):
+    def update_dynamics(self, rates, ff_input, rec_input, Wab_T, W_stp_T):
         """Updates the dynamics of the model at each timestep"""
 
         # update hidden state
@@ -188,8 +188,8 @@ class Network(nn.Module):
         # update stp variables
         if self.IF_STP:
             Aux = self.stp(rates[:, self.slices[0]])  # Aux is now u * x * rates
-            hidden_stp = self.J_STP * Aux @ self.W_stp_T
-            hidden[:, self.slices[0]].add_(hidden_stp)
+            hidden_stp = self.J_STP * Aux @ W_stp_T
+            hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
 
         # update batched EtoE
         if self.IF_BATCH_J:
@@ -210,14 +210,15 @@ class Network(nn.Module):
             hidden = rates[:, self.slices[0]] @ Wab_T[self.slices[0]]
 
             if self.IF_STP:
-                hidden[:, self.slices[0]].add_(hidden_stp)
+                hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
 
             rec_input[1] = (
                 rec_input[1] * self.EXP_DT_TAU_NMDA
                 + self.R_NMDA * hidden * self.DT_TAU_NMDA
             )
 
-            net_input.add_(rec_input[1])
+            # net_input.add_(rec_input[1])
+            net_input = net_input + rec_input[1]
 
         # compute non linearity
         non_linear = Activation()(
@@ -265,22 +266,24 @@ class Network(nn.Module):
         # I moved this outside of the temporal loop
         # The downside is that I need to pass Wab_T to update_dynamics
         # not sure it is more efficient
+        W_stp_T = None
         if self.LR_TRAIN:
             if self.CON_TYPE == 'sparse':
                 self.lr = self.lr_mask * (self.U @ self.V.T) / torch.sqrt(self.Ka[0])
 
             if self.CON_TYPE == 'all2all':
-                self.lr = self.lr_kappa * (self.U @ self.V.T)
+                self.lr = self.lr_kappa * (self.U @ self.V.T) / (1.0 * self.Na[0])
                 # if self.LR_MASK:
                 self.lr = self.lr_mask * self.lr
-                self.lr = self.lr / (1.0 * self.Na[0])
 
             if self.IF_STP:
-                self.W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
-            else:
-                Wab_T = self.Wab_T + self.lr.T
+                W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
+
+            Wab_T = self.Wab_T + self.lr.T
         else:
             Wab_T = self.Wab_T
+            if self.IF_STP:
+                W_stp_T = self.W_stp_T
 
         # Moving average
         mv_rates, mv_ff = 0, 0
@@ -292,15 +295,15 @@ class Network(nn.Module):
             if self.LIVE_FF_UPDATE:
                 ff_input, noise = live_ff_input(self, step, ff_input)
                 if self.RATE_NOISE:
-                    rates, rec_input = self.update_dynamics(rates, ff_input, rec_input, Wab_T)
+                    rates, rec_input = self.update_dynamics(rates, ff_input, rec_input, Wab_T, W_stp_T)
                     rates = rates + noise
                 else:
                     rates, rec_input = self.update_dynamics(
-                        rates, ff_input + noise, rec_input, Wab_T
+                        rates, ff_input + noise, rec_input, Wab_T, W_stp_T
                     )
             else:
                 rates, rec_input = self.update_dynamics(
-                    rates, ff_input[:, step], rec_input, Wab_T
+                    rates, ff_input[:, step], rec_input, Wab_T, W_stp_T
                 )
 
             # update moving average
@@ -337,11 +340,11 @@ class Network(nn.Module):
         if REC_LAST_ONLY == 0:
             # Stack list on 1st dim so that output is (N_BATCH, N_STEPS, N_NEURON)
             rates = torch.stack(rates_list, dim=1)
-            del rates_list
+            # del rates_list
 
             if self.LIVE_FF_UPDATE and RET_FF:  # returns ff input
                 self.ff_input = torch.stack(ff_list, dim=1)
-                del ff_list
+                # del ff_list
 
             if self.IF_STP and RET_STP:  # returns stp u and x
                 self.u_list = torch.stack(self.u_list, dim=1)
@@ -350,7 +353,7 @@ class Network(nn.Module):
         # Add Linear readout (N_BATCH, N_EVAL_WIN, 1) on last few steps
         if self.LR_TRAIN:
             y_pred = self.linear(rates[:, -self.lr_eval_win :])
-            del rates
+            # del rates
 
             if self.LR_CLASS==3:
                 # Cross Entropy Loss needs output to be 1D
@@ -363,7 +366,7 @@ class Network(nn.Module):
         if self.LIVE_FF_UPDATE == 0 and RET_FF:
             self.ff_input = ff_input[..., self.slices[0]]
 
-        del ff_input, rec_input
+        # del ff_input, rec_input
 
         clear_cache()
 
