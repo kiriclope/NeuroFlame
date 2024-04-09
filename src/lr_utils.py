@@ -22,12 +22,12 @@ def ortho_quench_lr(model):
 def initLR(model):
     # Low rank vector
     model.U = nn.Parameter(torch.randn((model.N_NEURON, int(model.RANK)),
-                                        device=model.device, dtype=model.FLOAT) * 0.1)
+                                        device=model.device, dtype=model.FLOAT) * 0.01)
 
     model.V = nn.Parameter(torch.randn((model.N_NEURON, int(model.RANK)),
-                                       device=model.device, dtype=model.FLOAT) * 0.1)
+                                       device=model.device, dtype=model.FLOAT) * 0.01)
 
-    model.lr_kappa = nn.Parameter(torch.rand(1, dtype=model.FLOAT, device=model.device) * 0.1)
+    model.lr_kappa = nn.Parameter(torch.rand(1, dtype=model.FLOAT, device=model.device))
     
     # Mask to train excitatory neurons only
     model.lr_mask = torch.zeros((model.N_NEURON, model.N_NEURON),
@@ -38,6 +38,8 @@ def initLR(model):
     # Linear readout for supervised learning
     model.linear = nn.Linear(model.Na[0], model.LR_CLASS,
                              device=model.device, dtype=model.FLOAT, bias=True)
+
+    model.dropout = nn.Dropout(model.DROP_RATE)
 
     model.odors = torch.randn((3, model.Na[0]),
                               device=model.device,

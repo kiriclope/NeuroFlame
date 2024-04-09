@@ -268,10 +268,10 @@ class Network(nn.Module):
         # not sure it is more efficient
         W_stp_T = None
         if self.LR_TRAIN:
-            if self.CON_TYPE == 'sparse':
+            if self.CON_TYPE == "sparse":
                 self.lr = self.lr_mask * (self.U @ self.V.T) / torch.sqrt(self.Ka[0])
 
-            if self.CON_TYPE == 'all2all':
+            if self.CON_TYPE == "all2all":
                 self.lr = self.lr_kappa * (self.U @ self.V.T) / (1.0 * self.Na[0])
                 # if self.LR_MASK:
                 self.lr = self.lr_mask * self.lr
@@ -295,7 +295,9 @@ class Network(nn.Module):
             if self.LIVE_FF_UPDATE:
                 ff_input, noise = live_ff_input(self, step, ff_input)
                 if self.RATE_NOISE:
-                    rates, rec_input = self.update_dynamics(rates, ff_input, rec_input, Wab_T, W_stp_T)
+                    rates, rec_input = self.update_dynamics(
+                        rates, ff_input, rec_input, Wab_T, W_stp_T
+                    )
                     rates = rates + noise
                 else:
                     rates, rec_input = self.update_dynamics(
@@ -352,10 +354,10 @@ class Network(nn.Module):
 
         # Add Linear readout (N_BATCH, N_EVAL_WIN, 1) on last few steps
         if self.LR_TRAIN:
-            y_pred = self.linear(rates[:, -self.lr_eval_win :])
+            y_pred = self.linear(self.dropout(rates[:, -self.lr_eval_win :]))
             # del rates
 
-            if self.LR_CLASS==3:
+            if self.LR_CLASS == 3:
                 # Cross Entropy Loss needs output to be 1D
                 y_pred = y_pred.mean(1)
                 return y_pred

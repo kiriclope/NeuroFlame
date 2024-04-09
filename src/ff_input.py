@@ -154,7 +154,8 @@ def init_ff_seq(model):
 
             theta = None
             if "dual" in model.TASK:
-                theta = get_theta(model.PHI0[0], model.PHI0[2]).unsqueeze(0)
+                if "rand" in model.TASK:
+                    theta = get_theta(model.PHI0[0], model.PHI0[2]).unsqueeze(0)
 
         for i, _ in enumerate(model.N_STIM_ON):
             if "rand" in model.TASK:
