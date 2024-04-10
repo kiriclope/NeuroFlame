@@ -10,9 +10,12 @@ class Configuration():
 
     def __init__(self, conf_name, repo_root):
         self.conf_file = repo_root + '/conf/' + conf_name
+        self.defaults = repo_root + '/conf/defaults.yml'
             
     def forward(self, **kwargs):
-        parameters = safe_load(open(self.conf_file, "r"))
+        parameters = safe_load(open(self.defaults, "r"))
+        config = safe_load(open(self.conf_file, "r"))
+        parameters.update(config)
         parameters.update(kwargs)
         
         self.__dict__.update(parameters)
@@ -86,6 +89,8 @@ def init_const(model):
     for i_pop in range(model.N_POP):
         model.EXP_DT_TAU[model.slices[i_pop]] = torch.exp(-model.DT / model.TAU[i_pop])
         model.DT_TAU[model.slices[i_pop]] = model.DT / model.TAU[i_pop]
+
+    model.THRESH = torch.tensor(model.THRESH, dtype=model.FLOAT, device=model.device)
 
     # synaptic dynamics
     model.TAU_SYN = torch.tensor(model.TAU_SYN, dtype=model.FLOAT, device=model.device)

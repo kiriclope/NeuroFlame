@@ -1,6 +1,6 @@
-###################################################
+###############################################
 # Parameters 
-###################################################
+###############################################
 # output different prompts for debugging purpose
 VERBOSE: 0
 # device to be used cuda or cpu
@@ -13,15 +13,12 @@ FLOAT_PRECISION: 32
 #####################################
 # Number of batches (ie initializations)
 N_BATCH: 1
-# Flag needed for batching Jab
-IF_BATCH_J: 0
-
 # Time step in s
 DT: 0.001
 # total simulation time in s
-DURATION: 11.0
+DURATION: 10
 # time to start saving simulation files
-T_STEADY: 1.0
+T_STEADY: 2.0
 # Saving to files every T_WINDOW
 T_WINDOW: 0.1
 
@@ -31,15 +28,17 @@ T_WINDOW: 0.1
 # stimulus as a cosine shape
 TASK: 'None'
 # # time for stimuli onset in s 
-T_STIM_ON: [1.0, 5, 7]
+T_STIM_ON: [1.0, 3.0]
 # # time for stimuli offset in s
-T_STIM_OFF: [2.0, 6, 8]
+T_STIM_OFF: [2.0, 4.0]
 # stimuli strengths
-I0: [0.5, -0.5, 0.5]
+I0: [1.0, 1.0]
 # stimuli phases
-PHI0: [180.0, 0.0, 90.0]
+PHI0: [180.0, 90.0]
+# stimuli phases
+PHI1: [180.0, 90.0]
 # stimuli tuning
-SIGMA0: [1.0, 0.0, 1.0]
+SIGMA0: [1.0, 1.0]
 
 ##########################################
 # Network parameters
@@ -47,9 +46,9 @@ SIGMA0: [1.0, 0.0, 1.0]
 # number of populations
 N_POP: 2
 # number of neurons
-N_NEURON: 10000
+N_NEURON: 2000
 # number of average presynaptic input (set to 1 if all to all)
-K: 500.0
+K: 100.0
 # fraction of neuron in each population (must sum to 1)
 frac: [0.8, 0.2]
 
@@ -75,7 +74,8 @@ THRESH: [1.0, 1.0]
 # set to 0 if instantaneous rates, 1 if exponentially decaying
 RATE_DYN: 1
 # rate time constants
-TAU: [0.04, 0.02]
+TAU: [0.04, 0.04]
+RATE_NOISE: 0
 
 ##########################################
 # Dynamics of the recurrent inputs
@@ -83,79 +83,75 @@ TAU: [0.04, 0.02]
 # set to 0 if instantaneous, 1 if exponentially decaying
 SYN_DYN: 1
 # Synaptic time constants for each population
-TAU_SYN: [.003, .002]
+TAU_SYN: [0.004, 0.002]
 
 ##########################################
 # NMDA currents
 ##########################################
 IF_NMDA: 0
-R_NMDA: 0.25
-TAU_NMDA: [.3, .2]
+R_NMDA: 1.0
+TAU_NMDA: [.2, .1]
+
+####################
+# Plasticity
+####################
+IF_STP: 0
+USE: 0.03
+TAU_FAC: 1.0
+TAU_REC: 0.2
+J_STP: 10.0
+STP_TYPE: 'markram'
 
 ##########################################
-# Feedforward inputs 
+# Feedforward inputs
 ##########################################
 LIVE_FF_UPDATE: 0
 # External inputs strengths
 Ja0: [2.0, 1.0]
 # External rate
-M0: 1.0
+M0: 2.0
 # Variance of the noise
-VAR_FF: [0, 0]
+VAR_FF: [0.0, 0.0]
 # To add an attentional switch
 # if BUMP_SWITCH[i] == 1 it sets Iext[i] to zero before stimulus presentation
 BUMP_SWITCH: [0, 0]
 
 ##########################################
-# Synaptic strengths 
+# Synaptic strengths           
 ##########################################
 # Network's gain
 GAIN: 1.0
 # Synaptic strengths
-Jab: [1., -1.5, 1, -1]
-
-####################
-# Plasticity
-####################
-# adds short term plasticity
-IF_STP: 0
-USE: 0.03
-TAU_FAC: 0.5
-TAU_REC: 0.2
+Jab: [1.0, -1.5, 1, -1]
+# Batching Jab
+IF_BATCH_J: 0
 
 ##############
 # Connectivity
 ##############
-IF_W_BLOCKS: 0
 # seed for connectivity None or float
-SEED: 0
+SEED: 1
 # CON_TYPE can be 'all2all' or 'sparse'
 CON_TYPE: 'sparse'
 # PROBA_TYPE can be 'cosine', 'cosine_spec' or 'lr'
-PROBA_TYPE: ['cosine', 'cosine', 'cosine', 'cosine']
-
+PROBA_TYPE: ['None', 'None', 'None', 'None']
 # strength of the asymmetries if all to all
 SIGMA: [0.0, 0.0, 0.0, 0.0]
 # tuning of the recurrent connections
-KAPPA: [0.5, 0.225, 0.5, 0.5]
-
+KAPPA: [0.0, 0.0, 0.0, 0.0]
 # phase of the connectivity
 PHASE: 0.0
 
 ##########
 # Low rank
 ##########
-LR_EVAL_WIN: 0
+LR_EVAL_WIN: 2
 LR_TRAIN: 0
+LR_MASK: 0
+LR_CLASS: 1
 
-# RANK: 2
-# LR_MEAN: [0.0, 0.0]
-# LR_COV: [[1.0, 0.0],[0.0, 1.0]]
+DROP_RATE: 0.5
 
-# RANK: 3
-# LR_MEAN: [0.0, 0.0, 0.0]
-# LR_COV: [[1.0, 0.0, 0.0],[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-
-# RANK: 4
+RANK: 2
 LR_MEAN: [0.0, 0.0, 0.0, 0.0]
 LR_COV: [[1.0, 0.9, 0.0, 0.0],[0.9, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.9], [0.0, 0.0, 0.9, 1.0]]

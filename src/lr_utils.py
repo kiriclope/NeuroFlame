@@ -33,11 +33,19 @@ def initLR(model):
     model.lr_mask = torch.zeros((model.N_NEURON, model.N_NEURON),
                                 device=model.device, dtype=model.FLOAT)
 
-    model.lr_mask[model.slices[0], model.slices[0]] = 1.0
-    
+    if model.LR_MASK==0:
+        model.lr_mask[model.slices[0], model.slices[0]] = 1.0
+    if model.LR_MASK==1:
+        model.lr_mask[model.slices[1], model.slices[1]] = 1.0
+    if model.LR_MASK==-1:
+        model.lr_mask = torch.ones((model.N_NEURON, model.N_NEURON),
+                                   device=model.device, dtype=model.FLOAT)
+
     # Linear readout for supervised learning
     model.linear = nn.Linear(model.Na[0], model.LR_CLASS,
-                             device=model.device, dtype=model.FLOAT, bias=True)
+                             device=model.device,
+                             dtype=model.FLOAT,
+                             bias=model.LR_BIAS)
 
     model.dropout = nn.Dropout(model.DROP_RATE)
 
@@ -50,7 +58,10 @@ def initLR(model):
     
 
     # Window where to evaluate loss
-    model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
+    if model.LR_EVAL_WIN==-1:
+        model.lr_eval_win = -1
+    else:
+        model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
 
 def get_theta(a, b, IF_NORM=0):
 

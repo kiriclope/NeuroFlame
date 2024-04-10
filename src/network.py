@@ -133,13 +133,12 @@ class Network(nn.Module):
 
         if self.LIVE_FF_UPDATE:
             rates = Activation()(
-                ff_input + rec_input[0], func_name=self.TF_TYPE, thresh=self.THRESH[0]
-            )
+                ff_input + rec_input[0], func_name=self.TF_TYPE, thresh=self.THRESH)
         else:
             rates = Activation()(
                 ff_input[:, 0] + rec_input[0],
                 func_name=self.TF_TYPE,
-                thresh=self.THRESH[0],
+                thresh=self.THRESH,
             )
 
         return rates, ff_input, rec_input
@@ -221,9 +220,9 @@ class Network(nn.Module):
             net_input = net_input + rec_input[1]
 
         # compute non linearity
-        non_linear = Activation()(
-            net_input, func_name=self.TF_TYPE, thresh=self.THRESH[0]
-        )
+        non_linear = Activation()(net_input,
+                                  func_name=self.TF_TYPE,
+                                  thresh=self.THRESH)
 
         # update rates
         if self.RATE_DYN:
@@ -268,13 +267,15 @@ class Network(nn.Module):
         # not sure it is more efficient
         W_stp_T = None
         if self.LR_TRAIN:
+
+            self.lr = self.lr_kappa * (self.U @ self.V.T)
+            self.lr = self.lr_mask * self.lr
+
             if self.CON_TYPE == "sparse":
-                self.lr = self.lr_mask * (self.U @ self.V.T) / torch.sqrt(self.Ka[0])
+                self.lr = self.lr / torch.sqrt(self.Ka[0])
 
             if self.CON_TYPE == "all2all":
-                self.lr = self.lr_kappa * (self.U @ self.V.T) / (1.0 * self.Na[0])
-                # if self.LR_MASK:
-                self.lr = self.lr_mask * self.lr
+                self.lr = self.lr / (1.0 * self.Na[0])
 
             if self.IF_STP:
                 W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
