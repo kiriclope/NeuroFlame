@@ -16,7 +16,7 @@ class LRNet(L.LightningModule):
         
         self.penalty = penalty
         self.lbd = lbd
-        
+
     def forward(self, ff_input=None):
         rates = self.model.forward(ff_input)
         y_pred = self.linear(rates[:, -self.lr_eval_win:])
@@ -54,4 +54,3 @@ class LRNet(L.LightningModule):
         loss = self.criterion(y_pred, y)
 
         self.log('val_loss', loss)
-        

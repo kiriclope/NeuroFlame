@@ -133,7 +133,8 @@ class Network(nn.Module):
 
         if self.LIVE_FF_UPDATE:
             rates = Activation()(
-                ff_input + rec_input[0], func_name=self.TF_TYPE, thresh=self.THRESH)
+                ff_input + rec_input[0], func_name=self.TF_TYPE, thresh=self.THRESH
+            )
         else:
             rates = Activation()(
                 ff_input[:, 0] + rec_input[0],
@@ -220,9 +221,7 @@ class Network(nn.Module):
             net_input = net_input + rec_input[1]
 
         # compute non linearity
-        non_linear = Activation()(net_input,
-                                  func_name=self.TF_TYPE,
-                                  thresh=self.THRESH)
+        non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH)
 
         # update rates
         if self.RATE_DYN:
@@ -267,15 +266,16 @@ class Network(nn.Module):
         # not sure it is more efficient
         W_stp_T = None
         if self.LR_TRAIN:
-
             self.lr = self.lr_kappa * (self.U @ self.V.T)
             self.lr = self.lr_mask * self.lr
 
-            if self.CON_TYPE == "sparse":
-                self.lr = self.lr / torch.sqrt(self.Ka[0])
+            # if self.CON_TYPE == "sparse":
+            #     self.lr = self.lr / self.Ka[0]
+            #     self.lr = self.lr.clamp(min=-1.0/torch.sqrt(self.Ka[0]))
 
-            if self.CON_TYPE == "all2all":
-                self.lr = self.lr / (1.0 * self.Na[0])
+            # if self.CON_TYPE == "all2all":
+            self.lr = self.lr / (1.0 * self.Na[0])
+            self.lr = self.lr.clamp(min=-self.Wab_T[0, 0])
 
             if self.IF_STP:
                 W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
@@ -355,7 +355,8 @@ class Network(nn.Module):
 
         # Add Linear readout (N_BATCH, N_EVAL_WIN, 1) on last few steps
         if self.LR_TRAIN:
-            y_pred = self.linear(self.dropout(rates[:, -self.lr_eval_win :]))
+            y_pred = self.linear(self.dropout(rates))
+            # y_pred = self.linear(self.dropout(rates[:, -self.lr_eval_win :]))
             # del rates
 
             if self.LR_CLASS == 3:

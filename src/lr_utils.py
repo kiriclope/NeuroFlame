@@ -27,8 +27,11 @@ def initLR(model):
     model.V = nn.Parameter(torch.randn((model.N_NEURON, int(model.RANK)),
                                        device=model.device, dtype=model.FLOAT) * 0.01)
 
-    model.lr_kappa = nn.Parameter(torch.rand(1, dtype=model.FLOAT, device=model.device))
-    
+    if model.LR_KAPPA==1:
+        model.lr_kappa = nn.Parameter(torch.rand(1, dtype=model.FLOAT, device=model.device))
+    else:
+        model.lr_kappa = torch.tensor(1.0, dtype=model.FLOAT, device=model.device)
+
     # Mask to train excitatory neurons only
     model.lr_mask = torch.zeros((model.N_NEURON, model.N_NEURON),
                                 device=model.device, dtype=model.FLOAT)
