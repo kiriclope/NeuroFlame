@@ -1,6 +1,17 @@
 import time
 import torch
 from torch import nn
+def masked_normalize(tensor):
+    # Create a mask for non-zero elements
+    mask = tensor != 0
+    normalized_tensor = tensor.clone()  # Create a clone to avoid in-place modification
+    if mask.any():
+        masked_tensor = tensor[mask]
+        mean = masked_tensor.mean()
+        std = masked_tensor.std(unbiased=False) + 1e-6  # Adding epsilon for numerical stability
+        # Normalize only the non-zero elements and replace them in the clone
+        normalized_tensor[mask] = (masked_tensor - mean) / std
+    return normalized_tensor
 
 def ortho_quench_lr(model):
             
@@ -55,10 +66,9 @@ def initLR(model):
     model.odors = torch.randn((3, model.Na[0]),
                               device=model.device,
                               dtype=model.FLOAT)
-
-    # for param in model.linear.parameters():
-    #     param.requires_grad = False
-    
+    if model.LR_FIX_READ:
+        for param in model.linear.parameters():
+            param.requires_grad = False
 
     # Window where to evaluate loss
     if model.LR_EVAL_WIN==-1:

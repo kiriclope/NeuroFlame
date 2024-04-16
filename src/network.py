@@ -8,7 +8,7 @@ from src.plasticity import Plasticity
 from src.ff_input import live_ff_input, init_ff_input
 
 from src.utils import set_seed, clear_cache, print_activity
-from src.lr_utils import initLR
+from src.lr_utils import initLR, masked_normalize
 
 import warnings
 
@@ -266,14 +266,12 @@ class Network(nn.Module):
         # not sure it is more efficient
         W_stp_T = None
         if self.LR_TRAIN:
-            self.lr = self.lr_kappa * (self.U @ self.V.T)
+            if self.LR_NORM:
+                self.lr = self.lr_kappa * (masked_normalize(self.U) @ masked_normalize(self.V).T)
+            else:
+                self.lr = self.lr_kappa * (self.U @ self.V.T)
+
             self.lr = self.lr_mask * self.lr
-
-            # if self.CON_TYPE == "sparse":
-            #     self.lr = self.lr / self.Ka[0]
-            #     self.lr = self.lr.clamp(min=-1.0/torch.sqrt(self.Ka[0]))
-
-            # if self.CON_TYPE == "all2all":
             self.lr = self.lr / (1.0 * self.Na[0])
             self.lr = self.lr.clamp(min=-self.Wab_T[0, 0])
 
