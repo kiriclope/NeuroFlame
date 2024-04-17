@@ -3,7 +3,7 @@ from torch.distributions import MultivariateNormal
 
 
 class Connectivity:
-    def __init__(self, Na, Nb, Kb, device="cuda", dtype=torch.float, verbose=0):
+    def __init__(self, Na, Nb, Kb, device="cuda", verbose=0):
         """
         Class: Connectivity
         Creates a connectivity matrix. The connectivity can be sparse are all to all.
@@ -20,7 +20,6 @@ class Connectivity:
 
         self.verbose = verbose
         self.device = device
-        self.dtype = dtype
 
     def low_rank_proba(self, kappa, lr_mean, lr_cov, ksi=None, **kwargs):
         """returns Low rank probability of connection"""
@@ -29,16 +28,15 @@ class Connectivity:
             if self.verbose:
                 print("Generating low rank vectors")
 
-            mean_ = torch.tensor(lr_mean, dtype=self.dtype, device=self.device)
-            cov_ = torch.tensor(lr_cov, dtype=self.dtype, device=self.device)
+            mean_ = torch.tensor(lr_mean,  device=self.device)
+            cov_ = torch.tensor(lr_cov,  device=self.device)
 
             if mean_.shape[0] > 1:
                 mv_normal = MultivariateNormal(mean_, cov_)
                 self.ksi = mv_normal.sample((self.Nb,)).T
             else:
                 self.ksi = torch.randn((1, self.Nb),
-                                       device=self.device,
-                                       dtype=self.dtype)
+                                       device=self.device)
 
             del mean_
             del cov_
@@ -66,10 +64,10 @@ class Connectivity:
         """returns cosine probability of connection"""
 
         theta_list = torch.linspace(
-            0, 2.0 * torch.pi, self.Na + 1, dtype=self.dtype, device=self.device
+            0, 2.0 * torch.pi, self.Na + 1,  device=self.device
         )[:-1]
         phi_list = torch.linspace(
-            0, 2.0 * torch.pi, self.Nb + 1, dtype=self.dtype, device=self.device
+            0, 2.0 * torch.pi, self.Nb + 1,  device=self.device
         )[:-1]
 
         theta_i, theta_j = torch.meshgrid(theta_list, phi_list, indexing="ij")
@@ -88,10 +86,10 @@ class Connectivity:
 
     def von_mises_proba(self, kappa):
         theta_list = torch.linspace(
-            0, 2.0 * torch.pi, self.Na + 1, dtype=self.dtype, device=self.device
+            0, 2.0 * torch.pi, self.Na + 1,  device=self.device
         )[:-1]
         phi_list = torch.linspace(
-            0, 2.0 * torch.pi, self.Nb + 1, dtype=self.dtype, device=self.device
+            0, 2.0 * torch.pi, self.Nb + 1,  device=self.device
         )[:-1]
 
         theta_i, theta_j = torch.meshgrid(theta_list, phi_list, indexing="ij")
@@ -126,9 +124,9 @@ class Connectivity:
             if self.verbose:
                 print("von Mises probability")
         elif "gaussian" in proba_type:
-            Pij = torch.randn((self.Na, self.Nb), dtype=self.dtype, device=self.device)
+            Pij = torch.randn((self.Na, self.Nb),  device=self.device)
         else:
-            Pij = torch.tensor(1.0, dtype=self.dtype, device=self.device)
+            Pij = torch.tensor(1.0,  device=self.device)
             if self.verbose:
                 print("uniform probability")
 
@@ -175,7 +173,7 @@ class Connectivity:
             #     if self.verbose:
             #         print('with heterogeneity, SIGMA', kwargs['sigma'])
 
-            #     Hij = kwargs['sigma'] * torch.randn((self.Na, self.Nb), dtype=self.dtype, device=self.device)
+            #     Hij = kwargs['sigma'] * torch.randn((self.Na, self.Nb),  device=self.device)
             #     Cij = Cij + Hij / torch.sqrt(self.Nb)
 
             # del Hij

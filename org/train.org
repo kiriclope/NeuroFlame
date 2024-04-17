@@ -13,7 +13,7 @@
   %matplotlib inline
   %config InlineBackend.figure_format = 'png'
 
-  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  REPO_ROOT = "/home/leon/models/NeuroFlame"
   pal = sns.color_palette("tab10")
 #+end_src
 
@@ -457,7 +457,7 @@
 * Model
 
 #+begin_src ipython
-  REPO_ROOT = "/home/leon/models/NeuroTorch"
+  REPO_ROOT = "/home/leon/models/NeuroFlame"
   conf_name = "config_train.yml"
 #+end_src
 
@@ -572,13 +572,11 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: Epoch 1/30, Training Loss: 0.8547, Validation Loss: 0.8443
-: Epoch 2/30, Training Loss: 0.7740, Validation Loss: 0.7622
-: Epoch 3/30, Training Loss: 0.7026, Validation Loss: 0.6630
-: Epoch 4/30, Training Loss: 0.5114, Validation Loss: 0.4713
-: Epoch 5/30, Training Loss: 0.1400, Validation Loss: 0.0415
-: Epoch 6/30, Training Loss: 0.0000, Validation Loss: 0.0636
-: Epoch 7/30, Training Loss: 0.0000, Validation Loss: 0.0000
+: Epoch 1/30, Training Loss: 0.8601, Validation Loss: 0.8555
+: Epoch 2/30, Training Loss: 0.7265, Validation Loss: 0.7418
+: Epoch 3/30, Training Loss: 0.6524, Validation Loss: 0.5942
+: Epoch 4/30, Training Loss: 0.3420, Validation Loss: 0.2743
+: Epoch 5/30, Training Loss: 0.0150, Validation Loss: 0.0000
 : Stopping training as loss has fallen below the threshold: 0.0
 
 ** Testing
@@ -648,7 +646,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/67424081b45e61de0baa59ee38e5381b29b13150.png]]
+[[file:./.ob-jupyter/aa8172d387124017f5a2207f87bdcf6f5d043cca.png]]
 
 #+begin_src ipython
     readout = model.linear.weight.data.cpu().detach().numpy()[0]
@@ -658,7 +656,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+RESULTS:
 :RESULTS:
 : (2, 61)
-[[file:./.ob-jupyter/0abc14a3c9829b5ec5ec5c9acced0f8825a02b42.png]]
+[[file:./.ob-jupyter/9618733c436d1d4acf2cfe4bb9535f21724e1848.png]]
 :END:
 
 #+begin_src ipython
@@ -666,7 +664,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/642d4218f0a7f358530db6fdf9e2f90a998e70a8.png]]
+[[file:./.ob-jupyter/440754d5d7aca5c535fd43c1db69f6225c354d3a.png]]
 
 #+begin_src ipython
 
@@ -780,10 +778,22 @@ Here we only evaluate performance from test onset to test offset
 #+End_src
 
 #+RESULTS:
-: Epoch 1/30, Training Loss: 8.1957, Validation Loss: 1.0399
-: Epoch 2/30, Training Loss: 0.0000, Validation Loss: 0.0082
-: Epoch 3/30, Training Loss: 0.0000, Validation Loss: 0.0000
-: Stopping training as loss has fallen below the threshold: 0.0
+#+begin_example
+  Epoch 1/30, Training Loss: 1.0906, Validation Loss: 2.6009
+  Epoch 2/30, Training Loss: 1.8745, Validation Loss: 1.6120
+  Epoch 3/30, Training Loss: 0.9192, Validation Loss: 1.0817
+  Epoch 4/30, Training Loss: 0.8926, Validation Loss: 0.9081
+  Epoch 5/30, Training Loss: 0.8946, Validation Loss: 0.9034
+  Epoch 6/30, Training Loss: 0.9068, Validation Loss: 0.9004
+  Epoch 7/30, Training Loss: 0.9099, Validation Loss: 0.8900
+  Epoch 8/30, Training Loss: 0.8777, Validation Loss: 0.8842
+  Epoch 9/30, Training Loss: 0.8639, Validation Loss: 0.8748
+  Epoch 10/30, Training Loss: 0.8565, Validation Loss: 0.8719
+  Epoch 11/30, Training Loss: 0.8539, Validation Loss: 0.8629
+  Epoch 12/30, Training Loss: 0.8534, Validation Loss: 0.8448
+  Epoch 13/30, Training Loss: 1.0759, Validation Loss: 0.8496
+  Epoch 14/30, Training Loss: 0.8571, Validation Loss: 0.8606
+#+end_example
 
 #+begin_src ipython
   plt.plot(loss)
@@ -794,7 +804,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/d6330ac1cf679b2e487010c7dd7d7332ea74218c.png]]
+: 70ad7693-b493-4b86-8927-809950350437
 
 ** Testing
 
@@ -803,6 +813,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
+: 01456013-0c9e-4a39-8c94-7b6d7cef1bc1
 
 #+begin_src ipython
   model.eval()
@@ -821,6 +832,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
+: b2f950d8-b7d2-4d3b-946c-bbf7f1b56ba9
 
 #+begin_src ipython
   model.N_BATCH = 1
@@ -829,6 +841,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
+: ec12b04a-6957-46c9-a3e9-adb6b65b5147
 
 #+begin_src ipython
   model.N_BATCH = 1
@@ -862,7 +875,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([4, 1420, 2000])
+: eed3fcce-f732-467c-8085-b6c907786c1d
 
 #+begin_src ipython
   model.VERBOSE = 0
@@ -872,7 +885,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: (4, 61, 1600)
+: 2adbefb2-107a-4ee7-b571-272976836968
 
 #+begin_src ipython
   idx = get_idx(model, 3)
@@ -880,10 +893,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: ksi torch.Size([5, 1600])
-[[file:./.ob-jupyter/570bbe4fd824b6a7e9add62deb29e37ac6575a24.png]]
-:END:
+: 6ba8ccc4-9fb8-49dd-9dde-d3c179ed0550
 
 #+begin_src ipython
     readout = model.linear.weight.data.cpu().detach().numpy()[0]
@@ -891,23 +901,21 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: (4, 61)
-[[file:./.ob-jupyter/3ea32dd151e56a6caf2f0be1d9b875a19c6322f2.png]]
-:END:
+: 53bb00c0-04af-4f97-ae03-40eedb4f9513
 
 #+begin_src ipython
   plot_m0_m1_phi(rates, idx)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/1a05efdcc6755d078a993715da311555f95b5b91.png]]
+: b0dabd88-3d44-445c-8b87-9e08535a5afd
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
+: bbccce34-c66a-47de-9047-01332053ecf9
 
 * Go/NoGo
 ** Training
@@ -1018,27 +1026,36 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 #+RESULTS:
 #+begin_example
-  Epoch 1/30, Training Loss: 0.8133, Validation Loss: 0.8483
-  Epoch 2/30, Training Loss: 0.8347, Validation Loss: 0.8547
-  Epoch 3/30, Training Loss: 0.8699, Validation Loss: 0.8627
-  Epoch 4/30, Training Loss: 0.8478, Validation Loss: 0.8504
-  Epoch 5/30, Training Loss: 0.8240, Validation Loss: 0.8172
-  Epoch 6/30, Training Loss: 0.7806, Validation Loss: 0.7638
-  Epoch 7/30, Training Loss: 0.7045, Validation Loss: 0.7214
-  Epoch 8/30, Training Loss: 0.6894, Validation Loss: 0.6670
-  Epoch 9/30, Training Loss: 0.6583, Validation Loss: 0.6216
-  Epoch 10/30, Training Loss: 0.5601, Validation Loss: 0.5780
-  Epoch 11/30, Training Loss: 0.5336, Validation Loss: 0.5242
-  Epoch 12/30, Training Loss: 0.5012, Validation Loss: 0.4614
-  Epoch 13/30, Training Loss: 0.3993, Validation Loss: 0.3844
-  Epoch 14/30, Training Loss: 0.3304, Validation Loss: 0.3123
-  Epoch 15/30, Training Loss: 0.2637, Validation Loss: 0.2447
-  Epoch 16/30, Training Loss: 0.2015, Validation Loss: 0.1850
-  Epoch 17/30, Training Loss: 0.1360, Validation Loss: 0.1202
-  Epoch 18/30, Training Loss: 0.0608, Validation Loss: 0.0576
-  Epoch 19/30, Training Loss: 0.0101, Validation Loss: 0.0052
-  Epoch 20/30, Training Loss: 0.0000, Validation Loss: 0.0000
-  Stopping training as loss has fallen below the threshold: 0.0
+  Epoch 1/30, Training Loss: 0.8137, Validation Loss: 0.7895
+  Epoch 2/30, Training Loss: 0.7869, Validation Loss: 0.7876
+  Epoch 3/30, Training Loss: 0.7573, Validation Loss: 0.7835
+  Epoch 4/30, Training Loss: 0.7729, Validation Loss: 0.7709
+  Epoch 5/30, Training Loss: 0.7071, Validation Loss: 0.7490
+  Epoch 6/30, Training Loss: 0.7787, Validation Loss: 0.7288
+  Epoch 7/30, Training Loss: 0.7110, Validation Loss: 0.7087
+  Epoch 8/30, Training Loss: 0.6649, Validation Loss: 0.6893
+  Epoch 9/30, Training Loss: 0.7065, Validation Loss: 0.6750
+  Epoch 10/30, Training Loss: 0.6326, Validation Loss: 0.6614
+  Epoch 11/30, Training Loss: 0.6517, Validation Loss: 0.6492
+  Epoch 12/30, Training Loss: 0.6042, Validation Loss: 0.6356
+  Epoch 13/30, Training Loss: 0.6238, Validation Loss: 0.6209
+  Epoch 14/30, Training Loss: 0.5761, Validation Loss: 0.6070
+  Epoch 15/30, Training Loss: 0.5245, Validation Loss: 0.5922
+  Epoch 16/30, Training Loss: 0.5763, Validation Loss: 0.5749
+  Epoch 17/30, Training Loss: 0.5215, Validation Loss: 0.5550
+  Epoch 18/30, Training Loss: 0.5378, Validation Loss: 0.5346
+  Epoch 19/30, Training Loss: 0.5496, Validation Loss: 0.5121
+  Epoch 20/30, Training Loss: 0.4537, Validation Loss: 0.4873
+  Epoch 21/30, Training Loss: 0.3910, Validation Loss: 0.4656
+  Epoch 22/30, Training Loss: 0.4071, Validation Loss: 0.4407
+  Epoch 23/30, Training Loss: 0.4209, Validation Loss: 0.4161
+  Epoch 24/30, Training Loss: 0.4405, Validation Loss: 0.3901
+  Epoch 25/30, Training Loss: 0.2604, Validation Loss: 0.3536
+  Epoch 26/30, Training Loss: 0.2553, Validation Loss: 0.3053
+  Epoch 27/30, Training Loss: 0.1102, Validation Loss: 0.2443
+  Epoch 28/30, Training Loss: 0.2202, Validation Loss: 0.2166
+  Epoch 29/30, Training Loss: 0.2605, Validation Loss: 0.1907
+  Epoch 30/30, Training Loss: 0.0571, Validation Loss: 0.1676
 #+end_example
 
 #+begin_src ipython
@@ -1050,7 +1067,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/bfb6844cfa7f3934da878f93df66d25812bf1b75.png]]
+[[file:./.ob-jupyter/b76926b59e176d4186c33c6c58eac7abc476f818.png]]
 
 ** Testing
 
@@ -1131,7 +1148,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/bbe31dacd73fe9550bd2ec10f74b4bfebac21578.png]]
+[[file:./.ob-jupyter/4b54406adbfea93d4b8fd676a6b9856db16672f3.png]]
 
 #+begin_src ipython
     readout = model.linear.weight.data.cpu().detach().numpy()[0]
@@ -1141,7 +1158,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 :RESULTS:
 : (2, 31)
-[[file:./.ob-jupyter/eb354aa846ab8ea730726dca2af2ea41b214313e.png]]
+[[file:./.ob-jupyter/1aeaeb8651ad156985f3cc6e5d8f8a148ccbad7d.png]]
 :END:
 
 #+begin_src ipython
@@ -1149,7 +1166,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/1bc7b89266abc494b588b9d3a19189e04267f60d.png]]
+[[file:./.ob-jupyter/cf699f9f404faa08187ced6e0cced745860ffdd1.png]]
 
 #+begin_src ipython
 

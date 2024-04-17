@@ -3,11 +3,9 @@ from torch import nn
 
 
 class Stimuli:
-    def __init__(self, task, size, dtype=torch.float, device="cuda"):
+    def __init__(self, task, size, device="cuda"):
         self.task = task
         self.size = size
-
-        self.dtype = dtype
         self.device = device
 
     def odrStim(self, strength, footprint, phase, rnd_phase=0, theta=None):
@@ -21,7 +19,7 @@ class Stimuli:
 
         if rnd_phase:
             phase = (
-                torch.rand((self.size[0], 1), dtype=self.dtype, device=self.device)
+                torch.rand((self.size[0], 1),  device=self.device)
                 * 2.0
                 * torch.pi
             )
@@ -31,7 +29,7 @@ class Stimuli:
                 0,
                 2.0 * torch.pi,
                 self.size[-1] + 1,
-                dtype=self.dtype,
+
                 device=self.device,
             )[:-1]
             theta = theta.unsqueeze(0).expand((1, self.size[-1]))

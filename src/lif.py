@@ -22,7 +22,7 @@ class LIFNetwork(nn.Module):
         The network can be trained with standard torch optimization technics.
         Parameters:
                conf_name: str, name of a .yml file contaning the model's parameters.
-               repo_root: str, root path of the NeuroTorch repository.
+               repo_root: str, root path of the NeuroFlame repository.
                **kwargs: **dict, any parameter in conf_file can be passed here
                                  and will then be overwritten.
         Returns:
@@ -57,7 +57,7 @@ class LIFNetwork(nn.Module):
         self.scaleWeights()
 
         # in pytorch, Wij is i to j.
-        self.Wab_T = torch.zeros((self.N_NEURON, self.N_NEURON), dtype=self.FLOAT, device=self.device)
+        self.Wab_T = torch.zeros((self.N_NEURON, self.N_NEURON),  device=self.device)
 
         # Creates connetivity matrix in blocks
         for i_pop in range(self.N_POP):
@@ -82,7 +82,7 @@ class LIFNetwork(nn.Module):
 
     def initSTP(self):
         ''' Creates stp model for population 0'''
-        self.J_STP = torch.tensor(self.J_STP, dtype=self.FLOAT, device=self.device)
+        self.J_STP = torch.tensor(self.J_STP,  device=self.device)
 
         self.stp = Plasticity(self.USE, self.TAU_FAC, self.TAU_REC,
                               self.DT, (self.N_BATCH, self.Na[0]),
@@ -105,8 +105,8 @@ class LIFNetwork(nn.Module):
             ff_input.to(self.device)
             self.N_BATCH = ff_input.shape[0]
         
-        rec_input = torch.randn((self.IF_NMDA+1, self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
-        volts = torch.zeros((self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
+        rec_input = torch.randn((self.IF_NMDA+1, self.N_BATCH, self.N_NEURON),  device=self.device)
+        volts = torch.zeros((self.N_BATCH, self.N_NEURON),  device=self.device)
         
         # Update spikes
         spikes = (volts>=self.V_THRESH)
@@ -121,7 +121,7 @@ class LIFNetwork(nn.Module):
         if self.VERBOSE:
             print("Jab", self.Jab)
 
-        self.Jab = torch.tensor(self.Jab, dtype=self.FLOAT, device=self.device)
+        self.Jab = torch.tensor(self.Jab,  device=self.device)
         self.Jab = self.Jab.reshape(self.N_POP, self.N_POP) * self.GAIN
         self.Jab.mul_(self.V_THRESH - self.V_REST)
         
@@ -133,7 +133,7 @@ class LIFNetwork(nn.Module):
         if self.VERBOSE:
             print("Ja0", self.Ja0)
         
-        self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device)
+        self.Ja0 = torch.tensor(self.Ja0,  device=self.device)
         self.Ja0.mul_(self.V_THRESH - self.V_REST)
         self.Ja0 = self.Ja0.unsqueeze(0)  # add batch dim
         self.Ja0 = self.Ja0.unsqueeze(-1) # add neural dim
@@ -143,7 +143,7 @@ class LIFNetwork(nn.Module):
             self.Ja0.mul_(self.M0 * torch.sqrt(self.Ka[0]))
         
         # scaling ff variance as 1 / sqrt(K0)
-        self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
+        self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF,  device=self.device))
         self.VAR_FF.mul_(self.M0 / torch.sqrt(self.Ka[0]))
         self.VAR_FF = self.VAR_FF.unsqueeze(0)  # add batch dim
         self.VAR_FF = self.VAR_FF.unsqueeze(-1) # add neural dim

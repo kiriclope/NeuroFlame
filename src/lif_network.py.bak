@@ -40,9 +40,9 @@ class LifNetwork(nn.Module):
         set_seed(self.SEED)
 
         # in pytorch, Wij is i to j.
-        self.Wab = nn.Linear(self.N_NEURON, self.N_NEURON, bias=False, dtype=self.FLOAT, device=self.device)
+        self.Wab = nn.Linear(self.N_NEURON, self.N_NEURON, bias=False,  device=self.device)
         if self.IF_NMDA:
-            self.W_NMDA = nn.Linear(self.N_NEURON, self.Na[0], bias=False, dtype=self.FLOAT, device=self.device)
+            self.W_NMDA = nn.Linear(self.N_NEURON, self.Na[0], bias=False,  device=self.device)
             # print(self.W_NMDA)
 
         for i_pop in range(self.N_POP):
@@ -206,14 +206,14 @@ class LifNetwork(nn.Module):
         self.device = torch.device(self.DEVICE)
 
     def initRates(self):
-        volt = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)
-        rec_input = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        volt = torch.zeros(self.N_BATCH, self.N_NEURON,  device=self.device)
+        rec_input = torch.zeros(self.N_BATCH, self.N_NEURON,  device=self.device)
         
         rec_NMDA = 0
         if self.IF_NMDA:
-            rec_NMDA = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)
+            rec_NMDA = torch.zeros(self.N_BATCH, self.N_NEURON,  device=self.device)
 
-        ff_input = torch.zeros(self.N_BATCH, self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        ff_input = torch.zeros(self.N_BATCH, self.N_NEURON,  device=self.device)
         
         return volt, rec_input, rec_NMDA, ff_input
     
@@ -223,15 +223,15 @@ class LifNetwork(nn.Module):
         Nb = self.Na[j_pop]
         Kb = self.Ka[j_pop]
 
-        Pij = torch.tensor(1.0, dtype=self.FLOAT, device=self.device)
+        Pij = torch.tensor(1.0,  device=self.device)
 
         if 'lr' in self.STRUCTURE[i_pop, j_pop]:
 
-            mean = torch.tensor([0.0, 0.0], dtype=self.FLOAT, device=self.device)
+            mean = torch.tensor([0.0, 0.0],  device=self.device)
 
             # Define the covariance matrix
             covariance = torch.tensor([[1.0, self.LR_COV],
-                                       [self.LR_COV, 1.0],], dtype=self.FLOAT, device=self.device)
+                                       [self.LR_COV, 1.0],],  device=self.device)
 
 
             multivariate_normal = MultivariateNormal(mean, covariance)
@@ -254,8 +254,8 @@ class LifNetwork(nn.Module):
                 print('Pij', Pij.shape)
 
         if 'cos' in self.STRUCTURE[i_pop, j_pop]:
-            theta = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Na), dtype=self.FLOAT, device=self.device)
-            phi = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Nb), dtype=self.FLOAT, device=self.device)
+            theta = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Na),  device=self.device)
+            phi = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(Nb),  device=self.device)
 
             i, j = torch.meshgrid(torch.arange(Na, device=self.device), torch.arange(Nb, device=self.device), indexing="ij")
             
@@ -288,8 +288,8 @@ class LifNetwork(nn.Module):
                 if self.VERBOSE:
                     print('with heterogeneity, SIGMA', self.SIGMA[i_pop, j_pop])
 
-                Hij = torch.normal(0, self.SIGMA[i_pop, j_pop], size=(Na, Nb), dtype=self.FLOAT, device=self.device)
-                Cij = Cij + Hij / torch.sqrt(torch.tensor(Nb, device=self.device, dtype=self.FLOAT))
+                Hij = torch.normal(0, self.SIGMA[i_pop, j_pop], size=(Na, Nb),  device=self.device)
+                Cij = Cij + Hij / torch.sqrt(torch.tensor(Nb, device=self.device))
                 del Hij
                 
         if self.VERBOSE:
@@ -331,15 +331,15 @@ class LifNetwork(nn.Module):
             # self.Ka.append(self.K)
             
         self.Na = torch.tensor(self.Na, dtype=torch.int, device=self.device)
-        self.Ka = torch.tensor(self.Ka, dtype=self.FLOAT, device=self.device)
+        self.Ka = torch.tensor(self.Ka,  device=self.device)
         self.csumNa = torch.cat((torch.tensor([0], device=self.device), torch.cumsum(self.Na, dim=0)))
 
         if self.VERBOSE:
             print("Na", self.Na, "Ka", self.Ka, "csumNa", self.csumNa)
 
-        self.TAU = torch.tensor(self.TAU, dtype=self.FLOAT, device=self.device)
-        self.EXP_DT_TAU = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
-        self.DT_TAU = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        self.TAU = torch.tensor(self.TAU,  device=self.device)
+        self.EXP_DT_TAU = torch.ones(self.N_NEURON,  device=self.device)
+        self.DT_TAU = torch.ones(self.N_NEURON,  device=self.device)
         
         for i_pop in range(self.N_POP):
             self.EXP_DT_TAU[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU[i_pop])
@@ -348,17 +348,17 @@ class LifNetwork(nn.Module):
         # if self.VERBOSE:
         #     print("DT", self.DT, "TAU", self.TAU)
         
-        self.TAU_SYN = torch.tensor(self.TAU_SYN, dtype=self.FLOAT, device=self.device)
-        self.EXP_DT_TAU_SYN = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
-        self.DT_TAU_SYN = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        self.TAU_SYN = torch.tensor(self.TAU_SYN,  device=self.device)
+        self.EXP_DT_TAU_SYN = torch.ones(self.N_NEURON,  device=self.device)
+        self.DT_TAU_SYN = torch.ones(self.N_NEURON,  device=self.device)
 
         for i_pop in range(self.N_POP):
             self.EXP_DT_TAU_SYN[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU_SYN[i_pop])
             self.DT_TAU_SYN[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = self.DT / self.TAU_SYN[i_pop]
 
-        self.TAU_NMDA = torch.tensor(self.TAU_NMDA, dtype=self.FLOAT, device=self.device)
-        self.EXP_DT_TAU_NMDA = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
-        self.DT_TAU_NMDA = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        self.TAU_NMDA = torch.tensor(self.TAU_NMDA,  device=self.device)
+        self.EXP_DT_TAU_NMDA = torch.ones(self.N_NEURON,  device=self.device)
+        self.DT_TAU_NMDA = torch.ones(self.N_NEURON,  device=self.device)
 
         for i_pop in range(self.N_POP):
             self.EXP_DT_TAU_NMDA[self.csumNa[i_pop] : self.csumNa[i_pop + 1]] = torch.exp(-self.DT / self.TAU_NMDA[i_pop])
@@ -368,9 +368,9 @@ class LifNetwork(nn.Module):
         #     print("EXP_DT_TAU", self.EXP_DT_TAU, "DT_TAU", self.DT_TAU)
 
         self.STRUCTURE = np.array(self.STRUCTURE).reshape(self.N_POP, self.N_POP)
-        self.SIGMA = torch.tensor(self.SIGMA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
-        self.KAPPA = torch.tensor(self.KAPPA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
-        self.PHASE = torch.tensor(self.PHASE * torch.pi / 180.0, dtype=self.FLOAT, device=self.device)
+        self.SIGMA = torch.tensor(self.SIGMA,  device=self.device).view(self.N_POP, self.N_POP)
+        self.KAPPA = torch.tensor(self.KAPPA,  device=self.device).view(self.N_POP, self.N_POP)
+        self.PHASE = torch.tensor(self.PHASE * torch.pi / 180.0,  device=self.device)
         
         # if self.VERBOSE:
         #     print(self.STRUCTURE)
@@ -384,7 +384,7 @@ class LifNetwork(nn.Module):
         if self.VERBOSE:
             print("Jab", self.Jab)
         
-        self.Jab = torch.tensor(self.Jab, dtype=self.FLOAT, device=self.device).reshape(self.N_POP, self.N_POP) * self.GAIN
+        self.Jab = torch.tensor(self.Jab,  device=self.device).reshape(self.N_POP, self.N_POP) * self.GAIN
         
         for i_pop in range(self.N_POP):
             self.Jab[:, i_pop] = self.Jab[:, i_pop] * torch.sqrt(self.Ka[0]) / self.Ka[i_pop] / self.TAU_SYN[i_pop] * (self.V_THRESH - self.V_REST)
@@ -396,14 +396,14 @@ class LifNetwork(nn.Module):
         if self.VERBOSE:
             print("Ja0", self.Ja0)
 
-        self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device)        
+        self.Ja0 = torch.tensor(self.Ja0,  device=self.device)
         self.Ja0 = self.Ja0 * torch.sqrt(self.Ka[0]) * self.M0 * (self.V_THRESH - self.V_REST)
         
         # if self.VERBOSE:
         #     print("scaled Ja0", self.Ja0)
         
-        self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
-        ff_mean = torch.tensor(0.0, dtype=self.FLOAT, device=self.device)
+        self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF,  device=self.device))
+        ff_mean = torch.tensor(0.0,  device=self.device)
         
         if self.I1[1]>0:
             self.dist_normal = Normal(self.I1[0], self.I1[1])
@@ -444,7 +444,7 @@ class LifNetwork(nn.Module):
         
     def stimFunc(self, i_pop, STIM=0):
         """Stimulus shape"""
-        theta = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(self.Na[i_pop]), dtype=self.FLOAT, device=self.device)
+        theta = torch.arange(0, 2.0 * torch.pi, 2.0 * torch.pi / float(self.Na[i_pop]),  device=self.device)
         theta = theta.repeat(self.N_BATCH, 1)  # shape is now (N_BATCH, N_NEURON)
         
         if STIM==0:

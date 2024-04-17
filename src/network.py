@@ -23,7 +23,7 @@ class Network(nn.Module):
         The network can be trained with standard torch optimization technics.
         Parameters:
                conf_name: str, name of a .yml file contaning the model's parameters.
-               repo_root: str, root path of the NeuroTorch repository.
+               repo_root: str, root path of the NeuroFlame repository.
                **kwargs: **dict, any parameter in conf_file can be passed here
                                  and will then be overwritten.
         Returns:
@@ -58,9 +58,7 @@ class Network(nn.Module):
         self.scaleWeights()
 
         # in pytorch, Wij is i to j.
-        self.Wab_T = torch.zeros(
-            (self.N_NEURON, self.N_NEURON), dtype=self.FLOAT, device=self.device
-        )
+        self.Wab_T = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
 
         # Creates connetivity matrix in blocks
         for i_pop in range(self.N_POP):
@@ -93,7 +91,7 @@ class Network(nn.Module):
 
     def initSTP(self):
         """Creates stp model for population 0"""
-        self.J_STP = torch.tensor(self.J_STP, dtype=self.FLOAT, device=self.device)
+        self.J_STP = torch.tensor(self.J_STP, device=self.device)
         self.J_STP.mul_(self.GAIN / torch.sqrt(self.Ka[0]))
 
         self.stp = Plasticity(
@@ -103,7 +101,6 @@ class Network(nn.Module):
             self.DT,
             (self.N_BATCH, self.Na[0]),
             STP_TYPE=self.STP_TYPE,
-            FLOAT=self.FLOAT,
             device=self.device,
         )
 
@@ -127,7 +124,6 @@ class Network(nn.Module):
 
         rec_input = torch.randn(
             (self.IF_NMDA + 1, self.N_BATCH, self.N_NEURON),
-            dtype=self.FLOAT,
             device=self.device,
         )
 
@@ -150,9 +146,7 @@ class Network(nn.Module):
             print("Jab", self.Jab)
 
         self.Jab = (
-            torch.tensor(self.Jab, dtype=self.FLOAT, device=self.device).reshape(
-                self.N_POP, self.N_POP
-            )
+            torch.tensor(self.Jab, device=self.device).reshape(self.N_POP, self.N_POP)
             * self.GAIN
         )
 
@@ -163,7 +157,7 @@ class Network(nn.Module):
         if self.VERBOSE:
             print("Ja0", self.Ja0)
 
-        self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device)
+        self.Ja0 = torch.tensor(self.Ja0, device=self.device)
         self.Ja0 = self.Ja0.unsqueeze(0)  # add batch dim
         self.Ja0 = self.Ja0.unsqueeze(-1)  # add neural dim
 
@@ -172,9 +166,7 @@ class Network(nn.Module):
             self.Ja0 = self.M0 * torch.sqrt(self.Ka[0]) * self.Ja0
 
         # scaling ff variance as 1 / sqrt(K0)
-        self.VAR_FF = torch.sqrt(
-            torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device)
-        )
+        self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, device=self.device))
         self.VAR_FF.mul_(self.M0 / torch.sqrt(self.Ka[0]))
         self.VAR_FF = self.VAR_FF.unsqueeze(0)  # add batch dim
         self.VAR_FF = self.VAR_FF.unsqueeze(-1)  # add neural dim
@@ -267,7 +259,9 @@ class Network(nn.Module):
         W_stp_T = None
         if self.LR_TRAIN:
             if self.LR_NORM:
-                self.lr = self.lr_kappa * (masked_normalize(self.U) @ masked_normalize(self.V).T)
+                self.lr = self.lr_kappa * (
+                    masked_normalize(self.U) @ masked_normalize(self.V).T
+                )
             else:
                 self.lr = self.lr_kappa * (self.U @ self.V.T)
 

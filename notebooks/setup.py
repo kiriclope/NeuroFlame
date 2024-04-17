@@ -12,7 +12,7 @@ sns.set_style("ticks")
 plt.rc("axes.spines", top=False, right=False)
 fig_path = '../figs/perf'
 golden_ratio = (5**.5 - 1) / 2
-width = 7
+width = 6
 height = width * golden_ratio
 
 matplotlib.rcParams['figure.figsize'] = [width, height]

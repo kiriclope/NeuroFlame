@@ -12,12 +12,10 @@ from src.lr_utils import get_theta
 def live_ff_input(model, step, ff_input):
     noise = 0
     if model.VAR_FF[0, 0, 0] > 0:
-        noise = torch.randn(
-            (model.N_BATCH, model.N_NEURON), dtype=model.FLOAT, device=model.device
-        )
+        noise = torch.randn((model.N_BATCH, model.N_NEURON), device=model.device)
         for i_pop in range(model.N_POP):
             noise[:, model.slices[i_pop]].mul_(model.VAR_FF[:, i_pop])
-    
+
     if step == 0:
         for i_pop in range(model.N_POP):
             if model.BUMP_SWITCH[i_pop]:
@@ -37,12 +35,10 @@ def live_ff_input(model, step, ff_input):
 
             size = (model.N_BATCH, model.Na[0])
             Stimulus = Stimuli(model.TASK, size, device=model.device)
-            
+
             if "rand" in model.TASK:
                 model.phase = (
-                    torch.rand((size[0], 1), dtype=model.FLOAT, device=model.device)
-                    * 2.0
-                    * torch.pi
+                    torch.rand((size[0], 1), device=model.device) * 2.0 * torch.pi
                 )
 
             theta = None
@@ -96,15 +92,11 @@ def init_ff_live(model):
     # Otherwise, ff_input is (N_BATCH, N_STEP, N_NEURON).
     # Live FF update is recommended when dealing with large batch size.
 
-    model.stim_mask = torch.ones(
-        (model.N_BATCH, 2, model.Na[0]), dtype=model.FLOAT, device=model.device
-    )
+    model.stim_mask = torch.ones((model.N_BATCH, 2, model.Na[0]), device=model.device)
 
     model.stim_mask[model.N_BATCH // 2 :] = -1
 
-    ff_input = torch.zeros(
-        (model.N_BATCH, model.N_NEURON), dtype=model.FLOAT, device=model.device
-    )
+    ff_input = torch.zeros((model.N_BATCH, model.N_NEURON), device=model.device)
 
     ff_input, _ = live_ff_input(model, 0, ff_input)
 
@@ -121,7 +113,6 @@ def init_ff_seq(model):
 
     ff_input = torch.randn(
         (model.N_BATCH, model.N_STEPS, model.N_NEURON),
-        dtype=model.FLOAT,
         device=model.device,
     )
 
@@ -146,11 +137,7 @@ def init_ff_seq(model):
         Stimulus = Stimuli(model.TASK, size, device=model.device)
 
         if "rand" in model.TASK:
-            model.phase = (
-                torch.rand((size[0], 1), dtype=model.FLOAT, device=model.device)
-                * 2.0
-                * torch.pi
-            )
+            model.phase = torch.rand((size[0], 1), device=model.device) * 2.0 * torch.pi
 
             theta = None
             if "dual" in model.TASK:

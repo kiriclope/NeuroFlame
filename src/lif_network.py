@@ -30,7 +30,7 @@ class LIFNetwork(nn.Module):
                sim_name: str,
                name of the output file for saving purposes.
                repo_root: str,
-               root path for the NeuroTorch repository.
+               root path for the NeuroFlame repository.
                **kwargs: **dict,
                any parameter in the configuration file can be passed and will then be overwritten.
         Returns:
@@ -57,16 +57,16 @@ class LIFNetwork(nn.Module):
         # Train a low rank connectivity
         if self.LR_TRAIN:
             # Low rank vector
-            self.U = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)), device=self.device, dtype=self.FLOAT))
-            # self.V = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)), device=self.device, dtype=self.FLOAT))
+            self.U = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)), device=self.device))
+            # self.V = nn.Parameter(torch.randn((self.N_NEURON, int(self.RANK)), device=self.device))
 
             # Mask to train excitatory neurons only
-            self.mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device, dtype=self.FLOAT)            
+            self.mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
             self.mask[self.slices[0], self.slices[0]] = 1.0
             
             # Linear readout for supervised learning
-            # self.linear = nn.Linear(self.N_NEURON, 1, device=self.device, dtype=self.FLOAT, bias=False)
-            self.linear = nn.Linear(self.Na[0], 1, device=self.device, dtype=self.FLOAT, bias=False)
+            # self.linear = nn.Linear(self.N_NEURON, 1, device=self.device,  bias=False)
+            self.linear = nn.Linear(self.Na[0], 1, device=self.device,  bias=False)
             
             self.lr_kappa = nn.Parameter(5 * torch.rand(1))
             
@@ -84,7 +84,7 @@ class LIFNetwork(nn.Module):
         '''
         
         # in pytorch, Wij is i to j.
-        self.Wab_T = torch.zeros((self.N_NEURON, self.N_NEURON), dtype=self.FLOAT, device=self.device)
+        self.Wab_T = torch.zeros((self.N_NEURON, self.N_NEURON),  device=self.device)
         
         for i_pop in range(self.N_POP):
             for j_pop in range(self.N_POP):
@@ -253,8 +253,8 @@ class LIFNetwork(nn.Module):
             # print('ff_input', ff_input.shape)
             self.N_BATCH = ff_input.shape[0]
         
-        rec_input = torch.zeros((self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
-        volt = torch.zeros((self.N_BATCH, self.N_NEURON), dtype=self.FLOAT, device=self.device)
+        rec_input = torch.zeros((self.N_BATCH, self.N_NEURON),  device=self.device)
+        volt = torch.zeros((self.N_BATCH, self.N_NEURON),  device=self.device)
         
         # Update spikes
         spikes = volt>=self.V_THRESH
@@ -283,7 +283,7 @@ class LIFNetwork(nn.Module):
             # self.Ka.append(self.K)
         
         self.Na = torch.tensor(self.Na, dtype=torch.int, device=self.device)
-        self.Ka = torch.tensor(self.Ka, dtype=self.FLOAT, device=self.device)
+        self.Ka = torch.tensor(self.Ka,  device=self.device)
         self.csumNa = torch.cat((torch.tensor([0], device=self.device), torch.cumsum(self.Na, dim=0)))
 
         self.slices = []
@@ -293,9 +293,9 @@ class LIFNetwork(nn.Module):
         if self.VERBOSE:
             print("Na", self.Na, "Ka", self.Ka, "csumNa", self.csumNa)
 
-        self.TAU = torch.tensor(self.TAU, dtype=self.FLOAT, device=self.device)
-        self.EXP_DT_TAU = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
-        self.DT_TAU = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        self.TAU = torch.tensor(self.TAU,  device=self.device)
+        self.EXP_DT_TAU = torch.ones(self.N_NEURON,  device=self.device)
+        self.DT_TAU = torch.ones(self.N_NEURON,  device=self.device)
         
         for i_pop in range(self.N_POP):
             self.EXP_DT_TAU[self.slices[i_pop]] = torch.exp(-self.DT / self.TAU[i_pop])
@@ -305,9 +305,9 @@ class LIFNetwork(nn.Module):
         # if self.VERBOSE:
         #     print("DT", self.DT, "TAU", self.TAU)
         
-        self.TAU_SYN = torch.tensor(self.TAU_SYN, dtype=self.FLOAT, device=self.device)
-        self.EXP_DT_TAU_SYN = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
-        self.DT_TAU_SYN = torch.ones(self.N_NEURON, dtype=self.FLOAT, device=self.device)
+        self.TAU_SYN = torch.tensor(self.TAU_SYN,  device=self.device)
+        self.EXP_DT_TAU_SYN = torch.ones(self.N_NEURON,  device=self.device)
+        self.DT_TAU_SYN = torch.ones(self.N_NEURON,  device=self.device)
         
         for i_pop in range(self.N_POP):
             self.EXP_DT_TAU_SYN[self.slices[i_pop]] = torch.exp(-self.DT / self.TAU_SYN[i_pop])
@@ -318,16 +318,16 @@ class LIFNetwork(nn.Module):
         #     print("EXP_DT_TAU", self.EXP_DT_TAU, "DT_TAU", self.DT_TAU)
         
         self.PROBA_TYPE = np.array(self.PROBA_TYPE).reshape(self.N_POP, self.N_POP)
-        self.SIGMA = torch.tensor(self.SIGMA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
-        self.KAPPA = torch.tensor(self.KAPPA, dtype=self.FLOAT, device=self.device).view(self.N_POP, self.N_POP)
-        self.PHASE = torch.tensor(self.PHASE * torch.pi / 180.0, dtype=self.FLOAT, device=self.device)
+        self.SIGMA = torch.tensor(self.SIGMA,  device=self.device).view(self.N_POP, self.N_POP)
+        self.KAPPA = torch.tensor(self.KAPPA,  device=self.device).view(self.N_POP, self.N_POP)
+        self.PHASE = torch.tensor(self.PHASE * torch.pi / 180.0,  device=self.device)
         
-        self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, dtype=self.FLOAT, device=self.device))
+        self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF,  device=self.device))
         
         if self.PROBA_TYPE[0][0] == 'lr':
-            mean_ = torch.tensor(self.LR_MEAN, dtype=self.FLOAT, device=self.device)
+            mean_ = torch.tensor(self.LR_MEAN,  device=self.device)
             # Define the covariance matrix
-            cov_ = torch.tensor(self.LR_COV, dtype=self.FLOAT, device=self.device)
+            cov_ = torch.tensor(self.LR_COV,  device=self.device)
             # print(self.LR_COV)
             multivariate_normal = MultivariateNormal(mean_, cov_)
             
@@ -342,7 +342,7 @@ class LIFNetwork(nn.Module):
         if self.VERBOSE:
             print("Jab", self.Jab)
         
-        self.Jab = torch.tensor(self.Jab, dtype=self.FLOAT, device=self.device).reshape(self.N_POP, self.N_POP) * self.GAIN * (self.V_THRESH - self.V_REST)
+        self.Jab = torch.tensor(self.Jab,  device=self.device).reshape(self.N_POP, self.N_POP) * self.GAIN * (self.V_THRESH - self.V_REST)
         
         for i_pop in range(self.N_POP):
             self.Jab[:, i_pop] = self.Jab[:, i_pop] * torch.sqrt(self.Ka[0]) / self.Ka[i_pop] / self.TAU_SYN[i_pop]
@@ -351,7 +351,7 @@ class LIFNetwork(nn.Module):
         if self.VERBOSE:
             print("Ja0", self.Ja0)
         
-        self.Ja0 = torch.tensor(self.Ja0, dtype=self.FLOAT, device=self.device) * (self.V_THRESH - self.V_REST)
+        self.Ja0 = torch.tensor(self.Ja0,  device=self.device) * (self.V_THRESH - self.V_REST)
         
     def init_ff_input(self):
         """
@@ -359,8 +359,8 @@ class LIFNetwork(nn.Module):
         Inputs can be noisy or not and depend on the task.
         """
         
-        # ff_input = torch.zeros(self.N_BATCH, self.N_STEPS, self.N_NEURON, dtype=self.FLOAT, device=self.device)
-        ff_input = torch.randn((self.N_BATCH, self.N_STEPS, self.N_NEURON), dtype=self.FLOAT, device=self.device)
+        # ff_input = torch.zeros(self.N_BATCH, self.N_STEPS, self.N_NEURON,  device=self.device)
+        ff_input = torch.randn((self.N_BATCH, self.N_STEPS, self.N_NEURON),  device=self.device)
         
         for i_pop in range(self.N_POP):
             ff_input[..., self.slices[i_pop]] = ff_input[..., self.slices[i_pop]] * self.VAR_FF[i_pop] / torch.sqrt(self.Ka[0])
@@ -379,7 +379,7 @@ class LIFNetwork(nn.Module):
                 size = (self.N_BATCH, self.N_STIM_OFF[i]-self.N_STIM_ON[i], self.Na[0])
                 # PHI0 should be PHI0[i] not PHI0[2*i+1]
                 if self.TASK == 'dual':
-                    random = torch.randn((self.Na[0],), dtype=self.FLOAT, device=self.device)
+                    random = torch.randn((self.Na[0],),  device=self.device)
                     stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], random)
                     # stimulus = Stimuli(self.TASK, size)(self.I0[i], self.SIGMA0[i], self.PHI0[2*i+1])
                 else:

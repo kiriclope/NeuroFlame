@@ -8,7 +8,7 @@ class LRNet(L.LightningModule):
         super().__init__()
     
         self.model = model
-        self.linear = nn.Linear(model.Na[0], 1, device=model.device, dtype=model.FLOAT)
+        self.linear = nn.Linear(model.Na[0], 1, device=model.device)
         
         self.lr = lr
 
