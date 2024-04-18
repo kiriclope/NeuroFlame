@@ -268,7 +268,7 @@ class Network(nn.Module):
 
             # self.lr = self.lr_mask * self.lr
             self.lr = self.lr / (1.0 * self.Na[0])
-            self.lr = self.lr.clamp(min=-self.Wab_T[0, 0])
+            # self.lr = self.lr.clamp(min=-self.Wab_T[0, 0])
 
             if self.IF_STP:
                 W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T

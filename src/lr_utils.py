@@ -3,6 +3,13 @@ import torch
 from torch import nn
 
 
+def masked_clamp(tensor, slice, value):
+    # Create a mask for non-zero elements
+    mask = tensor[slice] != value
+    masked_tensor = tensor.clone()
+    return masked_tensor
+
+
 def masked_normalize(tensor):
     # Create a mask for non-zero elements
     mask = tensor != 0

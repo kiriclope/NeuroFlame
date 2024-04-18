@@ -92,7 +92,7 @@
 
 #+begin_src ipython
   REPO_ROOT = '/home/leon/models/NeuroFlame/'
-  conf_name = 'config_EI.yml'
+  conf_name = 'config_train.yml'
 #+end_src
 
 #+RESULTS:
@@ -112,7 +112,7 @@ To find parameters for which we have a multistable ring attractor, we use torch 
 With torch we can easily pass lists of parameters or batches to the model.
 Here, let's batch the recurrent strenght $J_{EE}$.
 
-#+begin_src ipython  
+#+begin_src ipython
   N_BATCH = 20
   # Here we pass a list of parameters to J_STP which is JEE for the model with stp
   model.J_STP = torch.linspace(0, 10, N_BATCH, dtype=torch.float32, device='cuda')
@@ -121,10 +121,10 @@ Here, let's batch the recurrent strenght $J_{EE}$.
   # This is so that the models performs dot products correctly
   # In the model J_STP is multiplied by rates of size (N_BATCH * N_NEURON)
   # (N_BATCH * 1) * (N_BATCH * N_NEURON) = (N_BATCH * N_NEURON)
-  
+
   model.J_STP = model.J_STP.unsqueeze(-1)
   # we need to scale J_STP correctly 1/sqrt(K)
-  model.J_STP = model.J_STP * model.Jab[0, 0]  
+  model.J_STP = model.J_STP * model.Jab[0, 0]
   print('Jee', model.J_STP.shape)
 
   # We set the number of batches
@@ -140,7 +140,7 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 
 #+RESULTS:
 : Jee torch.Size([20, 1])
-: Elapsed (with compilation) = 0h 0m 10s
+: Elapsed (with compilation) = 0h 0m 17s
 : rates (20, 101, 2000)
 
 #+begin_src ipython
@@ -157,7 +157,7 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-  
+
   ax[0].plot(model.J_STP.cpu(), m0[:, -1], '-o')
   ax[0].set_xlabel('$J_{EE}$')
   ax[0].set_ylabel('$<Rates>_i$')
@@ -169,7 +169,7 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/881d329389b2201ad22faaa16b42d8d56a8d9060.png]]
+[[file:./.ob-jupyter/2f68dcb35b44f3388aa65a15da1d9f430558cdd0.png]]
 
 #+begin_src ipython
   print(model.J_STP.shape, m1.shape)
@@ -180,7 +180,7 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-  
+
   ax[0].plot(model.J_STP.cpu(), m1[:, -1])
   ax[0].set_xlabel('$J_{EE}$')
   ax[0].set_ylabel('$\mathcal{F}_1$')
@@ -192,7 +192,7 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/3dedb5db205c1486c4adfe1f294263488880c774.png]]
+[[file:./.ob-jupyter/62a500a8d1cd7f7387a1e488e2310d976c5f7c9f.png]]
 
 Here, for example, with J_STP=10 we have a ring attractor!
 
@@ -205,11 +205,11 @@ Here, for example, with J_STP=10 we have a ring attractor!
 ** Batching multiple parameters
 *** Simuls
 Sometimes we won't be so lucky and need to search harder over multiple parameters.
-In order to *batch* over multiple parameters, we need to carefully create each parameter batch. 
+In order to *batch* over multiple parameters, we need to carefully create each parameter batch.
 Here, let's batch the recurrent strenght $J_{EE}$ and the feedforward strength $J_{E0}$.
 
 #+begin_src ipython
-  model = Network(conf_name, REPO_ROOT, IF_STP=1, VERBOSE=0, LIVE_FF_UPDATE=1, N_BATCH=1, I0=[.2, 0])
+  model = Network(conf_name, REPO_ROOT, IF_STP=1, VERBOSE=0, LIVE_FF_UPDATE=1, N_BATCH=1, I0=[.2, 0.0, 0.0])
 #+end_src
 
 #+RESULTS:
@@ -247,7 +247,7 @@ In that way, all the values of J_{EE} are associated once with a value of Je0.
 #+begin_src ipython
   JEE = JEE.unsqueeze(0).expand(N_JE0, N_JEE)
   print('JEE first col', JEE[0])
-  
+
   JE0 = JE0.unsqueeze(1).expand(N_JE0, N_JEE)
   print('JE0 first row', JE0[:, 0])
 #+end_src
@@ -255,19 +255,20 @@ In that way, all the values of J_{EE} are associated once with a value of Je0.
 #+RESULTS:
 : JEE first col tensor([ 0.0000,  1.0526,  2.1053,  3.1579,  4.2105,  5.2632,  6.3158,  7.3684,
 :          8.4211,  9.4737, 10.5263, 11.5789, 12.6316, 13.6842, 14.7368, 15.7895,
-:         16.8421, 17.8947, 18.9474, 20.0000], device='cuda:0')
+:         16.8421, 17.8947, 18.9474, 20.0000], device='cuda:0',
+:        dtype=torch.float32)
 : JE0 first row tensor([1.0000, 1.1053, 1.2105, 1.3158, 1.4211, 1.5263, 1.6316, 1.7368, 1.8421,
 :         1.9474, 2.0526, 2.1579, 2.2632, 2.3684, 2.4737, 2.5789, 2.6842, 2.7895,
-:         2.8947, 3.0000], device='cuda:0')
+:         2.8947, 3.0000], device='cuda:0', dtype=torch.float32)
 
 Torch models need a single batch dimension so we concatenate the two dimensions into tensors of size (N_BATCH=N_JEE*N_JE0, 1)
 We need the extra dummy dimension so that in the model dot products are done properly.
 
 #+begin_src ipython
-  JEE = JEE.reshape((-1, 1)) 
+  JEE = JEE.reshape((-1, 1))
   print('JEE', JEE.shape)
 
-  JE0 = JE0.reshape((-1, 1)) 
+  JE0 = JE0.reshape((-1, 1))
   print('JE0', JE0.shape)
 #+end_src
 #+RESULTS:
@@ -286,17 +287,21 @@ Now we need to set the number of batches and copy our tensors to the model
   # now we can pass JE0 to Ja0
   # we need to scale JaE properly
   Ja0[:,0] = JE0 * model.M0 * torch.sqrt(model.Ka[0])
-  
+#+end_src
+
+#+RESULTS:
+: Ja0 torch.Size([400, 2, 1])
+
+#+begin_src ipython
   # and pass N_BATCH, Ja0 and Jee to the model
   model.N_BATCH = N_BATCH
   # copy Ja0
-  model.Ja0 = Ja0 
+  model.Ja0 = Ja0
   # in the model with stp, JEE is J_STP
   model.J_STP = JEE # * model.Jab[0, 0]
 #+end_src
 
 #+RESULTS:
-: Ja0 torch.Size([400, 2, 1])
 
 Let's run the simulations
 
@@ -308,26 +313,26 @@ Let's run the simulations
   print('rates', rates.shape)
 #+end_src
 #+RESULTS:
-: Elapsed (with compilation) = 0h 1m 14s
-: rates (400, 101, 2000)
+: Elapsed (with compilation) = 0h 0m 1s
+: rates (400, 61, 1600)
 
 Let's compute the fourier moments of the population activity and reshape them
 
 #+begin_src ipython
   idx = get_idx(model)
   rates_ordered = rates[..., idx]
-  
+
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
   print(m0.shape)
 #+end_src
 
 #+RESULTS:
-: (4, 2000)
-: (400, 101)
+: (4, 1600)
+: (400, 61)
 
 #+begin_src ipython
   m0 = m0.reshape(N_JE0, N_JEE, -1)
-  m1 = m1.reshape(N_JE0, N_JEE, -1)  
+  m1 = m1.reshape(N_JE0, N_JEE, -1)
 #+end_src
 
 #+RESULTS:
@@ -354,7 +359,7 @@ Let's compute the fourier moments of the population activity and reshape them
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/417b40213e825fd27e5e67f1057107cc5419852f.png]]
+[[file:./.ob-jupyter/a9d9cbfb1d6c382c0ce7a1a3af6a11a425978a1c.png]]
 
 #+begin_src ipython
   idx = 6
@@ -374,7 +379,7 @@ Let's compute the fourier moments of the population activity and reshape them
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5b33caa5981019baa2c129e466073b01cabde683.png]]
+[[file:./.ob-jupyter/467a2b4d6b98516a7181fa658000ec3a57531a0c.png]]
 
 The parameters corresponding to (row 3, col -1) work!
 
@@ -382,7 +387,7 @@ We can get their values from their matrix form
 
 #+begin_src ipython
   JEE = JEE.reshape((N_JE0, N_JEE))
-  JE0 = JE0.reshape((N_JE0, N_JEE))  
+  JE0 = JE0.reshape((N_JE0, N_JEE))
 
   print('JE0', JE0[3, -1].item())
   print('JEE', JEE[3, -1].item())
@@ -406,10 +411,10 @@ or directly from the original lists
 Let's test them.
 
 #+begin_src ipython
-  idx = [3, 10]
+  idx = [6, 9]
 
   model = Network(conf_name, REPO_ROOT, TASK='dual_rand',
-                  VERBOSE=0, DEVICE='cuda', seed=0, N_BATCH=1, LIVE_FF_UPDATE=1)
+                  VERBOSE=0, DEVICE='cuda', seed=0, N_BATCH=1, LIVE_FF_UPDATE=1, DURATION=10)
 
   # model.Ja0[:, 0] = JE0[idx[0], idx[1]] * model.M0 * torch.sqrt(model.Ka[0])
   # model.J_STP = JEE[idx[0], idx[1]]
@@ -418,7 +423,7 @@ Let's test them.
 #+end_src
 
 #+RESULTS:
-: 1.3157894611358643 10.526315689086914
+: 1.6315789222717285 9.473684310913086
 
 #+begin_src ipython
   rates_test = model().cpu().numpy()
@@ -428,13 +433,13 @@ Let's test them.
 #+begin_src ipython
   idx = get_idx(model)
   rates_ordered = rates_test[..., idx]
-  
+
   m0, m1, phi = decode_bump(rates_ordered, axis=-1)
   print(m0.shape)
 #+end_src
 
 #+RESULTS:
-: (4, 2000)
+: (4, 1600)
 : (1, 101)
 
 #+begin_src ipython
@@ -453,7 +458,7 @@ Let's test them.
   ax[0].imshow(rates_ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
   ax[0].set_ylabel('Neuron #')
   ax[0].set_xlabel('Step')
-  
+
   ax[1].plot(m1.T)
   ax[1].set_ylabel('$\mathcal{F}_1$')
   ax[1].set_xlabel('Step')
@@ -462,7 +467,7 @@ Let's test them.
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2d4dca564c9409d38356181c666c6d7cf3f67757.png]]
+[[file:./.ob-jupyter/51a335fddf706d79ad75cbdd44dc3d99e6f6d81a.png]]
 
 #+begin_src ipython
 

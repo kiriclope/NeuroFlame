@@ -158,7 +158,7 @@ def init_const(model):
             model.PHI0 = multivariate_normal.sample((model.Na[0],)).T
             model.PHI0 = torch.stack(
                 (model.PHI0[0], model.PHI0[0], model.PHI0[1], model.PHI0[1])
-            ).type(model.float32)
+            ).type(model.FLOAT)
         else:
             # print('Using Francesca like low rank')
             multivariate_normal = MultivariateNormal(mean_, cov_)

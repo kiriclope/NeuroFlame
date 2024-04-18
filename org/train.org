@@ -18,10 +18,13 @@
 #+end_src
 
 #+RESULTS:
+:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
+: <Figure size 600x370.82 with 0 Axes>
+:END:
 
 * Imports
 
@@ -530,10 +533,9 @@ Testing the network on steps from sample odor offset to test odor onset
 : torch.Size([102, 710, 2000]) torch.Size([26, 710, 2000])
 : torch.Size([102, 31]) torch.Size([26, 31])
 
-
 #+begin_src ipython
   # criterion = nn.BCEWithLogitsLoss()
-  criterion = DualLoss(alpha=0.5, thresh=2.0, N=model.Na[0], rwd_idx=rwd_idx)
+  criterion = DualLoss(alpha=1.0, thresh=2.0, N=model.Na[0], rwd_idx=rwd_idx)
 
   # SGD, Adam, AdamW
   learning_rate = 0.1
@@ -550,14 +552,38 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: Epoch 1/30, Training Loss: 0.3410, Validation Loss: 0.3306
-: Epoch 2/30, Training Loss: 0.2356, Validation Loss: 0.2149
-: Epoch 3/30, Training Loss: 0.0459, Validation Loss: 0.0964
-: Epoch 4/30, Training Loss: 0.0384, Validation Loss: 0.0503
-: Epoch 5/30, Training Loss: 0.0068, Validation Loss: 0.0163
-: Epoch 6/30, Training Loss: 0.0048, Validation Loss: 0.0057
-: Epoch 7/30, Training Loss: 0.0037, Validation Loss: 0.0022
-: Stopping training as loss has fallen below the threshold: 0.002227200145886937
+#+begin_example
+  Epoch 1/30, Training Loss: 0.9091, Validation Loss: 0.8177
+  Epoch 2/30, Training Loss: 0.6715, Validation Loss: 0.5001
+  Epoch 3/30, Training Loss: 0.1667, Validation Loss: 0.5000
+  Epoch 4/30, Training Loss: 0.5000, Validation Loss: 0.5000
+  Epoch 5/30, Training Loss: 0.3333, Validation Loss: 0.5000
+  Epoch 6/30, Training Loss: 0.3333, Validation Loss: 0.5000
+  Epoch 7/30, Training Loss: 0.6667, Validation Loss: 0.5000
+  Epoch 8/30, Training Loss: 0.3333, Validation Loss: 0.5000
+  Epoch 9/30, Training Loss: 0.6667, Validation Loss: 0.5000
+  Epoch 10/30, Training Loss: 0.3333, Validation Loss: 0.5000
+  Epoch 11/30, Training Loss: 0.6667, Validation Loss: 0.5000
+  Epoch 12/30, Training Loss: 0.8333, Validation Loss: 0.5000
+  Epoch 13/30, Training Loss: 0.8333, Validation Loss: 0.5000
+  Epoch 14/30, Training Loss: 0.5000, Validation Loss: 0.5000
+  Epoch 15/30, Training Loss: 0.3333, Validation Loss: 0.5000
+  Epoch 16/30, Training Loss: 0.5000, Validation Loss: 0.5000
+  Epoch 17/30, Training Loss: 0.1667, Validation Loss: 0.5000
+  Epoch 18/30, Training Loss: 0.3333, Validation Loss: 0.5000
+  Epoch 19/30, Training Loss: 0.5000, Validation Loss: 0.5000
+  Epoch 20/30, Training Loss: 0.6667, Validation Loss: 0.5000
+  Epoch 21/30, Training Loss: 0.5000, Validation Loss: 0.5000
+  Epoch 22/30, Training Loss: 0.1667, Validation Loss: 0.5000
+  Epoch 23/30, Training Loss: 0.5000, Validation Loss: 0.5000
+  Epoch 24/30, Training Loss: 0.1667, Validation Loss: 0.5000
+  Epoch 25/30, Training Loss: 0.8333, Validation Loss: 0.5000
+  Epoch 26/30, Training Loss: 0.5000, Validation Loss: 0.5000
+  Epoch 27/30, Training Loss: 0.3333, Validation Loss: 0.5000
+  Epoch 28/30, Training Loss: 0.3333, Validation Loss: 0.5000
+  Epoch 29/30, Training Loss: 0.5000, Validation Loss: 0.5000
+  Epoch 30/30, Training Loss: 0.3333, Validation Loss: 0.5000
+#+end_example
 
 ** Testing
 
@@ -571,7 +597,7 @@ Testing the network on steps from sample odor offset to test odor onset
   model.eval()
 
   lr = model.lr_kappa * model.lr_mask * (model.U @ model.V.T) / (1.0 * model.Na[0])
-  lr = lr.clamp(min=-model.Wab_T[0, 0])
+  # lr = lr.clamp(min=-model.Wab_T[0, 0])
 
   model.Wab_T = (Wij +lr.T)
   model.LR_TRAIN=0
@@ -626,7 +652,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/16c96cf613f18f90c521c697b049b140f1f56812.png]]
+[[file:./.ob-jupyter/0a2bd1719182a0750cc6f8ec25d178282a1cb829.png]]
 
 #+begin_src ipython
     readout = model.linear.weight.data.cpu().detach().numpy()[0]
@@ -636,7 +662,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+RESULTS:
 :RESULTS:
 : (2, 61)
-[[file:./.ob-jupyter/b7b8f904732bf232b9d61d5b63e79f08bcf68518.png]]
+[[file:./.ob-jupyter/cf0428c818e18418e412dd7e3f1816ddaec88221.png]]
 :END:
 
 #+begin_src ipython
@@ -644,7 +670,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5c39b71da837f5800d1693603b9045ec8ecfe5d6.png]]
+[[file:./.ob-jupyter/69e3dc7141c58ba219923ed6a708e90579ab2157.png]]
 
 #+begin_src ipython
 
@@ -660,14 +686,12 @@ Testing the network on steps from sample odor offset to test odor onset
   model.LR_TRAIN = 1
   model.LR_EVAL_WIN = model.T_STIM_OFF[2] - model.T_STIM_ON[2]
   model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
-  print(model.lr_eval_win)
 
   model.DURATION = 6.0
   model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
 #+end_src
 
 #+RESULTS:
-: 10
 
 Here we only evaluate performance from test onset to test offset
 
@@ -682,7 +706,7 @@ Here we only evaluate performance from test onset to test offset
 *** Inputs and Labels
 
 #+begin_src ipython
-  model.N_BATCH = 64
+  model.N_BATCH = 96
 
   model.I0[0] = 1
   model.I0[1] = 0
@@ -713,8 +737,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([256, 710, 2000])
-
+: ff_input torch.Size([384, 710, 2000])
 
  #+begin_src ipython
   labels_pair = torch.ones((2 * model.N_BATCH, model.lr_eval_win))
@@ -725,7 +748,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: labels torch.Size([256, 10])
+: labels torch.Size([384, 10])
 
 #+RESULTS:
 
@@ -737,8 +760,8 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: torch.Size([204, 710, 2000]) torch.Size([52, 710, 2000])
-: torch.Size([204, 10]) torch.Size([52, 10])
+: torch.Size([307, 710, 2000]) torch.Size([77, 710, 2000])
+: torch.Size([307, 10]) torch.Size([77, 10])
 
 #+begin_src ipython
   # Loss
@@ -759,36 +782,29 @@ Here we only evaluate performance from test onset to test offset
 
 #+RESULTS:
 #+begin_example
-  Epoch 1/30, Training Loss: 50.3871, Validation Loss: 64.4079
-  Epoch 2/30, Training Loss: 76.4959, Validation Loss: 62.7563
-  Epoch 3/30, Training Loss: 74.1133, Validation Loss: 59.2155
-  Epoch 4/30, Training Loss: 68.1816, Validation Loss: 54.6940
-  Epoch 5/30, Training Loss: 30.5874, Validation Loss: 48.6805
-  Epoch 6/30, Training Loss: 24.1802, Validation Loss: 38.0239
-  Epoch 7/30, Training Loss: 9.7003, Validation Loss: 8.5211
-  Epoch 8/30, Training Loss: 6.0844, Validation Loss: 2.2807
-  Epoch 9/30, Training Loss: 8.1330, Validation Loss: 0.9686
-  Epoch 10/30, Training Loss: 0.4206, Validation Loss: 0.4198
-  Epoch 11/30, Training Loss: 0.4202, Validation Loss: 0.4189
-  Epoch 12/30, Training Loss: 0.4190, Validation Loss: 0.4187
-  Epoch 13/30, Training Loss: 0.4199, Validation Loss: 0.4186
-  Epoch 14/30, Training Loss: 0.4158, Validation Loss: 0.4184
-  Epoch 15/30, Training Loss: 0.4201, Validation Loss: 0.4183
-  Epoch 16/30, Training Loss: 0.4192, Validation Loss: 0.4181
-  Epoch 17/30, Training Loss: 0.4197, Validation Loss: 0.4179
-  Epoch 18/30, Training Loss: 0.4174, Validation Loss: 0.4177
-  Epoch 19/30, Training Loss: 0.4193, Validation Loss: 0.4175
-  Epoch 20/30, Training Loss: 0.4169, Validation Loss: 0.4170
-  Epoch 21/30, Training Loss: 0.4146, Validation Loss: 0.4163
-  Epoch 22/30, Training Loss: 0.4146, Validation Loss: 0.4149
-  Epoch 23/30, Training Loss: 0.4161, Validation Loss: 0.4147
-  Epoch 24/30, Training Loss: 0.4153, Validation Loss: 0.4139
-  Epoch 25/30, Training Loss: 0.4116, Validation Loss: 0.4132
-  Epoch 26/30, Training Loss: 0.4060, Validation Loss: 0.4123
-  Epoch 27/30, Training Loss: 0.4020, Validation Loss: 0.4115
-  Epoch 28/30, Training Loss: 0.4094, Validation Loss: 0.4107
-  Epoch 29/30, Training Loss: 0.4115, Validation Loss: 0.4097
-  Epoch 30/30, Training Loss: 0.4105, Validation Loss: 0.4089
+  Epoch 1/30, Training Loss: 0.4052, Validation Loss: 0.4038
+  Epoch 2/30, Training Loss: 0.4014, Validation Loss: 0.3936
+  Epoch 3/30, Training Loss: 0.3934, Validation Loss: 0.3914
+  Epoch 4/30, Training Loss: 0.3788, Validation Loss: 0.3905
+  Epoch 5/30, Training Loss: 0.3887, Validation Loss: 0.3891
+  Epoch 6/30, Training Loss: 0.3834, Validation Loss: 0.3866
+  Epoch 7/30, Training Loss: 0.3952, Validation Loss: 0.3824
+  Epoch 8/30, Training Loss: 0.3345, Validation Loss: 0.3755
+  Epoch 9/30, Training Loss: 0.3699, Validation Loss: 0.3707
+  Epoch 10/30, Training Loss: 0.3677, Validation Loss: 0.3745
+  Epoch 11/30, Training Loss: 3.0816, Validation Loss: 0.3803
+  Epoch 12/30, Training Loss: 0.3759, Validation Loss: 1.3083
+  Epoch 13/30, Training Loss: 0.4032, Validation Loss: 0.3905
+  Epoch 14/30, Training Loss: 0.9012, Validation Loss: 0.3885
+  Epoch 15/30, Training Loss: 0.3641, Validation Loss: 0.3842
+  Epoch 16/30, Training Loss: 0.3760, Validation Loss: 0.3813
+  Epoch 17/30, Training Loss: 0.4088, Validation Loss: 0.3790
+  Epoch 18/30, Training Loss: 0.3768, Validation Loss: 0.3762
+  Epoch 19/30, Training Loss: 0.3743, Validation Loss: 0.3738
+  Epoch 20/30, Training Loss: 0.3633, Validation Loss: 0.3773
+  Epoch 21/30, Training Loss: 0.4040, Validation Loss: 0.3751
+  Epoch 22/30, Training Loss: 0.3665, Validation Loss: 0.3725
+  Epoch 23/30, Training Loss: 0.3628, Validation Loss: 0.3694
 #+end_example
 
 #+begin_src ipython
@@ -800,7 +816,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c35462e0ca0faca8ef3206a614ac140b915f3f47.png]]
+: 003bf404-8f2b-4353-8f15-75d3bcfc1ddf
 
 ** Testing
 
@@ -809,6 +825,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
+: f2193e58-c212-41ab-abad-7bb8d60735c3
 
 #+begin_src ipython
   model.eval()
@@ -827,6 +844,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
+: 26f635b2-6b15-4590-a293-fcc540d71624
 
 #+begin_src ipython
   model.N_BATCH = 1
@@ -835,6 +853,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
+: a383c549-5b33-49f6-a0cc-c349524beff7
 
 #+begin_src ipython
   model.N_BATCH = 1
@@ -868,7 +887,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([4, 710, 2000])
+: ad55490d-14c8-42ff-8ec9-0d0a0e6e6ed3
 
 #+begin_src ipython
   model.VERBOSE = 0
@@ -878,18 +897,15 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: (4, 61, 1600)
+: 9fc7e50a-4956-415c-878d-6ff59f0ea063
 
 #+begin_src ipython
-  idx = get_idx(model, 3)
+  idx = get_idx(model, 2)
   plot_rates_selec(rates, idx)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: ksi torch.Size([5, 1600])
-[[file:./.ob-jupyter/a6a3ed8266939c818f6e27379a361e4e344af745.png]]
-:END:
+: e9775f6f-9260-41d9-9d5c-a23d94d95f46
 
 #+begin_src ipython
     readout = model.linear.weight.data.cpu().detach().numpy()[0]
@@ -897,23 +913,21 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: (4, 61)
-[[file:./.ob-jupyter/03e2a9b14bbc5e12f47711d9af7f7876053114d1.png]]
-:END:
+: 44e0a350-b7d3-4604-aa74-89b415d79844
 
 #+begin_src ipython
   plot_m0_m1_phi(rates, idx)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ab41ab31fe3deb048d273f5173b941ccb5169e8f.png]]
+: aa67df69-fdb8-4976-9e40-3860eb97a32b
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
+: 604b4627-f42b-4d9f-bd47-6f0cc4340424
 
 * Go/NoGo
 ** Training

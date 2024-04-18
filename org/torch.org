@@ -4,11 +4,11 @@
 
 * Notebook Settings
 
-#+begin_src ipython 
+#+begin_src ipython
   %load_ext autoreload
   %autoreload 2
   %reload_ext autoreload
-  
+
   %run ../notebooks/setup.py
   %matplotlib inline
   %config InlineBackend.figure_format = 'png'
@@ -25,7 +25,7 @@
 #+begin_src ipython
   import sys
   sys.path.insert(0, '../')
-  
+
   import torch
   import gc
   import pandas as pd
@@ -103,8 +103,8 @@
 
 #+begin_src ipython
   start = perf_counter()
-  model = Network(conf_name, REPO_ROOT, VERBOSE=1, DEVICE='cuda', LIVE_FF_UPDATE=1, TASK='dual_rand', seed=0)  
-  rates = model(RET_FF=1).cpu().numpy()  
+  model = Network(conf_name, REPO_ROOT, VERBOSE=1, DEVICE='cuda', LIVE_FF_UPDATE=1, TASK='dual_rand', seed=0)
+  rates = model(RET_FF=1).cpu().numpy()
   end = perf_counter()
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
@@ -115,115 +115,48 @@
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+: Na tensor([2000,  500], device='cuda:0', dtype=torch.int32) Ka tensor([250., 250.], device='cuda:0') csumNa tensor([   0, 2000, 2500], device='cuda:0')
+# [goto error]
 #+begin_example
-  Na tensor([2000,  500], device='cuda:0', dtype=torch.int32) Ka tensor([250., 250.], device='cuda:0') csumNa tensor([   0, 2000, 2500], device='cuda:0')
-  Jab [1.0, -1.5, 1, -1]
-  Ja0 [1.3, 1.0]
-  Generating ff input
-  times (s) 0.0 rates (Hz) [0.1, 1.98]
-  times (s) 0.07 rates (Hz) [0.08, 1.82]
-  times (s) 0.13 rates (Hz) [0.09, 2.54]
-  times (s) 0.2 rates (Hz) [0.07, 2.27]
-  times (s) 0.26 rates (Hz) [0.08, 2.59]
-  times (s) 0.33 rates (Hz) [0.07, 1.82]
-  times (s) 0.4 rates (Hz) [0.09, 2.53]
-  times (s) 0.46 rates (Hz) [0.08, 2.58]
-  times (s) 0.53 rates (Hz) [0.09, 2.55]
-  times (s) 0.6 rates (Hz) [0.07, 2.2]
-  times (s) 0.66 rates (Hz) [1.3, 1.92]
-  times (s) 0.73 rates (Hz) [1.24, 4.08]
-  times (s) 0.79 rates (Hz) [1.26, 4.22]
-  times (s) 0.86 rates (Hz) [1.32, 4.23]
-  times (s) 0.93 rates (Hz) [1.62, 4.57]
-  times (s) 0.99 rates (Hz) [2.28, 5.54]
-  times (s) 1.06 rates (Hz) [3.05, 6.79]
-  times (s) 1.13 rates (Hz) [3.37, 7.66]
-  times (s) 1.19 rates (Hz) [3.35, 8.05]
-  times (s) 1.26 rates (Hz) [3.36, 8.36]
-  times (s) 1.32 rates (Hz) [3.07, 8.59]
-  times (s) 1.39 rates (Hz) [0.88, 5.52]
-  times (s) 1.46 rates (Hz) [1.78, 5.98]
-  times (s) 1.52 rates (Hz) [2.19, 6.52]
-  times (s) 1.59 rates (Hz) [1.93, 6.18]
-  times (s) 1.66 rates (Hz) [2.09, 6.33]
-  times (s) 1.72 rates (Hz) [2.12, 6.38]
-  times (s) 1.79 rates (Hz) [2.15, 6.43]
-  times (s) 1.85 rates (Hz) [2.17, 6.48]
-  times (s) 1.92 rates (Hz) [2.19, 6.52]
-  times (s) 1.99 rates (Hz) [2.21, 6.57]
-  times (s) 2.05 rates (Hz) [2.24, 6.62]
-  times (s) 2.12 rates (Hz) [2.26, 6.66]
-  times (s) 2.19 rates (Hz) [2.27, 6.7]
-  times (s) 2.25 rates (Hz) [2.28, 6.74]
-  times (s) 2.32 rates (Hz) [2.29, 6.76]
-  times (s) 2.38 rates (Hz) [2.28, 6.77]
-  times (s) 2.45 rates (Hz) [2.28, 6.78]
-  times (s) 2.52 rates (Hz) [2.28, 6.79]
-  times (s) 2.58 rates (Hz) [2.28, 6.8]
-  times (s) 2.65 rates (Hz) [2.28, 6.8]
-  times (s) 2.72 rates (Hz) [2.28, 6.8]
-  times (s) 2.78 rates (Hz) [2.28, 6.8]
-  times (s) 2.85 rates (Hz) [2.29, 6.82]
-  times (s) 2.91 rates (Hz) [2.31, 6.85]
-  times (s) 2.98 rates (Hz) [2.32, 6.87]
-  times (s) 3.05 rates (Hz) [2.34, 6.9]
-  times (s) 3.11 rates (Hz) [2.34, 6.91]
-  times (s) 3.18 rates (Hz) [2.31, 6.9]
-  times (s) 3.25 rates (Hz) [2.27, 6.85]
-  times (s) 3.31 rates (Hz) [2.23, 6.78]
-  times (s) 3.38 rates (Hz) [2.18, 6.7]
-  times (s) 3.44 rates (Hz) [2.13, 6.61]
-  times (s) 3.51 rates (Hz) [2.08, 6.51]
-  times (s) 3.58 rates (Hz) [2.02, 6.41]
-  times (s) 3.64 rates (Hz) [1.98, 6.31]
-  times (s) 3.71 rates (Hz) [1.99, 6.26]
-  times (s) 3.77 rates (Hz) [1.99, 6.23]
-  times (s) 3.84 rates (Hz) [2.01, 6.23]
-  times (s) 3.91 rates (Hz) [2.05, 6.25]
-  times (s) 3.97 rates (Hz) [2.09, 6.3]
-  times (s) 4.04 rates (Hz) [2.15, 6.37]
-  times (s) 4.11 rates (Hz) [2.19, 6.43]
-  times (s) 4.17 rates (Hz) [2.21, 6.48]
-  times (s) 4.24 rates (Hz) [2.21, 6.5]
-  times (s) 4.3 rates (Hz) [2.22, 6.53]
-  times (s) 4.37 rates (Hz) [2.23, 6.56]
-  times (s) 4.44 rates (Hz) [2.26, 6.61]
-  times (s) 4.5 rates (Hz) [2.3, 6.66]
-  times (s) 4.57 rates (Hz) [2.33, 6.72]
-  times (s) 4.64 rates (Hz) [2.37, 6.79]
-  times (s) 4.7 rates (Hz) [2.39, 6.84]
-  times (s) 4.77 rates (Hz) [2.4, 6.88]
-  times (s) 4.83 rates (Hz) [2.41, 6.9]
-  times (s) 4.9 rates (Hz) [2.4, 6.91]
-  times (s) 4.97 rates (Hz) [2.38, 6.9]
-  times (s) 5.03 rates (Hz) [2.36, 6.88]
-  times (s) 5.1 rates (Hz) [2.35, 6.87]
-  times (s) 5.17 rates (Hz) [2.34, 6.85]
-  times (s) 5.23 rates (Hz) [2.33, 6.84]
-  times (s) 5.3 rates (Hz) [2.32, 6.83]
-  times (s) 5.36 rates (Hz) [2.32, 6.83]
-  times (s) 5.43 rates (Hz) [2.32, 6.83]
-  times (s) 5.5 rates (Hz) [2.33, 6.85]
-  times (s) 5.56 rates (Hz) [2.34, 6.86]
-  times (s) 5.63 rates (Hz) [2.35, 6.89]
-  times (s) 5.7 rates (Hz) [2.37, 6.92]
-  times (s) 5.76 rates (Hz) [2.39, 6.96]
-  times (s) 5.83 rates (Hz) [2.41, 7.0]
-  times (s) 5.89 rates (Hz) [2.43, 7.03]
-  times (s) 5.96 rates (Hz) [2.43, 7.06]
-  times (s) 6.03 rates (Hz) [2.43, 7.08]
-  times (s) 6.09 rates (Hz) [2.43, 7.09]
-  times (s) 6.16 rates (Hz) [2.43, 7.1]
-  times (s) 6.23 rates (Hz) [2.42, 7.1]
-  times (s) 6.29 rates (Hz) [2.42, 7.1]
-  times (s) 6.36 rates (Hz) [2.41, 7.1]
-  times (s) 6.42 rates (Hz) [2.4, 7.08]
-  times (s) 6.49 rates (Hz) [2.39, 7.07]
-  times (s) 6.56 rates (Hz) [2.39, 7.07]
-  times (s) 6.62 rates (Hz) [2.4, 7.08]
-  Elapsed (with compilation) = 0h 0m 3s
-  rates (1, 101, 2000)
+  ---------------------------------------------------------------------------
+  AttributeError                            Traceback (most recent call last)
+  Cell In[8], line 2
+        1 start = perf_counter()
+  ----> 2 model = Network(conf_name, REPO_ROOT, VERBOSE=1, DEVICE='cuda', LIVE_FF_UPDATE=1, TASK='dual_rand', seed=0)
+        3 rates = model(RET_FF=1).cpu().numpy()
+        4 end = perf_counter()
+
+  File ~/models/NeuroFlame/org/../src/network.py:36, in Network.__init__(self, conf_name, repo_root, **kwargs)
+       33 super().__init__()
+       35 # Load parameters from configuration file and create networks constants
+  ---> 36 config = Configuration(conf_name, repo_root)(**kwargs)
+       37 self.__dict__.update(config.__dict__)
+       39 # Initialize weight matrix
+
+  File ~/models/NeuroFlame/org/../src/configuration.py:43, in Configuration.__call__(self, **kwargs)
+       42 def __call__(self, **kwargs):
+  ---> 43     return self.forward(**kwargs)
+
+  File ~/models/NeuroFlame/org/../src/configuration.py:38, in Configuration.forward(self, **kwargs)
+       35 set_seed(self.SEED)
+       37 # create networks' constants
+  ---> 38 init_const(self)
+       40 return self
+
+  File ~/models/NeuroFlame/org/../src/configuration.py:161, in init_const(model)
+      157     multivariate_normal = MultivariateNormal(mean_, cov_)
+      158     model.PHI0 = multivariate_normal.sample((model.Na[0],)).T
+      159     model.PHI0 = torch.stack(
+      160         (model.PHI0[0], model.PHI0[0], model.PHI0[1], model.PHI0[1])
+  --> 161     ).type(model.float32)
+      162 else:
+      163     # print('Using Francesca like low rank')
+      164     multivariate_normal = MultivariateNormal(mean_, cov_)
+
+  AttributeError: 'Configuration' object has no attribute 'float32'
 #+end_example
+:END:
 #+RESULTS:
 
 #+begin_src ipython
@@ -260,7 +193,7 @@
   print(ff_input.shape)
 
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
-  
+
   ax[0].plot(ff_input[0, :, :5])
   ax[0].plot(ff_input[0, :, -5:])
   ax[0].set_xlabel('Step')
@@ -281,7 +214,7 @@
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
-  
+
   r_max = 15
 
   ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
@@ -346,7 +279,7 @@
   model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE='cuda',
                   N_BATCH=100, SEED=seed, LR_COV=LR_COV,
                   TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=10)
-  
+
   rates = model(RET_FF=1).detach().cpu().numpy()
   end = perf_counter()
 
@@ -365,7 +298,7 @@
 
 #+RESULTS:
 
-*** Results 
+*** Results
 
 #+begin_src ipython
   Ne = model.Na[0].detach().cpu().numpy()
@@ -537,7 +470,7 @@
 
               gc.collect()
               torch.cuda.empty_cache()
-              
+
       end = perf_counter()
 
       print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
@@ -576,7 +509,7 @@
 
       for i in range(len(cov_list)):
           theta = get_theta(ksi[i][0], ksi[i][2], GM=0, IF_NORM=0)
-          
+
           overlap.append(rates[i] @ ksi[i].T / rates.shape[-1])
 
           index_order = theta.argsort()
@@ -659,13 +592,13 @@
 :RESULTS:
 : (100, 101, 2000)
 # [goto error]
-: [0;31m---------------------------------------------------------------------------[0m
-: [0;31mNameError[0m                                 Traceback (most recent call last)
-: Cell [0;32mIn[41], line 2[0m
-: [1;32m      1[0m [38;5;28mprint[39m(rates[38;5;241m.[39mshape)
-: [0;32m----> 2[0m [38;5;28mprint[39m([41mksi[49m[38;5;241m.[39mshape)
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[41], line 2
+:       1 print(rates.shape)
+: ----> 2 print(ksi.shape)
 :
-: [0;31mNameError[0m: name 'ksi' is not defined
+: NameError: name 'ksi' is not defined
 :END:
 
 #+begin_src ipython
@@ -737,13 +670,13 @@
 #+RESULTS:
 :RESULTS:
 # [goto error]
-: [0;31m---------------------------------------------------------------------------[0m
-: [0;31mNameError[0m                                 Traceback (most recent call last)
-: Cell [0;32mIn[43], line 1[0m
-: [0;32m----> 1[0m [38;5;28mprint[39m([41mratesGo[49m[38;5;241m.[39mshape)
-: [1;32m      2[0m [38;5;28mprint[39m(ksiGo[38;5;241m.[39mshape)
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[43], line 1
+: ----> 1 print(ratesGo.shape)
+:       2 print(ksiGo.shape)
 :
-: [0;31mNameError[0m: name 'ratesGo' is not defined
+: NameError: name 'ratesGo' is not defined
 :END:
 
 #+begin_src ipython
@@ -754,13 +687,13 @@
 #+RESULTS:
 :RESULTS:
 # [goto error]
-: [0;31m---------------------------------------------------------------------------[0m
-: [0;31mNameError[0m                                 Traceback (most recent call last)
-: Cell [0;32mIn[44], line 1[0m
-: [0;32m----> 1[0m overlap1, rates1 [38;5;241m=[39m ret_overlap(rates, [41mksi[49m)
-: [1;32m      2[0m overlap2, rates2 [38;5;241m=[39m ret_overlap(ratesGo, ksiGo)
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[44], line 1
+: ----> 1 overlap1, rates1 = ret_overlap(rates, ksi)
+:       2 overlap2, rates2 = ret_overlap(ratesGo, ksiGo)
 :
-: [0;31mNameError[0m: name 'ksi' is not defined
+: NameError: name 'ksi' is not defined
 :END:
 
 #+begin_src ipython
@@ -771,13 +704,13 @@
 #+RESULTS:
 :RESULTS:
 # [goto error]
-: [0;31m---------------------------------------------------------------------------[0m
-: [0;31mNameError[0m                                 Traceback (most recent call last)
-: Cell [0;32mIn[45], line 1[0m
-: [0;32m----> 1[0m [38;5;28mprint[39m([41moverlap1[49m[38;5;241m.[39mshape)
-: [1;32m      2[0m [38;5;28mprint[39m(overlap2[38;5;241m.[39mshape)
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[45], line 1
+: ----> 1 print(overlap1.shape)
+:       2 print(overlap2.shape)
 :
-: [0;31mNameError[0m: name 'overlap1' is not defined
+: NameError: name 'overlap1' is not defined
 :END:
 
 #+begin_src ipython
@@ -948,7 +881,7 @@
   I0 = [.1, 0.0, 0.0]
   rates_list = []
   ksi_list = []
-  
+
   for i in range(10):
       rates, ksi = run_behavior(conf_name, cov_list, n_ini, seed=i, device='cuda', I0=I0)
       rates_list.append(rates)
@@ -1019,7 +952,7 @@
 
 #+begin_src ipython
   ini = 0
-  
+
   x = m1[:, ini, ..., -1] / m0[:, ini, ..., -1] * np.cos(phi[:, ini, ..., -1])
   y = m1[:, ini, ..., -1] / m0[:, ini, ..., -1] * np.sin(phi[:, ini, ..., -1])
 
@@ -1048,7 +981,7 @@
               model = Network(conf_name,
                               REPO_ROOT, DEVICE=device,  VERBOSE=0, SEED=0,
                               LIVE_FF_UPDATE=1, N_BATCH=n_ini, **kwargs)
-              
+
               # model.I0[0] = .1
               # sample_A = model.init_ff_input()
 
@@ -1375,7 +1308,7 @@
 
 #+begin_src ipython
   rates_ord_cov4 = np.zeros(rates_cov4.shape)
-  
+
   for i in real_list:
       idx = np.arange(0, len(ksi_cov4[i][0]))
       theta = get_theta(ksi_cov4[i][0], ksi_cov4[i][2], GM=0, IF_NORM=0)
