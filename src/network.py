@@ -92,7 +92,7 @@ class Network(nn.Module):
     def initSTP(self):
         """Creates stp model for population 0"""
         self.J_STP = torch.tensor(self.J_STP, device=self.device)
-        self.J_STP.mul_(self.GAIN / torch.sqrt(self.Ka[0]))
+        self.J_STP = self.J_STP * (self.GAIN / torch.sqrt(self.Ka[0]))
 
         self.stp = Plasticity(
             self.USE,
@@ -108,6 +108,8 @@ class Network(nn.Module):
         self.W_stp_T = (
             self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
         )
+
+        self.Wab_T[self.slices[0], self.slices[0]] = 0
 
     def init_ff_input(self):
         return init_ff_input(self)
@@ -209,7 +211,6 @@ class Network(nn.Module):
                 + self.R_NMDA * hidden * self.DT_TAU_NMDA
             )
 
-            # net_input.add_(rec_input[1])
             net_input = net_input + rec_input[1]
 
         # compute non linearity
@@ -245,18 +246,18 @@ class Network(nn.Module):
                 self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
             )
 
+            self.Wab_T[self.slices[0], self.slices[0]] = 0
+
         # Add STP
+        W_stp_T = None
         if self.IF_STP:
             self.initSTP()
             self.x_list, self.u_list = [], []
-
-        if self.IF_BATCH_J or self.IF_STP:
-            self.Wab_T[self.slices[0], self.slices[0]] = 0
+            W_stp_T = self.W_stp_T
 
         # I moved this outside of the temporal loop
         # The downside is that I need to pass Wab_T to update_dynamics
         # not sure it is more efficient
-        W_stp_T = None
         if self.LR_TRAIN:
             if self.LR_NORM:
                 self.lr = self.lr_kappa * (
@@ -265,7 +266,7 @@ class Network(nn.Module):
             else:
                 self.lr = self.lr_kappa * (self.U @ self.V.T)
 
-            self.lr = self.lr_mask * self.lr
+            # self.lr = self.lr_mask * self.lr
             self.lr = self.lr / (1.0 * self.Na[0])
             self.lr = self.lr.clamp(min=-self.Wab_T[0, 0])
 
@@ -273,6 +274,7 @@ class Network(nn.Module):
                 W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
 
             Wab_T = self.Wab_T + self.lr.T
+
         else:
             Wab_T = self.Wab_T
             if self.IF_STP:

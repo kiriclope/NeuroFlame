@@ -40,11 +40,11 @@ def ortho_quench_lr(model):
 def initLR(model):
     # Low rank vector
     model.U = nn.Parameter(
-        torch.randn((model.N_NEURON, int(model.RANK)), device=model.device) * 0.01
+        torch.randn((model.N_NEURON, int(model.RANK)), device=model.device) * 0.1
     )
 
     model.V = nn.Parameter(
-        torch.randn((model.N_NEURON, int(model.RANK)), device=model.device) * 0.01
+        torch.randn((model.N_NEURON, int(model.RANK)), device=model.device) * 0.1
     )
 
     if model.LR_KAPPA == 1:
@@ -75,6 +75,7 @@ def initLR(model):
         (3, model.Na[0]),
         device=model.device,
     )
+
     if model.LR_FIX_READ:
         for param in model.linear.parameters():
             param.requires_grad = False

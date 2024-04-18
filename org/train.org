@@ -131,7 +131,7 @@
       num_batches = len(dataloader)
 
       device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-      
+
       # Validation loop.
       model.eval()
       val_loss = 0.0
@@ -142,7 +142,7 @@
               outputs = model(data)
               loss = loss_fn(outputs, targets)
               val_loss += loss.item() * data.size(0)
-              
+
           val_loss /= size
 
       return val_loss
@@ -205,35 +205,6 @@
 
 #+RESULTS:
 
-#+begin_src  ipython
-  import torch.nn as nn
-
-  class BalancedBCELoss(nn.Module):
-      def __init__(self, alpha=0.1):
-          super(BalancedBCELoss, self).__init__()
-          self.alpha = alpha
-          self.bce_with_logits = nn.BCEWithLogitsLoss()
-
-      def forward(self, logits, targets):
-          # Compute standard BCE Loss
-          bce_loss = self.bce_with_logits(logits, targets)
-
-          # Compute positive and negative mean activations
-          # print(logits.shape, targets.shape)
-          pos_activation = logits[targets == 1].mean()
-          neg_activation = logits[targets == 0].mean()
-          # print(pos_activation.shape , neg_activation.shape)
-          # Compute the loss that promotes mean activity of 0 when averaged across both classes using MSE
-          balance_loss = (pos_activation - neg_activation)**2
-
-          # Combine the BCE loss with the balance loss
-          combined_loss = bce_loss + self.alpha * balance_loss
-
-          return combined_loss
-#+end_src
-
-#+RESULTS:
-
 #+begin_src ipython
   import torch
   import torch.nn as nn
@@ -256,7 +227,8 @@
           mean_activation = readout.mean(dim=1).unsqueeze(-1)
           sign_overlap = torch.sign(2 * targets - 1) * mean_activation / (1.0 * self.N)
 
-          sign_loss = F.relu(self.thresh -sign_overlap).mean()
+          # sign_loss = F.relu(self.thresh - sign_overlap).mean()
+          sign_loss = torch.sigmoid(self.thresh -sign_overlap).mean()
 
           combined_loss = (1-self.alpha) * bce_loss + self.alpha * sign_loss
           return combined_loss
@@ -316,9 +288,9 @@
 
       u, v = a, b
 
-      if GM:          
+      if GM:
           v = b - np.dot(b, a) / np.dot(a, a) * a
-          
+
       if IF_NORM:
           u = a / np.linalg.norm(a)
           v = b / np.linalg.norm(b)
@@ -350,7 +322,7 @@
   def get_overlap(model, rates):
       ksi = model.odors.cpu().detach().numpy()
       return rates @ ksi.T / rates.shape[-1]
-  
+
 #+end_src
 
 #+RESULTS:
@@ -359,9 +331,9 @@
   import scipy.stats as stats
 
   def plot_smooth(data, ax, color):
-      mean = data.mean(axis=0)  
+      mean = data.mean(axis=0)
       ci = smooth.std(axis=0, ddof=1) * 1.96
-      
+
       # Plot
       ax.plot(mean, color=color)
       ax.fill_between(range(data.shape[1]), mean - ci, mean + ci, alpha=0.25, color=color)
@@ -465,19 +437,23 @@
 
 #+begin_src ipython
   start = perf_counter()
-  model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', SEED=0)
+  model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', SEED=0, N_BATCH=16)
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-  # print()
-  # for name, param in model.named_parameters():
-  #     if param.requires_grad:
-  #         print(name, param.shape)
+  print()
+  for name, param in model.named_parameters():
+      if param.requires_grad:
+          print(name, param.shape)
 #+end_src
 
 #+RESULTS:
+:
+: U torch.Size([2000, 2])
+: V torch.Size([2000, 2])
+: linear.weight torch.Size([1, 1600])
 
 * Sample Classification
 ** Training
@@ -485,15 +461,16 @@
 
 #+begin_src ipython
   model.LR_TRAIN = 1
+  model.LR_EVAL_WIN = model.T_STIM_OFF[2] - model.T_STIM_ON[0]
+  model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
+  print(model.lr_eval_win)
 
-  model.LR_EVAL_WIN = 4
-  model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT)
-
-  model.DURATION = 6
+  model.DURATION = 6.0
   model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
 #+end_src
 
 #+RESULTS:
+: 50
 
 Testing the network on steps from sample odor offset to test odor onset
 
@@ -529,7 +506,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: torch.Size([128, 1420, 2000])
+: torch.Size([128, 710, 2000])
 
 #+begin_src ipython
   labels_A = torch.ones((model.N_BATCH, rwd_idx.shape[0]))
@@ -550,8 +527,9 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: torch.Size([102, 1420, 2000]) torch.Size([26, 1420, 2000])
+: torch.Size([102, 710, 2000]) torch.Size([26, 710, 2000])
 : torch.Size([102, 31]) torch.Size([26, 31])
+
 
 #+begin_src ipython
   # criterion = nn.BCEWithLogitsLoss()
@@ -572,12 +550,14 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: Epoch 1/30, Training Loss: 0.8601, Validation Loss: 0.8555
-: Epoch 2/30, Training Loss: 0.7265, Validation Loss: 0.7418
-: Epoch 3/30, Training Loss: 0.6524, Validation Loss: 0.5942
-: Epoch 4/30, Training Loss: 0.3420, Validation Loss: 0.2743
-: Epoch 5/30, Training Loss: 0.0150, Validation Loss: 0.0000
-: Stopping training as loss has fallen below the threshold: 0.0
+: Epoch 1/30, Training Loss: 0.3410, Validation Loss: 0.3306
+: Epoch 2/30, Training Loss: 0.2356, Validation Loss: 0.2149
+: Epoch 3/30, Training Loss: 0.0459, Validation Loss: 0.0964
+: Epoch 4/30, Training Loss: 0.0384, Validation Loss: 0.0503
+: Epoch 5/30, Training Loss: 0.0068, Validation Loss: 0.0163
+: Epoch 6/30, Training Loss: 0.0048, Validation Loss: 0.0057
+: Epoch 7/30, Training Loss: 0.0037, Validation Loss: 0.0022
+: Stopping training as loss has fallen below the threshold: 0.002227200145886937
 
 ** Testing
 
@@ -626,7 +606,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([2, 1420, 2000])
+: ff_input torch.Size([2, 710, 2000])
 
 #+begin_src ipython
   model.VERBOSE = 0
@@ -646,7 +626,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/aa8172d387124017f5a2207f87bdcf6f5d043cca.png]]
+[[file:./.ob-jupyter/16c96cf613f18f90c521c697b049b140f1f56812.png]]
 
 #+begin_src ipython
     readout = model.linear.weight.data.cpu().detach().numpy()[0]
@@ -656,7 +636,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+RESULTS:
 :RESULTS:
 : (2, 61)
-[[file:./.ob-jupyter/9618733c436d1d4acf2cfe4bb9535f21724e1848.png]]
+[[file:./.ob-jupyter/b7b8f904732bf232b9d61d5b63e79f08bcf68518.png]]
 :END:
 
 #+begin_src ipython
@@ -664,7 +644,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/440754d5d7aca5c535fd43c1db69f6225c354d3a.png]]
+[[file:./.ob-jupyter/5c39b71da837f5800d1693603b9045ec8ecfe5d6.png]]
 
 #+begin_src ipython
 
@@ -733,7 +713,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([256, 1420, 2000])
+: ff_input torch.Size([256, 710, 2000])
 
 
  #+begin_src ipython
@@ -757,7 +737,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: torch.Size([204, 1420, 2000]) torch.Size([52, 1420, 2000])
+: torch.Size([204, 710, 2000]) torch.Size([52, 710, 2000])
 : torch.Size([204, 10]) torch.Size([52, 10])
 
 #+begin_src ipython
@@ -779,20 +759,36 @@ Here we only evaluate performance from test onset to test offset
 
 #+RESULTS:
 #+begin_example
-  Epoch 1/30, Training Loss: 1.0906, Validation Loss: 2.6009
-  Epoch 2/30, Training Loss: 1.8745, Validation Loss: 1.6120
-  Epoch 3/30, Training Loss: 0.9192, Validation Loss: 1.0817
-  Epoch 4/30, Training Loss: 0.8926, Validation Loss: 0.9081
-  Epoch 5/30, Training Loss: 0.8946, Validation Loss: 0.9034
-  Epoch 6/30, Training Loss: 0.9068, Validation Loss: 0.9004
-  Epoch 7/30, Training Loss: 0.9099, Validation Loss: 0.8900
-  Epoch 8/30, Training Loss: 0.8777, Validation Loss: 0.8842
-  Epoch 9/30, Training Loss: 0.8639, Validation Loss: 0.8748
-  Epoch 10/30, Training Loss: 0.8565, Validation Loss: 0.8719
-  Epoch 11/30, Training Loss: 0.8539, Validation Loss: 0.8629
-  Epoch 12/30, Training Loss: 0.8534, Validation Loss: 0.8448
-  Epoch 13/30, Training Loss: 1.0759, Validation Loss: 0.8496
-  Epoch 14/30, Training Loss: 0.8571, Validation Loss: 0.8606
+  Epoch 1/30, Training Loss: 50.3871, Validation Loss: 64.4079
+  Epoch 2/30, Training Loss: 76.4959, Validation Loss: 62.7563
+  Epoch 3/30, Training Loss: 74.1133, Validation Loss: 59.2155
+  Epoch 4/30, Training Loss: 68.1816, Validation Loss: 54.6940
+  Epoch 5/30, Training Loss: 30.5874, Validation Loss: 48.6805
+  Epoch 6/30, Training Loss: 24.1802, Validation Loss: 38.0239
+  Epoch 7/30, Training Loss: 9.7003, Validation Loss: 8.5211
+  Epoch 8/30, Training Loss: 6.0844, Validation Loss: 2.2807
+  Epoch 9/30, Training Loss: 8.1330, Validation Loss: 0.9686
+  Epoch 10/30, Training Loss: 0.4206, Validation Loss: 0.4198
+  Epoch 11/30, Training Loss: 0.4202, Validation Loss: 0.4189
+  Epoch 12/30, Training Loss: 0.4190, Validation Loss: 0.4187
+  Epoch 13/30, Training Loss: 0.4199, Validation Loss: 0.4186
+  Epoch 14/30, Training Loss: 0.4158, Validation Loss: 0.4184
+  Epoch 15/30, Training Loss: 0.4201, Validation Loss: 0.4183
+  Epoch 16/30, Training Loss: 0.4192, Validation Loss: 0.4181
+  Epoch 17/30, Training Loss: 0.4197, Validation Loss: 0.4179
+  Epoch 18/30, Training Loss: 0.4174, Validation Loss: 0.4177
+  Epoch 19/30, Training Loss: 0.4193, Validation Loss: 0.4175
+  Epoch 20/30, Training Loss: 0.4169, Validation Loss: 0.4170
+  Epoch 21/30, Training Loss: 0.4146, Validation Loss: 0.4163
+  Epoch 22/30, Training Loss: 0.4146, Validation Loss: 0.4149
+  Epoch 23/30, Training Loss: 0.4161, Validation Loss: 0.4147
+  Epoch 24/30, Training Loss: 0.4153, Validation Loss: 0.4139
+  Epoch 25/30, Training Loss: 0.4116, Validation Loss: 0.4132
+  Epoch 26/30, Training Loss: 0.4060, Validation Loss: 0.4123
+  Epoch 27/30, Training Loss: 0.4020, Validation Loss: 0.4115
+  Epoch 28/30, Training Loss: 0.4094, Validation Loss: 0.4107
+  Epoch 29/30, Training Loss: 0.4115, Validation Loss: 0.4097
+  Epoch 30/30, Training Loss: 0.4105, Validation Loss: 0.4089
 #+end_example
 
 #+begin_src ipython
@@ -804,7 +800,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: 70ad7693-b493-4b86-8927-809950350437
+[[file:./.ob-jupyter/c35462e0ca0faca8ef3206a614ac140b915f3f47.png]]
 
 ** Testing
 
@@ -813,7 +809,6 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: 01456013-0c9e-4a39-8c94-7b6d7cef1bc1
 
 #+begin_src ipython
   model.eval()
@@ -832,7 +827,6 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: b2f950d8-b7d2-4d3b-946c-bbf7f1b56ba9
 
 #+begin_src ipython
   model.N_BATCH = 1
@@ -841,7 +835,6 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ec12b04a-6957-46c9-a3e9-adb6b65b5147
 
 #+begin_src ipython
   model.N_BATCH = 1
@@ -875,7 +868,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: eed3fcce-f732-467c-8085-b6c907786c1d
+: ff_input torch.Size([4, 710, 2000])
 
 #+begin_src ipython
   model.VERBOSE = 0
@@ -885,7 +878,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: 2adbefb2-107a-4ee7-b571-272976836968
+: (4, 61, 1600)
 
 #+begin_src ipython
   idx = get_idx(model, 3)
@@ -893,7 +886,10 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: 6ba8ccc4-9fb8-49dd-9dde-d3c179ed0550
+:RESULTS:
+: ksi torch.Size([5, 1600])
+[[file:./.ob-jupyter/a6a3ed8266939c818f6e27379a361e4e344af745.png]]
+:END:
 
 #+begin_src ipython
     readout = model.linear.weight.data.cpu().detach().numpy()[0]
@@ -901,21 +897,23 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: 53bb00c0-04af-4f97-ae03-40eedb4f9513
+:RESULTS:
+: (4, 61)
+[[file:./.ob-jupyter/03e2a9b14bbc5e12f47711d9af7f7876053114d1.png]]
+:END:
 
 #+begin_src ipython
   plot_m0_m1_phi(rates, idx)
 #+end_src
 
 #+RESULTS:
-: b0dabd88-3d44-445c-8b87-9e08535a5afd
+[[file:./.ob-jupyter/ab41ab31fe3deb048d273f5173b941ccb5169e8f.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: bbccce34-c66a-47de-9047-01332053ecf9
 
 * Go/NoGo
 ** Training
@@ -957,8 +955,8 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: U torch.Size([2000, 2])
-: V torch.Size([2000, 2])
+: U torch.Size([3000, 2])
+: V torch.Size([3000, 2])
 
 #+begin_src ipython
   # switching sample and distractor odors
@@ -985,7 +983,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: torch.Size([128, 1420, 2000])
+: torch.Size([128, 710, 3000])
 
 #+begin_src ipython
   labels_Go = torch.ones((model.N_BATCH, model.lr_eval_win))
@@ -1004,7 +1002,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: torch.Size([102, 1420, 2000]) torch.Size([26, 1420, 2000])
+: torch.Size([102, 710, 3000]) torch.Size([26, 710, 3000])
 : torch.Size([102, 11]) torch.Size([26, 11])
 
 #+begin_src ipython
@@ -1026,36 +1024,36 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 #+RESULTS:
 #+begin_example
-  Epoch 1/30, Training Loss: 0.8137, Validation Loss: 0.7895
-  Epoch 2/30, Training Loss: 0.7869, Validation Loss: 0.7876
-  Epoch 3/30, Training Loss: 0.7573, Validation Loss: 0.7835
-  Epoch 4/30, Training Loss: 0.7729, Validation Loss: 0.7709
-  Epoch 5/30, Training Loss: 0.7071, Validation Loss: 0.7490
-  Epoch 6/30, Training Loss: 0.7787, Validation Loss: 0.7288
-  Epoch 7/30, Training Loss: 0.7110, Validation Loss: 0.7087
-  Epoch 8/30, Training Loss: 0.6649, Validation Loss: 0.6893
-  Epoch 9/30, Training Loss: 0.7065, Validation Loss: 0.6750
-  Epoch 10/30, Training Loss: 0.6326, Validation Loss: 0.6614
-  Epoch 11/30, Training Loss: 0.6517, Validation Loss: 0.6492
-  Epoch 12/30, Training Loss: 0.6042, Validation Loss: 0.6356
-  Epoch 13/30, Training Loss: 0.6238, Validation Loss: 0.6209
-  Epoch 14/30, Training Loss: 0.5761, Validation Loss: 0.6070
-  Epoch 15/30, Training Loss: 0.5245, Validation Loss: 0.5922
-  Epoch 16/30, Training Loss: 0.5763, Validation Loss: 0.5749
-  Epoch 17/30, Training Loss: 0.5215, Validation Loss: 0.5550
-  Epoch 18/30, Training Loss: 0.5378, Validation Loss: 0.5346
-  Epoch 19/30, Training Loss: 0.5496, Validation Loss: 0.5121
-  Epoch 20/30, Training Loss: 0.4537, Validation Loss: 0.4873
-  Epoch 21/30, Training Loss: 0.3910, Validation Loss: 0.4656
-  Epoch 22/30, Training Loss: 0.4071, Validation Loss: 0.4407
-  Epoch 23/30, Training Loss: 0.4209, Validation Loss: 0.4161
-  Epoch 24/30, Training Loss: 0.4405, Validation Loss: 0.3901
-  Epoch 25/30, Training Loss: 0.2604, Validation Loss: 0.3536
-  Epoch 26/30, Training Loss: 0.2553, Validation Loss: 0.3053
-  Epoch 27/30, Training Loss: 0.1102, Validation Loss: 0.2443
-  Epoch 28/30, Training Loss: 0.2202, Validation Loss: 0.2166
-  Epoch 29/30, Training Loss: 0.2605, Validation Loss: 0.1907
-  Epoch 30/30, Training Loss: 0.0571, Validation Loss: 0.1676
+  Epoch 1/30, Training Loss: 3.6489, Validation Loss: 5.1639
+  Epoch 2/30, Training Loss: 0.9587, Validation Loss: 0.9550
+  Epoch 3/30, Training Loss: 1.0726, Validation Loss: 0.9484
+  Epoch 4/30, Training Loss: 0.9331, Validation Loss: 0.9423
+  Epoch 5/30, Training Loss: 0.9318, Validation Loss: 0.9396
+  Epoch 6/30, Training Loss: 0.9454, Validation Loss: 0.9380
+  Epoch 7/30, Training Loss: 0.9441, Validation Loss: 0.9368
+  Epoch 8/30, Training Loss: 0.9358, Validation Loss: 0.9358
+  Epoch 9/30, Training Loss: 0.9351, Validation Loss: 0.9349
+  Epoch 10/30, Training Loss: 0.9272, Validation Loss: 0.9340
+  Epoch 11/30, Training Loss: 0.9332, Validation Loss: 0.9331
+  Epoch 12/30, Training Loss: 0.9464, Validation Loss: 0.9321
+  Epoch 13/30, Training Loss: 0.9168, Validation Loss: 0.9312
+  Epoch 14/30, Training Loss: 0.9301, Validation Loss: 0.9301
+  Epoch 15/30, Training Loss: 0.9292, Validation Loss: 0.9290
+  Epoch 16/30, Training Loss: 0.9120, Validation Loss: 0.9279
+  Epoch 17/30, Training Loss: 0.9268, Validation Loss: 0.9267
+  Epoch 18/30, Training Loss: 0.9338, Validation Loss: 0.9253
+  Epoch 19/30, Training Loss: 0.9063, Validation Loss: 0.9239
+  Epoch 20/30, Training Loss: 0.9317, Validation Loss: 0.9223
+  Epoch 21/30, Training Loss: 0.9111, Validation Loss: 0.9206
+  Epoch 22/30, Training Loss: 0.9192, Validation Loss: 0.9190
+  Epoch 23/30, Training Loss: 0.9285, Validation Loss: 0.9175
+  Epoch 24/30, Training Loss: 0.9162, Validation Loss: 0.9162
+  Epoch 25/30, Training Loss: 0.9035, Validation Loss: 0.9148
+  Epoch 26/30, Training Loss: 0.9018, Validation Loss: 0.9133
+  Epoch 27/30, Training Loss: 0.9242, Validation Loss: 0.9118
+  Epoch 28/30, Training Loss: 0.8859, Validation Loss: 0.9103
+  Epoch 29/30, Training Loss: 0.8965, Validation Loss: 0.9088
+  Epoch 30/30, Training Loss: 0.9202, Validation Loss: 0.9073
 #+end_example
 
 #+begin_src ipython
@@ -1067,7 +1065,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/b76926b59e176d4186c33c6c58eac7abc476f818.png]]
+[[file:./.ob-jupyter/f3d645d15f5970178060f8dc42f2636aea7037ee.png]]
 
 ** Testing
 
@@ -1124,7 +1122,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([2, 820, 2000])
+: ff_input torch.Size([2, 410, 3000])
 
 #+begin_src ipython
   model.VERBOSE = 0
@@ -1134,21 +1132,21 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: (2, 31, 1600)
+: (2, 31, 2400)
 
 #+begin_src ipython
   idx = get_idx(model, 2)
 #+end_src
 
 #+RESULTS:
-: ksi torch.Size([5, 1600])
+: ksi torch.Size([5, 2400])
 
 #+begin_src ipython
   plot_rates_selec(rates, idx)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/4b54406adbfea93d4b8fd676a6b9856db16672f3.png]]
+[[file:./.ob-jupyter/2051dcef8f1600e5af5162ddf61d2942a71b5144.png]]
 
 #+begin_src ipython
     readout = model.linear.weight.data.cpu().detach().numpy()[0]
@@ -1158,7 +1156,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 :RESULTS:
 : (2, 31)
-[[file:./.ob-jupyter/1aeaeb8651ad156985f3cc6e5d8f8a148ccbad7d.png]]
+[[file:./.ob-jupyter/d62062988e58241e293564f3e219c2620d1876bf.png]]
 :END:
 
 #+begin_src ipython
@@ -1166,7 +1164,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/cf699f9f404faa08187ced6e0cced745860ffdd1.png]]
+[[file:./.ob-jupyter/b86b25edb44b1198aed6aaa4eb9b5e63bee19e29.png]]
 
 #+begin_src ipython
 
@@ -1240,7 +1238,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([4, 1420, 2000])
+: ff_input torch.Size([4, 710, 3000])
 
 #+begin_src ipython
   model.VERBOSE = 0
@@ -1250,7 +1248,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: (4, 61, 1600)
+: (4, 61, 2400)
 
 #+begin_src ipython
   idx = get_idx(model, 2)
@@ -1259,14 +1257,14 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ksi torch.Size([5, 1600])
+: ksi torch.Size([5, 2400])
 
 #+begin_src ipython
   plot_rates_selec(rates, idx)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e4caaab4bea919900ace6494650a14ffdaddc96b.png]]
+[[file:./.ob-jupyter/182695158ea375fed9d413ab0ea0b2bc960197f3.png]]
 
 #+begin_src ipython
     readout = model.linear.weight.data.cpu().detach().numpy()[0]
@@ -1276,7 +1274,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 :RESULTS:
 : (4, 61)
-[[file:./.ob-jupyter/cd0beac3e0baa53e9e4550bbb8302e7c753a86b7.png]]
+[[file:./.ob-jupyter/45477123096aa04a71fa0a6b948874f388bcbfb2.png]]
 :END:
 
 #+begin_src ipython
@@ -1284,7 +1282,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f558d9d5b9efdaedb97767e5b1e4afc0ccd71308.png]]
+[[file:./.ob-jupyter/f352f0891676005a8cca214a55d509ac6ce2b303.png]]
 
 #+begin_src ipython
 
@@ -1338,9 +1336,9 @@ Here we only evaluate performance from test onset to test offset
           print(name, param.shape)
 #+end_src
 #+RESULTS:
-: U torch.Size([2000, 2])
-: V torch.Size([2000, 2])
-: linear.weight torch.Size([1, 1600])
+: U torch.Size([3000, 2])
+: V torch.Size([3000, 2])
+: linear.weight torch.Size([1, 2400])
 : linear.bias torch.Size([1])
 
 #+begin_src ipython
@@ -1379,7 +1377,18 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([768, 1420, 2000]) labels torch.Size([768, 2, 11])
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: OutOfMemoryError                          Traceback (most recent call last)
+: Cell In[162], line 31
+:      28             ff_input.append(model.init_ff_input())
+:      30 labels = torch.tensor(labels, dtype=torch.float, device='cuda').reshape(2, -1, model.lr_eval_win).transpose(0, 1)
+: ---> 31 ff_input = torch.vstack(ff_input)
+:      32 print('ff_input', ff_input.shape, 'labels', labels.shape)
+:
+: OutOfMemoryError: CUDA out of memory. Tried to allocate 12.19 GiB. GPU 0 has a total capacity of 23.50 GiB of which 5.18 GiB is free. Process 3166108 has 498.00 MiB memory in use. Process 3487083 has 458.00 MiB memory in use. Including non-PyTorch memory, this process has 17.35 GiB memory in use. Of the allocated memory 16.77 GiB is allocated by PyTorch, and 279.52 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+:END:
 
 #+begin_src ipython
   batch_size = 16
@@ -1387,8 +1396,78 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: torch.Size([614, 1420, 2000]) torch.Size([154, 1420, 2000])
-: torch.Size([614, 2, 11]) torch.Size([154, 2, 11])
+:RESULTS:
+# [goto error]
+#+begin_example
+  ---------------------------------------------------------------------------
+  ValueError                                Traceback (most recent call last)
+  Cell In[163], line 2
+        1 batch_size = 16
+  ----> 2 train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
+
+  Cell In[4], line 6, in split_data(X, Y, train_perc, batch_size)
+        3 def split_data(X, Y, train_perc=0.8, batch_size=32):
+        5   if Y.ndim==3:
+  ----> 6     X_train, X_test, Y_train, Y_test = train_test_split(X, Y,
+        7                                                         train_size=train_perc,
+        8                                                         stratify=Y[:, 0, 0].cpu().numpy(),
+        9                                                         shuffle=True)
+       10   else:
+       11     X_train, X_test, Y_train, Y_test = train_test_split(X, Y,
+       12                                                         train_size=train_perc,
+       13                                                         stratify=Y[:, 0].cpu().numpy(),
+       14                                                         shuffle=True)
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/sklearn/utils/_param_validation.py:214, in validate_params.<locals>.decorator.<locals>.wrapper(*args, **kwargs)
+      208 try:
+      209     with config_context(
+      210         skip_parameter_validation=(
+      211             prefer_skip_nested_validation or global_skip_validation
+      212         )
+      213     ):
+  --> 214         return func(*args, **kwargs)
+      215 except InvalidParameterError as e:
+      216     # When the function is just a wrapper around an estimator, we allow
+      217     # the function to delegate validation to the estimator, but we replace
+      218     # the name of the estimator by the name of the function in the error
+      219     # message to avoid confusion.
+      220     msg = re.sub(
+      221         r"parameter of \w+ must be",
+      222         f"parameter of {func.__qualname__} must be",
+      223         str(e),
+      224     )
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/sklearn/model_selection/_split.py:2646, in train_test_split(test_size, train_size, random_state, shuffle, stratify, *arrays)
+     2643 if n_arrays == 0:
+     2644     raise ValueError("At least one array required as input")
+  -> 2646 arrays = indexable(*arrays)
+     2648 n_samples = _num_samples(arrays[0])
+     2649 n_train, n_test = _validate_shuffle_split(
+     2650     n_samples, test_size, train_size, default_test_size=0.25
+     2651 )
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/sklearn/utils/validation.py:453, in indexable(*iterables)
+      434 """Make arrays indexable for cross-validation.
+      435
+      436 Checks consistent length, passes through None, and ensures that everything
+     (...)
+      449     sparse matrix, or dataframe) or `None`.
+      450 """
+      452 result = [_make_indexable(X) for X in iterables]
+  --> 453 check_consistent_length(*result)
+      454 return result
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/sklearn/utils/validation.py:407, in check_consistent_length(*arrays)
+      405 uniques = np.unique(lengths)
+      406 if len(uniques) > 1:
+  --> 407     raise ValueError(
+      408         "Found input variables with inconsistent numbers of samples: %r"
+      409         % [int(l) for l in lengths]
+      410     )
+
+  ValueError: Found input variables with inconsistent numbers of samples: [12, 768]
+#+end_example
+:END:
 
 #+begin_src ipython
   # criterion = nn.BCEWithLogitsLoss()
@@ -1406,21 +1485,54 @@ Here we only evaluate performance from test onset to test offset
   loss, val_loss = run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)
 #+end_src
 #+RESULTS:
+:RESULTS:
+# [goto error]
 #+begin_example
-  Epoch 1/30, Training Loss: 0.5874, Validation Loss: 0.9006
-  Epoch 2/30, Training Loss: 0.9546, Validation Loss: 0.5615
-  Epoch 3/30, Training Loss: 0.0729, Validation Loss: 0.6976
-  Epoch 4/30, Training Loss: 0.5498, Validation Loss: 0.7903
-  Epoch 5/30, Training Loss: 0.5739, Validation Loss: 0.6309
-  Epoch 6/30, Training Loss: 0.0679, Validation Loss: 0.4250
-  Epoch 7/30, Training Loss: 3.0350, Validation Loss: 0.5301
-  Epoch 8/30, Training Loss: 0.1622, Validation Loss: 0.8770
-  Epoch 9/30, Training Loss: 0.4851, Validation Loss: 0.5316
-  Epoch 10/30, Training Loss: 0.7584, Validation Loss: 0.4907
-  Epoch 11/30, Training Loss: 0.4760, Validation Loss: 0.4262
-  Epoch 12/30, Training Loss: 0.3980, Validation Loss: 0.2171
-  Epoch 13/30, Training Loss: 0.6124, Validation Loss: 0.6247
+  ---------------------------------------------------------------------------
+  IndexError                                Traceback (most recent call last)
+  Cell In[165], line 2
+        1 num_epochs = 30
+  ----> 2 loss, val_loss = run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)
+
+  Cell In[7], line 14, in run_optim(model, train_loader, val_loader, loss_fn, optimizer, num_epochs, penalty, lbd, thresh)
+       12 # Training loop.
+       13 for epoch in range(num_epochs):
+  ---> 14     loss = train(train_loader, model, loss_fn, optimizer, penalty, lbd)
+       15     val_loss = test(val_loader, model, loss_fn)
+       16     scheduler.step(val_loss)
+
+  Cell In[5], line 11, in train(dataloader, model, loss_fn, optimizer, penalty, lbd)
+        8 y_pred = model(X)
+       10 # if y.ndim==y_pred.ndim:
+  ---> 11 loss = loss_fn(y_pred, y)
+       13 if penalty is not None:
+       14     reg_loss = 0
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/nn/modules/module.py:1511, in Module._wrapped_call_impl(self, *args, **kwargs)
+     1509     return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]
+     1510 else:
+  -> 1511     return self._call_impl(*args, **kwargs)
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/nn/modules/module.py:1520, in Module._call_impl(self, *args, **kwargs)
+     1515 # If we don't have any hooks, we want to skip the rest of the logic in
+     1516 # this function, and just call forward.
+     1517 if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
+     1518         or _global_backward_pre_hooks or _global_backward_hooks
+     1519         or _global_forward_hooks or _global_forward_pre_hooks):
+  -> 1520     return forward_call(*args, **kwargs)
+     1522 try:
+     1523     result = None
+
+  Cell In[12], line 20, in DualLoss.forward(self, readout, targets)
+       18     return self.DPA_loss
+       19 else:
+  ---> 20     self.DPA_loss = self.loss(readout[:, self.rwd_idx], targets[:, 0, :self.rwd_idx.shape[0]])
+       21     self.DRT_loss = self.loss(readout[:, self.cue_idx], targets[:, 1, :self.cue_idx.shape[0]])
+       22     return (self.DPA_loss + self.DRT_loss) / 2.0
+
+  IndexError: too many indices for tensor of dimension 2
 #+end_example
+:END:
 
 ** Re-Testing
 
@@ -1429,7 +1541,6 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: 48b31406-d10e-4696-9b05-985651aaf8a1
 
 #+begin_src ipython
   model.eval()
@@ -1448,7 +1559,6 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: 783beff4-b2b9-4f99-acc5-64f799207a9b
 
 #+begin_src ipython
   model.N_BATCH = 1
@@ -1457,7 +1567,6 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: 29e8fbc4-c898-46b8-9ad6-3d876bb04571
 
 #+begin_src ipython
   model.N_BATCH = 1
@@ -1491,7 +1600,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: 554cdcde-7fa3-4369-bfc9-b31df2088568
+: ff_input torch.Size([4, 710, 3000])
 
 #+begin_src ipython
   model.VERBOSE = 0
@@ -1501,21 +1610,21 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: 092f9273-adbf-484b-8e3b-31c160c819c6
+: (4, 61, 2400)
 
 #+begin_src ipython
   idx = get_idx(model, 2)
 #+end_src
 
 #+RESULTS:
-: 91fd3493-6663-4ed9-8f31-9c5203c7b967
+: ksi torch.Size([5, 2400])
 
 #+begin_src ipython
   plot_rates_selec(rates, idx)
 #+end_src
 
 #+RESULTS:
-: fb80c8ea-ba78-471c-9254-f73afccfbdbd
+[[file:./.ob-jupyter/ae314c21b949bcc0a83ae3ea80a32b6ad73e36b0.png]]
 
 #+begin_src ipython
     readout = model.linear.weight.data[0].cpu().detach().numpy()
@@ -1523,18 +1632,20 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: 3c566a00-d714-4b59-bb8d-c1fe7e660dda
+:RESULTS:
+: (4, 61)
+[[file:./.ob-jupyter/40802e1447fca814415ec62dfc49b66ad00964fb.png]]
+:END:
 
 #+begin_src ipython
   plot_m0_m1_phi(rates, idx)
 #+end_src
 
 #+RESULTS:
-: f3c2dab7-2d9b-4095-92dc-56df43d503aa
+[[file:./.ob-jupyter/7d0fca32c3308062189afa334537bbddbf091938.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 965502f8-6141-4ca7-8b8b-b019381fe52e
