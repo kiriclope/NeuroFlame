@@ -27,7 +27,7 @@
   (list
    ;; generates the main site, and as side-effect, the sitemap for the latest 5 posts
    (list "tutorials"
-         :base-directory "./content/"
+         :base-directory "./docs/content/"
          :base-extension "org"
          :recursive t
          :publishing-directory "./public/"
@@ -44,7 +44,7 @@
 
 
    (list "assets"
-         :base-directory "./"
+         :base-directory "./docs/"
          :exclude (regexp-opt '("assets" "public"))
          :include '("./docs/CNAME" "./docs/LICENSE" "./docs/publish.el")
          :recursive t
