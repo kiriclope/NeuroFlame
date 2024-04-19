@@ -1,6 +1,4 @@
-;;; Package --- summary
-      ;;; Commentary:
-      ;;; Code:
+;;; Publish org website --- summary
 
 (require 'package)
 (package-initialize)
