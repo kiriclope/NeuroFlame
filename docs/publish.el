@@ -35,20 +35,12 @@
          :section-numbers nil
          :with-toc t)
 
-   ;; (list "files"
-   ;;       :base-directory "./files"
-   ;;       :recursive t
-   ;;       :base-extension (regexp-opt '("jpg" "gif" "png" "js" "svg" "css" "pdf" "html" "webp"))
-   ;;       :publishing-directory "./public/files"
-   ;;       :publishing-function 'org-publish-attachment)
-
-
    (list "assets"
          :base-directory "./"
          :exclude (regexp-opt '("assets" "public"))
-         :include '("./docs/CNAME" "./docs/LICENSE" "./docs/publish.el")
+         :include '("./docs/CNAME" "./docs/LICENSE" "./docs/publish.el" "./neuroflame.jpeg")
          :recursive t
-         :base-extension (regexp-opt '("jpg" "gif" "png" "js" "svg" "css" "pdf"))
+         :base-extension (regexp-opt '("jpeg" "gif" "png" "js" "svg" "css" "pdf"))
          :publishing-directory "./public"
          :publishing-function 'org-publish-attachment)))
 
