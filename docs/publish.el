@@ -44,7 +44,7 @@
 
 
    (list "assets"
-         :base-directory "./docs/"
+         :base-directory "./"
          :exclude (regexp-opt '("assets" "public"))
          :include '("./docs/CNAME" "./docs/LICENSE" "./docs/publish.el")
          :recursive t
