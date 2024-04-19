@@ -8,7 +8,7 @@ from src.plasticity import Plasticity
 from src.ff_input import live_ff_input, init_ff_input
 
 from src.utils import set_seed, clear_cache, print_activity
-from src.lr_utils import initLR, masked_normalize
+from src.lr_utils import initLR, masked_normalize, clamp_tensor, normalize_tensor
 
 import warnings
 
@@ -266,14 +266,20 @@ class Network(nn.Module):
             else:
                 self.lr = self.lr_kappa * (self.U @ self.V.T)
 
-            # self.lr = self.lr_mask * self.lr
-            self.lr = self.lr / (1.0 * self.Na[0])
+            self.lr = self.lr_mask * self.lr
+            self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
+            self.lr = normalize_tensor(self.lr, 1, self.slices, self.Na)
+
+            # self.lr = self.lr / (1.0 * self.Na[0])
             # self.lr = self.lr.clamp(min=-self.Wab_T[0, 0])
 
             if self.IF_STP:
                 W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
+                W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
 
             Wab_T = self.Wab_T + self.lr.T
+            Wab_T = clamp_tensor(Wab_T, 0, self.slices)
+            Wab_T = clamp_tensor(Wab_T, 1, self.slices)
 
         else:
             Wab_T = self.Wab_T

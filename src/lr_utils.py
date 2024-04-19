@@ -2,12 +2,28 @@ import time
 import torch
 from torch import nn
 
+def normalize_tensor(tensor, idx, slice, Na):
+    norm_tensor = tensor.clone()
 
-def masked_clamp(tensor, slice, value):
+    mask = tensor[:, slice[idx]] / Na[idx]
+    norm_tensor[:, slice[idx]] = mask
+
+    # mask = tensor[slice[idx]] / Na[idx]
+    # norm_tensor[slice[idx]] = mask
+
+    return norm_tensor
+
+def clamp_tensor(tensor, idx, slice):
     # Create a mask for non-zero elements
-    mask = tensor[slice] != value
-    masked_tensor = tensor.clone()
-    return masked_tensor
+    clamped_tensor = tensor.clone()
+    if idx == 0:
+        mask = tensor[slice[0]].clamp(min=0.0)
+    else:
+        mask = tensor[slice[1]].clamp(max=0.0)
+
+    clamped_tensor[slice[idx]] = mask
+
+    return clamped_tensor
 
 
 def masked_normalize(tensor):
@@ -47,17 +63,17 @@ def ortho_quench_lr(model):
 def initLR(model):
     # Low rank vector
     model.U = nn.Parameter(
-        torch.randn((model.N_NEURON, int(model.RANK)), device=model.device) * 0.1
+        torch.randn((model.N_NEURON, int(model.RANK)), device=model.device)
     )
 
     model.V = nn.Parameter(
-        torch.randn((model.N_NEURON, int(model.RANK)), device=model.device) * 0.1
+        torch.randn((model.N_NEURON, int(model.RANK)), device=model.device)
     )
 
     if model.LR_KAPPA == 1:
         model.lr_kappa = nn.Parameter(torch.rand(1, device=model.device))
     else:
-        model.lr_kappa = torch.tensor(1.0, device=model.device)
+        model.lr_kappa = torch.tensor(2.0, device=model.device)
 
     # Mask to train excitatory neurons only
     model.lr_mask = torch.zeros((model.N_NEURON, model.N_NEURON), device=model.device)
