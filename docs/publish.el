@@ -7,27 +7,22 @@
 (setq package-archives '(("nongnu" . "https://elpa.nongnu.org/nongnu/")
                          ("melpa" . "https://melpa.org/packages/")))
 (package-refresh-contents)
-(dolist (pkg '(dash projectile yaml-mode htmlize))
+(dolist (pkg '(htmlize))
   (unless (package-installed-p pkg)
     (package-install pkg)))
 
-(unless (package-installed-p 'ox-rss)
-  (package-refresh-contents)
-  (package-install 'ox-rss))
-
-(require 'dash)
+;; (require 'dash)
 (require 'org)
 
 (require 'ox-rss)
 (require 'ox-publish)
-(require 'projectile)
 
 ; Project definition
 (defvar lc--publish-project-alist
   (list
    ;; generates the main site, and as side-effect, the sitemap for the latest 5 posts
    (list "tutorials"
-         :base-directory "./"
+         :base-directory "./docs/content/"
          :base-extension "org"
          :recursive t
          :publishing-directory "./public/"
@@ -43,7 +38,7 @@
          :publishing-function 'org-publish-attachment)
 
    (list "assets"
-         :base-directory "./"
+         :base-directory "./docs/"
          :exclude (regexp-opt '("assets" "public"))
          :include '("CNAME" "LICENSE" "publish.el")
          :recursive t
