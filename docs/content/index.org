@@ -1,11 +1,115 @@
 #+SETUPFILE: https://fniessen.github.io/org-html-themes/org/theme-readtheorg.setup
 #+TITLE: NeuroFlame: Fast Learning And Modeling Engine
-#+DATE: 2023-09-14
+#+DATE: 2024-04-19
 #+AUTHOR: Alexandre Mahrach
 #+FILETAGS: RNN Torch
 
-* Overview
+* NeuroFlame
 
-1. From bits to qubits: Dirac notation, density matrices, measurements, Bloch sphere
-2. Quantum circuits: basic single-qubit & two-qubit gates, multipartite quantum states
-3. Entanglement: Bell states, Teleportation, Q-sphere
+#+ATTR_HTML: :width 400px
+[[./neuroflame.jpeg]]
+Copyright © 2024 by Melanie Tschiersch. All rights reserved.
+
+** Introduction
+
+This package provides an implementation of a recurrent neural network trainer and simulator with pytorch.
+Networks can have multiple neural populations with different connectivity types (all to all, sparse) that can be structured (tuned, low rank).
+
+Network weights can be trained in a unsupervised or supervised manner just as vanilla RNNs in torch.
+
+For more info look at the notebooks in ./notebooks and the configuration files in ./conf.
+
+** Installation
+
+#+begin_src sh
+  pip install -r requirements.txt
+#+end_src
+
+or alternatively using conda (I recommend using mamba's [[https://github.com/conda-forge/miniforge][miniforge]], a c++ conda implementation)
+
+#+begin_src sh
+  mamba install --file conda_requirements.txt
+#+end_src
+
+** Basic Usage
+Here is how to run a simulation
+
+#+begin_src ipython
+  # import the network class
+  from src.network import Network
+
+  # Define repository root
+  repo_root = '/'
+
+  # Choose a config file
+  conf_file = './conf/conf_EI.yml'
+
+  # Other parameters can be overwriten with kwargs
+  # kwargs can be any of the args in the config file
+
+  # initialize model
+  model = Network(conf_file, repo_root, **kwargs)
+
+  # run a forward pass
+  rates = model()
+#+end_src
+
+** Advanced Usage
+*** Project Structure
+#+begin_src sh
+  .
+  ├── conf  # contains configuration files in yaml format.
+  │   ├── *.yml
+  ├── notebooks  # contains ipython notebooks.
+  │   ├── setup.py
+  │   └── *.ipynb
+  ├── org  # contains org notebooks.
+  │   ├── /doc/*.org
+  │   └── *.org
+  ├── src  # contains source code.
+  │   ├── activation.py  # contains custom activation functions.
+  │   ├── connectivity.py  # contains custom connectivity profiles.
+  │   ├── decode.py
+  │   ├── lif_network.py  # implementation of a LIF network.
+  │   ├── lif_neuron.py
+  │   ├── lr_utils.py  # utils for low rank networks.
+  │   ├── network.py  # core of the project.
+  │   ├── plasticity.py  # contains STP.
+  │   ├── plot_utils.py
+  │   ├── sparse.py  # utils for large sparse matrices.
+  │   ├── stimuli.py  # contains custom stimuli for behavioral tasks.
+  │   ├── train.py  # utils to train networks.
+  └── └── utils.py
+#+end_src
+
+*** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/doc/dynamics.org][Networks Dynamics]]
+Network dynamics is described [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/doc/dynamics.md][here]].
+*** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/tests/connectivity.org][Connectivity]]
+The connectivities available in NeuroFlame are described [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/tests/connectivity.org][here]].
+*** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/doc/neurotorch.org][Single Network Simulation and Batched Simulations]]
+I describe in detail how to run a network simulation and use NeuroFlame to effectively run parallel simulations for different parameters [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/doc/neurotorch.org][here]].
+*** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/train.org][Networks Training]]
+[[file:/LeonCarmin/NeuroFlame/src/branch/main/org/train.org][Here]], I show how to train networks.
+*** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/tests/balance.org][Balanced Networks]]
+[[file:/LeonCarmin/NeuroFlame/src/branch/main/org/tests/balance.org][Here]], a tutorial on balanced networks.
+*** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/search/multi_stable.org][Multistability]]
+
+**** Fully connected
+[[file:/LeonCarmin/NeuroFlame/src/branch/main/org/search/ring_attractor.org][Here]], a notebook that shows how to use NeuroFlame to locate ring attractors in parameter space.
+**** Sparse
+[[file:/LeonCarmin/NeuroFlame/src/branch/main/org/search/multi_stable.org][Here]], a notebook that shows how to use NeuroFlame to locate multistable balance states in parameter space.
+
+*** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/tests/stp.org][Short Term Plasticity]]
+[[file:/LeonCarmin/NeuroFlame/src/branch/main/org/tests/stp.org][Here]], a tutorial on STP with NeuroFlame.
+*** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/tests/stimuli.org][Behavioral Tasks]]
+ [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/tests/stimuli.org][Here]], a tutorial on how to use different stimuli to get the model to perform different behavioral tasks.
+*** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/serial_bias.org][Serial Bias]]
+[[file:/LeonCarmin/NeuroFlame/src/branch/main/org/serial_bias.org][Here]], a tutorial on how to get serial bias in a balanced network model.
+
+** Contributing
+Feel free to contribute.
+
+#+begin_example
+MIT License
+Copyright (c) [2023] [A. Mahrach]
+#+end_example
