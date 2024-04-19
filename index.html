@@ -44,24 +44,249 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#org569fb4f">Overview</a></li>
+<li><a href="#orga03c52e">NeuroFlame</a>
+<ul>
+<li><a href="#org4c73dcd">Introduction</a></li>
+<li><a href="#org9917d69">Installation</a></li>
+<li><a href="#org83b804d">Basic Usage</a></li>
+<li><a href="#orgc65d76a">Advanced Usage</a>
+<ul>
+<li><a href="#orgf52f81e">Project Structure</a></li>
+<li><a href="#org5d2caeb">Networks Dynamics</a></li>
+<li><a href="#orgba57f14">Connectivity</a></li>
+<li><a href="#org86fe834">Single Network Simulation and Batched Simulations</a></li>
+<li><a href="#org72b8680">Networks Training</a></li>
+<li><a href="#org9edcf28">Balanced Networks</a></li>
+<li><a href="#orgdde09ea">Multistability</a></li>
+<li><a href="#org12a429e">Short Term Plasticity</a></li>
+<li><a href="#orgdea7f18">Behavioral Tasks</a></li>
+<li><a href="#org50015ac">Serial Bias</a></li>
+</ul>
+</li>
+<li><a href="#org53a16f5">Contributing</a></li>
+</ul>
+</li>
 </ul>
 </div>
 </nav>
 
-<section id="outline-container-org569fb4f" class="outline-2">
-<h2 id="org569fb4f">Overview</h2>
-<div class="outline-text-2" id="text-org569fb4f">
-<ol class="org-ol">
-<li>From bits to qubits: Dirac notation, density matrices, measurements, Bloch sphere</li>
-<li>Quantum circuits: basic single-qubit &amp; two-qubit gates, multipartite quantum states</li>
-<li>Entanglement: Bell states, Teleportation, Q-sphere</li>
-</ol>
+<section id="outline-container-orga03c52e" class="outline-2">
+<h2 id="orga03c52e">NeuroFlame</h2>
+<div class="outline-text-2" id="text-orga03c52e">
+<p width="400px">
+<img src="./neuroflame.jpeg" alt="neuroflame.jpeg" width="400px">
+Copyright © 2024 by Melanie Tschiersch. All rights reserved.
+</p>
+</div>
+
+<div id="outline-container-org4c73dcd" class="outline-3">
+<h3 id="org4c73dcd">Introduction</h3>
+<div class="outline-text-3" id="text-org4c73dcd">
+<p>
+This package provides an implementation of a recurrent neural network trainer and simulator with pytorch.
+Networks can have multiple neural populations with different connectivity types (all to all, sparse) that can be structured (tuned, low rank).
+</p>
+
+<p>
+Network weights can be trained in a unsupervised or supervised manner just as vanilla RNNs in torch.
+</p>
+
+<p>
+For more info look at the notebooks in ./notebooks and the configuration files in ./conf.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org9917d69" class="outline-3">
+<h3 id="org9917d69">Installation</h3>
+<div class="outline-text-3" id="text-org9917d69">
+<div class="org-src-container">
+<pre class="src src-sh">pip install -r requirements.txt
+</pre>
+</div>
+
+<p>
+or alternatively using conda (I recommend using mamba&rsquo;s <a href="https://github.com/conda-forge/miniforge">miniforge</a>, a c++ conda implementation)
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">mamba install --file conda_requirements.txt
+</pre>
+</div>
+</div>
+</div>
+
+<div id="outline-container-org83b804d" class="outline-3">
+<h3 id="org83b804d">Basic Usage</h3>
+<div class="outline-text-3" id="text-org83b804d">
+<p>
+Here is how to run a simulation
+</p>
+
+<div class="org-src-container">
+<pre class="src src-ipython"># import the network class
+from src.network import Network
+
+# Define repository root
+repo_root = '/'
+
+# Choose a config file
+conf_file = './conf/conf_EI.yml'
+
+# Other parameters can be overwriten with kwargs
+# kwargs can be any of the args in the config file
+
+# initialize model
+model = Network(conf_file, repo_root, **kwargs)
+
+# run a forward pass
+rates = model()
+</pre>
+</div>
+</div>
+</div>
+
+<div id="outline-container-orgc65d76a" class="outline-3">
+<h3 id="orgc65d76a">Advanced Usage</h3>
+<div class="outline-text-3" id="text-orgc65d76a">
+</div>
+<div id="outline-container-orgf52f81e" class="outline-4">
+<h4 id="orgf52f81e">Project Structure</h4>
+<div class="outline-text-4" id="text-orgf52f81e">
+<div class="org-src-container">
+<pre class="src src-sh">.
+&#9500;&#9472;&#9472; conf  <span class="org-comment-delimiter"># </span><span class="org-comment">contains configuration files in yaml format.</span>
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; *.yml
+&#9500;&#9472;&#9472; notebooks  <span class="org-comment-delimiter"># </span><span class="org-comment">contains ipython notebooks.</span>
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; setup.py
+&#9474;&#160;&#160; &#9492;&#9472;&#9472; *.ipynb
+&#9500;&#9472;&#9472; org  <span class="org-comment-delimiter"># </span><span class="org-comment">contains org notebooks.</span>
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; /doc/*.org
+&#9474;&#160;&#160; &#9492;&#9472;&#9472; *.org
+&#9500;&#9472;&#9472; src  <span class="org-comment-delimiter"># </span><span class="org-comment">contains source code.</span>
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; activation.py  <span class="org-comment-delimiter"># </span><span class="org-comment">contains custom activation functions.</span>
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; connectivity.py  <span class="org-comment-delimiter"># </span><span class="org-comment">contains custom connectivity profiles.</span>
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; decode.py
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; lif_network.py  <span class="org-comment-delimiter"># </span><span class="org-comment">implementation of a LIF network.</span>
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; lif_neuron.py
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; lr_utils.py  <span class="org-comment-delimiter"># </span><span class="org-comment">utils for low rank networks.</span>
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; network.py  <span class="org-comment-delimiter"># </span><span class="org-comment">core of the project.</span>
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; plasticity.py  <span class="org-comment-delimiter"># </span><span class="org-comment">contains STP.</span>
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; plot_utils.py
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; sparse.py  <span class="org-comment-delimiter"># </span><span class="org-comment">utils for large sparse matrices.</span>
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; stimuli.py  <span class="org-comment-delimiter"># </span><span class="org-comment">contains custom stimuli for behavioral tasks.</span>
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; train.py  <span class="org-comment-delimiter"># </span><span class="org-comment">utils to train networks.</span>
+&#9492;&#9472;&#9472; &#9492;&#9472;&#9472; utils.py
+</pre>
+</div>
+</div>
+</div>
+
+<div id="outline-container-org5d2caeb" class="outline-4">
+<h4 id="org5d2caeb"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/dynamics.html">Networks Dynamics</a></h4>
+<div class="outline-text-4" id="text-org5d2caeb">
+<p>
+Network dynamics is described <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/dynamics.md">here</a>.
+</p>
+</div>
+</div>
+<div id="outline-container-orgba57f14" class="outline-4">
+<h4 id="orgba57f14"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/connectivity.html">Connectivity</a></h4>
+<div class="outline-text-4" id="text-orgba57f14">
+<p>
+The connectivities available in NeuroFlame are described <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/connectivity.html">here</a>.
+</p>
+</div>
+</div>
+<div id="outline-container-org86fe834" class="outline-4">
+<h4 id="org86fe834"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/neurotorch.html">Single Network Simulation and Batched Simulations</a></h4>
+<div class="outline-text-4" id="text-org86fe834">
+<p>
+I describe in detail how to run a network simulation and use NeuroFlame to effectively run parallel simulations for different parameters <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/neurotorch.html">here</a>.
+</p>
+</div>
+</div>
+<div id="outline-container-org72b8680" class="outline-4">
+<h4 id="org72b8680"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/train.html">Networks Training</a></h4>
+<div class="outline-text-4" id="text-org72b8680">
+<p>
+<a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/train.html">Here</a>, I show how to train networks.
+</p>
+</div>
+</div>
+<div id="outline-container-org9edcf28" class="outline-4">
+<h4 id="org9edcf28"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/balance.html">Balanced Networks</a></h4>
+<div class="outline-text-4" id="text-org9edcf28">
+<p>
+<a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/balance.html">Here</a>, a tutorial on balanced networks.
+</p>
+</div>
+</div>
+<div id="outline-container-orgdde09ea" class="outline-4">
+<h4 id="orgdde09ea"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/search/multi_stable.html">Multistability</a></h4>
+<div class="outline-text-4" id="text-orgdde09ea">
+</div>
+<ul class="org-ul">
+<li><a id="orgd23cd8f"></a>Fully connected<br>
+<div class="outline-text-5" id="text-orgd23cd8f">
+<p>
+<a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/search/ring_attractor.html">Here</a>, a notebook that shows how to use NeuroFlame to locate ring attractors in parameter space.
+</p>
+</div>
+</li>
+<li><a id="org73186d2"></a>Sparse<br>
+<div class="outline-text-5" id="text-org73186d2">
+<p>
+<a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/search/multi_stable.html">Here</a>, a notebook that shows how to use NeuroFlame to locate multistable balance states in parameter space.
+</p>
+</div>
+</li>
+</ul>
+</div>
+
+<div id="outline-container-org12a429e" class="outline-4">
+<h4 id="org12a429e"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stp.html">Short Term Plasticity</a></h4>
+<div class="outline-text-4" id="text-org12a429e">
+<p>
+<a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stp.html">Here</a>, a tutorial on STP with NeuroFlame.
+</p>
+</div>
+</div>
+<div id="outline-container-orgdea7f18" class="outline-4">
+<h4 id="orgdea7f18"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stimuli.html">Behavioral Tasks</a></h4>
+<div class="outline-text-4" id="text-orgdea7f18">
+<p>
+<a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stimuli.html">Here</a>, a tutorial on how to use different stimuli to get the model to perform different behavioral tasks.
+</p>
+</div>
+</div>
+<div id="outline-container-org50015ac" class="outline-4">
+<h4 id="org50015ac"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/serial_bias.html">Serial Bias</a></h4>
+<div class="outline-text-4" id="text-org50015ac">
+<p>
+<a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/serial_bias.html">Here</a>, a tutorial on how to get serial bias in a balanced network model.
+</p>
+</div>
+</div>
+</div>
+
+<div id="outline-container-org53a16f5" class="outline-3">
+<h3 id="org53a16f5">Contributing</h3>
+<div class="outline-text-3" id="text-org53a16f5">
+<p>
+Feel free to contribute.
+</p>
+
+<pre class="example" id="orge7f5fc1">
+MIT License
+Copyright (c) [2023] [A. Mahrach]
+</pre>
+</div>
 </div>
 </section>
 </main>
 <footer id="postamble" class="status">
-<p class="date">Date: 2023-09-14</p>
+<p class="date">Date: 2024-04-19</p>
 <p class="author">Author: Alexandre Mahrach</p>
 <p class="date">Created: 19 Apr. 2024</p>
 </footer>
