@@ -1,5 +1,5 @@
-;;; Package --- summary
-      ;;; Commentary:
+;;; Publish org website --- summary
+      ;;; Commentary: 
       ;;; Code:
 
 (require 'package)
