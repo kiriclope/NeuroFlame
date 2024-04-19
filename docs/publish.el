@@ -1,6 +1,6 @@
 ;;; Package --- summary
-  ;;; Commentary:
-  ;;; Code:
+      ;;; Commentary:
+      ;;; Code:
 
 (require 'package)
 (package-initialize)
@@ -15,9 +15,12 @@
   (package-refresh-contents)
   (package-install 'ox-rss))
 
-;; (require 'dash)
-(require 'org)
+(unless (package-installed-p 'dash)
+  (package-refresh-contents)
+  (package-install 'dash))
 
+(require 'dash)
+(require 'org)
 (require 'ox-rss)
 (require 'ox-publish)
 
