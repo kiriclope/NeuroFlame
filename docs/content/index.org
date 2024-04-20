@@ -1,6 +1,5 @@
 #+SETUPFILE: https://fniessen.github.io/org-html-themes/org/theme-readtheorg.setup
 #+TITLE: NeuroFlame: Fast Learning And Modeling Engine
-#+AUTHOR: Alexandre Mahrach
 #+FILETAGS: RNN Torch
 
 #+ATTR_HTML: :width 400px
@@ -10,12 +9,10 @@ Copyright © 2024 by Melanie Tschiersch. All rights reserved.
 
 * Introduction
 
-This package provides an implementation of a recurrent neural network trainer and simulator with pytorch.
-Networks can have multiple neural populations with different connectivity types (all to all, sparse) that can be structured (tuned, low rank).
+This package provides an implementation of a recurrent neural network trainer and simulator with Pytorch.
+Networks can have multiple neural populations with different connectivity types (all-to-all, sparse) and structures (feature selective, spatially tuned, low rank).
 
-Network weights can be trained in a unsupervised or supervised manner just as vanilla RNNs in torch.
-
-For more info look at the notebooks in ./notebooks and the configuration files in ./conf.
+Networks models can be trained in a unsupervised or supervised manner just as vanilla RNNs in Pytorch.
 
 * Installation
 
@@ -80,13 +77,62 @@ Here is how to run a simulation
   └── └── utils.py
 #+end_src
 
-** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/doc/dynamics.org][Networks Dynamics]]
-Network dynamics is described [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/doc/dynamics.md][here]].
-** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/tests/connectivity.org][Connectivity]]
+** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/doc/dynamics.org][Network Dynamics]]
+*** Dynamics
+**** Currents
+
+Neuron $i$ in population $A$ has a reccurent input $h^A_i$,
+
+$$  \tau_{syn} \frac{dh_i}{dt}(t) = - h_i(t) + \sum_j J_{ij} h_j(t) $$
+
+or not
+
+$$ h^A_i(t) = \sum_{jB} J^{AB}_{ij} h_j(t) $$
+
+**** Rates
+
+The models can have rate dynamics (setting *RATE_DYN* to 1 in the configuration file):
+
+$$ \tau_A \frac{d r^A_i}{dt}(t) = - r^A_i(t) + \Phi( \sum_{jB} J^{AB}_{ij} h^{AB}_j(t) + h^A_{ext}(t)) $$
+
+Here, $r_i$ is the rate of unit $i$ in population $A$
+
+otherwise rates will be instantaneous:
+
+$$ r^A_i(t) = \Phi(\sum_{jB} J^{AB}_{ij} h_j(t) + h^A_{ext}(t)) $$
+
+Here $\Phi$ is the transfer function defined in *src/activation.py* and can be set to a threshold linear, a sigmoid or a non linear function (Brunel et al., 2003).
+
+*** Connectivity
 The connectivities available in NeuroFlame are described [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/tests/connectivity.org][here]].
-** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/doc/neurotorch.org][Single Network Simulation and Batched Simulations]]
+
+Probability of connection from population B to A:
+
+**** Sparse Nets
+by default it is a sparse net
+
+$$ P_{ij}^{AB} = \frac{K_B}{N_B} $$
+
+otherwise
+it can be cosine
+
+$$ P_{ij}^{AB} = ( 1.0 + \Kappa_B \cos(\theta_i^A - \theta_j^B) ) $$
+
+and also low rank
+
+$$ J_{ij}^{AB} = \frac{J_{AB}}{\sqrt{K_B}} with proba. P_{ij}^{AB} * \frac{K_B}{N_B} $$
+$$ 0 otherwise $$
+
+**** All to all
+
+$$ J_{ij}^{AB} =  \frac{J_{AB}}{N_B} P_{ij}^{AB} $$
+
+where Pij can be as above.
+
+** Parallel Simulations or Input Batching
+*** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/doc/neurotorch.org][Single Network Simulation and Batched Simulations]]
 I describe in detail how to run a network simulation and use NeuroFlame to effectively run parallel simulations for different parameters [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/doc/neurotorch.org][here]].
-** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/train.org][Networks Training]]
+** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/train.org][Network Training]]
 [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/train.org][Here]], I show how to train networks.
 ** [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/tests/balance.org][Balanced Networks]]
 [[file:/LeonCarmin/NeuroFlame/src/branch/main/org/tests/balance.org][Here]], a tutorial on balanced networks.
