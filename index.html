@@ -66,37 +66,41 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#org0d71cd7">Introduction</a></li>
-<li><a href="#org3c4d3d0">Installation</a></li>
-<li><a href="#orgde65b30">Basic Usage</a></li>
-<li><a href="#org394a52d">Advanced Usage</a>
+<li><a href="#org997e142">Introduction</a></li>
+<li><a href="#org49f0bec">Installation</a></li>
+<li><a href="#org80b86a7">Project Structure</a></li>
+<li><a href="#orgce9b00e">Network Dynamics</a>
 <ul>
-<li><a href="#orge23b720">Project Structure</a></li>
-<li><a href="#org94a4d75">Network Dynamics</a>
+<li>
 <ul>
-<li><a href="#org44405c7">Dynamics</a></li>
-<li><a href="#org498a770">Connectivity</a></li>
+<li><a href="#org50e6312">Dynamics</a></li>
+<li><a href="#orge7de299">Connectivity</a></li>
 </ul>
 </li>
-<li><a href="#org667a827">Parallel Simulations or Input Batching</a>
+</ul>
+</li>
+<li><a href="#orgc162149">Network Simulations</a>
 <ul>
-<li><a href="#org7b7e27c">Single Network Simulation and Batched Simulations</a></li>
+<li><a href="#org3eda80a">Basic Usage</a></li>
+<li><a href="#org740e45a">Parallel Network Simulations</a></li>
 </ul>
 </li>
-<li><a href="#org384dc60">Network Training</a></li>
-<li><a href="#org9e1c6b1">Balanced Networks</a></li>
-<li><a href="#org6c3f735">Multistability</a></li>
-<li><a href="#org8b9a625">Short Term Plasticity</a></li>
-<li><a href="#orgfec9740">Behavioral Tasks</a></li>
-<li><a href="#orgd438659">Serial Bias</a></li>
+<li><a href="#orge8fb382">Network Training</a></li>
+<li><a href="#org1db3119">Tutorials</a>
+<ul>
+<li><a href="#orge5e7fd3">Balanced Networks</a></li>
+<li><a href="#org559da80">Multistability</a></li>
+<li><a href="#org7e28c39">Short Term Plasticity</a></li>
+<li><a href="#orge1d6e8e">Behavioral Tasks</a></li>
+<li><a href="#orgcf5ccde">Serial Bias</a></li>
 </ul>
 </li>
-<li><a href="#org046876e">Contributing</a></li>
+<li><a href="#org76227b0">Contributing</a></li>
 </ul>
 </div>
 </nav>
 
-<figure id="org78cbb7b">
+<figure id="org4c95e5b">
 <img src="./neuroflame.jpeg" alt="neuroflame.jpeg" width="400px">
 
 </figure>
@@ -105,9 +109,9 @@
 Copyright © 2024 by Melanie Tschiersch. All rights reserved.
 </p>
 
-<section id="outline-container-org0d71cd7" class="outline-2">
-<h2 id="org0d71cd7">Introduction</h2>
-<div class="outline-text-2" id="text-org0d71cd7">
+<section id="outline-container-org997e142" class="outline-2">
+<h2 id="org997e142">Introduction</h2>
+<div class="outline-text-2" id="text-org997e142">
 <p>
 This package provides an implementation of a recurrent neural network trainer and simulator with Pytorch.
 Networks can have multiple neural populations with different connectivity types (all-to-all, sparse) and structures (feature selective, spatially tuned, low rank).
@@ -119,9 +123,9 @@ Networks models can be trained in a unsupervised or supervised manner just as va
 </div>
 </section>
 
-<section id="outline-container-org3c4d3d0" class="outline-2">
-<h2 id="org3c4d3d0">Installation</h2>
-<div class="outline-text-2" id="text-org3c4d3d0">
+<section id="outline-container-org49f0bec" class="outline-2">
+<h2 id="org49f0bec">Installation</h2>
+<div class="outline-text-2" id="text-org49f0bec">
 <div class="org-src-container">
 <pre class="src src-sh">pip install -r requirements.txt
 </pre>
@@ -138,43 +142,9 @@ or alternatively using conda (I recommend using mamba&rsquo;s <a href="https://g
 </div>
 </section>
 
-<section id="outline-container-orgde65b30" class="outline-2">
-<h2 id="orgde65b30">Basic Usage</h2>
-<div class="outline-text-2" id="text-orgde65b30">
-<p>
-Here is how to run a simulation
-</p>
-
-<div class="org-src-container">
-<pre class="src src-ipython"># import the network class
-from src.network import Network
-
-# Define repository root
-repo_root = '/'
-
-# Choose a config file
-conf_file = './conf/conf_EI.yml'
-
-# Other parameters can be overwriten with kwargs
-# kwargs can be any of the args in the config file
-
-# initialize model
-model = Network(conf_file, repo_root, **kwargs)
-
-# run a forward pass
-rates = model()
-</pre>
-</div>
-</div>
-</section>
-
-<section id="outline-container-org394a52d" class="outline-2">
-<h2 id="org394a52d">Advanced Usage</h2>
-<div class="outline-text-2" id="text-org394a52d">
-</div>
-<div id="outline-container-orge23b720" class="outline-3">
-<h3 id="orge23b720">Project Structure</h3>
-<div class="outline-text-3" id="text-orge23b720">
+<section id="outline-container-org80b86a7" class="outline-2">
+<h2 id="org80b86a7">Project Structure</h2>
+<div class="outline-text-2" id="text-org80b86a7">
 <div class="org-src-container">
 <pre class="src src-sh">.
 &#9500;&#9472;&#9472; conf  <span class="org-comment-delimiter"># </span><span class="org-comment">contains configuration files in yaml format.</span>
@@ -202,19 +172,19 @@ rates = model()
 </pre>
 </div>
 </div>
-</div>
+</section>
 
-<div id="outline-container-org94a4d75" class="outline-3">
-<h3 id="org94a4d75"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/dynamics.html">Network Dynamics</a></h3>
-<div class="outline-text-3" id="text-org94a4d75">
+<section id="outline-container-orgce9b00e" class="outline-2">
+<h2 id="orgce9b00e"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/dynamics.html">Network Dynamics</a></h2>
+<div class="outline-text-2" id="text-orgce9b00e">
 </div>
-<div id="outline-container-org44405c7" class="outline-4">
-<h4 id="org44405c7">Dynamics</h4>
-<div class="outline-text-4" id="text-org44405c7">
+<div id="outline-container-org50e6312" class="outline-4">
+<h4 id="org50e6312">Dynamics</h4>
+<div class="outline-text-4" id="text-org50e6312">
 </div>
 <ul class="org-ul">
-<li><a id="orgbb82a76"></a>Currents<br>
-<div class="outline-text-5" id="text-orgbb82a76">
+<li><a id="org0b4861f"></a>Currents<br>
+<div class="outline-text-5" id="text-org0b4861f">
 <p>
 Neuron \(i\) in population \(A\) has a reccurent input \(h^A_i\),
 </p>
@@ -233,8 +203,8 @@ or not
 </div>
 </li>
 
-<li><a id="org45ebda7"></a>Rates<br>
-<div class="outline-text-5" id="text-org45ebda7">
+<li><a id="org3e1fd8f"></a>Rates<br>
+<div class="outline-text-5" id="text-org3e1fd8f">
 <p>
 The models can have rate dynamics (setting <b>RATE_DYN</b> to 1 in the configuration file):
 </p>
@@ -263,9 +233,9 @@ Here \(\Phi\) is the transfer function defined in <b>src/activation.py</b> and c
 </ul>
 </div>
 
-<div id="outline-container-org498a770" class="outline-4">
-<h4 id="org498a770">Connectivity</h4>
-<div class="outline-text-4" id="text-org498a770">
+<div id="outline-container-orge7de299" class="outline-4">
+<h4 id="orge7de299">Connectivity</h4>
+<div class="outline-text-4" id="text-orge7de299">
 <p>
 The connectivities available in NeuroFlame are described <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/connectivity.html">here</a>.
 </p>
@@ -276,8 +246,8 @@ Probability of connection from population B to A:
 </div>
 
 <ul class="org-ul">
-<li><a id="orgbe88530"></a>Sparse Nets<br>
-<div class="outline-text-5" id="text-orgbe88530">
+<li><a id="org325945e"></a>Sparse Nets<br>
+<div class="outline-text-5" id="text-org325945e">
 <p>
 by default it is a sparse net
 </p>
@@ -306,8 +276,8 @@ and also low rank
 </div>
 </li>
 
-<li><a id="org0f28b09"></a>All to all<br>
-<div class="outline-text-5" id="text-org0f28b09">
+<li><a id="orga9c9804"></a>All to all<br>
+<div class="outline-text-5" id="text-orga9c9804">
 <p>
 \[ J_{ij}^{AB} =  \frac{J_{AB}}{N_B} P_{ij}^{AB} \]
 </p>
@@ -319,51 +289,86 @@ where Pij can be as above.
 </li>
 </ul>
 </div>
+</section>
+
+<section id="outline-container-orgc162149" class="outline-2">
+<h2 id="orgc162149">Network Simulations</h2>
+<div class="outline-text-2" id="text-orgc162149">
+</div>
+<div id="outline-container-org3eda80a" class="outline-3">
+<h3 id="org3eda80a">Basic Usage</h3>
+<div class="outline-text-3" id="text-org3eda80a">
+<p>
+Here is how to run a simulation
+</p>
+
+<div class="org-src-container">
+<pre class="src src-ipython"># import the network class
+from src.network import Network
+
+# Define repository root
+repo_root = '/'
+
+# Choose a config file
+conf_file = './conf/conf_EI.yml'
+
+# Other parameters can be overwriten with kwargs
+# kwargs can be any of the args in the config file
+
+# initialize model
+model = Network(conf_file, repo_root, **kwargs)
+
+# run a forward pass
+rates = model()
+</pre>
+</div>
+</div>
 </div>
 
-<div id="outline-container-org667a827" class="outline-3">
-<h3 id="org667a827">Parallel Simulations or Input Batching</h3>
-<div class="outline-text-3" id="text-org667a827">
-</div>
-<div id="outline-container-org7b7e27c" class="outline-4">
-<h4 id="org7b7e27c"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/neurotorch.html">Single Network Simulation and Batched Simulations</a></h4>
-<div class="outline-text-4" id="text-org7b7e27c">
+<div id="outline-container-org740e45a" class="outline-3">
+<h3 id="org740e45a"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/neurotorch.html">Parallel Network Simulations</a></h3>
+<div class="outline-text-3" id="text-org740e45a">
 <p>
 I describe in detail how to run a network simulation and use NeuroFlame to effectively run parallel simulations for different parameters <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/neurotorch.html">here</a>.
 </p>
 </div>
 </div>
-</div>
-<div id="outline-container-org384dc60" class="outline-3">
-<h3 id="org384dc60"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/train.html">Network Training</a></h3>
-<div class="outline-text-3" id="text-org384dc60">
+</section>
+
+<section id="outline-container-orge8fb382" class="outline-2">
+<h2 id="orge8fb382"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/train.html">Network Training</a></h2>
+<div class="outline-text-2" id="text-orge8fb382">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/train.html">Here</a>, I show how to train networks.
 </p>
 </div>
+</section>
+<section id="outline-container-org1db3119" class="outline-2">
+<h2 id="org1db3119">Tutorials</h2>
+<div class="outline-text-2" id="text-org1db3119">
 </div>
-<div id="outline-container-org9e1c6b1" class="outline-3">
-<h3 id="org9e1c6b1"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/balance.html">Balanced Networks</a></h3>
-<div class="outline-text-3" id="text-org9e1c6b1">
+<div id="outline-container-orge5e7fd3" class="outline-3">
+<h3 id="orge5e7fd3"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/balance.html">Balanced Networks</a></h3>
+<div class="outline-text-3" id="text-orge5e7fd3">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/balance.html">Here</a>, a tutorial on balanced networks.
 </p>
 </div>
 </div>
-<div id="outline-container-org6c3f735" class="outline-3">
-<h3 id="org6c3f735"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/search/multi_stable.html">Multistability</a></h3>
-<div class="outline-text-3" id="text-org6c3f735">
+<div id="outline-container-org559da80" class="outline-3">
+<h3 id="org559da80"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/search/multi_stable.html">Multistability</a></h3>
+<div class="outline-text-3" id="text-org559da80">
 </div>
 <ul class="org-ul">
-<li><a id="org6eb08df"></a>Fully connected<br>
-<div class="outline-text-5" id="text-org6eb08df">
+<li><a id="orgc96c432"></a>Fully connected<br>
+<div class="outline-text-5" id="text-orgc96c432">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/search/ring_attractor.html">Here</a>, a notebook that shows how to use NeuroFlame to locate ring attractors in parameter space.
 </p>
 </div>
 </li>
-<li><a id="org69f6e9f"></a>Sparse<br>
-<div class="outline-text-5" id="text-org69f6e9f">
+<li><a id="org937dfe3"></a>Sparse<br>
+<div class="outline-text-5" id="text-org937dfe3">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/search/multi_stable.html">Here</a>, a notebook that shows how to use NeuroFlame to locate multistable balance states in parameter space.
 </p>
@@ -372,25 +377,25 @@ I describe in detail how to run a network simulation and use NeuroFlame to effec
 </ul>
 </div>
 
-<div id="outline-container-org8b9a625" class="outline-3">
-<h3 id="org8b9a625"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stp.html">Short Term Plasticity</a></h3>
-<div class="outline-text-3" id="text-org8b9a625">
+<div id="outline-container-org7e28c39" class="outline-3">
+<h3 id="org7e28c39"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stp.html">Short Term Plasticity</a></h3>
+<div class="outline-text-3" id="text-org7e28c39">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stp.html">Here</a>, a tutorial on STP with NeuroFlame.
 </p>
 </div>
 </div>
-<div id="outline-container-orgfec9740" class="outline-3">
-<h3 id="orgfec9740"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stimuli.html">Behavioral Tasks</a></h3>
-<div class="outline-text-3" id="text-orgfec9740">
+<div id="outline-container-orge1d6e8e" class="outline-3">
+<h3 id="orge1d6e8e"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stimuli.html">Behavioral Tasks</a></h3>
+<div class="outline-text-3" id="text-orge1d6e8e">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stimuli.html">Here</a>, a tutorial on how to use different stimuli to get the model to perform different behavioral tasks.
 </p>
 </div>
 </div>
-<div id="outline-container-orgd438659" class="outline-3">
-<h3 id="orgd438659"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/serial_bias.html">Serial Bias</a></h3>
-<div class="outline-text-3" id="text-orgd438659">
+<div id="outline-container-orgcf5ccde" class="outline-3">
+<h3 id="orgcf5ccde"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/serial_bias.html">Serial Bias</a></h3>
+<div class="outline-text-3" id="text-orgcf5ccde">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/serial_bias.html">Here</a>, a tutorial on how to get serial bias in a balanced network model.
 </p>
@@ -398,14 +403,14 @@ I describe in detail how to run a network simulation and use NeuroFlame to effec
 </div>
 </section>
 
-<section id="outline-container-org046876e" class="outline-2">
-<h2 id="org046876e">Contributing</h2>
-<div class="outline-text-2" id="text-org046876e">
+<section id="outline-container-org76227b0" class="outline-2">
+<h2 id="org76227b0">Contributing</h2>
+<div class="outline-text-2" id="text-org76227b0">
 <p>
 Feel free to contribute.
 </p>
 
-<pre class="example" id="org695841c">
+<pre class="example" id="orga4de344">
 MIT License
 Copyright (c) [2023] [A. Mahrach]
 </pre>
