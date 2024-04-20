@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 19 Apr. 2024 -->
+<!-- 20 Apr. 2024 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NeuroFlame: Fast Learning And Modeling Engine</title>
@@ -35,6 +35,28 @@
     /*]]>*///-->
 // @license-end
 </script>
+<script type="text/x-mathjax-config">
+    MathJax.Hub.Config({
+        displayAlign: "center",
+        displayIndent: "0em",
+
+        "HTML-CSS": { scale: 100,
+                        linebreaks: { automatic: "false" },
+                        webFont: "TeX"
+                       },
+        SVG: {scale: 100,
+              linebreaks: { automatic: "false" },
+              font: "TeX"},
+        NativeMML: {scale: 100},
+        TeX: { equationNumbers: {autoNumber: "AMS"},
+               MultLineWidth: "85%",
+               TagSide: "right",
+               TagIndent: ".8em"
+             }
+});
+</script>
+<script type="text/javascript"
+        src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS_HTML"></script>
 </head>
 <body>
 <main id="content">
@@ -44,29 +66,37 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#org71b6adb">Introduction</a></li>
-<li><a href="#orgd9d1dea">Installation</a></li>
-<li><a href="#org2413865">Basic Usage</a></li>
-<li><a href="#org99a6d3a">Advanced Usage</a>
+<li><a href="#org0d71cd7">Introduction</a></li>
+<li><a href="#org3c4d3d0">Installation</a></li>
+<li><a href="#orgde65b30">Basic Usage</a></li>
+<li><a href="#org394a52d">Advanced Usage</a>
 <ul>
-<li><a href="#orged4051c">Project Structure</a></li>
-<li><a href="#org004a83e">Networks Dynamics</a></li>
-<li><a href="#orgd61a47a">Connectivity</a></li>
-<li><a href="#orgc896fe6">Single Network Simulation and Batched Simulations</a></li>
-<li><a href="#org747de2f">Networks Training</a></li>
-<li><a href="#org6e885ae">Balanced Networks</a></li>
-<li><a href="#orgef59ff3">Multistability</a></li>
-<li><a href="#org1bae1ad">Short Term Plasticity</a></li>
-<li><a href="#org67a53dd">Behavioral Tasks</a></li>
-<li><a href="#orgc0e26bc">Serial Bias</a></li>
+<li><a href="#orge23b720">Project Structure</a></li>
+<li><a href="#org94a4d75">Network Dynamics</a>
+<ul>
+<li><a href="#org44405c7">Dynamics</a></li>
+<li><a href="#org498a770">Connectivity</a></li>
 </ul>
 </li>
-<li><a href="#org0fab3c4">Contributing</a></li>
+<li><a href="#org667a827">Parallel Simulations or Input Batching</a>
+<ul>
+<li><a href="#org7b7e27c">Single Network Simulation and Batched Simulations</a></li>
+</ul>
+</li>
+<li><a href="#org384dc60">Network Training</a></li>
+<li><a href="#org9e1c6b1">Balanced Networks</a></li>
+<li><a href="#org6c3f735">Multistability</a></li>
+<li><a href="#org8b9a625">Short Term Plasticity</a></li>
+<li><a href="#orgfec9740">Behavioral Tasks</a></li>
+<li><a href="#orgd438659">Serial Bias</a></li>
+</ul>
+</li>
+<li><a href="#org046876e">Contributing</a></li>
 </ul>
 </div>
 </nav>
 
-<figure id="org33e2809">
+<figure id="org78cbb7b">
 <img src="./neuroflame.jpeg" alt="neuroflame.jpeg" width="400px">
 
 </figure>
@@ -75,27 +105,23 @@
 Copyright © 2024 by Melanie Tschiersch. All rights reserved.
 </p>
 
-<section id="outline-container-org71b6adb" class="outline-2">
-<h2 id="org71b6adb">Introduction</h2>
-<div class="outline-text-2" id="text-org71b6adb">
+<section id="outline-container-org0d71cd7" class="outline-2">
+<h2 id="org0d71cd7">Introduction</h2>
+<div class="outline-text-2" id="text-org0d71cd7">
 <p>
-This package provides an implementation of a recurrent neural network trainer and simulator with pytorch.
-Networks can have multiple neural populations with different connectivity types (all to all, sparse) that can be structured (tuned, low rank).
+This package provides an implementation of a recurrent neural network trainer and simulator with Pytorch.
+Networks can have multiple neural populations with different connectivity types (all-to-all, sparse) and structures (feature selective, spatially tuned, low rank).
 </p>
 
 <p>
-Network weights can be trained in a unsupervised or supervised manner just as vanilla RNNs in torch.
-</p>
-
-<p>
-For more info look at the notebooks in ./notebooks and the configuration files in ./conf.
+Networks models can be trained in a unsupervised or supervised manner just as vanilla RNNs in Pytorch.
 </p>
 </div>
 </section>
 
-<section id="outline-container-orgd9d1dea" class="outline-2">
-<h2 id="orgd9d1dea">Installation</h2>
-<div class="outline-text-2" id="text-orgd9d1dea">
+<section id="outline-container-org3c4d3d0" class="outline-2">
+<h2 id="org3c4d3d0">Installation</h2>
+<div class="outline-text-2" id="text-org3c4d3d0">
 <div class="org-src-container">
 <pre class="src src-sh">pip install -r requirements.txt
 </pre>
@@ -112,9 +138,9 @@ or alternatively using conda (I recommend using mamba&rsquo;s <a href="https://g
 </div>
 </section>
 
-<section id="outline-container-org2413865" class="outline-2">
-<h2 id="org2413865">Basic Usage</h2>
-<div class="outline-text-2" id="text-org2413865">
+<section id="outline-container-orgde65b30" class="outline-2">
+<h2 id="orgde65b30">Basic Usage</h2>
+<div class="outline-text-2" id="text-orgde65b30">
 <p>
 Here is how to run a simulation
 </p>
@@ -142,13 +168,13 @@ rates = model()
 </div>
 </section>
 
-<section id="outline-container-org99a6d3a" class="outline-2">
-<h2 id="org99a6d3a">Advanced Usage</h2>
-<div class="outline-text-2" id="text-org99a6d3a">
+<section id="outline-container-org394a52d" class="outline-2">
+<h2 id="org394a52d">Advanced Usage</h2>
+<div class="outline-text-2" id="text-org394a52d">
 </div>
-<div id="outline-container-orged4051c" class="outline-3">
-<h3 id="orged4051c">Project Structure</h3>
-<div class="outline-text-3" id="text-orged4051c">
+<div id="outline-container-orge23b720" class="outline-3">
+<h3 id="orge23b720">Project Structure</h3>
+<div class="outline-text-3" id="text-orge23b720">
 <div class="org-src-container">
 <pre class="src src-sh">.
 &#9500;&#9472;&#9472; conf  <span class="org-comment-delimiter"># </span><span class="org-comment">contains configuration files in yaml format.</span>
@@ -178,60 +204,166 @@ rates = model()
 </div>
 </div>
 
-<div id="outline-container-org004a83e" class="outline-3">
-<h3 id="org004a83e"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/dynamics.html">Networks Dynamics</a></h3>
-<div class="outline-text-3" id="text-org004a83e">
+<div id="outline-container-org94a4d75" class="outline-3">
+<h3 id="org94a4d75"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/dynamics.html">Network Dynamics</a></h3>
+<div class="outline-text-3" id="text-org94a4d75">
+</div>
+<div id="outline-container-org44405c7" class="outline-4">
+<h4 id="org44405c7">Dynamics</h4>
+<div class="outline-text-4" id="text-org44405c7">
+</div>
+<ul class="org-ul">
+<li><a id="orgbb82a76"></a>Currents<br>
+<div class="outline-text-5" id="text-orgbb82a76">
 <p>
-Network dynamics is described <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/dynamics.md">here</a>.
+Neuron \(i\) in population \(A\) has a reccurent input \(h^A_i\),
+</p>
+
+<p>
+\[  \tau_{syn} \frac{dh_i}{dt}(t) = - h_i(t) + \sum_j J_{ij} h_j(t) \]
+</p>
+
+<p>
+or not
+</p>
+
+<p>
+\[ h^A_i(t) = \sum_{jB} J^{AB}_{ij} h_j(t) \]
 </p>
 </div>
+</li>
+
+<li><a id="org45ebda7"></a>Rates<br>
+<div class="outline-text-5" id="text-org45ebda7">
+<p>
+The models can have rate dynamics (setting <b>RATE_DYN</b> to 1 in the configuration file):
+</p>
+
+<p>
+\[ \tau_A \frac{d r^A_i}{dt}(t) = - r^A_i(t) + \Phi( \sum_{jB} J^{AB}_{ij} h^{AB}_j(t) + h^A_{ext}(t)) \]
+</p>
+
+<p>
+Here, \(r_i\) is the rate of unit \(i\) in population \(A\)
+</p>
+
+<p>
+otherwise rates will be instantaneous:
+</p>
+
+<p>
+\[ r^A_i(t) = \Phi(\sum_{jB} J^{AB}_{ij} h_j(t) + h^A_{ext}(t)) \]
+</p>
+
+<p>
+Here \(\Phi\) is the transfer function defined in <b>src/activation.py</b> and can be set to a threshold linear, a sigmoid or a non linear function (Brunel et al., 2003).
+</p>
 </div>
-<div id="outline-container-orgd61a47a" class="outline-3">
-<h3 id="orgd61a47a"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/connectivity.html">Connectivity</a></h3>
-<div class="outline-text-3" id="text-orgd61a47a">
+</li>
+</ul>
+</div>
+
+<div id="outline-container-org498a770" class="outline-4">
+<h4 id="org498a770">Connectivity</h4>
+<div class="outline-text-4" id="text-org498a770">
 <p>
 The connectivities available in NeuroFlame are described <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/connectivity.html">here</a>.
 </p>
+
+<p>
+Probability of connection from population B to A:
+</p>
+</div>
+
+<ul class="org-ul">
+<li><a id="orgbe88530"></a>Sparse Nets<br>
+<div class="outline-text-5" id="text-orgbe88530">
+<p>
+by default it is a sparse net
+</p>
+
+<p>
+\[ P_{ij}^{AB} = \frac{K_B}{N_B} \]
+</p>
+
+<p>
+otherwise
+it can be cosine
+</p>
+
+<p>
+\[ P_{ij}^{AB} = ( 1.0 + \Kappa_B \cos(\theta_i^A - \theta_j^B) ) \]
+</p>
+
+<p>
+and also low rank
+</p>
+
+<p>
+\[ J_{ij}^{AB} = \frac{J_{AB}}{\sqrt{K_B}} with proba. P_{ij}^{AB} * \frac{K_B}{N_B} \]
+\[ 0 otherwise \]
+</p>
+</div>
+</li>
+
+<li><a id="org0f28b09"></a>All to all<br>
+<div class="outline-text-5" id="text-org0f28b09">
+<p>
+\[ J_{ij}^{AB} =  \frac{J_{AB}}{N_B} P_{ij}^{AB} \]
+</p>
+
+<p>
+where Pij can be as above.
+</p>
+</div>
+</li>
+</ul>
 </div>
 </div>
-<div id="outline-container-orgc896fe6" class="outline-3">
-<h3 id="orgc896fe6"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/neurotorch.html">Single Network Simulation and Batched Simulations</a></h3>
-<div class="outline-text-3" id="text-orgc896fe6">
+
+<div id="outline-container-org667a827" class="outline-3">
+<h3 id="org667a827">Parallel Simulations or Input Batching</h3>
+<div class="outline-text-3" id="text-org667a827">
+</div>
+<div id="outline-container-org7b7e27c" class="outline-4">
+<h4 id="org7b7e27c"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/neurotorch.html">Single Network Simulation and Batched Simulations</a></h4>
+<div class="outline-text-4" id="text-org7b7e27c">
 <p>
 I describe in detail how to run a network simulation and use NeuroFlame to effectively run parallel simulations for different parameters <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/doc/neurotorch.html">here</a>.
 </p>
 </div>
 </div>
-<div id="outline-container-org747de2f" class="outline-3">
-<h3 id="org747de2f"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/train.html">Networks Training</a></h3>
-<div class="outline-text-3" id="text-org747de2f">
+</div>
+<div id="outline-container-org384dc60" class="outline-3">
+<h3 id="org384dc60"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/train.html">Network Training</a></h3>
+<div class="outline-text-3" id="text-org384dc60">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/train.html">Here</a>, I show how to train networks.
 </p>
 </div>
 </div>
-<div id="outline-container-org6e885ae" class="outline-3">
-<h3 id="org6e885ae"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/balance.html">Balanced Networks</a></h3>
-<div class="outline-text-3" id="text-org6e885ae">
+<div id="outline-container-org9e1c6b1" class="outline-3">
+<h3 id="org9e1c6b1"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/balance.html">Balanced Networks</a></h3>
+<div class="outline-text-3" id="text-org9e1c6b1">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/balance.html">Here</a>, a tutorial on balanced networks.
 </p>
 </div>
 </div>
-<div id="outline-container-orgef59ff3" class="outline-3">
-<h3 id="orgef59ff3"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/search/multi_stable.html">Multistability</a></h3>
-<div class="outline-text-3" id="text-orgef59ff3">
+<div id="outline-container-org6c3f735" class="outline-3">
+<h3 id="org6c3f735"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/search/multi_stable.html">Multistability</a></h3>
+<div class="outline-text-3" id="text-org6c3f735">
 </div>
 <ul class="org-ul">
-<li><a id="org0d4bafc"></a>Fully connected<br>
-<div class="outline-text-5" id="text-org0d4bafc">
+<li><a id="org6eb08df"></a>Fully connected<br>
+<div class="outline-text-5" id="text-org6eb08df">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/search/ring_attractor.html">Here</a>, a notebook that shows how to use NeuroFlame to locate ring attractors in parameter space.
 </p>
 </div>
 </li>
-<li><a id="org2b635bd"></a>Sparse<br>
-<div class="outline-text-5" id="text-org2b635bd">
+<li><a id="org69f6e9f"></a>Sparse<br>
+<div class="outline-text-5" id="text-org69f6e9f">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/search/multi_stable.html">Here</a>, a notebook that shows how to use NeuroFlame to locate multistable balance states in parameter space.
 </p>
@@ -240,25 +372,25 @@ I describe in detail how to run a network simulation and use NeuroFlame to effec
 </ul>
 </div>
 
-<div id="outline-container-org1bae1ad" class="outline-3">
-<h3 id="org1bae1ad"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stp.html">Short Term Plasticity</a></h3>
-<div class="outline-text-3" id="text-org1bae1ad">
+<div id="outline-container-org8b9a625" class="outline-3">
+<h3 id="org8b9a625"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stp.html">Short Term Plasticity</a></h3>
+<div class="outline-text-3" id="text-org8b9a625">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stp.html">Here</a>, a tutorial on STP with NeuroFlame.
 </p>
 </div>
 </div>
-<div id="outline-container-org67a53dd" class="outline-3">
-<h3 id="org67a53dd"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stimuli.html">Behavioral Tasks</a></h3>
-<div class="outline-text-3" id="text-org67a53dd">
+<div id="outline-container-orgfec9740" class="outline-3">
+<h3 id="orgfec9740"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stimuli.html">Behavioral Tasks</a></h3>
+<div class="outline-text-3" id="text-orgfec9740">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/tests/stimuli.html">Here</a>, a tutorial on how to use different stimuli to get the model to perform different behavioral tasks.
 </p>
 </div>
 </div>
-<div id="outline-container-orgc0e26bc" class="outline-3">
-<h3 id="orgc0e26bc"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/serial_bias.html">Serial Bias</a></h3>
-<div class="outline-text-3" id="text-orgc0e26bc">
+<div id="outline-container-orgd438659" class="outline-3">
+<h3 id="orgd438659"><a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/serial_bias.html">Serial Bias</a></h3>
+<div class="outline-text-3" id="text-orgd438659">
 <p>
 <a href="file:///LeonCarmin/NeuroFlame/src/branch/main/org/serial_bias.html">Here</a>, a tutorial on how to get serial bias in a balanced network model.
 </p>
@@ -266,14 +398,14 @@ I describe in detail how to run a network simulation and use NeuroFlame to effec
 </div>
 </section>
 
-<section id="outline-container-org0fab3c4" class="outline-2">
-<h2 id="org0fab3c4">Contributing</h2>
-<div class="outline-text-2" id="text-org0fab3c4">
+<section id="outline-container-org046876e" class="outline-2">
+<h2 id="org046876e">Contributing</h2>
+<div class="outline-text-2" id="text-org046876e">
 <p>
 Feel free to contribute.
 </p>
 
-<pre class="example" id="orga19a62a">
+<pre class="example" id="org695841c">
 MIT License
 Copyright (c) [2023] [A. Mahrach]
 </pre>
@@ -282,7 +414,7 @@ Copyright (c) [2023] [A. Mahrach]
 </main>
 <footer id="postamble" class="status">
 <p class="author">Author: Alexandre Mahrach</p>
-<p class="date">Created: 19 Apr. 2024</p>
+<p class="date">Created: 20 Apr. 2024</p>
 </footer>
 </body>
 </html>
