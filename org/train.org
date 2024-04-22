@@ -88,7 +88,7 @@
 
 #+begin_src ipython
   def train(dataloader, model, loss_fn, optimizer, penalty=None, lbd=1):
-      device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+      device = torch.device(DEVICE if torch.cuda.is_available() else "cpu")
 
       model.train()
       for batch, (X, y) in enumerate(dataloader):
@@ -130,7 +130,7 @@
       size = len(dataloader.dataset)
       num_batches = len(dataloader)
 
-      device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+      device = torch.device(DEVICE if torch.cuda.is_available() else "cpu")
 
       # Validation loop.
       model.eval()
@@ -156,7 +156,7 @@
       # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.1, verbose=True)
       # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 
-      device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+      device = torch.device(DEVICE if torch.cuda.is_available() else 'cpu')
       model.to(device)
 
       loss_list = []
@@ -262,8 +262,8 @@
           self.thresh = thresh
           self.N = N
 
-          self.cue_idx = torch.tensor(cue_idx, dtype=torch.int, device='cuda')
-          self.rwd_idx = torch.tensor(rwd_idx, dtype=torch.int, device='cuda')
+          self.cue_idx = torch.tensor(cue_idx, dtype=torch.int, device=DEVICE)
+          self.rwd_idx = torch.tensor(rwd_idx, dtype=torch.int, device=DEVICE)
 
           self.loss = SignBCELoss(self.alpha, self.thresh, self.N)
 
@@ -431,13 +431,17 @@
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroFlame"
   conf_name = "config_train.yml"
+  DEVICE = 'cuda'
+  seed = np.random.randint(0, 1e6)
+  print(seed)
 #+end_src
 
 #+RESULTS:
+: 995054
 
 #+begin_src ipython
   start = perf_counter()
-  model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE='cuda', SEED=0, N_BATCH=16)
+  model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=16)
 #+end_src
 
 #+RESULTS:
@@ -453,13 +457,15 @@
 #+end_src
 
 #+RESULTS:
-: U torch.Size([2000, 2])
-: V torch.Size([2000, 2])
-: linear.weight torch.Size([1, 1600])
+: U torch.Size([1000, 2])
+: V torch.Size([1000, 2])
+: linear.weight torch.Size([1, 500])
 : linear.bias torch.Size([1])
 
 #+begin_src ipython
   model.LR_TRAIN = 1
+  model.LR_READOUT=1
+
   model.LR_EVAL_WIN = model.T_STIM_OFF[2] - model.T_STIM_ON[0]
   model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
   print(model.lr_eval_win)
@@ -505,7 +511,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: torch.Size([128, 710, 2000])
+: torch.Size([128, 710, 1000])
 
 #+begin_src ipython
   labels_A = torch.ones((model.N_BATCH, rwd_idx.shape[0]))
@@ -526,16 +532,15 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: torch.Size([102, 710, 2000]) torch.Size([26, 710, 2000])
+: torch.Size([102, 710, 1000]) torch.Size([26, 710, 1000])
 : torch.Size([102, 31]) torch.Size([26, 31])
 
 #+begin_src ipython
-  # criterion = nn.BCEWithLogitsLoss()
   criterion = DualLoss(alpha=0.5, thresh=1.0, N=model.Na[0], rwd_idx=rwd_idx)
 
   # SGD, Adam, AdamW
   learning_rate = 0.1
-  optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+  optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
   num_epochs = 30
   loss, val_loss = 0, 0
@@ -549,70 +554,36 @@ Testing the network on steps from sample odor offset to test odor onset
 
 #+RESULTS:
 #+begin_example
-  Epoch 1/30, Training Loss: 42.8731, Validation Loss: 31.0039
-  Epoch 2/30, Training Loss: 10.6266, Validation Loss: 12.7745
-  Epoch 3/30, Training Loss: 31.8756, Validation Loss: 15.8503
-  Epoch 4/30, Training Loss: 5.4168, Validation Loss: 6.7865
-  Epoch 5/30, Training Loss: 0.4235, Validation Loss: 0.4204
-  Epoch 6/30, Training Loss: 0.4023, Validation Loss: 0.3940
-  Epoch 7/30, Training Loss: 0.3957, Validation Loss: 0.5878
-  Epoch 8/30, Training Loss: 0.3506, Validation Loss: 0.3451
-  Epoch 9/30, Training Loss: 0.2857, Validation Loss: 0.2900
-  Epoch 10/30, Training Loss: 0.1424, Validation Loss: 0.1665
-  Epoch 11/30, Training Loss: 0.1009, Validation Loss: 0.1469
-  Epoch 12/30, Training Loss: 0.1314, Validation Loss: 0.0858
-  Epoch 13/30, Training Loss: 0.0000, Validation Loss: 0.0000
+  Epoch 1/30, Training Loss: 0.8195, Validation Loss: 0.5730
+  Epoch 2/30, Training Loss: 0.5088, Validation Loss: 0.4928
+  Epoch 3/30, Training Loss: 0.4759, Validation Loss: 0.4737
+  Epoch 4/30, Training Loss: 0.4665, Validation Loss: 0.4631
+  Epoch 5/30, Training Loss: 0.4506, Validation Loss: 0.4501
+  Epoch 6/30, Training Loss: 0.4275, Validation Loss: 0.4202
+  Epoch 7/30, Training Loss: 0.2160, Validation Loss: 0.2476
+  Epoch 8/30, Training Loss: 0.1082, Validation Loss: 0.1501
+  Epoch 9/30, Training Loss: 0.0000, Validation Loss: 0.0000
   Stopping training as loss has fallen below the threshold: 0.0
 #+end_example
+
+#+begin_src ipython
+  torch.save(model.state_dict(), 'sample_%d.pth' % seed)
+#+end_src
+
+#+RESULTS:
 
 ** Testing
 
 #+begin_src ipython
-  Wij = model.Wab_T.clone()
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  plot_con(Wij[model.slices[0], model.slices[0]].cpu().numpy())
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/984a50d539ecd9c251fec28a20136cbcecd37176.png]]
-
-#+begin_src ipython
+  model.LR_READOUT = 0
   model.eval()
-
-  if model.LR_NORM:
-      lr = model.lr_kappa * model.lr_mask * (masked_normalize(model.U) @ masked_normalize(model.V).T)
-  else:
-      lr = model.lr_kappa * model.lr_mask * (model.U @ model.V.T)
-  # lr = lr / model.Na[0]
-  # lr = lr.clamp(min=-model.Wab_T[0, 0])
-
-  lr = normalize_tensor(lr, 0, model.slices, model.Na)
-  lr = normalize_tensor(lr, 1, model.slices, model.Na)
-
-  model.Wab_T = (Wij +lr.T)
-  model.Wab_T = clamp_tensor(model.Wab_T, 0, model.slices)
-  model.Wab_T = clamp_tensor(model.Wab_T, 1, model.slices)
-
-  if model.IF_STP:
-    W_stp_T = model.W_stp_T + lr[model.slices[0], model.slices[0]].T
-    W_stp_T = clamp_tensor(W_stp_T, 0, model.slices)
-
-  model.LR_TRAIN=0
 #+end_src
 
 #+RESULTS:
-
-#+begin_src ipython
-  Mij = model.Wab_T.clone().cpu().detach().numpy()
-  plot_con(Mij[model.slices[0], model.slices[0]].T)
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/91392c44f0875b8a67aaecf663c905dd775d1260.png]]
+: Network(
+:   (linear): Linear(in_features=500, out_features=1, bias=True)
+:   (dropout): Dropout(p=0.0, inplace=False)
+: )
 
 #+begin_src ipython
   model.DURATION = 6
@@ -641,32 +612,27 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([2, 710, 2000])
+: ff_input torch.Size([2, 710, 1000])
 
 #+begin_src ipython
   model.VERBOSE = 0
-  rates = model.forward(ff_input=ff_input, RET_FF=1).cpu().detach().numpy()
+  rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
   print('rates', rates.shape)
-  model.Wab_T = Wij.clone()
 #+end_src
 
 #+RESULTS:
-: rates (2, 61, 1600)
-
+: rates (2, 61, 500)
 
 #+begin_src ipython
   idx = get_idx(model, 2)
-#+end_src
-
-#+RESULTS:
-: ksi torch.Size([5, 1600])
-
-#+begin_src ipython
   plot_rates_selec(rates, idx)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/0ae3a7a32c354ad8499a8a1400cd765eb1547b17.png]]
+:RESULTS:
+: ksi torch.Size([5, 500])
+[[file:./.ob-jupyter/17c331c063af0062370d9c20b545ee64b6cdbfc3.png]]
+:END:
 
 #+begin_src ipython
     readout = model.linear.weight.data.cpu().detach().numpy()[0]
@@ -676,7 +642,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+RESULTS:
 :RESULTS:
 : (2, 61)
-[[file:./.ob-jupyter/3c466450b56bc72cfc249ca11ef87fe8b3631941.png]]
+[[file:./.ob-jupyter/6f99449fbf48b44d3c37e3fb2480c29c4ea98273.png]]
 :END:
 
 #+begin_src ipython
@@ -684,7 +650,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/a9656a5346066343135a5ec5a0eb16884b487be8.png]]
+[[file:./.ob-jupyter/0e32d7e2002fad5ada8ce0a9f7a2d1d5782ce0b1.png]]
 
 #+begin_src ipython
 
@@ -697,7 +663,21 @@ Testing the network on steps from sample odor offset to test odor onset
 *** Parameters
 
 #+begin_src ipython
+  for name, param in model.named_parameters():
+      if param.requires_grad:
+          print(name, param.shape)
+#+end_src
+
+#+RESULTS:
+: U torch.Size([1000, 2])
+: V torch.Size([1000, 2])
+: linear.weight torch.Size([1, 500])
+: linear.bias torch.Size([1])
+
+#+begin_src ipython
   model.LR_TRAIN = 1
+  model.LR_READOUT = 1
+
   model.LR_EVAL_WIN = model.T_STIM_OFF[2] - model.T_STIM_ON[2]
   model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
 
@@ -751,7 +731,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([256, 710, 2000])
+: ff_input torch.Size([256, 710, 1000])
 
  #+begin_src ipython
   labels_pair = torch.ones((2 * model.N_BATCH, model.lr_eval_win))
@@ -774,17 +754,16 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: torch.Size([204, 710, 2000]) torch.Size([52, 710, 2000])
+: torch.Size([204, 710, 1000]) torch.Size([52, 710, 1000])
 : torch.Size([204, 10]) torch.Size([52, 10])
 
 #+begin_src ipython
   # Loss
-  # criterion = nn.BCEWithLogitsLoss()
   criterion = DualLoss(alpha=0.5, thresh=1.0, N=model.Na[0], rwd_idx=rwd_idx)
 
   # Optimizer: SGD, Adam, AdamW
   learning_rate = 0.1
-  optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+  optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
 #+RESULTS:
@@ -795,11 +774,40 @@ Here we only evaluate performance from test onset to test offset
 #+End_src
 
 #+RESULTS:
-: Epoch 1/30, Training Loss: 0.0991, Validation Loss: 0.7371
-: Epoch 2/30, Training Loss: 0.1303, Validation Loss: 0.0000
-: Stopping training as loss has fallen below the threshold: 0.0
+#+begin_example
+  Epoch 1/30, Training Loss: 1.6835, Validation Loss: 2.3240
+  Epoch 2/30, Training Loss: 0.3880, Validation Loss: 0.3742
+  Epoch 3/30, Training Loss: 0.3903, Validation Loss: 0.3296
+  Epoch 4/30, Training Loss: 0.3070, Validation Loss: 0.2988
+  Epoch 5/30, Training Loss: 0.3535, Validation Loss: 0.2665
+  Epoch 6/30, Training Loss: 0.2945, Validation Loss: 0.2353
+  Epoch 7/30, Training Loss: 0.2668, Validation Loss: 0.2057
+  Epoch 8/30, Training Loss: 0.1402, Validation Loss: 0.1568
+  Epoch 9/30, Training Loss: 0.2611, Validation Loss: 0.1558
+  Epoch 10/30, Training Loss: 0.1479, Validation Loss: 0.1503
+  Epoch 11/30, Training Loss: 0.1840, Validation Loss: 0.1439
+  Epoch 12/30, Training Loss: 0.1061, Validation Loss: 0.1305
+  Epoch 13/30, Training Loss: 0.1960, Validation Loss: 0.4364
+  Epoch 14/30, Training Loss: 0.2182, Validation Loss: 0.1330
+  Epoch 15/30, Training Loss: 0.2165, Validation Loss: 0.1313
+  Epoch 16/30, Training Loss: 0.1930, Validation Loss: 0.1441
+  Epoch 17/30, Training Loss: 0.2374, Validation Loss: 0.1345
+  Epoch 18/30, Training Loss: 0.1169, Validation Loss: 0.1241
+  Epoch 19/30, Training Loss: 0.1660, Validation Loss: 0.1090
+  Epoch 20/30, Training Loss: 0.1533, Validation Loss: 0.0808
+  Epoch 21/30, Training Loss: 0.0447, Validation Loss: 0.0503
+  Epoch 22/30, Training Loss: 0.1276, Validation Loss: 0.0813
+  Epoch 23/30, Training Loss: 0.0635, Validation Loss: 0.0802
+  Epoch 24/30, Training Loss: 0.0884, Validation Loss: 0.0744
+  Epoch 25/30, Training Loss: 0.0820, Validation Loss: 0.0690
+  Epoch 26/30, Training Loss: 0.1510, Validation Loss: 0.0634
+  Epoch 27/30, Training Loss: 0.1377, Validation Loss: 0.0578
+  Epoch 28/30, Training Loss: 0.1231, Validation Loss: 0.0515
+  Epoch 29/30, Training Loss: 0.0877, Validation Loss: 0.0438
+  Epoch 30/30, Training Loss: 0.0272, Validation Loss: 0.0337
+#+end_example
 
-#+begin_src ipython
+    #+begin_src ipython
   plt.plot(loss)
   plt.plot(val_loss)
   plt.xlabel('epochs')
@@ -808,46 +816,24 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/236a9a24d3240cd89688e3e1f43f9a6a306f354e.png]]
+[[file:./.ob-jupyter/006e702652a349caeac634457700ea645e9fad8b.png]]
+
+#+begin_src ipython
+  torch.save(model.state_dict(), 'dpa_%d.pth' % seed)
+#+end_src
+
+#+RESULTS:
 
 ** Testing
 
 #+begin_src ipython
-  Wij = model.Wab_T.clone()
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
   model.eval()
-  if model.LR_NORM:
-      lr = model.lr_kappa * model.lr_mask * (masked_normalize(model.U) @ masked_normalize(model.V).T)
-  else:
-      lr = model.lr_kappa * model.lr_mask * (model.U @ model.V.T)
-
-  # lr = lr / model.Na[0]
-  # lr = lr.clamp(min=-model.Wab_T[0, 0])
-
-  lr = normalize_tensor(lr, 0, model.slices, model.Na)
-  lr = normalize_tensor(lr, 1, model.slices, model.Na)
-
-  model.Wab_T = (Wij +lr.T)
-  model.Wab_T = clamp_tensor(model.Wab_T, 0, model.slices)
-  model.Wab_T = clamp_tensor(model.Wab_T, 1, model.slices)
-
-  if model.IF_STP:
-    W_stp_T = model.W_stp_T + lr[model.slices[0], model.slices[0]].T
-    W_stp_T = clamp_tensor(W_stp_T, 0, model.slices)
-
-  model.N_BATCH = 1
-  model.VERBOSE=1
-  model.LR_TRAIN=0
+  model.LR_READOUT = 0
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-  model.N_BATCH = 1
   model.DURATION = 6
   model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
 #+end_src
@@ -886,17 +872,15 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([4, 710, 2000])
+: ff_input torch.Size([4, 710, 1000])
 
 #+begin_src ipython
-  model.VERBOSE = 0
-  rates = model.forward(ff_input=ff_input, RET_FF=1).cpu().detach().numpy()
-  model.Wab_T = Wij
+  rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (4, 61, 1600)
+: (4, 61, 500)
 
 #+begin_src ipython
   idx = get_idx(model, 2)
@@ -905,8 +889,8 @@ Here we only evaluate performance from test onset to test offset
 
 #+RESULTS:
 :RESULTS:
-: ksi torch.Size([5, 1600])
-[[file:./.ob-jupyter/08e6935a20ae836741a77adff31526e47236a6e2.png]]
+: ksi torch.Size([5, 500])
+[[file:./.ob-jupyter/c0563a88b60efeb22aaabf8e291a327d0fa68f70.png]]
 :END:
 
 #+begin_src ipython
@@ -917,7 +901,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 :RESULTS:
 : (4, 61)
-[[file:./.ob-jupyter/ee69197436849125b6932d877cf9f82c4c22f4eb.png]]
+[[file:./.ob-jupyter/cf659348e2e54456ad76a7b51163e440bb4699a6.png]]
 :END:
 
 #+begin_src ipython
@@ -925,7 +909,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c3b077c5e7f0b57d7878e509293a6e90ee3739ad.png]]
+[[file:./.ob-jupyter/ec4556519972d4f072c7f30582133f386f2b0328.png]]
 
 #+begin_src ipython
 
@@ -937,7 +921,9 @@ Here we only evaluate performance from test onset to test offset
 ** Training
 
 #+begin_src ipython
-  model.LR_TRAIN=1
+  model.LR_TRAIN = 1
+  model.LR_READOUT = 1
+
   model.LR_EVAL_WIN = 1
   model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW+1)
   print(model.lr_eval_win)
@@ -973,9 +959,9 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: U torch.Size([2000, 2])
-: V torch.Size([2000, 2])
-: linear.weight torch.Size([1, 1600])
+: U torch.Size([1000, 2])
+: V torch.Size([1000, 2])
+: linear.weight torch.Size([1, 500])
 : linear.bias torch.Size([1])
 
 #+begin_src ipython
@@ -1003,7 +989,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: torch.Size([128, 710, 2000])
+: torch.Size([128, 710, 1000])
 
 #+begin_src ipython
   labels_Go = torch.ones((model.N_BATCH, model.lr_eval_win))
@@ -1022,7 +1008,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: torch.Size([102, 710, 2000]) torch.Size([26, 710, 2000])
+: torch.Size([102, 710, 1000]) torch.Size([26, 710, 1000])
 : torch.Size([102, 11]) torch.Size([26, 11])
 
 #+begin_src ipython
@@ -1031,7 +1017,7 @@ Here we only evaluate performance from test onset to test offset
 
   # SGD, Adam, AdamW
   learning_rate = 0.1
-  optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+  optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
 #+RESULTS:
@@ -1044,25 +1030,32 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 #+RESULTS:
 #+begin_example
-  Epoch 1/30, Training Loss: 37.6953, Validation Loss: 23.1774
-  Epoch 2/30, Training Loss: 2.1198, Validation Loss: 3.3160
-  Epoch 3/30, Training Loss: 0.4589, Validation Loss: 5.9065
-  Epoch 4/30, Training Loss: 0.4438, Validation Loss: 0.4417
-  Epoch 5/30, Training Loss: 0.4176, Validation Loss: 0.4246
-  Epoch 6/30, Training Loss: 0.4120, Validation Loss: 0.4011
-  Epoch 7/30, Training Loss: 0.3752, Validation Loss: 0.3819
-  Epoch 8/30, Training Loss: 0.3654, Validation Loss: 0.3638
-  Epoch 9/30, Training Loss: 0.3501, Validation Loss: 0.3436
-  Epoch 10/30, Training Loss: 0.3146, Validation Loss: 0.3193
-  Epoch 11/30, Training Loss: 0.2583, Validation Loss: 0.2853
-  Epoch 12/30, Training Loss: 0.2442, Validation Loss: 0.2360
-  Epoch 13/30, Training Loss: 0.0421, Validation Loss: 0.1708
-  Epoch 14/30, Training Loss: 0.2089, Validation Loss: 0.1540
-  Epoch 15/30, Training Loss: 0.1301, Validation Loss: 0.1260
-  Epoch 16/30, Training Loss: 0.0665, Validation Loss: 0.0951
-  Epoch 17/30, Training Loss: 0.0239, Validation Loss: 0.0572
-  Epoch 18/30, Training Loss: 0.0241, Validation Loss: 0.0095
-  Epoch 19/30, Training Loss: 0.0000, Validation Loss: 0.0000
+  Epoch 1/30, Training Loss: 1.3179, Validation Loss: 1.9098
+  Epoch 2/30, Training Loss: 0.4827, Validation Loss: 0.4829
+  Epoch 3/30, Training Loss: 0.4818, Validation Loss: 0.4819
+  Epoch 4/30, Training Loss: 0.4827, Validation Loss: 0.4830
+  Epoch 5/30, Training Loss: 0.4835, Validation Loss: 0.4811
+  Epoch 6/30, Training Loss: 0.4794, Validation Loss: 0.4792
+  Epoch 7/30, Training Loss: 0.4774, Validation Loss: 0.4771
+  Epoch 8/30, Training Loss: 0.4749, Validation Loss: 0.4746
+  Epoch 9/30, Training Loss: 0.4712, Validation Loss: 0.4717
+  Epoch 10/30, Training Loss: 0.4688, Validation Loss: 0.4682
+  Epoch 11/30, Training Loss: 0.4648, Validation Loss: 0.4641
+  Epoch 12/30, Training Loss: 0.4558, Validation Loss: 0.4603
+  Epoch 13/30, Training Loss: 0.4640, Validation Loss: 0.4562
+  Epoch 14/30, Training Loss: 0.4600, Validation Loss: 0.4511
+  Epoch 15/30, Training Loss: 0.4364, Validation Loss: 0.4446
+  Epoch 16/30, Training Loss: 0.4381, Validation Loss: 0.4368
+  Epoch 17/30, Training Loss: 0.4506, Validation Loss: 0.4246
+  Epoch 18/30, Training Loss: 0.3970, Validation Loss: 0.4064
+  Epoch 19/30, Training Loss: 0.3842, Validation Loss: 0.3878
+  Epoch 20/30, Training Loss: 0.3577, Validation Loss: 0.3611
+  Epoch 21/30, Training Loss: 0.3301, Validation Loss: 0.3244
+  Epoch 22/30, Training Loss: 0.2949, Validation Loss: 0.2817
+  Epoch 23/30, Training Loss: 0.2277, Validation Loss: 0.2316
+  Epoch 24/30, Training Loss: 0.1871, Validation Loss: 0.1653
+  Epoch 25/30, Training Loss: 0.0949, Validation Loss: 0.0810
+  Epoch 26/30, Training Loss: 0.0192, Validation Loss: 0.0000
   Stopping training as loss has fallen below the threshold: 0.0
 #+end_example
 
@@ -1075,40 +1068,19 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/0d762f493e5e1ea61577c24fa94e3e86d458ce00.png]]
+[[file:./.ob-jupyter/84de79d3f8f753aa2433e2c75a3b49d75f441d80.png]]
 
-** Testing
-
- #+begin_src ipython
-  Wij = model.Wab_T.clone()
+#+begin_src ipython
+  torch.save(model.state_dict(), 'drt.pth')
 #+end_src
 
 #+RESULTS:
 
+** Testing
+
 #+begin_src ipython
   model.eval()
-  if model.LR_NORM:
-      lr = model.lr_kappa * model.lr_mask * (masked_normalize(model.U) @ masked_normalize(model.V).T)
-  else:
-      lr = model.lr_kappa * model.lr_mask * (model.U @ model.V.T)
-
-  # lr = lr / model.Na[0]
-  # lr = lr.clamp(min=-model.Wab_T[0, 0])
-
-  lr = normalize_tensor(lr, 0, model.slices, model.Na)
-  lr = normalize_tensor(lr, 1, model.slices, model.Na)
-
-  model.Wab_T = (Wij +lr.T)
-  model.Wab_T = clamp_tensor(model.Wab_T, 0, model.slices)
-  model.Wab_T = clamp_tensor(model.Wab_T, 1, model.slices)
-
-  if model.IF_STP:
-    W_stp_T = model.W_stp_T + lr[model.slices[0], model.slices[0]].T
-    W_stp_T = clamp_tensor(W_stp_T, 0, model.slices)
-
-  model.N_BATCH = 1
-  model.VERBOSE=1
-  model.LR_TRAIN=0
+  model.LR_READOUT = 0
 #+end_src
 
 #+RESULTS:
@@ -1144,31 +1116,27 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([2, 410, 2000])
+: ff_input torch.Size([2, 410, 1000])
 
 #+begin_src ipython
   model.VERBOSE = 0
-  rates = model.forward(ff_input=ff_input, RET_FF=1).cpu().detach().numpy()
-  model.Wab_T = Wij
+  rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (2, 31, 1600)
+: (2, 31, 500)
 
 #+begin_src ipython
   idx = get_idx(model, 2)
-#+end_src
-
-#+RESULTS:
-: ksi torch.Size([5, 1600])
-
-#+begin_src ipython
   plot_rates_selec(rates, idx)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/8430001da74097faea8bb334c10f1b343dfb79ca.png]]
+:RESULTS:
+: ksi torch.Size([5, 500])
+[[file:./.ob-jupyter/44e32926d075d2f1b0a05ab4b835364c435ebaeb.png]]
+:END:
 
 #+begin_src ipython
     readout = model.linear.weight.data.cpu().detach().numpy()[0]
@@ -1178,7 +1146,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 :RESULTS:
 : (2, 31)
-[[file:./.ob-jupyter/9b108afa054e147d787dcec0472c4698408bd36e.png]]
+[[file:./.ob-jupyter/6a4f7ae3f035bf71bcdc2988959a04fb034696ad.png]]
 :END:
 
 #+begin_src ipython
@@ -1186,10 +1154,10 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/0bdb00219297b5566ecc4d2412b42f2048307ee1.png]]
+[[file:./.ob-jupyter/2b230bdefaa7dd4b398641eb5b74a3f68fddf315.png]]
 
 #+begin_src ipython
-
+  torch.save(model.state_dict(), 'dual.pth')
 #+end_src
 
 #+RESULTS:
@@ -1197,34 +1165,9 @@ Here we only evaluate performance from test onset to test offset
 * Dual
 ** Testing
 
- #+begin_src ipython
-  Wij = model.Wab_T.clone()
-#+end_src
-
-#+RESULTS:
-
 #+begin_src ipython
   model.eval()
-
-  if model.LR_NORM:
-      lr = model.lr_kappa * model.lr_mask * (masked_normalize(model.U) @ masked_normalize(model.V).T)
-  else:
-      lr = model.lr_kappa * model.lr_mask * (model.U @ model.V.T)
-  # lr = lr / model.Na[0]
-  # lr = lr.clamp(min=-model.Wab_T[0, 0])
-
-  lr = normalize_tensor(lr, 0, model.slices, model.Na)
-  lr = normalize_tensor(lr, 1, model.slices, model.Na)
-
-  model.Wab_T = (Wij +lr.T)
-  model.Wab_T = clamp_tensor(model.Wab_T, 0, model.slices)
-  model.Wab_T = clamp_tensor(model.Wab_T, 1, model.slices)
-
-  if model.IF_STP:
-    W_stp_T = model.W_stp_T + lr[model.slices[0], model.slices[0]].T
-    W_stp_T = clamp_tensor(W_stp_T, 0, model.slices)
-
-  model.LR_TRAIN=0
+  model.LR_READOUT = 0
 #+end_src
 
 #+RESULTS:
@@ -1274,7 +1217,6 @@ Here we only evaluate performance from test onset to test offset
 #+begin_src ipython
   model.VERBOSE = 0
   rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
-  model.Wab_T = Wij
   print(rates.shape)
 #+end_src
 
@@ -1295,7 +1237,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2185340a765237ec95f8a6bb12877a7dc7011b31.png]]
+[[file:./.ob-jupyter/3b5e974d7cbbb43b38fef688092c7d3a6c1fbc9c.png]]
 
 #+begin_src ipython
     readout = model.linear.weight.data.cpu().detach().numpy()[0]
@@ -1305,7 +1247,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 :RESULTS:
 : (4, 61)
-[[file:./.ob-jupyter/fded109dfe955e88174810e754a8df5e591d98dd.png]]
+[[file:./.ob-jupyter/80290ccb1a25114339da689f45c6648bf5fbd613.png]]
 :END:
 
 #+begin_src ipython
@@ -1313,7 +1255,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/51ea9841ca021d9338e03115c331e57945aa8795.png]]
+[[file:./.ob-jupyter/42be825b7a63c18c931370508c91dabfc7ad5250.png]]
 
 #+begin_src ipython
 
@@ -1325,6 +1267,8 @@ Here we only evaluate performance from test onset to test offset
 
 #+begin_src ipython
   model.LR_TRAIN = 1
+  model.LR_READOUT = 1
+
   model.LR_EVAL_WIN = 1
   model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
   print(model.lr_eval_win)
@@ -1390,19 +1334,19 @@ Here we only evaluate performance from test onset to test offset
 
               if i==k: # Pair Trials
                   labels[0, l] = np.ones((model.N_BATCH, model.lr_eval_win))
-              else: # Unpair Trials
-                  labels[0, l] = np.ones((model.N_BATCH, model.lr_eval_win))
+              # else: # Unpair Trials
+              #     labels[0, l] = np.zeros((model.N_BATCH, model.lr_eval_win))
 
               if j==1: # Go
                   labels[1, l] = np.ones((model.N_BATCH, model.lr_eval_win))
-              if j==-1: # NoGo
-                  labels[1, l] = np.ones((model.N_BATCH, model.lr_eval_win))
+              # if j==-1: # NoGo
+              #     labels[1, l] = np.zeros((model.N_BATCH, model.lr_eval_win))
 
               l+=1
 
               ff_input.append(model.init_ff_input())
 
-  labels = torch.tensor(labels, dtype=torch.float, device='cuda').reshape(2, -1, model.lr_eval_win).transpose(0, 1)
+  labels = torch.tensor(labels, dtype=torch.float, device=DEVICE).reshape(2, -1, model.lr_eval_win).transpose(0, 1)
   ff_input = torch.vstack(ff_input)
   print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
@@ -1412,13 +1356,13 @@ Here we only evaluate performance from test onset to test offset
 # [goto error]
 : ---------------------------------------------------------------------------
 : OutOfMemoryError                          Traceback (most recent call last)
-: Cell In[122], line 31
+: Cell In[117], line 31
 :      28             ff_input.append(model.init_ff_input())
-:      30 labels = torch.tensor(labels, dtype=torch.float, device='cuda').reshape(2, -1, model.lr_eval_win).transpose(0, 1)
+:      30 labels = torch.tensor(labels, dtype=torch.float, device=DEVICE).reshape(2, -1, model.lr_eval_win).transpose(0, 1)
 : ---> 31 ff_input = torch.vstack(ff_input)
 :      32 print('ff_input', ff_input.shape, 'labels', labels.shape)
 :
-: OutOfMemoryError: CUDA out of memory. Tried to allocate 8.13 GiB. GPU 0 has a total capacity of 23.50 GiB of which 3.79 GiB is free. Process 136878 has 318.00 MiB memory in use. Including non-PyTorch memory, this process has 19.37 GiB memory in use. Of the allocated memory 17.88 GiB is allocated by PyTorch, and 1.18 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+: OutOfMemoryError: CUDA out of memory. Tried to allocate 8.13 GiB. GPU 0 has a total capacity of 23.50 GiB of which 3.88 GiB is free. Process 2596683 has 440.00 MiB memory in use. Process 2648748 has 410.00 MiB memory in use. Including non-PyTorch memory, this process has 18.75 GiB memory in use. Of the allocated memory 17.77 GiB is allocated by PyTorch, and 681.38 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
 :END:
 
 #+begin_src ipython
@@ -1432,11 +1376,11 @@ Here we only evaluate performance from test onset to test offset
 #+begin_example
   ---------------------------------------------------------------------------
   ValueError                                Traceback (most recent call last)
-  Cell In[123], line 2
+  Cell In[118], line 2
         1 batch_size = 16
   ----> 2 train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
 
-  Cell In[4], line 6, in split_data(X, Y, train_perc, batch_size)
+  Cell In[5], line 6, in split_data(X, Y, train_perc, batch_size)
         3 def split_data(X, Y, train_perc=0.8, batch_size=32):
         5   if Y.ndim==3:
   ----> 6     X_train, X_test, Y_train, Y_test = train_test_split(X, Y,
@@ -1506,7 +1450,7 @@ Here we only evaluate performance from test onset to test offset
 
   # SGD, Adam, AdamW
   learning_rate = 0.1
-  optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+  optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
 #+RESULTS:
@@ -1516,29 +1460,13 @@ Here we only evaluate performance from test onset to test offset
   loss, val_loss = run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)
 #+end_src
 #+RESULTS:
-: 495f0abf-a776-47bd-8e86-44bdc314cd40
+: 971d8653-169f-4934-ac32-3eb050d14571
 
 ** Re-Testing
 
 #+begin_src ipython
-  Wij = model.Wab_T.clone()
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
   model.eval()
-  if model.LR_NORM:
-      lr = model.lr_kappa * model.lr_mask * (masked_normalize(model.U) @ masked_normalize(model.V).T) / (1.0 * model.Na[0])
-  else:
-      lr = model.lr_kappa * model.lr_mask * (model.U @ model.V.T) / (1.0 * model.Na[0])
-
-  lr = lr.clamp(min=-model.Wab_T[0, 0])
-  model.Wab_T = Wij + lr.T
-
-  model.N_BATCH = 1
-  model.VERBOSE=1
-  model.LR_TRAIN=0
+  model.LR_READOUT = 0
 #+end_src
 
 #+RESULTS:
@@ -1586,9 +1514,7 @@ Here we only evaluate performance from test onset to test offset
 : ff_input torch.Size([4, 710, 2000])
 
 #+begin_src ipython
-  model.VERBOSE = 0
   rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
-  model.Wab_T = Wij
   print(rates.shape)
 #+end_src
 
@@ -1597,17 +1523,14 @@ Here we only evaluate performance from test onset to test offset
 
 #+begin_src ipython
   idx = get_idx(model, 2)
-#+end_src
-
-#+RESULTS:
-: ksi torch.Size([5, 1600])
-
-#+begin_src ipython
   plot_rates_selec(rates, idx)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/6581daa6193dba178737887eb28a27115b26ebb1.png]]
+:RESULTS:
+: ksi torch.Size([5, 1600])
+[[file:./.ob-jupyter/6d61db29b639e84c2d372b67bc2d5688e428c38a.png]]
+:END:
 
 #+begin_src ipython
     readout = model.linear.weight.data[0].cpu().detach().numpy()
@@ -1617,7 +1540,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 :RESULTS:
 : (4, 61)
-[[file:./.ob-jupyter/a3f13427065b74d083a0c5b6dd370315098956e3.png]]
+[[file:./.ob-jupyter/ca38faca0c3a146addd4935a11d08a5f6e2bfe9b.png]]
 :END:
 
 #+begin_src ipython
@@ -1625,7 +1548,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e1dff1fa02ec53f57cc7ad64e6c144b2543b0267.png]]
+[[file:./.ob-jupyter/414bc92961b30cbfaf129c016fe5844b46d6f48a.png]]
 
 #+begin_src ipython
 

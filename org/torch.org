@@ -115,49 +115,116 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: Na tensor([2000,  500], device='cuda:0', dtype=torch.int32) Ka tensor([250., 250.], device='cuda:0') csumNa tensor([   0, 2000, 2500], device='cuda:0')
-# [goto error]
 #+begin_example
-  ---------------------------------------------------------------------------
-  AttributeError                            Traceback (most recent call last)
-  Cell In[8], line 2
-        1 start = perf_counter()
-  ----> 2 model = Network(conf_name, REPO_ROOT, VERBOSE=1, DEVICE='cuda', LIVE_FF_UPDATE=1, TASK='dual_rand', seed=0)
-        3 rates = model(RET_FF=1).cpu().numpy()
-        4 end = perf_counter()
-
-  File ~/models/NeuroFlame/org/../src/network.py:36, in Network.__init__(self, conf_name, repo_root, **kwargs)
-       33 super().__init__()
-       35 # Load parameters from configuration file and create networks constants
-  ---> 36 config = Configuration(conf_name, repo_root)(**kwargs)
-       37 self.__dict__.update(config.__dict__)
-       39 # Initialize weight matrix
-
-  File ~/models/NeuroFlame/org/../src/configuration.py:43, in Configuration.__call__(self, **kwargs)
-       42 def __call__(self, **kwargs):
-  ---> 43     return self.forward(**kwargs)
-
-  File ~/models/NeuroFlame/org/../src/configuration.py:38, in Configuration.forward(self, **kwargs)
-       35 set_seed(self.SEED)
-       37 # create networks' constants
-  ---> 38 init_const(self)
-       40 return self
-
-  File ~/models/NeuroFlame/org/../src/configuration.py:161, in init_const(model)
-      157     multivariate_normal = MultivariateNormal(mean_, cov_)
-      158     model.PHI0 = multivariate_normal.sample((model.Na[0],)).T
-      159     model.PHI0 = torch.stack(
-      160         (model.PHI0[0], model.PHI0[0], model.PHI0[1], model.PHI0[1])
-  --> 161     ).type(model.float32)
-      162 else:
-      163     # print('Using Francesca like low rank')
-      164     multivariate_normal = MultivariateNormal(mean_, cov_)
-
-  AttributeError: 'Configuration' object has no attribute 'float32'
+  Na tensor([2000,  500], device='cuda:0', dtype=torch.int32) Ka tensor([250., 250.], device='cuda:0') csumNa tensor([   0, 2000, 2500], device='cuda:0')
+  Jab [1.0, -1.5, 1, -1]
+  Ja0 [1.3, 1.0]
+  Generating ff input
+  times (s) 0.0 rates (Hz) [0.08, 2.03]
+  times (s) 0.07 rates (Hz) [0.08, 2.57]
+  times (s) 0.13 rates (Hz) [0.1, 1.95]
+  times (s) 0.2 rates (Hz) [0.09, 2.54]
+  times (s) 0.26 rates (Hz) [0.08, 2.59]
+  times (s) 0.33 rates (Hz) [0.07, 1.82]
+  times (s) 0.4 rates (Hz) [0.12, 2.76]
+  times (s) 0.46 rates (Hz) [0.1, 1.95]
+  times (s) 0.53 rates (Hz) [0.07, 1.82]
+  times (s) 0.6 rates (Hz) [0.13, 2.78]
+  times (s) 0.66 rates (Hz) [1.61, 2.38]
+  times (s) 0.73 rates (Hz) [1.1, 3.23]
+  times (s) 0.79 rates (Hz) [1.12, 3.44]
+  times (s) 0.86 rates (Hz) [1.22, 3.73]
+  times (s) 0.93 rates (Hz) [1.55, 4.38]
+  times (s) 0.99 rates (Hz) [2.4, 5.58]
+  times (s) 1.06 rates (Hz) [3.6, 7.3]
+  times (s) 1.13 rates (Hz) [3.96, 8.34]
+  times (s) 1.19 rates (Hz) [3.79, 8.61]
+  times (s) 1.26 rates (Hz) [3.85, 8.99]
+  times (s) 1.32 rates (Hz) [3.54, 9.29]
+  times (s) 1.39 rates (Hz) [1.15, 6.04]
+  times (s) 1.46 rates (Hz) [2.53, 7.0]
+  times (s) 1.52 rates (Hz) [2.71, 7.42]
+  times (s) 1.59 rates (Hz) [2.37, 6.98]
+  times (s) 1.66 rates (Hz) [2.69, 7.31]
+  times (s) 1.72 rates (Hz) [2.63, 7.28]
+  times (s) 1.79 rates (Hz) [2.65, 7.32]
+  times (s) 1.85 rates (Hz) [2.68, 7.37]
+  times (s) 1.92 rates (Hz) [2.69, 7.4]
+  times (s) 1.99 rates (Hz) [2.7, 7.43]
+  times (s) 2.05 rates (Hz) [2.7, 7.45]
+  times (s) 2.12 rates (Hz) [2.69, 7.45]
+  times (s) 2.19 rates (Hz) [2.63, 7.41]
+  times (s) 2.25 rates (Hz) [2.61, 7.38]
+  times (s) 2.32 rates (Hz) [2.61, 7.39]
+  times (s) 2.38 rates (Hz) [2.6, 7.38]
+  times (s) 2.45 rates (Hz) [2.61, 7.38]
+  times (s) 2.52 rates (Hz) [2.6, 7.37]
+  times (s) 2.58 rates (Hz) [2.58, 7.35]
+  times (s) 2.65 rates (Hz) [2.59, 7.35]
+  times (s) 2.72 rates (Hz) [2.58, 7.34]
+  times (s) 2.78 rates (Hz) [2.57, 7.33]
+  times (s) 2.85 rates (Hz) [2.57, 7.33]
+  times (s) 2.91 rates (Hz) [2.56, 7.32]
+  times (s) 2.98 rates (Hz) [2.55, 7.31]
+  times (s) 3.05 rates (Hz) [2.56, 7.32]
+  times (s) 3.11 rates (Hz) [2.57, 7.34]
+  times (s) 3.18 rates (Hz) [2.58, 7.35]
+  times (s) 3.25 rates (Hz) [2.59, 7.37]
+  times (s) 3.31 rates (Hz) [2.59, 7.37]
+  times (s) 3.38 rates (Hz) [2.59, 7.37]
+  times (s) 3.44 rates (Hz) [2.58, 7.37]
+  times (s) 3.51 rates (Hz) [2.58, 7.36]
+  times (s) 3.58 rates (Hz) [2.58, 7.36]
+  times (s) 3.64 rates (Hz) [2.57, 7.35]
+  times (s) 3.71 rates (Hz) [2.56, 7.34]
+  times (s) 3.77 rates (Hz) [2.55, 7.33]
+  times (s) 3.84 rates (Hz) [2.52, 7.3]
+  times (s) 3.91 rates (Hz) [2.52, 7.29]
+  times (s) 3.97 rates (Hz) [2.53, 7.3]
+  times (s) 4.04 rates (Hz) [2.53, 7.3]
+  times (s) 4.11 rates (Hz) [2.51, 7.28]
+  times (s) 4.17 rates (Hz) [2.49, 7.25]
+  times (s) 4.24 rates (Hz) [2.46, 7.21]
+  times (s) 4.3 rates (Hz) [2.44, 7.18]
+  times (s) 4.37 rates (Hz) [2.43, 7.15]
+  times (s) 4.44 rates (Hz) [2.41, 7.13]
+  times (s) 4.5 rates (Hz) [2.39, 7.09]
+  times (s) 4.57 rates (Hz) [2.37, 7.06]
+  times (s) 4.64 rates (Hz) [2.37, 7.04]
+  times (s) 4.7 rates (Hz) [2.36, 7.03]
+  times (s) 4.77 rates (Hz) [2.36, 7.02]
+  times (s) 4.83 rates (Hz) [2.36, 7.01]
+  times (s) 4.9 rates (Hz) [2.34, 6.99]
+  times (s) 4.97 rates (Hz) [2.31, 6.95]
+  times (s) 5.03 rates (Hz) [2.27, 6.89]
+  times (s) 5.1 rates (Hz) [2.27, 6.86]
+  times (s) 5.17 rates (Hz) [2.27, 6.84]
+  times (s) 5.23 rates (Hz) [2.25, 6.81]
+  times (s) 5.3 rates (Hz) [2.24, 6.79]
+  times (s) 5.36 rates (Hz) [2.24, 6.78]
+  times (s) 5.43 rates (Hz) [2.24, 6.77]
+  times (s) 5.5 rates (Hz) [2.26, 6.79]
+  times (s) 5.56 rates (Hz) [2.27, 6.8]
+  times (s) 5.63 rates (Hz) [2.26, 6.8]
+  times (s) 5.7 rates (Hz) [2.23, 6.77]
+  times (s) 5.76 rates (Hz) [2.19, 6.73]
+  times (s) 5.83 rates (Hz) [2.15, 6.67]
+  times (s) 5.89 rates (Hz) [2.13, 6.63]
+  times (s) 5.96 rates (Hz) [2.09, 6.57]
+  times (s) 6.03 rates (Hz) [2.08, 6.54]
+  times (s) 6.09 rates (Hz) [2.1, 6.53]
+  times (s) 6.16 rates (Hz) [2.11, 6.54]
+  times (s) 6.23 rates (Hz) [2.13, 6.55]
+  times (s) 6.29 rates (Hz) [2.15, 6.57]
+  times (s) 6.36 rates (Hz) [2.17, 6.59]
+  times (s) 6.42 rates (Hz) [2.17, 6.6]
+  times (s) 6.49 rates (Hz) [2.16, 6.59]
+  times (s) 6.56 rates (Hz) [2.17, 6.59]
+  times (s) 6.62 rates (Hz) [2.16, 6.59]
+  Elapsed (with compilation) = 0h 0m 5s
+  rates (1, 101, 2000)
 #+end_example
-:END:
-#+RESULTS:
+
 
 #+begin_src ipython
   overlap = get_overlap(model, rates)
@@ -183,8 +250,8 @@
 #+end_src
 
 #+RESULTS:
-: 506.29632
-: 506.29632
+: 927.28832
+: 927.28832
 
 *** Dynamics
 
@@ -209,7 +276,7 @@
 #+RESULTS:
 :RESULTS:
 : (1, 101, 2000)
-[[file:./.ob-jupyter/332ad00e5bcdddf2f328f5fe85537db97c2f878e.png]]
+[[file:./.ob-jupyter/37e5f88acf53830b67f64e57c822bef1b69b5777.png]]
 :END:
 
 #+begin_src ipython
@@ -221,17 +288,17 @@
   ax[0].set_ylabel('Neuron #')
   ax[0].set_xlabel('Step')
 
-  ax[1].imshow(rates_ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+  ax[1].imshow(rates_ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
   ax[1].set_ylabel('Pref. Location (°)')
   ax[1].set_xlabel('Step')
-  ax[1].set_yticks(np.linspace(0, Ne, 5), np.linspace(360, 0, 5).astype(int))
+  ax[1].set_yticks(np.linspace(0, Ne, 5), np.linspace(0, 360, 5).astype(int))
   # ax[0][1].colorbar()
 
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/988c1dc0003c6e368e63436010cd1ae7115d0046.png]]
+[[file:./.ob-jupyter/e5df0dcb01cec1bb7971e1b8b8b508e5b7ea1fef.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -248,7 +315,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/53f55d91952cf2976e0e459642b121450da596c1.png]]
+[[file:./.ob-jupyter/9d3b66aaf2085b56dda1c5027f8f7b4dc4df8e9c.png]]
 
 #+begin_src ipython
 

@@ -58,6 +58,7 @@ class Network(nn.Module):
         self.scaleWeights()
 
         # in pytorch, Wij is i to j.
+        # self.register_buffer('Wab_T', torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device))
         self.Wab_T = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
 
         # Creates connetivity matrix in blocks
@@ -354,7 +355,7 @@ class Network(nn.Module):
                 self.x_list = torch.stack(self.x_list, dim=1)
 
         # Add Linear readout (N_BATCH, N_EVAL_WIN, 1) on last few steps
-        if self.LR_TRAIN:
+        if self.LR_READOUT:
             y_pred = self.linear(self.dropout(rates))
             # y_pred = self.linear(self.dropout(rates[:, -self.lr_eval_win :]))
             # del rates

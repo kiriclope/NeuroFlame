@@ -15,10 +15,13 @@
 #+end_src
 
 #+RESULTS:
+:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
+: <Figure size 600x370.82 with 0 Axes>
+:END:
 
 * Imports
 
@@ -135,10 +138,10 @@
 ** ODR
 
 #+begin_src ipython
-  ff_input = Stimuli(task='odr', size=(10, 1000))(1, 1, 0, rnd_phase=1).cpu().numpy()
+  ff_input = Stimuli(task='odr', size=(10, 1000))(1, 1, np.pi/3, rnd_phase=0).cpu().numpy()
   print(ff_input.shape)
   plt.plot(ff_input.T[:, :5])
-  
+
   plt.xlabel('Neuron #')
   plt.ylabel('Input Strength')
   plt.title('ODR')
@@ -147,9 +150,18 @@
 
 #+RESULTS:
 :RESULTS:
-: (10, 1000)
-[[file:./.ob-jupyter/975d0e75646fd358685de805c19deecd7d46dc28.png]]
+: (1, 1000)
+[[file:./.ob-jupyter/64fa62ee533c6753ef92528ce61ecf479c30e350.png]]
 :END:
+
+#+begin_src ipython
+    m0, m1, phase = decode_bump(ff_input)
+    print(phase * 180 / np.pi)
+    #   print((360 - phase * 180 / np.pi))
+#+end_src
+#+RESULTS:
+: [59.99999639]
+:
 
 ** Dual Task
 
@@ -162,7 +174,7 @@
   theta = get_theta(xi[0].cpu().numpy(), xi[1].cpu().numpy(), GM=0, IF_NORM=0)
   theta = np.arctan2(xi[1].cpu().numpy(), xi[0].cpu().numpy())
   index_order = theta.argsort()
-  
+
   ff_input = ff_input[index_order]
   plt.plot(ff_input)
   plt.xlabel('Neuron #')
@@ -174,7 +186,7 @@
 #+RESULTS:
 :RESULTS:
 : (1000,)
-[[file:./.ob-jupyter/6c8c2a76449636e0bfc500e60fec7139ad699adc.png]]
+[[file:./.ob-jupyter/2db403982d74cf5f8644812fc9625e8b87ee6422.png]]
 :END:
 
 #+begin_src ipython
@@ -189,7 +201,7 @@
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroFlame"
-  model = Network('config_odr.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='odr_rand', LIVE_FF_UPDATE=0, N_BATCH=30, seed=0)
+  model = Network('config_odr.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='odr_rand', LIVE_FF_UPDATE=0, N_BATCH=10, seed=0)
 #+end_src
 
 #+RESULTS:
@@ -203,8 +215,40 @@
 #+end_src
 
 #+RESULTS:
-: torch.Size([30, 1, 500])
-: (30, 44400, 1000)
+:RESULTS:
+# [goto error]
+#+begin_example
+  ---------------------------------------------------------------------------
+  RuntimeError                              Traceback (most recent call last)
+  Cell In[20], line 4
+        1 Ne = model.Na[0].cpu().numpy()
+        2 N = model.N_NEURON
+  ----> 4 ff_input = model.init_ff_input().cpu().numpy()
+        5 print(ff_input.shape)
+
+  File ~/models/NeuroFlame/org/tests/../../src/network.py:116, in Network.init_ff_input(self)
+      115 def init_ff_input(self):
+  --> 116     return init_ff_input(self)
+
+  File ~/models/NeuroFlame/org/tests/../../src/ff_input.py:176, in init_ff_input(model)
+      174 if model.LIVE_FF_UPDATE:
+      175     return init_ff_live(model)
+  --> 176 return init_ff_seq(model)
+
+  File ~/models/NeuroFlame/org/tests/../../src/ff_input.py:165, in init_ff_seq(model)
+      159             stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[:, i])
+      161         # reshape stimulus to be (N_BATCH, 1, NE) adding dummy time dimension
+      162         # stimulus = stimulus.unsqueeze(1)
+      163         # print(stimulus.shape)
+  --> 165         ff_input[:, model.N_STIM_ON[i] : model.N_STIM_OFF[i], model.slices[0]].add_(
+      166             stimulus
+      167         )
+      168         del stimulus
+      170 return ff_input * torch.sqrt(model.Ka[0]) * model.M0
+
+  RuntimeError: The size of tensor a (4000) must match the size of tensor b (10) at non-singleton dimension 1
+#+end_example
+:END:
 
 #+begin_src ipython
   m0, m1, phase = decode_bump(ff_input[..., model.slices[0]])
@@ -246,7 +290,7 @@
 [[file:./.ob-jupyter/97edbdc69846a716650db4b8fd248918ec293ec6.png]]
 
 #+begin_src ipython
-  
+
 #+end_src
 
 #+RESULTS:
@@ -263,7 +307,7 @@
 #+begin_src ipython
   Ne = model.Na[0].cpu().numpy()
   N = model.N_NEURON
-  
+
   ff_input = model.init_ff_input().cpu().numpy()
   print(ff_input.shape)
 #+end_src
@@ -306,7 +350,7 @@
   ax[2].set_xlabel('Step')
   ax[2].set_ylabel('Pref Loc. (°)')
   ax[2].set_yticks(np.linspace(0, 2000, 5), np.linspace(0, 360, 5).astype(int))
-  
+
   plt.show()
 #+end_src
 
@@ -363,7 +407,7 @@
 #+begin_src ipython
   Ne = model.Na[0].cpu().numpy()
   N = model.N_NEURON
-  
+
   ff_input = model.ff_input.cpu().numpy()
   print(ff_input.shape)
 #+end_src
@@ -395,7 +439,7 @@
   # ax[2].set_xlabel('Step')
   # ax[2].set_ylabel('Pref Loc. (°)')
   # ax[2].set_yticks(np.linspace(0, 2000, 5), np.linspace(0, 360, 5).astype(int))
-  
+
   plt.show()
 #+end_src
 
@@ -412,7 +456,7 @@
   ax[1].plot(m1.T)
   ax[1].set_xlabel('Step')
   ax[1].set_ylabel('$\mathcal{F}_1$')
-  
+
   ax[2].plot(phase.T * 180 / np.pi)
   ax[2].set_xlabel('Step')
   ax[2].set_ylabel('$\Phi$ (°)')
@@ -433,7 +477,7 @@
 [[file:./.ob-jupyter/6eb383f6aed69dd097be003620504534f0ccda91.png]]
 
 #+begin_src ipython
-  
+
 
 #+end_src
 
@@ -452,7 +496,7 @@
 #+begin_src ipython
   Ne = model.Na[0].cpu().numpy()
   N = model.N_NEURON
-  
+
   ff_input = model.ff_input.cpu().numpy()
   print(ff_input.shape)
 #+end_src
@@ -493,12 +537,12 @@
   ax[2].set_xlabel('Step')
   ax[2].set_ylabel('Pref Loc. (°)')
   ax[2].set_yticks(np.linspace(0, 2000, 5), np.linspace(0, 360, 5).astype(int))
-  
+
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/94d807eb213f2f129cae73ee005ba5f9c27600e9.png]]
+[[file:./.ob-jupyter/dc49ab8273ccce1ba30881751907da3af0ebbe90.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=(2.25*width, height))
@@ -510,7 +554,7 @@
   ax[1].plot(m1.T)
   ax[1].set_xlabel('Step')
   ax[1].set_ylabel('$\mathcal{F}_1$')
-  
+
   ax[2].plot(phase.T * 180 / np.pi)
   ax[2].set_xlabel('Step')
   ax[2].set_ylabel('$\Phi$ (°)')
@@ -519,7 +563,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ba2550fdd16c634d3b28f46c01e5ebae141ef1d1.png]]
+[[file:./.ob-jupyter/96268c0aefcf268afa5522df0592cd738900ead0.png]]
 
 #+begin_src ipython
   plt.hist(model.phase.cpu().numpy() * 180 / np.pi, bins='auto')
@@ -528,7 +572,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/092a6401b9a721d207b793845be198f647e2b47a.png]]
+[[file:./.ob-jupyter/fd236d4f77c1bdaa79c04f384bf8ff736a35cb6c.png]]
 
 #+begin_src ipython
 

@@ -74,7 +74,7 @@ To find parameters for which we have a multistable ring attractor, we use torch 
 With torch we can easily pass lists of parameters or batches to the model.
 Here, let's batch the recurrent strenght $J_{EE}$.
 
-#+begin_src ipython  
+#+begin_src ipython
   N_BATCH = 20
   # Here we pass a list of parameters to J_STP which is JEE for the model with stp
   model.J_STP = torch.linspace(0, 10, N_BATCH, dtype=torch.float32, device='cuda')
@@ -86,7 +86,7 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 
   model.J_STP = model.J_STP.unsqueeze(-1)
   # we need to scale J_STP correctly 1/sqrt(K)
-  model.J_STP = model.J_STP * model.Jab[0, 0]  
+  model.J_STP = model.J_STP * model.Jab[0, 0]
   print('Jee', model.J_STP.shape)
 
   # We set the number of batches
@@ -102,7 +102,7 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 
 #+RESULTS:
 : Jee torch.Size([20, 1])
-: Elapsed (with compilation) = 0h 0m 7s
+: Elapsed (with compilation) = 0h 0m 9s
 : rates (20, 21, 2000)
 
 #+begin_src ipython
@@ -115,7 +115,7 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-  
+
   ax[0].plot(model.J_STP.cpu(), m0[:, -1], '-o')
   ax[0].set_xlabel('$J_{EE}$')
   ax[0].set_ylabel('$<Rates>_i$')
@@ -127,7 +127,7 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/83bc3196637a9531a4d8bf8c089d579e7dda74c9.png]]
+[[file:./.ob-jupyter/a500c3b4eb73e8813c20e2c8a5944d37f43d3c18.png]]
 
 #+begin_src ipython
   print(model.J_STP.shape, m1.shape)
@@ -138,7 +138,7 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-  
+
   ax[0].plot(model.J_STP.cpu(), m1[:, -1])
   ax[0].set_xlabel('$J_{EE}$')
   ax[0].set_ylabel('$\mathcal{F}_1$')
@@ -150,7 +150,7 @@ Here, let's batch the recurrent strenght $J_{EE}$.
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/264621beab89d7a36e430db89816e806b08d194a.png]]
+[[file:./.ob-jupyter/3aa5feff8a8249f90267c5332abce99066404f5e.png]]
 
 Here, for example, with J_STP=10 we have a ring attractor!
 
@@ -163,7 +163,7 @@ Here, for example, with J_STP=10 we have a ring attractor!
 ** Batching multiple parameters
 
 Sometimes we won't be so lucky and need to search harder over multiple parameters.
-In order to *batch* over multiple parameters, we need to carefully create each parameter batch. 
+In order to *batch* over multiple parameters, we need to carefully create each parameter batch.
 Here, let's batch the recurrent strenght $J_{EE}$ and the feedforward strength $J_{E0}$.
 
 #+begin_src ipython
@@ -180,7 +180,7 @@ First we create the lists of parameters to sweep
 
   JEE_list = torch.linspace(5, 10, N_JEE, device='cuda')
   print('Jee list', JEE_list)
-  
+
   JE0_list = torch.linspace(0, 4, N_JE0, device='cuda')
   print('Je0 list', JE0_list)
 #+end_src
@@ -200,7 +200,7 @@ In that way, all the values of J_{EE} are associated once with a value of Je0.
 #+begin_src ipython
   JEE = JEE_list.unsqueeze(0).expand(N_JE0, N_JEE)
   print('JEE first col', JEE[0])
-  
+
   JE0 = JE0_list.unsqueeze(1).expand(N_JE0, N_JEE)
   print('JE0 first row', JE0[:, 0])
 #+end_src
@@ -216,10 +216,10 @@ Torch models need a single batch dimension so we concatenate the two dimensions 
 We need the extra dummy dimension so that in the model dot products are done properly.
 
 #+begin_src ipython
-  JEE = JEE.reshape((-1, 1)) 
+  JEE = JEE.reshape((-1, 1))
   print('JEE', JEE.shape)
 
-  JE0 = JE0.reshape((-1, 1)) 
+  JE0 = JE0.reshape((-1, 1))
   print('JE0', JE0.shape)
 #+end_src
 #+RESULTS:
@@ -242,7 +242,7 @@ Now we need to set the number of batches and copy our tensors to the model
   # and pass N_BATCH, Ja0 and Jee to the model
   model.N_BATCH = N_BATCH
   # copy Ja0
-  model.Ja0 = Ja0 
+  model.Ja0 = Ja0
   # in the model with stp, JEE is J_STP
   model.J_STP = JEE * model.Jab[0, 0]
 #+end_src
@@ -260,7 +260,7 @@ Let's run the simulations
   print('rates', rates.shape)
 #+end_src
 #+RESULTS:
-: Elapsed (with compilation) = 0h 0m 12s
+: Elapsed (with compilation) = 0h 0m 14s
 : rates (200, 21, 2000)
 
 Let's compute the fourier moments of the population activity and reshape them
@@ -268,7 +268,7 @@ Let's compute the fourier moments of the population activity and reshape them
   m0, m1, phi = decode_bump(rates, axis=-1)
 
   m0 = m0.reshape(N_JE0, N_JEE, -1)
-  m1 = m1.reshape(N_JE0, N_JEE, -1)  
+  m1 = m1.reshape(N_JE0, N_JEE, -1)
 #+end_src
 
 #+RESULTS:
@@ -295,7 +295,7 @@ Let's compute the fourier moments of the population activity and reshape them
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/9fcf03c314082968f69ab6f6d8b4a1aa7829b67c.png]]
+[[file:./.ob-jupyter/2f6016aa5164ea897e71ae2801ab9e8819a47240.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -304,7 +304,7 @@ Let's compute the fourier moments of the population activity and reshape them
   ax[0].set_ylabel('$\mathcal{F}_1$')
   ax[0].set_xlabel('step')
   ax[0].set_title('Varying $J_{EE}$')
-  
+
   ax[1].plot(m1[:, 3].T)
   ax[1].set_ylabel('$\mathcal{F}_1$')
   ax[1].set_xlabel('step')
@@ -314,7 +314,7 @@ Let's compute the fourier moments of the population activity and reshape them
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/dbf3386bf578e4cd90416e8627bdd89bcfdab83c.png]]
+[[file:./.ob-jupyter/f64c71d2e8ef927e2e68a0b157be668340d6d697.png]]
 
 The parameters corresponding to (row 3, col -1) work!
 
@@ -323,7 +323,7 @@ We can get their values from their matrix form
 #+begin_src ipython
   JEE = torch.linspace(5, 10, N_JEE, device='cuda')
   JE0 = torch.linspace(0, 4, N_JE0, device='cuda')
-  
+
   JEE = JEE.unsqueeze(0).expand(N_JE0, N_JEE)
   JE0 = JE0.unsqueeze(1).expand(N_JE0, N_JEE)
 
@@ -331,7 +331,7 @@ We can get their values from their matrix form
   print('JEE', JEE[3, -1].item())
 #+end_src
 #+RESULTS:
-: JE0 1.3333333730697632
+: JE0 1.3333333333333333
 : JEE 10.0
 
 or directly from the original lists
@@ -339,13 +339,13 @@ or directly from the original lists
 #+begin_src ipython
   JE0 = torch.linspace(0, 4, N_JE0, device='cuda')
   print('JE0', JE0[3].item())
-  
+
   JEE = torch.linspace(5, 10, N_JEE, device='cuda')
   print('JEE', JEE[-1].item())
 #+end_src
 
 #+RESULTS:
-: JE0 1.3333333730697632
+: JE0 1.3333333333333333
 : JEE 10.0
 
 Let's test them.
@@ -381,7 +381,7 @@ Let's test them.
   ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
   ax[0].set_ylabel('Neuron #')
   ax[0].set_xlabel('Step')
-  
+
   ax[1].plot(m1.T)
   ax[1].set_ylabel('$\mathcal{F}_1$')
   ax[1].set_xlabel('Step')
@@ -390,7 +390,7 @@ Let's test them.
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7c00c5aeb2b0a2ddb5d298b191f78880f5a25a4f.png]]
+[[file:./.ob-jupyter/5cbf0b7bfb8455f1d5e06d21be0886e97038e4d4.png]]
 
 #+begin_src ipython
 
@@ -419,10 +419,10 @@ Now that we have found a ring attractor we can investigate the biases in the mod
   print(model.PHI0.shape)
 
   PHI0 = model.PHI0.unsqueeze(-1).repeat((N_PHASE, 1, 1))
-  
+
   print(PHI0.shape)
-  PHI0[:, -1] = torch.randint(0, 360, (N_PHASE,), device=model.device).unsqueeze(1)
-  PHI0[:, 0] = torch.randint(0, 360, (N_PHASE,), device=model.device).unsqueeze(1)
+  PHI0[:, -1] = torch.randint(0, 360, (N_PHASE,), device=model.device).unsqueeze(1) * torch.pi / 180.0
+  PHI0[:, 0] = torch.randint(0, 360, (N_PHASE,), device=model.device).unsqueeze(1) * torch.pi / 180.0
 #+end_src
 
 #+RESULTS:
@@ -449,8 +449,8 @@ Now that we have found a ring attractor we can investigate the biases in the mod
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-  r_max = np.max(rates[0]) 
-  
+  r_max = np.max(rates[0])
+
   ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
   ax[0].set_ylabel('Pref. Location (°)')
   ax[0].set_yticks(np.linspace(0, model.Na[0].cpu(), 5), np.linspace(0, 360, 5).astype(int))
@@ -464,7 +464,7 @@ Now that we have found a ring attractor we can investigate the biases in the mod
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/9826ee048ffdad63f7a39662157e4f66ff1e351d.png]]
+[[file:./.ob-jupyter/4ed3ab2ce3345622e10b68f0f1250e021847881e.png]]
 
 #+begin_src ipython
   target_loc = model.PHI0[:, -1].cpu().numpy()
@@ -483,7 +483,7 @@ Now that we have found a ring attractor we can investigate the biases in the mod
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/8a34f9bb7261360c1cb3db61734e79e18b55baa7.png]]
+[[file:./.ob-jupyter/3c4468758dca70ab9f3daa3142551a5830275fc6.png]]
 
 #+begin_src ipython
   plt.hist(errors[:, -1] * 180/np.pi, bins='auto')
@@ -492,7 +492,7 @@ Now that we have found a ring attractor we can investigate the biases in the mod
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/09fb2524767ca0316c3f25bb4f9574dffbda4d1f.png]]
+[[file:./.ob-jupyter/7090c766b789d32d505f1fc177cb3d8a30aad98f.png]]
 
 ** Systematic biases
 
@@ -505,13 +505,13 @@ Now that we have found a ring attractor we can investigate the biases in the mod
   stt = binned_statistic(target_loc[:,0], errors[:,-1] * 180/np.pi, statistic='mean', bins=30, range=[0, 360])
   dstt = np.mean(np.diff(stt.bin_edges))
   plt.plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
-  
+
   plt.axhline(color='k', linestyle=":")
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/68beed935e7348db766ff208a2392da1236f6d8a.png]]
+[[file:./.ob-jupyter/f2a2130538d4f8744f2c9e3e436d36c1f9261e13.png]]
 
 ** Serial biases
 
@@ -531,11 +531,10 @@ Now that we have found a ring attractor we can investigate the biases in the mod
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7dfcc8d4389dec374381e6d100464d97b313206c.png]]
+[[file:./.ob-jupyter/39430343f09af953d41aa5cdcb640396e6db82b5.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-
