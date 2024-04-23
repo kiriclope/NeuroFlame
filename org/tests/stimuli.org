@@ -15,13 +15,10 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
-: <Figure size 600x370.82 with 0 Axes>
-:END:
 
 * Imports
 
@@ -138,9 +135,10 @@
 ** ODR
 
 #+begin_src ipython
-  ff_input = Stimuli(task='odr', size=(10, 1000))(1, 1, np.pi/3, rnd_phase=0).cpu().numpy()
+  ff_input = Stimuli(task='odr', size=(10, 1000))(1, 1, np.pi/2, rnd_phase=0).cpu().numpy()
   print(ff_input.shape)
   plt.plot(ff_input.T[:, :5])
+  plt.xticks(np.linspace(0, 1000, 5), np.linspace(0, 360, 5).astype(int))
 
   plt.xlabel('Neuron #')
   plt.ylabel('Input Strength')
@@ -151,7 +149,7 @@
 #+RESULTS:
 :RESULTS:
 : (1, 1000)
-[[file:./.ob-jupyter/64fa62ee533c6753ef92528ce61ecf479c30e350.png]]
+[[file:./.ob-jupyter/44857dff6ad30decd3dc5c58e64b55e7447d8c62.png]]
 :END:
 
 #+begin_src ipython
@@ -160,14 +158,13 @@
     #   print((360 - phase * 180 / np.pi))
 #+end_src
 #+RESULTS:
-: [59.99999639]
-:
+: [89.99999965]
 
 ** Dual Task
 
 #+begin_src ipython
   xi = torch.randn((2, 1000), device='cuda')
-  ff_input = Stimuli(task='dual', size=(10, 1000))(1, 1, xi[0]).cpu().detach().numpy()
+  ff_input = Stimuli(task='dual', size=(10, 1000))(-1, 1, xi[1]).cpu().detach().numpy()
 
   print(ff_input.shape)
 
@@ -186,14 +183,16 @@
 #+RESULTS:
 :RESULTS:
 : (1000,)
-[[file:./.ob-jupyter/2db403982d74cf5f8644812fc9625e8b87ee6422.png]]
+[[file:./.ob-jupyter/869f7a3d837a59d1794e4e60aeab890fa2a4337a.png]]
 :END:
 
 #+begin_src ipython
-
+    m0, m1, phase = decode_bump(ff_input)
+    print(phase * 180 / np.pi)
 #+end_src
 
 #+RESULTS:
+: 89.88686868091703
 
 * FF Inputs
 ** SEQ FF UPDATE

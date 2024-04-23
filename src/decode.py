@@ -30,7 +30,7 @@ def decode_bump_torch(signal, axis=-1):
     dPhi = 2.0 * torch.pi / length
 
     # Creating the complex exponential
-    exp_vals = torch.exp(1.0j * torch.arange(length).to(signal.device) * dPhi)
+    exp_vals = torch.exp(1.0j * torch.arange(length).to(signal.device) * dPhi).type(torch.cfloat)
 
     # Computing the discrete Fourier transform manually
     dft = signal_copy @ exp_vals

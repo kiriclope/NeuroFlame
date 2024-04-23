@@ -43,6 +43,10 @@ class Network(nn.Module):
         if self.LR_TRAIN:
             initLR(self)
 
+        # Add STP
+        if self.IF_STP:
+            self.initSTP()
+
         # Reset the seed
         set_seed(0)
         clear_cache()
@@ -92,17 +96,8 @@ class Network(nn.Module):
 
     def initSTP(self):
         """Creates stp model for population 0"""
-        self.J_STP = torch.tensor(self.J_STP, device=self.device)
-        self.J_STP = self.J_STP * (self.GAIN / torch.sqrt(self.Ka[0]))
-
-        self.stp = Plasticity(
-            self.USE,
-            self.TAU_FAC,
-            self.TAU_REC,
-            self.DT,
-            (self.N_BATCH, self.Na[0]),
-            STP_TYPE=self.STP_TYPE,
-            device=self.device,
+        self.J_STP = torch.tensor(self.J_STP, device=self.device) * (
+            self.GAIN / torch.sqrt(self.Ka[0])
         )
 
         # NEED .clone() here otherwise BAD THINGS HAPPEN
@@ -252,7 +247,17 @@ class Network(nn.Module):
         # Add STP
         W_stp_T = None
         if self.IF_STP:
-            self.initSTP()
+            # Need this here otherwise autograd complains
+            self.stp = Plasticity(
+                self.USE,
+                self.TAU_FAC,
+                self.TAU_REC,
+                self.DT,
+                (self.N_BATCH, self.Na[0]),
+                STP_TYPE=self.STP_TYPE,
+                device=self.device,
+            )
+
             self.x_list, self.u_list = [], []
             W_stp_T = self.W_stp_T
 
@@ -279,6 +284,7 @@ class Network(nn.Module):
                 W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
 
             Wab_T = self.Wab_T + self.lr.T
+
             Wab_T = clamp_tensor(Wab_T, 0, self.slices)
             Wab_T = clamp_tensor(Wab_T, 1, self.slices)
 

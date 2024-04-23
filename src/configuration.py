@@ -133,11 +133,13 @@ def init_const(model):
     model.KAPPA = torch.tensor(model.KAPPA, device=model.device).view(
         model.N_POP, model.N_POP
     )
+
     model.PHASE = torch.tensor(model.PHASE * torch.pi / 180.0, device=model.device)
 
     model.PHI0 = (
         torch.tensor(model.PHI0, device=model.device).unsqueeze(0) * torch.pi / 180.0
     )
+
     # model.PHI1 = torch.tensor(model.PHI1,  device=model.device).unsqueeze(0) * torch.pi / 180.0
 
     if "dual" in model.TASK:
