@@ -73,7 +73,7 @@ def initLR(model):
     if model.LR_KAPPA == 1:
         model.lr_kappa = nn.Parameter(torch.rand(1, device=model.device))
     else:
-        model.lr_kappa = torch.tensor(2.0, device=model.device)
+        model.lr_kappa = torch.tensor(1.0, device=model.device)
 
     # Mask to train excitatory neurons only
     model.lr_mask = torch.zeros((model.N_NEURON, model.N_NEURON), device=model.device)
