@@ -1,0 +1,333 @@
+#+STARTUP: fold
+#+TITLE: Sparse Structure
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session sparse :kernel torch
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Imports
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../')
+
+  import torch
+  from time import perf_counter
+
+  from src.network import Network
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump
+
+  from src.connectivity import Connectivity
+  from torch.sparse import to_sparse_semi_structured, SparseSemiStructuredTensor
+  SparseSemiStructuredTensor._FORCE_CUTLASS = True
+
+#+end_src
+
+#+RESULTS:
+
+* Helpers
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+
+** Connectivity
+
+#+begin_src ipython
+  def plot_eigen(W):
+      # Compute eigenvalues
+      eigenvalues = torch.linalg.eigvals(W).cpu().numpy()
+
+      # Extract real and imaginary parts
+      real_parts = eigenvalues.real
+      imag_parts = eigenvalues.imag
+
+      # Plotting
+      plt.scatter(real_parts, imag_parts)
+      plt.xlabel('Real Part')
+      plt.ylabel('Imaginary Part')
+      plt.axhline(y=0, color='k', linestyle='--')
+      plt.axvline(x=0, color='k', linestyle='--')
+
+      # plt.grid(True, which='both')
+      plt.show()
+#+end_src
+
+#+RESULTS:
+
+** Random
+
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_theta(a, b, GM=0, IF_NORM=0):
+
+      if GM:
+          b = b - np.dot(b, a) / np.dot(a, a) * a
+
+      if IF_NORM:
+          u = a / np.linalg.norm(a)
+          v = b / np.linalg.norm(b)
+      else:
+          u=a
+          v=b
+
+      return np.arctan2(v, u)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def normalize(v):
+      return v / np.linalg.norm(v)
+
+  def project(x, u):
+      return x * u
+  # return np.dot(x, u) * u
+
+  def sort_by_angle(x, u, v):
+      u_hat = normalize(u)
+      v_hat = normalize(v)
+
+      x_proj_u = project(x, u_hat)
+      x_proj_v = project(x, v_hat)
+      # x_proj = x_proj_u + x_proj_v
+      theta = np.arctan2(x_proj_v, x_proj_u) + np.pi
+
+      # cos_theta = np.dot(x_proj, u_hat) / np.linalg.norm(x_proj) * u_hat
+      # sin_theta = np.dot(x_proj, v_hat) / np.linalg.norm(x_proj) * v_hat
+      # theta = np.arctan2(sin_theta, cos_theta)
+
+      # Pair up each element of x with the corresponding angle
+      # x_angle_pairs = list(zip(x, theta))
+
+      # Sort based on the angle
+      # x_angle_pairs.sort(key=lambda pair: pair[1])
+
+      # Extract the sorted elements
+      # sorted_x = [pair[0] for pair in x_angle_pairs]
+
+      return theta
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_idx(model):
+      ksi = model.PHI0.cpu().detach().numpy()
+      print(ksi.shape)
+
+      idx = np.arange(0, len(ksi[0]))
+      theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
+
+      return theta.argsort()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_overlap(model, rates):
+      ksi = model.PHI0.cpu().detach().numpy()
+      return rates @ ksi.T / rates.shape[-1]
+
+#+end_src
+
+#+RESULTS:
+
+* SemiSparseTensors
+#+begin_src ipython
+  a = torch.Tensor([0, 0, 1, 1]).tile((64, 16)).half().cuda()
+  print('a', a.shape)
+  b = torch.rand(64, 5).half().cuda()
+  print('b', b.shape)
+  c = a @ b
+  print('c', c.shape)
+  a_sparse = to_sparse_semi_structured(a)
+  c_sparse = torch.mm(a_sparse, b)
+  print('c', c_sparse.T.shape)
+  torch.allclose(c, c_sparse)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: a torch.Size([64, 64])
+: b torch.Size([64, 5])
+: c torch.Size([64, 5])
+: c torch.Size([5, 64])
+: True
+:END:
+
+* Sparse Matrix
+#+begin_src ipython
+  W = Connectivity(1024, 1024, 100)('sparse', 'None', kappa=1.0, sigma=0, phase=0).type(torch.float16)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  W_sparse = to_sparse_semi_structured(W)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+    print(W_sparse.indices())
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+tensor([[ -4376,  -4370,  -4370,  ...,  -4386,  -4371,  -4883],
+        [ -4660,  -4370,  -4370,  ...,  -4370,  -4370,  -4370],
+        [ -4370,  -4372,  -4370,  ...,  -4371,  -4402,  -8498],
+        ...,
+        [ -4380,  -4370,  -4370,  ...,  -8466,  -4371,  -4370],
+        [ -4370,  -4370, -28946,  ...,  -4371,  -4372,  -4882],
+        [ -4370,  20206,  -4370,  ...,  -4370,  -4370,  -4370]],
+       device='cuda:0', dtype=torch.int16)
+:END:
+
+
+#+begin_src ipython
+    Cij = W.cpu().detach().numpy()
+    print(Cij.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+(1024, 1024)
+:END:
+
+#+begin_src ipython
+  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
+
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij, cmap='jet', aspect=1)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij, axis=0)  # sum over pres
+  ax2.plot(Kj)
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij, axis=1)  # sum over pres
+  ax3.plot(Kj)
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij.shape[0] / 2)):
+      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/62ff74fc8c82ceed0f4c6940fad212a9c33907d2.png]]
+:END:
+
+#+begin_src ipython
+  plot_eigen(1.0 * Wij)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/659f5db46b95a077ad16716a035315ff4f631b7e.png]]
+:END:
+
+* Model
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroFlame"
+  model = Network('config_sparse.yml',  REPO_ROOT, VERBOSE=0, DEVICE='cuda:1', TASK='odr', LIVE_FF_UPDATE=1,
+                  PROBA_TYPE=['cosine_spec', '', '',''], KAPPA=[8, 0, 0, 0], DURATION=10, N_BATCH=10)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  start = perf_counter()
+  rates = model().cpu().numpy()
+  end = perf_counter()
+  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+#+end_src
+
+#+RESULTS:
+: Elapsed (with compilation) = 0h 0m 33s
+
+#+begin_src ipython
+1024*30
+#+end_src
+
+#+RESULTS:
+: 30720
+
+#+begin_src ipython
+  Ne = model.Na[0].detach().cpu().numpy()
+  N = model.N_NEURON
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+  r_max = 15
+
+  ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max, origin='lower')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_xlabel('Step')
+
+  ax[1].plot(rates[0, :, :10])
+  ax[1].set_ylabel('Pref. Location (°)')
+  ax[1].set_xlabel('Step')
+  # ax[0][1].colorbar()
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/d6f8b20ddab86dc99804ff6b5f9a68942542f1d5.png]]
+
+#+begin_src ipython
+40/33.
+#+end_src
+
+#+RESULTS:
+: 1.2121212121212122

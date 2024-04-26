@@ -1,5 +1,8 @@
 import torch
 from torch import nn
+from torch.sparse import to_sparse_semi_structured, SparseSemiStructuredTensor
+
+SparseSemiStructuredTensor._FORCE_CUTLASS = True
 
 from src.configuration import Configuration
 from src.connectivity import Connectivity
@@ -88,11 +91,14 @@ class Network(nn.Module):
                 )
 
         del weights, weight_mat
-        # take weights transpose for optim
-        self.Wab_T = self.Wab_T.T
 
-        # if self.CON_TYPE=='sparse':
-        #     self.Wab_T = self.Wab_T.to_sparse()
+        if self.SPARSE == "full":
+            self.Wab_T = self.Wab_T.T.to_sparse()
+        elif self.SPARSE == "semi":
+            self.Wab_T = to_sparse_semi_structured(self.Wab_T)
+        else:
+            # take weights transpose for optim
+            self.Wab_T = self.Wab_T.T
 
     def initSTP(self):
         """Creates stp model for population 0"""
@@ -173,7 +179,12 @@ class Network(nn.Module):
         """Updates the dynamics of the model at each timestep"""
 
         # update hidden state
-        hidden = rates @ Wab_T
+        if self.SPARSE == "full":
+            hidden = torch.sparse.mm(rates, Wab_T)
+        elif self.SPARSE == 'semi':
+            hidden = (Wab_T @ rates.T).T
+        else:
+            hidden = rates @ Wab_T
 
         # update stp variables
         if self.IF_STP:
@@ -270,14 +281,14 @@ class Network(nn.Module):
                     masked_normalize(self.U) @ masked_normalize(self.V).T
                 )
             else:
-                self.lr = self.lr_kappa * (self.U @ self.V.T)
+                if self.LR_MN:
+                    self.lr = self.lr_kappa * (self.U @ self.V.T)
+                else:
+                    self.lr = self.lr_kappa * (self.U @ self.U.T)
 
             self.lr = self.lr_mask * self.lr
             self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
             self.lr = normalize_tensor(self.lr, 1, self.slices, self.Na)
-
-            # self.lr = self.lr / (1.0 * self.Na[0])
-            # self.lr = self.lr.clamp(min=-self.Wab_T[0, 0])
 
             if self.IF_STP:
                 W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T

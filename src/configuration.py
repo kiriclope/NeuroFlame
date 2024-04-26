@@ -22,9 +22,9 @@ class Configuration:
 
         if self.FLOAT_PRECISION == 32:
             self.FLOAT = torch.float
-        if self.FLOAT_PRECISION == 16:
+        elif self.FLOAT_PRECISION == 16:
             self.FLOAT = torch.float16
-        if self.FLOAT_PRECISION == '16b':
+        elif self.FLOAT_PRECISION == '16b':
             self.FLOAT = torch.bfloat16
         else:
             self.FLOAT = torch.float64
