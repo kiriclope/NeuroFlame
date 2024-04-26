@@ -3,7 +3,7 @@ set -e
 
 # Base directory for org files and notebooks
 org_base_dir="org"
-notebook_base_dir="notebook"
+notebook_base_dir="notebooks"
 
 # Create notebook directory if it doesn't exist
 mkdir -p $notebook_base_dir
