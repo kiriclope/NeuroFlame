@@ -495,7 +495,7 @@
 #+end_src
 
 #+RESULTS:
-: 77492
+: 596535
 
 #+begin_src ipython
   model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=16)
@@ -615,70 +615,62 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
 #+begin_example
-  Epoch 1/30, Training Loss: 0.9882, Validation Loss: 0.9659
-  Angle(U, W) : 93.0 °
-  Epoch 2/30, Training Loss: 0.9411, Validation Loss: 0.9398
-  Angle(U, W) : 93.0 °
-  Epoch 3/30, Training Loss: 0.9291, Validation Loss: 0.9092
-  Angle(U, W) : 93.0 °
-  Epoch 4/30, Training Loss: 0.8795, Validation Loss: 0.8809
-  Angle(U, W) : 93.0 °
-  Epoch 5/30, Training Loss: 0.8775, Validation Loss: 0.8576
-  Angle(U, W) : 92.0 °
-  Epoch 6/30, Training Loss: 0.8017, Validation Loss: 0.8201
-  Angle(U, W) : 91.0 °
-  Epoch 7/30, Training Loss: 0.7519, Validation Loss: 0.7833
-  Angle(U, W) : 91.0 °
-  Epoch 8/30, Training Loss: 0.7369, Validation Loss: 0.7249
-  Angle(U, W) : 91.0 °
-  Epoch 9/30, Training Loss: 0.6979, Validation Loss: 0.6594
-  Angle(U, W) : 93.0 °
-  Epoch 10/30, Training Loss: 0.5484, Validation Loss: 0.5762
-  Angle(U, W) : 93.0 °
-  Epoch 11/30, Training Loss: 0.5772, Validation Loss: 0.5013
-  Angle(U, W) : 93.0 °
-  Epoch 12/30, Training Loss: 0.3474, Validation Loss: 0.3855
-  Angle(U, W) : 93.0 °
-  Epoch 13/30, Training Loss: 0.3326, Validation Loss: 0.3538
-  Angle(U, W) : 93.0 °
-  Epoch 14/30, Training Loss: 0.3596, Validation Loss: 0.3031
-  Angle(U, W) : 93.0 °
-  Epoch 15/30, Training Loss: 0.3241, Validation Loss: 0.2357
-  Angle(U, W) : 93.0 °
-  Epoch 16/30, Training Loss: 0.1772, Validation Loss: 0.1518
-  Angle(U, W) : 94.0 °
-  Epoch 17/30, Training Loss: 0.0740, Validation Loss: 0.1333
-  Angle(U, W) : 94.0 °
-  Epoch 18/30, Training Loss: 0.0527, Validation Loss: 0.0373
-  Angle(U, W) : 95.0 °
-  Epoch 19/30, Training Loss: 0.0108, Validation Loss: 0.0171
-  Angle(U, W) : 96.0 °
-  Epoch 20/30, Training Loss: 0.0054, Validation Loss: 0.0152
-  Angle(U, W) : 96.0 °
-  Epoch 21/30, Training Loss: 0.0160, Validation Loss: 0.0131
-  Angle(U, W) : 96.0 °
-  Epoch 22/30, Training Loss: 0.0131, Validation Loss: 0.0116
-  Angle(U, W) : 96.0 °
-  Epoch 23/30, Training Loss: 0.0111, Validation Loss: 0.0100
-  Angle(U, W) : 96.0 °
-  Epoch 24/30, Training Loss: 0.0082, Validation Loss: 0.0110
-  Angle(U, W) : 96.0 °
-  Epoch 25/30, Training Loss: 0.0044, Validation Loss: 0.0089
-  Angle(U, W) : 96.0 °
-  Epoch 26/30, Training Loss: 0.0040, Validation Loss: 0.0089
-  Angle(U, W) : 96.0 °
-  Epoch 27/30, Training Loss: 0.0042, Validation Loss: 0.0059
-  Angle(U, W) : 96.0 °
-  Epoch 28/30, Training Loss: 0.0032, Validation Loss: 0.0063
-  Angle(U, W) : 96.0 °
-  Epoch 29/30, Training Loss: 0.0028, Validation Loss: 0.0056
-  Angle(U, W) : 96.0 °
-  Epoch 30/30, Training Loss: 0.0011, Validation Loss: 0.0040
-  Angle(U, W) : 96.0 °
-  Stopping training as loss has fallen below the threshold: 0.003984620400632803
-  Elapsed (with compilation) = 0h 4m 24s
+  ---------------------------------------------------------------------------
+  RuntimeError                              Traceback (most recent call last)
+  Cell In[51], line 3
+        1 num_epochs = 30
+        2 start = perf_counter()
+  ----> 3 loss, val_loss = run_optim(model, train_loader, val_loader, criterion, optimizer, num_epochs)
+        4 end = perf_counter()
+        5 print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+
+  Cell In[8], line 15, in run_optim(model, train_loader, val_loader, loss_fn, optimizer, num_epochs, penalty, lbd, thresh)
+       13 # Training loop.
+       14 for epoch in range(num_epochs):
+  ---> 15     loss = train(train_loader, model, loss_fn, optimizer, penalty, lbd)
+       16     val_loss = test(val_loader, model, loss_fn)
+       17     scheduler.step(val_loss)
+
+  Cell In[6], line 24, in train(dataloader, model, loss_fn, optimizer, penalty, lbd, clip_grad)
+       21         loss = loss + lbd * reg_loss
+       23 # Backpropagation
+  ---> 24 loss.backward()
+       26 # Clip gradients
+       27 if clip_grad:
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/_tensor.py:522, in Tensor.backward(self, gradient, retain_graph, create_graph, inputs)
+      512 if has_torch_function_unary(self):
+      513     return handle_torch_function(
+      514         Tensor.backward,
+      515         (self,),
+     (...)
+      520         inputs=inputs,
+      521     )
+  --> 522 torch.autograd.backward(
+      523     self, gradient, retain_graph, create_graph, inputs=inputs
+      524 )
+
+  File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/autograd/__init__.py:266, in backward(tensors, grad_tensors, retain_graph, create_graph, grad_variables, inputs)
+      261     retain_graph = create_graph
+      263 # The reason we repeat the same comment below is that
+      264 # some Python versions print out the first line of a multi-line function
+      265 # calls in the traceback and some print out the last line
+  --> 266 Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+      267     tensors,
+      268     grad_tensors_,
+      269     retain_graph,
+      270     create_graph,
+      271     inputs,
+      272     allow_unreachable=True,
+      273     accumulate_grad=True,
+      274 )
+
+  RuntimeError: Trying to backward through the graph a second time (or directly access saved tensors after they have already been freed). Saved intermediate values of the graph are freed when you call .backward() or autograd.grad(). Specify retain_graph=True if you need to backward through the graph a second time or if you need to access saved tensors after calling backward.
 #+end_example
+:END:
 
 ** Testing
 
@@ -758,7 +750,64 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: rates (20, 71, 1000)
+:RESULTS:
+# [goto error]
+#+begin_example
+  [0;31m---------------------------------------------------------------------------[0m
+  [0;31mRuntimeError[0m                              Traceback (most recent call last)
+  Cell [0;32mIn[56], line 1[0m
+  [0;32m----> 1[0m rates [38;5;241m=[39m [41mmodel[49m[38;5;241;41m.[39;49m[41mforward[49m[41m([49m[41mff_input[49m[38;5;241;41m=[39;49m[41mff_input[49m[41m)[49m[38;5;241m.[39mcpu()[38;5;241m.[39mdetach()[38;5;241m.[39mnumpy()
+  [1;32m      2[0m [38;5;28mprint[39m([38;5;124m'[39m[38;5;124mrates[39m[38;5;124m'[39m, rates[38;5;241m.[39mshape)
+
+  File [0;32m~/models/NeuroFlame/org/../src/network.py:258[0m, in [0;36mNetwork.forward[0;34m(self, ff_input, REC_LAST_ONLY, RET_FF, RET_STP)[0m
+  [1;32m    247[0m [38;5;250m[39m[38;5;124;03m"""[39;00m
+  [1;32m    248[0m [38;5;124;03mMain method of Network class, runs networks dynamics over set of timesteps[39;00m
+  [1;32m    249[0m [38;5;124;03mand returns rates at each time point or just the last time point.[39;00m
+  [0;32m   (...)[0m
+  [1;32m    254[0m [38;5;124;03m:param rates_list: float (N_BATCH, N_STEP or 1, N_NEURONS), rates of the neurons.[39;00m
+  [1;32m    255[0m [38;5;124;03m"""[39;00m
+  [1;32m    257[0m [38;5;66;03m# Initialization (if  ff_input is None, ff_input is generated)[39;00m
+  [0;32m--> 258[0m rates, ff_input, rec_input [38;5;241m=[39m [38;5;28;41mself[39;49m[38;5;241;41m.[39;49m[41minitRates[49m[41m([49m[41mff_input[49m[41m)[49m
+  [1;32m    260[0m [38;5;66;03m# NEED .clone() here otherwise BAD THINGS HAPPEN[39;00m
+  [1;32m    261[0m [38;5;28;01mif[39;00m [38;5;28mself[39m[38;5;241m.[39mIF_BATCH_J:
+
+  File [0;32m~/models/NeuroFlame/org/../src/network.py:157[0m, in [0;36mNetwork.initRates[0;34m(self, ff_input)[0m
+  [1;32m    153[0m     rates [38;5;241m=[39m Activation()(
+  [1;32m    154[0m         ff_input [38;5;241m+[39m rec_input[[38;5;241m0[39m], func_name[38;5;241m=[39m[38;5;28mself[39m[38;5;241m.[39mTF_TYPE, thresh[38;5;241m=[39m[38;5;28mself[39m[38;5;241m.[39mthresh
+  [1;32m    155[0m     )
+  [1;32m    156[0m [38;5;28;01melse[39;00m:
+  [0;32m--> 157[0m     rates [38;5;241m=[39m [41mActivation[49m[41m([49m[41m)[49m[41m([49m
+  [1;32m    158[0m [41m        [49m[41mff_input[49m[41m[[49m[41m:[49m[41m,[49m[41m [49m[38;5;241;41m0[39;49m[41m][49m[41m [49m[38;5;241;41m+[39;49m[41m [49m[41mrec_input[49m[41m[[49m[38;5;241;41m0[39;49m[41m][49m[41m,[49m
+  [1;32m    159[0m [41m        [49m[41mfunc_name[49m[38;5;241;41m=[39;49m[38;5;28;41mself[39;49m[38;5;241;41m.[39;49m[41mTF_TYPE[49m[41m,[49m
+  [1;32m    160[0m [41m        [49m[41mthresh[49m[38;5;241;41m=[39;49m[38;5;28;41mself[39;49m[38;5;241;41m.[39;49m[41mthresh[49m[41m,[49m
+  [1;32m    161[0m [41m    [49m[41m)[49m
+  [1;32m    163[0m [38;5;28;01mreturn[39;00m rates, ff_input, rec_input
+
+  File [0;32m~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/nn/modules/module.py:1511[0m, in [0;36mModule._wrapped_call_impl[0;34m(self, *args, **kwargs)[0m
+  [1;32m   1509[0m     [38;5;28;01mreturn[39;00m [38;5;28mself[39m[38;5;241m.[39m_compiled_call_impl([38;5;241m*[39margs, [38;5;241m*[39m[38;5;241m*[39mkwargs)  [38;5;66;03m# type: ignore[misc][39;00m
+  [1;32m   1510[0m [38;5;28;01melse[39;00m:
+  [0;32m-> 1511[0m     [38;5;28;01mreturn[39;00m [38;5;28;41mself[39;49m[38;5;241;41m.[39;49m[41m_call_impl[49m[41m([49m[38;5;241;41m*[39;49m[41margs[49m[41m,[49m[41m [49m[38;5;241;41m*[39;49m[38;5;241;41m*[39;49m[41mkwargs[49m[41m)[49m
+
+  File [0;32m~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/nn/modules/module.py:1520[0m, in [0;36mModule._call_impl[0;34m(self, *args, **kwargs)[0m
+  [1;32m   1515[0m [38;5;66;03m# If we don't have any hooks, we want to skip the rest of the logic in[39;00m
+  [1;32m   1516[0m [38;5;66;03m# this function, and just call forward.[39;00m
+  [1;32m   1517[0m [38;5;28;01mif[39;00m [38;5;129;01mnot[39;00m ([38;5;28mself[39m[38;5;241m.[39m_backward_hooks [38;5;129;01mor[39;00m [38;5;28mself[39m[38;5;241m.[39m_backward_pre_hooks [38;5;129;01mor[39;00m [38;5;28mself[39m[38;5;241m.[39m_forward_hooks [38;5;129;01mor[39;00m [38;5;28mself[39m[38;5;241m.[39m_forward_pre_hooks
+  [1;32m   1518[0m         [38;5;129;01mor[39;00m _global_backward_pre_hooks [38;5;129;01mor[39;00m _global_backward_hooks
+  [1;32m   1519[0m         [38;5;129;01mor[39;00m _global_forward_hooks [38;5;129;01mor[39;00m _global_forward_pre_hooks):
+  [0;32m-> 1520[0m     [38;5;28;01mreturn[39;00m [41mforward_call[49m[41m([49m[38;5;241;41m*[39;49m[41margs[49m[41m,[49m[41m [49m[38;5;241;41m*[39;49m[38;5;241;41m*[39;49m[41mkwargs[49m[41m)[49m
+  [1;32m   1522[0m [38;5;28;01mtry[39;00m:
+  [1;32m   1523[0m     result [38;5;241m=[39m [38;5;28;01mNone[39;00m
+
+  File [0;32m~/models/NeuroFlame/org/../src/activation.py:11[0m, in [0;36mActivation.forward[0;34m(self, x, func_name, thresh)[0m
+  [1;32m      9[0m [38;5;28;01mdef[39;00m [38;5;21mforward[39m([38;5;28mself[39m, x, func_name[38;5;241m=[39m[38;5;124m"[39m[38;5;124mrelu[39m[38;5;124m"[39m, thresh[38;5;241m=[39m[38;5;241m15[39m):
+  [1;32m     10[0m     [38;5;28;01mif[39;00m func_name [38;5;241m==[39m [38;5;124m"[39m[38;5;124mrelu[39m[38;5;124m"[39m:
+  [0;32m---> 11[0m         [38;5;28;01mreturn[39;00m nn[38;5;241m.[39mReLU()([41mx[49m[41m [49m[38;5;241;41m-[39;49m[41m [49m[41mthresh[49m)
+  [1;32m     12[0m     [38;5;28;01melif[39;00m func_name [38;5;241m==[39m [38;5;124m"[39m[38;5;124merf[39m[38;5;124m"[39m:
+  [1;32m     13[0m         [38;5;28;01mreturn[39;00m torch[38;5;241m.[39merf(x [38;5;241m/[39m torch[38;5;241m.[39msqrt(torch[38;5;241m.[39mtensor([38;5;241m2.0[39m)))
+
+  [0;31mRuntimeError[0m: The size of tensor a (20) must match the size of tensor b (32) at non-singleton dimension 0
+#+end_example
+:END:
 
 #+begin_src ipython
   # memory = model.odors.cpu().detach().numpy()[0]
@@ -768,7 +817,17 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/6e2ce57ae72b988b5bbe9dcf4ab4d04a38a1ae70.png]]
+:RESULTS:
+# [goto error]
+: [0;31m---------------------------------------------------------------------------[0m
+: [0;31mNameError[0m                                 Traceback (most recent call last)
+: Cell [0;32mIn[57], line 4[0m
+: [1;32m      2[0m memory [38;5;241m=[39m model[38;5;241m.[39mlow_rank[38;5;241m.[39mU[38;5;241m.[39mcpu()[38;5;241m.[39mdetach()[38;5;241m.[39mnumpy()[model[38;5;241m.[39mslices[[38;5;241m0[39m], [38;5;241m0[39m]
+: [1;32m      3[0m readout [38;5;241m=[39m model[38;5;241m.[39mlow_rank[38;5;241m.[39mlinear[38;5;241m.[39mweight[38;5;241m.[39mdata[38;5;241m.[39mcpu()[38;5;241m.[39mdetach()[38;5;241m.[39mnumpy()[[38;5;241m0[39m]
+: [0;32m----> 4[0m plot_overlap([41mrates[49m, memory, readout, labels[38;5;241m=[39m[[38;5;124m'[39m[38;5;124mA[39m[38;5;124m'[39m, [38;5;124m'[39m[38;5;124mB[39m[38;5;124m'[39m])
+:
+: [0;31mNameError[0m: name 'rates' is not defined
+:END:
 
 #+begin_src ipython
   idx = get_idx(model, -1)
@@ -778,7 +837,14 @@ Testing the network on steps from sample odor offset to test odor onset
 #+RESULTS:
 :RESULTS:
 : ksi torch.Size([3, 1000])
-[[file:./.ob-jupyter/d8616dd23aad1ac0c135a7548237686dbf30c29f.png]]
+# [goto error]
+: [0;31m---------------------------------------------------------------------------[0m
+: [0;31mNameError[0m                                 Traceback (most recent call last)
+: Cell [0;32mIn[58], line 2[0m
+: [1;32m      1[0m idx [38;5;241m=[39m get_idx(model, [38;5;241m-[39m[38;5;241m1[39m)
+: [0;32m----> 2[0m plot_rates_selec([41mrates[49m, idx)
+:
+: [0;31mNameError[0m: name 'rates' is not defined
 :END:
 
 #+begin_src ipython
@@ -786,7 +852,15 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f86a9ddca7953c2024381e5544e2e2d5a36dc5b2.png]]
+:RESULTS:
+# [goto error]
+: [0;31m---------------------------------------------------------------------------[0m
+: [0;31mNameError[0m                                 Traceback (most recent call last)
+: Cell [0;32mIn[59], line 1[0m
+: [0;32m----> 1[0m plot_m0_m1_phi([41mrates[49m, idx)
+:
+: [0;31mNameError[0m: name 'rates' is not defined
+:END:
 
 #+begin_src ipython
 

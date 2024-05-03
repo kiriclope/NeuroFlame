@@ -227,7 +227,7 @@ class Network(nn.Module):
             net_input = net_input + rec_input[1]
 
         # compute non linearity
-        non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.thresh)
+        non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=0)
 
         # update rates
         if self.RATE_DYN:

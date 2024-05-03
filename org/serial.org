@@ -96,8 +96,8 @@ First, we define a sequence of stimuli intensities and footprints
 Then, we create a sequence of stimuli onsets and offsets
 
 #+BEGIN_SRC ipython
-  a = [1 + i * 3.5 for i in range(N_TRIALS)]
-  b = [4 + i * 3.5 for i in range(N_TRIALS)]
+  a = [1 + i * 4.5 for i in range(N_TRIALS)]
+  b = [4 + i * 4.5 for i in range(N_TRIALS)]
 
   T_STIM_ON = [val for pair in zip(a, b) for val in pair]
 
@@ -105,11 +105,11 @@ Then, we create a sequence of stimuli onsets and offsets
 #+end_src
 
 #+RESULTS:
-: [1.0, 4.0, 4.5, 7.5, 8.0, 11.0, 11.5, 14.5, 15.0, 18.0, 18.5, 21.5, 22.0, 25.0, 25.5, 28.5, 29.0, 32.0, 32.5, 35.5]
+: [1.0, 4.0, 5.5, 8.5, 10.0, 13.0, 14.5, 17.5, 19.0, 22.0, 23.5, 26.5, 28.0, 31.0, 32.5, 35.5, 37.0, 40.0, 41.5, 44.5]
 
 #+BEGIN_SRC ipython
-  c = [2 + i * 3.5 for i in range(N_TRIALS)]
-  d = [4.5 + i * 3.5 for i in range(N_TRIALS)]
+  c = [2 + i * 4.5 for i in range(N_TRIALS)]
+  d = [4.5 + i * 4.5 for i in range(N_TRIALS)]
 
   T_STIM_OFF = [val for pair in zip(c, d) for val in pair]
   print(T_STIM_OFF)
@@ -119,8 +119,8 @@ Then, we create a sequence of stimuli onsets and offsets
 #+end_src
 
 #+RESULTS:
-: [2.0, 4.5, 5.5, 8.0, 9.0, 11.5, 12.5, 15.0, 16.0, 18.5, 19.5, 22.0, 23.0, 25.5, 26.5, 29.0, 30.0, 32.5, 33.5, 36.0]
-: 37.0
+: [2.0, 4.5, 6.5, 9.0, 11.0, 13.5, 15.5, 18.0, 20.0, 22.5, 24.5, 27.0, 29.0, 31.5, 33.5, 36.0, 38.0, 40.5, 42.5, 45.0]
+: 46.0
 
 ** Phase Batches
 Now, we need to create batches of stimuli phases to simulate to compute SB.
@@ -152,7 +152,7 @@ Let's batch the phases!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/cbee3934eeaad69d25b67efa7074855eebae192e.png]]
+[[file:./.ob-jupyter/db7b84db41113be45fb47b309fb97467faee790a.png]]
 
 ** Model
 
@@ -186,7 +186,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-: torch.Size([1024, 371])
+: torch.Size([1024, 461])
 
 #+begin_src ipython
   targets = PHI0[:,::2,0].cpu().numpy() * np.pi / 180
@@ -201,7 +201,7 @@ Let's decode the bumps!
 
   mask = 0
   for i in range(0, 2 * N_TRIALS, 2):
-          mask = mask | (steps == (model.N_STIM_OFF[i] + 9 * model.N_WINDOW - model.N_STEADY))
+          mask = mask | (steps == (model.N_STIM_OFF[i] + 10 * model.N_WINDOW - model.N_STEADY))
 
   idx = np.where(mask)[0]
 
@@ -214,9 +214,9 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-: [ 29  64  99 134 169 204 239 274 309 344]
+: [ 30  75 120 165 210 255 300 345 390 435]
 : delay phase (1024, 10)
-: 156.0000043410955 155.71386039600696
+: 151.9999996763259 149.65257294161924
 
 #+begin_src ipython
   errors =  targets - phi_off
@@ -227,7 +227,7 @@ Let's decode the bumps!
  #+end_src
 
 #+RESULTS:
-: 0.004994154
+: 0.040970325
 : errors (1024, 10)
 
 #+begin_src ipython
@@ -261,7 +261,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/1d85e3e158532e4ebb215e8b2d44e5554acaeda9.png]]
+[[file:./.ob-jupyter/6b02926f1697cc937e2fb26650f23052d1e0b927.png]]
 
 #+begin_src ipython
   plt.hist(errors, bins=5)
@@ -271,7 +271,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/fea55203919fa1cbeb371bb7f05e627f02a9dae6.png]]
+[[file:./.ob-jupyter/ea994b59ec0247bc5c45ffe16ea10728d3206bf4.png]]
 
 #+begin_src ipython
   rel_loc = np.diff(targets, axis=1)
@@ -296,7 +296,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/def1f263a70d34df840f8d7fa75dbad93ede6d7c.png]]
+[[file:./.ob-jupyter/9194a7259452b2ff922192f3303bef96966c1cf5.png]]
 
 #+begin_src ipython
   pal = sns.color_palette("rocket_r", n_colors= N_TRIALS)
@@ -320,7 +320,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/c19ce510b84f2a56feec4df777437aea55c57b21.png]]
+[[file:./.ob-jupyter/bf36f0719d7c31e1b39035a5908fa6bbd2ad66af.png]]
 
 #+begin_src ipython
 
