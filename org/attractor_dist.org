@@ -54,7 +54,7 @@
 
 #+RESULTS:
 
-#+begin_src ipython 
+#+begin_src ipython
   import numpy as np
   def get_theta(a, b, GM=0, IF_NORM=0):
 
@@ -67,12 +67,12 @@
           u = a / np.linalg.norm(a)
           v = b / np.linalg.norm(b)
 
-      return np.arctan2(v, u)
+      return np.arctan2(v, u) % (2.0 * np.pi)
 #+end_src
 
 #+RESULTS:
 
-#+begin_src ipython 
+#+begin_src ipython
   def get_idx(model):
       ksi = model.PHI0.cpu().detach().numpy()
       theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
@@ -81,7 +81,7 @@
 
 #+RESULTS:
 
-#+begin_src ipython 
+#+begin_src ipython
   def get_overlap(model, rates):
       return rates @ model.PHI0.T / rates.shape[-1]
 #+end_src
@@ -97,15 +97,15 @@
 
       X = torch.stack((x,y))
 
-      xPhi = torch.cos(torch.pi / 2 + torch.tensor(phi0) * torch.pi / 180)
-      yPhi = torch.sin(torch.pi / 2 + torch.tensor(phi0) * torch.pi / 180)
+      xPhi = torch.cos(torch.pi / 2 + torch.tensor(phi0))
+      yPhi = torch.sin(torch.pi / 2 + torch.tensor(phi0))
       vPhi = torch.stack((xPhi, yPhi))
 
       dot = vPhi.to(X.device).to(X.dtype) @ X
 
       # if phi0 > 0 and phi0 < 180:
       #     dot = dot * -1
-      
+
       # print(dot[:n_ini])
       A = torch.stack([(dot[:n_ini]<0).sum(), (dot[:n_ini]>0).sum()])
       # print('A perf', A)
@@ -124,7 +124,7 @@
 #+begin_src ipython
   def get_perf(model, rates, n_ini):
       overlap = get_overlap(model, rates)
-      
+
       readoutA = overlap[:n_ini, -5:, 0]
       readoutB = overlap[n_ini:, -5:, 0]
 
@@ -142,7 +142,7 @@
   def get_avg_phi(centers):
       x_c1, y_c1 = centers[0]
       x_c2, y_c2 = centers[1]
-      
+
       radius = np.sqrt(x_c1**2 + y_c1**2)
 
       # Midpoint M of A and B
@@ -151,7 +151,7 @@
       phi1 = np.arctan2(y_c1, x_c1)
       phi2 = np.arctan2(y_c2, x_c2)
 
-      phi0 = ( (phi1 + phi2) / 2 ) % np.pi
+      phi0 = ( (phi1 + phi2) / 2 ) % (2 * np.pi)
       psi0 = (phi0 + np.pi) % (2 * np.pi)
 
       xPhi = radius * np.cos(phi0)
@@ -164,9 +164,9 @@
               np.sqrt((xPsi - xM)**2 + (yPsi - yM)**2)]
 
       if dist[0]>dist[1]:
-          mean_phi = phi0 * 180 / np.pi
+          mean_phi = phi0
       else:
-          mean_phi = psi0 * 180 / np.pi
+          mean_phi = psi0
 
       return mean_phi
 #+end_src
@@ -199,17 +199,17 @@
 ** Parameters
 
 #+begin_src ipython
-  REPO_ROOT = "/home/leon/models/NeuroFlame"
-  conf_name = "config_EI.yml"
-  name = "low_rank_ini"
+   REPO_ROOT = "/home/leon/models/NeuroFlame"
+   conf_name = "config_EI.yml"
 
-  n_ini  = 32
-  
-  LR_COV = [[1.0, 1.0, 0.0, 0.0],
-            [0.8, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.8],
-            [0.0, 0.0, 0.8, 1.0]]
+   n_ini  = 32
 
+   LR_COV = [[1.0, 1.0, 0.0, 0.0],
+             [0.8, 1.0, 0.0, 0.0],
+             [0.0, 0.0, 1.0, 0.8],
+             [0.0, 0.0, 0.8, 1.0]]
+
+   device = 'cuda'
 #+end_src
 
 #+RESULTS:
@@ -230,12 +230,12 @@
   distance_list = []
   centers_list = []
   phi0_list = []
-  
+
   for i in range(100):
       seed = np.random.randint(10000)
 
-      n_ini  = 50
-      model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
+      n_ini  = 32
+      model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=device,
                       N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
                       TASK='dual_rand', LIVE_FF_UPDATE=1, DURATION=30)
 
@@ -253,24 +253,25 @@
       distance_list.append(np.linalg.norm(centers[0]-centers[1]))
 
       n_ini  = 32
-      model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
-                      N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
-                      TASK='dual', LIVE_FF_UPDATE=1, DURATION=10, I0=[0.5, 0.5])
+      # model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=device,
+      #                 N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
+      #                 TASK='dual', LIVE_FF_UPDATE=1, DURATION=10, I0=[1.0, 1.0])
 
-      # model.TASK = 'dual'
-      # model.DURATION = 10
-      # model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+      model.TASK = 'dual'
+      model.DURATION = 10
+      model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+      model.I0 = [0.75, 0.75]
 
       rates = model()
       rates_list.append(rates[..., idx])
       perf_list.append(get_perf(model, rates, n_ini))
 
-      # model.PHI1 = torch.tensor([0, 180-mean_phi], device='cuda:1')
-      # model.TASK = 'dual_odr'
+      # model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=device,
+      #                 N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
+      #                 TASK='dual_odr', LIVE_FF_UPDATE=1, DURATION=10, I0=[1.0, 1.0])
 
-      model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE='cuda:1',
-                      N_BATCH=2*n_ini, SEED=seed, LR_COV=LR_COV,
-                      TASK='dual_odr', LIVE_FF_UPDATE=1, DURATION=10, I0=[0.5, 0.5])
+      model.TASK = 'dual_odr'
+      model.PHI1 = torch.tensor([0, mean_phi], device=device)
 
       rates_cr = model()
       rates_cr_list.append(rates_cr[..., idx])
@@ -287,12 +288,29 @@
 #+end_src
 
 #+RESULTS:
-: Elapsed (with compilation) = 0h 26m 24s
+: Elapsed (with compilation) = 0h 28m 44s
 
 #+begin_src ipython
-  rates_list = torch.stack(rates_list).cpu().numpy()
-  rates_fp = torch.stack(rates_fp).cpu().numpy()
-  rates_cr_list = torch.stack(rates_cr_list).cpu().numpy()
+  print(mean_phi*180/np.pi)
+#+end_src
+
+#+RESULTS:
+: 10.274732115625637
+
+#+begin_src ipython
+  rates_list = np.array([rates.cpu() for rates in rates_list])
+  rates_fp = np.array([rates.cpu() for rates in rates_fp])
+  rates_cr_list = np.array([rates.cpu() for rates in rates_cr_list])
+#+end_src
+
+#+RESULTS:
+
+RESULTS:
+
+#+begin_src ipython
+  # rates_list = torch.stack(rates_list).cpu().numpy()
+  # rates_fp = torch.stack(rates_fp).cpu().numpy()
+  # rates_cr_list = torch.stack(rates_cr_list).cpu().numpy()
 #+end_src
 
 #+RESULTS:
@@ -320,18 +338,18 @@
 
       x_c1, y_c1 = centers_list[i, 0]
       x_c2, y_c2 = centers_list[i, 1]
-      
+
       ax.plot(x_c1, y_c1, 'x', alpha=1, ms=20, color=color, lw=10)
       ax.plot(x_c2, y_c2, 'x', alpha=1, ms=20, color=color, lw=10)
 
       # plot separatrix
-      x = 1.75 * np.cos(phi0_list[i] * np.pi / 180)
-      y = 1.75 * np.sin(phi0_list[i] * np.pi / 180)
+      x = 1.75 * np.cos(phi0_list[i])
+      y = 1.75 * np.sin(phi0_list[i])
 
       # Draw an arrow using plt.arrow(x, y, dx, dy, **kwargs)
       plt.arrow(0, 0, x, y, head_width=0.25, head_length=0.25, fc=color)
 
-      mean = np.array([phi0_list[i], phi0_list[i] - 180 ]) * np.pi/180
+      mean = np.array([phi0_list[i], phi0_list[i] - np.pi ])
 
       x = 1.75 * np.cos(mean)
       y = 1.75 * np.sin(mean)
@@ -354,15 +372,15 @@
   y_cloud = m1 / m0 * np.sin(phi)
 
   # plot centers
-  for i in range(centers_list.shape[0]):      
+  for i in range(centers_list.shape[0]):
       color = np.random.rand(3,)
       plot_ring(i, ax, color)
-      
+
   plt.show()
   #+end_src
 
   #+RESULTS:
-  [[file:./.ob-jupyter/d2a1975ef060d7e73bbbaeff58d6f870589478f0.png]]
+  [[file:./.ob-jupyter/363e136dd512fed7bbfdbfba29ec7851241ee7a7.png]]
 
 #+begin_src ipython
   def plot_trajectory(rates, i, ax):
@@ -392,30 +410,29 @@
     ax.plot(x_c2, y_c2, 'x', alpha=1, ms=20, color='k', lw=10)
 
     # plot separatrix
-    x = 1.75 * np.cos(phi0_list[i] * np.pi / 180)
-    y = 1.75 * np.sin(phi0_list[i] * np.pi / 180)
+    x = 1.75 * np.cos(phi0_list[i])
+    y = 1.75 * np.sin(phi0_list[i])
 
     # Draw an arrow using plt.arrow(x, y, dx, dy, **kwargs)
     plt.arrow(0, 0, x, y, head_width=0.25, head_length=0.25, fc='k')
 
-    x = 1.75 * np.cos(phi0_list[i] * np.pi / 180 + np.pi/2)
-    y = 1.75 * np.sin(phi0_list[i] * np.pi / 180 + np.pi/2)
+    x = 1.75 * np.cos(phi0_list[i] + np.pi/2)
+    y = 1.75 * np.sin(phi0_list[i] + np.pi/2)
 
     # Draw an arrow using plt.arrow(x, y, dx, dy, **kwargs)
     plt.arrow(0, 0, x, y, head_width=0.25, head_length=0.25, fc='b')
 
-    mean = np.array([phi0_list[i], phi0_list[i] - 180 ]) * np.pi/180
+    mean = np.array([phi0_list[i], phi0_list[i] - np.pi ])
 
     x = 1.75 * np.cos(mean)
     y = 1.75 * np.sin(mean)
     ax.plot(x, y, '--', color='k')
 
-    mean = np.array([phi0_list[i] + 90, phi0_list[i] - 180 + 90]) * np.pi/180
+    mean = np.array([phi0_list[i] + np.pi/2, phi0_list[i] - np.pi + np.pi/2])
 
     x = 1.75 * np.cos(mean)
     y = 1.75 * np.sin(mean)
     ax.plot(x, y, '--', color='b')
-
 
     ax.set_xlim([-2, 2])
     ax.set_ylim([-2, 2])
@@ -425,7 +442,7 @@
 #+RESULTS:
 
 #+begin_src ipython
-  i = 9
+  i = 0
   fig, ax = plt.subplots(1, 3, figsize=(3*height, height))
 
   plot_ring(i, ax[0], 'b')
@@ -441,9 +458,9 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7ce4bd207ed36f616cbaf925c5a3f18ba808c890.png]]
+[[file:./.ob-jupyter/bdd76b003b55a5ce34110a9e16fcaf3f776545f5.png]]
 
-#+begin_src ipython 
+#+begin_src ipython
   rates = rates_cr_list[i]
   # print(get_perf_cr(rates, phi0_list[i], n_ini))
 
@@ -464,8 +481,8 @@
   # Midpoint M of A and B
   print(phi0)
   radius = np.sqrt(x_c1**2 + y_c1**2)
-  xPhi =  np.cos(np.pi / 2 + phi0 * np.pi / 180)
-  yPhi =  np.sin(np.pi / 2 + phi0 * np.pi / 180)
+  xPhi =  np.cos(np.pi / 2 + phi0)
+  yPhi =  np.sin(np.pi / 2 + phi0)
 
   vPhi = np.stack((xPhi, yPhi))
   print(vPhi.shape)
@@ -488,21 +505,64 @@
 #+RESULTS:
 : (64, 101, 2000)
 : (2, 64)
-: 300.6935835499952
+: 3.5825993438535413
 : (2,)
-: A perf [18 14]
-: B perf [32  0]
-: performance 78.125
+: A perf [ 0 32]
+: B perf [17 15]
+: performance 73.4375
 
 *** performance
 
 #+begin_src ipython
-  # print('dist', distance_list)
-  # print('perf_list',perf_list*100)
-  # print('perf_cr_list', perf_cr_list)
+  print('dist', distance_list)
+  print('perf_list',perf_list*100)
+  print('perf_cr_list', perf_cr_list)
 #+end_src
 
 #+RESULTS:
+#+begin_example
+  dist [2.8159165 1.9680208 2.4535592 2.8749638 2.5266786 1.6827261 2.0808263
+   2.1903996 1.6030115 2.564585  2.3874645 2.3818402 2.9048111 2.8229537
+   2.4855978 2.9044554 0.6367554 2.1510975 2.3544674 2.4133115 2.8149474
+   1.6002074 2.8578453 2.4749317 2.5027053 2.0230737 2.5038652 1.5302052
+   2.704962  2.172975  2.1517289 2.1152701 2.611614  2.443475  2.3681836
+   2.3334973 1.563741  2.946833  2.396855  2.3845248 2.8547688 2.889833
+   1.8789948 2.1067734 1.9388148 2.503643  2.402532  2.0298607 2.7321155
+   2.0423124 1.9620029 2.533088  2.285747  1.6103201 2.524631  2.0806322
+   2.6208897 1.454607  1.9328033 1.924977  2.1423793 2.841242  2.3538668
+   2.6459734 1.4917232 2.3414776 2.087667  2.2844975 2.9597018 2.9004831
+   2.8418074 2.7345273 2.22267   2.7577906 2.4657686 2.1738484 2.363838
+   2.3137035 2.546744  2.5674071 2.6048553 2.3724995 1.8090179 2.8772173
+   1.2505152 2.3138437 1.6327852 2.346297  3.012898  1.7947518 2.626807
+   2.365903  2.2780154 2.5593219 2.0259335 1.791198  2.3912737 2.5016682
+   2.5248992 2.4134183]
+  perf_list [ 70.9375  11.25    76.5625  94.6875  87.5     94.6875  50.      70.9375
+    27.8125  93.4375  99.375   82.5     75.625   85.9375 100.      50.
+    50.      50.      56.875   83.4375  53.4375  42.5     84.375   54.0625
+    63.4375  50.      50.      56.875   55.3125  62.1875  50.      33.4375
+    53.75    91.875   50.      53.125   49.6875  61.875   74.0625  50.
+    63.75    50.      81.5625  96.875   70.9375  50.      50.      81.5625
+    42.8125  81.25    81.875   49.6875  50.     100.      44.0625  53.125
+   100.      49.0625  52.5     61.5625  82.1875  49.0625  55.3125  53.125
+    22.5     50.      64.375   63.125   50.      54.0625  92.8125  53.125
+    74.375   83.125   45.3125  89.0625  50.      73.4375  50.      57.1875
+    50.      58.75    90.625   52.5     50.      59.6875  54.6875  98.4375
+    57.1875  77.5     72.5     50.      50.      84.0625  73.125   51.5625
+    31.5625  50.      55.      55.9375]
+  perf_cr_list [ 73.4375  79.6875  59.375   50.      53.125  100.      89.0625  85.9375
+    90.625   50.      54.6875  53.125   57.8125  56.25    53.125   51.5625
+    65.625   51.5625  53.125   50.     100.      59.375   50.      56.25
+    51.5625 100.      92.1875  56.25    57.8125 100.      50.     100.
+    54.6875  50.     100.      51.5625  75.      98.4375  82.8125  50.
+   100.      93.75    62.5     51.5625  59.375   50.     100.      62.5
+    84.375   51.5625  89.0625  50.      62.5    100.      68.75    62.5
+    93.75    65.625   93.75   100.     100.     100.     100.      50.
+    50.      50.      96.875   53.125   51.5625  89.0625 100.     100.
+    93.75    98.4375  82.8125  53.125   73.4375  56.25   100.      54.6875
+    59.375   60.9375 100.      57.8125  65.625   51.5625 100.      90.625
+    51.5625  96.875   65.625   75.      50.     100.      95.3125  84.375
+    51.5625  79.6875  62.5     53.125 ]
+#+end_example
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2 * width, height])
@@ -511,7 +571,7 @@
   ax[0].set_xlabel('Distance')
   ax[0].set_ylabel('Density')
 
-  ax[1].hist(phi0_list, density='True')
+  ax[1].hist(phi0_list * 180 / np.pi, density='True')
   ax[1].set_xlabel('Location (°)')
   ax[1].set_ylabel('Density')
 
@@ -519,38 +579,131 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ffcc2e3a7f5b071e8328a18aceef65c9e9c098ce.png]]
+[[file:./.ob-jupyter/b7aa7700ac935210688f2e79e1ed238f2c2f6d1c.png]]
 
 
 #+begin_src ipython
-  window = 20
+  print(centers_list.shape)
+
+  radius = []
+  for i in range(centers_list.shape[0]):
+      x_c1, y_c1 = centers_list[i, 0]
+      x_c2, y_c2 = centers_list[i, 1]
+      radius.append(np.sqrt(x_c1**2 + y_c1**2))
+
+
+  radius = np.array(radius)
+  print(radius.mean())
+#+end_src
+
+#+RESULTS:
+: (100, 2, 2)
+: 1.3009497400361318
+
+#+begin_src ipython
+  window = 10
 
   fig, ax = plt.subplots(1, 2, figsize=[2 * width, height])
 
-  idx = distance_list.argsort()
+  distance = distance_list / 2.0
+  idx = distance.argsort()
 
-  ax[0].plot(distance_list[idx] / 2 / radius, circcvl(perf_list[idx]*100, window), '-ob')
-  ax[0].plot(distance_list[idx] / 2 / radius, circcvl(perf_cr_list[idx], window), '-or')
+  ax[0].plot(distance[idx], circcvl(perf_list[idx]*100, window), '-ob')
+  ax[0].plot(distance[idx], circcvl(perf_cr_list[idx], window), '-or')
   ax[0].set_xlabel('Distance')
   ax[0].set_ylabel('Performance')
+  ax[0].set_ylim([50, 90])
+  # ax[0].set_xlim([0.5, 1.0])
 
   idx = phi0_list.argsort()
 
-  ax[1].plot(phi0_list[idx], circcvl(perf_list[idx]*100, window), '-ob', label='uncorrected')
-  ax[1].plot(phi0_list[idx], circcvl(perf_cr_list[idx], window), '-or', label='corrected')
+  ax[1].plot(phi0_list[idx] * 180 / np.pi, circcvl(perf_list[idx]*100, window), '-ob', label='uncorrected')
+  ax[1].plot(phi0_list[idx] * 180 / np.pi, circcvl(perf_cr_list[idx], window), '-or', label='corrected')
   ax[1].set_xticks(np.linspace(0, 360, 5))
   ax[1].set_xlabel('Readout Location (°)')
   ax[1].set_ylabel('Performance')
   ax[1].legend(frameon=0, fontsize=14, loc='best')
-  
+  ax[1].set_ylim([40, 90])
+
+  plt.savefig('performance.svg', dpi=300)
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5751a6d01b386681a4bc4bca62915abd03364ac9.png]]
+[[file:./.ob-jupyter/bbf8ed1e4afc9acdc3492c53a52ea83524e22a0d.png]]
 
 #+begin_src ipython
+  import pickle
+  SAVE=0
+  if SAVE==1:
+      filehandler = open("distance.obj","wb")
+      pickle.dump(distance_list,filehandler)
+      filehandler.close()
+
+      filehandler = open("perf.obj","wb")
+      pickle.dump(perf_list,filehandler)
+      filehandler.close()
+
+      filehandler = open("perf_cr.obj","wb")
+      pickle.dump(perf_cr_list,filehandler)
+      filehandler.close()
+
+      filehandler = open("phi0.obj","wb")
+      pickle.dump(phi0_list,filehandler)
+      filehandler.close()
+
+      filehandler = open("centers.obj","wb")
+      pickle.dump(centers_list,filehandler)
+      filehandler.close()
+      SAVE=0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  import pickle
+  filehandler = open("distance.obj","rb")
+  dist = pickle.load(filehandler)
+  filehandler.close()
+
+  filehandler = open("perf.obj","rb")
+  perf = pickle.load(filehandler)
+  filehandler.close()
+
+  filehandler = open("perf_cr.obj","rb")
+  perf_cr = pickle.load(filehandler)
+  filehandler.close()
+
+  filehandler = open("phi0.obj","rb")
+  phi0 = pickle.load(filehandler)
+  filehandler.close()
+
+  filehandler = open("centers.obj","rb")
+  centers = pickle.load(filehandler)
+  filehandler.close()
+
+  filehandler = open("centers.obj","rb")
+  centers = pickle.load(filehandler)
+  filehandler.close()
 
 #+end_src
 
 #+RESULTS:
+
+#+begin_src ipython
+  phi0_list = np.hstack((phi0_list, phi0))
+  perf_list = np.hstack((perf_list, perf))
+  perf_cr_list = np.hstack((perf_cr_list, perf_cr))
+  distance_list = np.hstack((distance_list, dist))
+  centers_list = np.hstack((centers_list, centers))
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  print(phi0_list.shape)
+   # print(distance_list/2/radius)
+#+end_src
+
+#+RESULTS:
+: (700,)

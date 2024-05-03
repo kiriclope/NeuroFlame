@@ -22,9 +22,9 @@ class Configuration:
 
         if self.FLOAT_PRECISION == 32:
             self.FLOAT = torch.float
-        if self.FLOAT_PRECISION == 16:
+        elif self.FLOAT_PRECISION == 16:
             self.FLOAT = torch.float16
-        if self.FLOAT_PRECISION == '16b':
+        elif self.FLOAT_PRECISION == "16b":
             self.FLOAT = torch.bfloat16
         else:
             self.FLOAT = torch.float64
@@ -98,7 +98,23 @@ def init_const(model):
         model.EXP_DT_TAU[model.slices[i_pop]] = torch.exp(-model.DT / model.TAU[i_pop])
         model.DT_TAU[model.slices[i_pop]] = model.DT / model.TAU[i_pop]
 
+    # Adaptation
     model.THRESH = torch.tensor(model.THRESH, device=model.device)
+    model.thresh = torch.ones(model.N_NEURON, device=model.device)
+
+    for i_pop in range(model.N_POP):
+        model.thresh[model.slices[i_pop]] = model.THRESH[i_pop]
+
+    model.thresh = model.thresh.unsqueeze(0)
+
+    if model.IF_ADAPT:
+        model.TAU_ADAPT = torch.tensor(model.TAU_ADAPT, device=model.device)
+        model.EXP_DT_TAU_ADAPT = torch.ones(model.N_NEURON, device=model.device)
+        model.DT_TAU_ADAPT = torch.ones(model.N_NEURON, device=model.device)
+
+        for i_pop in range(model.N_POP):
+            model.EXP_DT_TAU_ADAPT[model.slices[i_pop]] = torch.exp(-model.DT / model.TAU_ADAPT[i_pop])
+            model.DT_TAU_ADAPT[model.slices[i_pop]] = model.DT / model.TAU_ADAPT[i_pop]
 
     # synaptic dynamics
     model.TAU_SYN = torch.tensor(model.TAU_SYN, device=model.device)
@@ -124,6 +140,32 @@ def init_const(model):
             model.DT_TAU_NMDA[model.slices[i_pop]] = model.DT / model.TAU_NMDA[i_pop]
 
     ##########################################
+    # defining models' Parameters
+    ##########################################
+    model.Jab = (
+        torch.tensor(model.Jab, device=model.device).reshape(model.N_POP, model.N_POP)
+        * model.GAIN
+    )
+
+    for i_pop in range(model.N_POP):
+        model.Jab[:, i_pop] = model.Jab[:, i_pop] / torch.sqrt(model.Ka[i_pop])
+
+    model.Ja0 = torch.tensor(model.Ja0, device=model.device)
+    # now inputs are scaled in init_ff_input unless live update
+    if model.LIVE_FF_UPDATE:
+        model.Ja0 = model.M0 * torch.sqrt(model.Ka[0]) * model.Ja0
+
+    model.Ja0 = model.Ja0.unsqueeze(0)  # add batch dim
+    model.Ja0 = model.Ja0.unsqueeze(-1)  # add neural dim
+
+    model.VAR_FF = torch.sqrt(torch.tensor(model.VAR_FF, device=model.device))
+
+    # scaling ff variance as 1 / sqrt(K0)
+    model.VAR_FF.mul_(model.M0 / torch.sqrt(model.Ka[0]))
+    model.VAR_FF = model.VAR_FF.unsqueeze(0)  # add batch dim
+    model.VAR_FF = model.VAR_FF.unsqueeze(-1)  # add neural dim
+
+    ##########################################
     # defining connectivity constants
     ##########################################
     model.PROBA_TYPE = np.array(model.PROBA_TYPE).reshape(model.N_POP, model.N_POP)
@@ -133,11 +175,14 @@ def init_const(model):
     model.KAPPA = torch.tensor(model.KAPPA, device=model.device).view(
         model.N_POP, model.N_POP
     )
+
     model.PHASE = torch.tensor(model.PHASE * torch.pi / 180.0, device=model.device)
 
-    model.PHI0 = (
-        torch.tensor(model.PHI0, device=model.device).unsqueeze(0) * torch.pi / 180.0
-    )
+    if isinstance(model.PHI0, list):
+        model.PHI0 = torch.tensor(model.PHI0, device=model.device).unsqueeze(0)
+
+    model.PHI0 = model.PHI0 * torch.pi / 180.0
+
     # model.PHI1 = torch.tensor(model.PHI1,  device=model.device).unsqueeze(0) * torch.pi / 180.0
 
     if "dual" in model.TASK:
@@ -151,7 +196,8 @@ def init_const(model):
             mean_ = mean_[[0, 2]]
             cov_ = torch.tensor(
                 ([cov_[0, 0], cov_[0, 2]], [cov_[2, 0], cov_[2, 2]]),
-                device=model.device, dtype=torch.float32
+                device=model.device,
+                dtype=torch.float32,
             )
 
             multivariate_normal = MultivariateNormal(mean_, cov_)

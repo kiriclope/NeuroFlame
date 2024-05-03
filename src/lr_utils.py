@@ -2,6 +2,7 @@ import time
 import torch
 from torch import nn
 
+
 def normalize_tensor(tensor, idx, slice, Na):
     norm_tensor = tensor.clone()
 
@@ -13,15 +14,19 @@ def normalize_tensor(tensor, idx, slice, Na):
 
     return norm_tensor
 
+
 def clamp_tensor(tensor, idx, slice):
     # Create a mask for non-zero elements
     clamped_tensor = tensor.clone()
     if idx == 0:
         mask = tensor[slice[0]].clamp(min=0.0)
+        clamped_tensor[slice[0]] = mask
+    elif idx == 'lr':
+        mask = tensor[slice[0]].clamp(min=-1.0, max=1.0)
+        clamped_tensor[slice[0]] = mask
     else:
         mask = tensor[slice[1]].clamp(max=0.0)
-
-    clamped_tensor[slice[idx]] = mask
+        clamped_tensor[slice[1]] = mask
 
     return clamped_tensor
 
@@ -41,23 +46,100 @@ def masked_normalize(tensor):
     return normalized_tensor
 
 
-def ortho_quench_lr(model):
-    eigenvalues, eigenvectors = torch.linalg.eig(
-        model.Wab_T[model.slices[0], model.slices[0]].T
-    )
+class LowRankWeights(nn.Module):
+    def __init__(
+        self,
+        N_NEURON,
+        Na,
+        slices,
+        RANK=1,
+        LR_MN=1,
+        LR_KAPPA=0,
+        LR_BIAS=1,
+        LR_FIX_READ=0,
+        DROP_RATE=0,
+        LR_MASK=0,
+        LR_CLASS=1,
+        DEVICE="cuda",
+    ):
+        super().__init__()
 
-    # Eigenvalues are complex, get the eigenvalue with the largest real part
-    max_real_index = torch.argmax(eigenvalues.real)
-    m = eigenvectors[:, max_real_index]
+        self.N_NEURON = N_NEURON
+        self.slices = slices
+        self.RANK = RANK
+        self.LR_MN = LR_MN
+        self.LR_KAPPA = LR_KAPPA
+        self.LR_BIAS = LR_BIAS
+        self.LR_FIX_READ = LR_FIX_READ
+        self.LR_CLASS = LR_CLASS
 
-    model.PHI0[0], model.PHI0[2] = get_ortho_pertu(m, 0.0, device=model.device)
+        self.DROP_RATE = DROP_RATE
+        self.LR_MASK = LR_MASK
 
-    Lij = torch.outer(model.PHI0[0], model.PHI0[0])
-    Lij = Lij + torch.outer(model.PHI0[2], model.PHI0[2])
+        self.Na = Na
+        self.device = DEVICE
 
-    model.lr = model.Jab[0][0] * model.KAPPA[0][0] * Lij / torch.sqrt(model.Ka[0])
-    model.Wab_T[model.slices[0], model.slices[0]].add_(model.lr.T)
-    model.Wab_T[model.slices[0], model.slices[0]].clamp_(min=0.0)
+        self.U = nn.Parameter(
+            torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * 0.01
+        )
+
+        if self.LR_MN:
+            self.V = nn.Parameter(
+                torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * 0.01
+            )
+        else:
+            self.V = (
+                torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * 0.01
+            )
+
+        if self.LR_KAPPA == 1:
+            self.lr_kappa = nn.Parameter(torch.rand(1, device=self.device))
+        else:
+            self.lr_kappa = torch.tensor(3.0, device=self.device)
+
+        # Mask to train excitatory neurons only
+        self.lr_mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
+
+        if self.LR_MASK == 0:
+            self.lr_mask[self.slices[0], self.slices[0]] = 1.0
+        if self.LR_MASK == 1:
+            self.lr_mask[self.slices[1], self.slices[1]] = 1.0
+        if self.LR_MASK == -1:
+            self.lr_mask = torch.ones(
+                (self.N_NEURON, self.N_NEURON), device=self.device
+            )
+
+        # Linear readout for supervised learning
+        self.linear = nn.Linear(
+            self.Na[0], self.LR_CLASS, device=self.device, bias=self.LR_BIAS
+        )
+
+        self.dropout = nn.Dropout(self.DROP_RATE)
+
+        if self.LR_FIX_READ:
+            for param in self.linear.parameters():
+                param.requires_grad = False
+
+    def forward(self, LR_NORM=0, LR_CLAMP=0):
+        if LR_NORM:
+            self.lr = self.lr_kappa * (
+                masked_normalize(self.U) @ masked_normalize(self.V).T
+            )
+        else:
+            if self.LR_MN:
+                self.lr = self.lr_kappa * (self.U @ self.V.T)
+            else:
+                self.lr = self.lr_kappa * (self.U @ self.U.T)
+
+        self.lr = self.lr_mask * self.lr
+
+        self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
+        self.lr = normalize_tensor(self.lr, 1, self.slices, self.Na)
+
+        if LR_CLAMP:
+            self.lr = clamp_tensor(self.lr, 'lr', self.slices)
+
+        return self.lr
 
 
 def initLR(model):
@@ -66,14 +148,19 @@ def initLR(model):
         torch.randn((model.N_NEURON, int(model.RANK)), device=model.device) * 0.01
     )
 
-    model.V = nn.Parameter(
-        torch.randn((model.N_NEURON, int(model.RANK)), device=model.device) * 0.01
-    )
+    if model.LR_MN:
+        model.V = nn.Parameter(
+            torch.randn((model.N_NEURON, int(model.RANK)), device=model.device) * 0.01
+        )
+    else:
+        model.V = (
+            torch.randn((model.N_NEURON, int(model.RANK)), device=model.device) * 0.01
+        )
 
     if model.LR_KAPPA == 1:
         model.lr_kappa = nn.Parameter(torch.rand(1, device=model.device))
     else:
-        model.lr_kappa = torch.tensor(2.0, device=model.device)
+        model.lr_kappa = torch.tensor(1.0, device=model.device)
 
     # Mask to train excitatory neurons only
     model.lr_mask = torch.zeros((model.N_NEURON, model.N_NEURON), device=model.device)
@@ -128,86 +215,3 @@ def get_idx(ksi, ksi1):
 def get_overlap(model, rates):
     ksi = model.PHI0.cpu().detach().numpy()
     return rates @ ksi.T / rates.shape[-1]
-
-
-def get_ortho_pertu(m, s, device):
-    m = m.real.unsqueeze(-1)
-    N = m.shape[0]
-    # Covariance matrix for u and v
-    C = torch.tensor([[1, s], [s, 1]], device=device)
-
-    # Cholesky decomposition
-    L = torch.linalg.cholesky(C)
-
-    # Generate a basis orthogonal to m
-    # Simple method: Use random vectors and orthogonalize
-    a = torch.randn(N, 1, device=device)
-    b = torch.randn(N, 1, device=device)
-
-    # Orthogonalize a and b wrt m
-    a -= torch.matmul(a.T, m) * m
-    b -= torch.matmul(b.T, m) * m + torch.matmul(b.T, a) * a / torch.square(
-        torch.linalg.norm(a)
-    )
-
-    # Normalize
-    a /= torch.linalg.norm(a)
-    b /= torch.linalg.norm(b)
-
-    # Generating initial random vectors (uncorrelated)
-    x = torch.randn(2, 1, device=device)
-
-    # Apply transformation
-    transformed = L @ x
-
-    # Apply the transformation to a and b to get u and v
-    u = transformed[0] * a
-    v = transformed[1] * b
-
-    return u.squeeze(-1), v.squeeze(-1)
-
-
-def gen_ortho_vec(m, desired_cov, random_seed=None, device="cuda"):
-    if random_seed is not None:
-        torch.manual_seed(random_seed)  # For reproducibility
-
-    N = m.size(0)
-    # Step 1: Generate a random vector u and make it orthogonal to m
-    u = torch.randn(N, device=device)
-    # u -= u.dot(m) / m.dot(m) * m
-
-    # Step 2: Generate a random vector v that is orthogonal to both m and u
-    v = torch.randn(N, device=device)
-    # v -= v.dot(m) / m.dot(m) * m
-    # v -= v.dot(u) / u.dot(u) * u
-
-    # Normalize u and v to ensure they are unit vectors (optional)
-    # u = u / u.norm()
-    # v = v / v.norm()
-
-    # Step 3: Construct the desired covariance matrix
-    cov_matrix = torch.tensor([[1, desired_cov], [desired_cov, 1]])
-
-    # Step 4: Obtain the Cholesky decomposition of the covariance matrix
-    L = torch.linalg.cholesky(cov_matrix)
-
-    # Step 5: Use L to generate vectors with the desired covariance
-    u_prime = L[0, 0] * u + L[0, 1] * v
-    v_prime = L[1, 0] * u + L[1, 1] * v
-
-    return u_prime, v_prime
-
-
-def gen_v_cov(u, cov, device="cuda"):
-    seed = int(time.time())
-    torch.manual_seed(seed)
-
-    N = u.size(0)
-
-    v = torch.randn(N, device=device)
-    v -= v.dot(u) / u.dot(u) * u
-
-    a = cov
-    b = torch.sqrt(1.0 - cov**2)
-
-    return a * u + b * v

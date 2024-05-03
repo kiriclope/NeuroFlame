@@ -1,10 +1,10 @@
-###############################################
+###################################################
 # Parameters
-###############################################
+###################################################
 # output different prompts for debugging purpose
 VERBOSE: 0
 # device to be used cuda or cpu
-DEVICE: 'cuda:1'
+DEVICE: cuda
 # float precision
 FLOAT_PRECISION: 32
 
@@ -13,12 +13,14 @@ FLOAT_PRECISION: 32
 #####################################
 # Number of batches (ie initializations)
 N_BATCH: 1
+IF_BATCH_J: 0
+
 # Time step in s
-DT: 0.01
+DT: 0.001
 # total simulation time in s
-DURATION: 6
+DURATION: 11.5
 # time to start saving simulation files
-T_STEADY: 1.0
+T_STEADY: 1
 # Saving to files every T_WINDOW
 T_WINDOW: 0.1
 
@@ -26,19 +28,17 @@ T_WINDOW: 0.1
 # Parameters for the stimulus presentation
 ##########################################
 # stimulus as a cosine shape
-TASK: 'dual'
+TASK: 'odr'
 # # time for stimuli onset in s
-T_STIM_ON: [1.0, 3.0, 5.0]
+T_STIM_ON: [1.0, 3, 5.0]
 # # time for stimuli offset in s
-T_STIM_OFF: [2.0, 4.0, 6.0]
+T_STIM_OFF: [2.5, 4., 6.5]
 # stimuli strengths
-I0: [0.2, 0.0, 0.0]
+I0: [1.75, -5, 1.75]
 # stimuli phases
-PHI0: [180.0, 90.0, 0.0]
-# stimuli phases
-PHI1: [180.0, 90.0, 0.0]
+PHI0: [180.0, 0, 90]
 # stimuli tuning
-SIGMA0: [1.0, 1.0, 1.0]
+SIGMA0: [1.0, 0, 1.0]
 
 ##########################################
 # Network parameters
@@ -46,11 +46,11 @@ SIGMA0: [1.0, 1.0, 1.0]
 # number of populations
 N_POP: 2
 # number of neurons
-N_NEURON: 2000
+N_NEURON: 1000
 # number of average presynaptic input (set to 1 if all to all)
-K: 200.0
+K: 1.0
 # fraction of neuron in each population (must sum to 1)
-frac: [0.8, 0.2]
+frac: [0.5, 0.5]
 
 ##########################################
 # Voltage Dynamics for LIF model
@@ -66,16 +66,16 @@ V_REST: -70.0
 # set to 0 for threshold linear, 1 for sigmoid
 TF_TYPE: 'relu'
 # threshold
-THRESH: [1.0, 1.0]
+THRESH: [0.0, 0.0]
 
 ##########################################
 # Dynamics of the rates
 ##########################################
 # set to 0 if instantaneous rates, 1 if exponentially decaying
-RATE_DYN: 0
+RATE_DYN: 1
 # rate time constants
-TAU: [0.04, 0.04]
-RATE_NOISE: 0
+TAU: [0.04, 0.02]
+RATE_NOISE: 1
 
 ##########################################
 # Dynamics of the recurrent inputs
@@ -83,35 +83,32 @@ RATE_NOISE: 0
 # set to 0 if instantaneous, 1 if exponentially decaying
 SYN_DYN: 1
 # Synaptic time constants for each population
-TAU_SYN: [0.2, 0.1]
+TAU_SYN: [.004, .004]
 
 ##########################################
 # NMDA currents
 ##########################################
 IF_NMDA: 1
 R_NMDA: 1.0
-TAU_NMDA: [0.40, 0.40]
+TAU_NMDA: [.1, .1]
 
-####################
-# Plasticity
-####################
-IF_STP: 0
-USE: 0.03
-TAU_FAC: 1.0
-TAU_REC: 0.2
-J_STP: 10.0
-STP_TYPE: 'markram'
+##########################################
+# Adaptation currents
+##########################################
+IF_ADAPT: 1
+A_ADAPT: 0.01
+TAU_ADAPT: [50, 50]
 
 ##########################################
 # Feedforward inputs
 ##########################################
 LIVE_FF_UPDATE: 0
 # External inputs strengths
-Ja0: [2.0, 1.0]
+Ja0: [1.58, 1.0]
 # External rate
 M0: 2.0
 # Variance of the noise
-VAR_FF: [0.0, 0.0]
+VAR_FF: [0.75, 0.75]
 # To add an attentional switch
 # if BUMP_SWITCH[i] == 1 it sets Iext[i] to zero before stimulus presentation
 BUMP_SWITCH: [0, 0]
@@ -120,44 +117,54 @@ BUMP_SWITCH: [0, 0]
 # Synaptic strengths
 ##########################################
 # Network's gain
-GAIN: 0.5
+GAIN: 1.0
 # Synaptic strengths
 Jab: [1.0, -1.5, 1, -1]
-# Batching Jab
-IF_BATCH_J: 0
+
+####################
+# Plasticity
+####################
+# adds short term plasticity
+IF_STP: 1
+USE: 0.03
+TAU_FAC: 1.0
+TAU_REC: 0.2
+J_STP: 7.5
+STP_TYPE: 'markram'
 
 ##############
 # Connectivity
 ##############
-SPARSE: None
+IF_W_BLOCKS: 0
 # seed for connectivity None or float
-SEED: 1
+SEED: 0
 # CON_TYPE can be 'all2all' or 'sparse'
-CON_TYPE: 'sparse'
+CON_TYPE: 'all2all'
 # PROBA_TYPE can be 'cosine', 'cosine_spec' or 'lr'
-PROBA_TYPE: ['None', 'None', 'None', 'None']
+PROBA_TYPE: ['cosine', 'cosine', 'cosine', 'cosine']
+
 # strength of the asymmetries if all to all
 SIGMA: [0.0, 0.0, 0.0, 0.0]
 # tuning of the recurrent connections
-KAPPA: [0.0, 0.0, 0.0, 0.0]
+KAPPA: [1.0, 0.25, 1.0, 0.25]
+
 # phase of the connectivity
 PHASE: 0.0
 
 ##########
 # Low rank
 ##########
-LR_EVAL_WIN: 2
+LR_EVAL_WIN: 0
 LR_TRAIN: 0
-LR_READOUT: 0
 
-LR_MASK: 0
-LR_KAPPA: 0
-LR_CLASS: 1
-LR_BIAS: 1
-LR_NORM: 0
-LR_FIX_READ: 0
-DROP_RATE: 0.0
+# RANK: 2
+# LR_MEAN: [0.0, 0.0]
+# LR_COV: [[1.0, 0.0],[0.0, 1.0]]
 
-RANK: 2
+# RANK: 3
+# LR_MEAN: [0.0, 0.0, 0.0]
+# LR_COV: [[1.0, 0.0, 0.0],[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+
+# RANK: 4
 LR_MEAN: [0.0, 0.0, 0.0, 0.0]
 LR_COV: [[1.0, 0.9, 0.0, 0.0],[0.9, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.9], [0.0, 0.0, 0.9, 1.0]]
