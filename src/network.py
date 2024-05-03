@@ -151,13 +151,13 @@ class Network(nn.Module):
 
         if self.LIVE_FF_UPDATE:
             rates = Activation()(
-                ff_input + rec_input[0], func_name=self.TF_TYPE, thresh=self.THRESH
+                ff_input + rec_input[0], func_name=self.TF_TYPE, thresh=self.thresh
             )
         else:
             rates = Activation()(
                 ff_input[:, 0] + rec_input[0],
                 func_name=self.TF_TYPE,
-                thresh=self.THRESH,
+                thresh=self.thresh,
             )
 
         return rates, ff_input, rec_input
@@ -227,13 +227,17 @@ class Network(nn.Module):
             net_input = net_input + rec_input[1]
 
         # compute non linearity
-        non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.THRESH)
+        non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.thresh)
 
         # update rates
         if self.RATE_DYN:
             rates = rates * self.EXP_DT_TAU + non_linear * self.DT_TAU
         else:
             rates = non_linear
+
+        if self.IF_ADAPT:
+            self.thresh = self.thresh * self.EXP_DT_TAU_ADAPT
+            self.thresh = self.thresh + rates * self.DT_TAU_ADAPT * self.A_ADAPT
 
         # del hidden, net_input, non_linear
 

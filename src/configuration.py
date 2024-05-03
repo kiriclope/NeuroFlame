@@ -98,7 +98,23 @@ def init_const(model):
         model.EXP_DT_TAU[model.slices[i_pop]] = torch.exp(-model.DT / model.TAU[i_pop])
         model.DT_TAU[model.slices[i_pop]] = model.DT / model.TAU[i_pop]
 
+    # Adaptation
     model.THRESH = torch.tensor(model.THRESH, device=model.device)
+    model.thresh = torch.ones(model.N_NEURON, device=model.device)
+
+    for i_pop in range(model.N_POP):
+        model.thresh[model.slices[i_pop]] = model.THRESH[i_pop]
+
+    model.thresh = model.thresh.unsqueeze(0)
+
+    if model.IF_ADAPT:
+        model.TAU_ADAPT = torch.tensor(model.TAU_ADAPT, device=model.device)
+        model.EXP_DT_TAU_ADAPT = torch.ones(model.N_NEURON, device=model.device)
+        model.DT_TAU_ADAPT = torch.ones(model.N_NEURON, device=model.device)
+
+        for i_pop in range(model.N_POP):
+            model.EXP_DT_TAU_ADAPT[model.slices[i_pop]] = torch.exp(-model.DT / model.TAU_ADAPT[i_pop])
+            model.DT_TAU_ADAPT[model.slices[i_pop]] = model.DT / model.TAU_ADAPT[i_pop]
 
     # synaptic dynamics
     model.TAU_SYN = torch.tensor(model.TAU_SYN, device=model.device)

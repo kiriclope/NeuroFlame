@@ -8,7 +8,7 @@ class Activation(nn.Module):
 
     def forward(self, x, func_name="relu", thresh=15):
         if func_name == "relu":
-            return nn.ReLU()(x)
+            return nn.ReLU()(x - thresh)
         elif func_name == "erf":
             return torch.erf(x / torch.sqrt(torch.tensor(2.0)))
         elif func_name == "sqrt":

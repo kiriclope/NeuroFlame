@@ -81,7 +81,7 @@ First, we define a sequence of stimuli intensities and footprints
 
 #+BEGIN_SRC ipython
   # Stimuli strength
-  I0 = [1.75, -5] * N_TRIALS
+  I0 = [1.75, -2.5] * N_TRIALS
   print('I0', I0)
 
   # Stimuli footprint
@@ -90,14 +90,14 @@ First, we define a sequence of stimuli intensities and footprints
 #+end_src
 
 #+RESULTS:
-: I0 [1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5]
+: I0 [1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5]
 : SIGMA0 [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
 
 Then, we create a sequence of stimuli onsets and offsets
 
 #+BEGIN_SRC ipython
   a = [1 + i * 3.5 for i in range(N_TRIALS)]
-  b = [3 + i * 3.5 for i in range(N_TRIALS)]
+  b = [4 + i * 3.5 for i in range(N_TRIALS)]
 
   T_STIM_ON = [val for pair in zip(a, b) for val in pair]
 
@@ -105,12 +105,11 @@ Then, we create a sequence of stimuli onsets and offsets
 #+end_src
 
 #+RESULTS:
-: [1.0, 3.0, 4.5, 6.5, 8.0, 10.0, 11.5, 13.5, 15.0, 17.0, 18.5, 20.5, 22.0, 24.0, 25.5, 27.5, 29.0, 31.0, 32.5, 34.5]
+: [1.0, 4.0, 4.5, 7.5, 8.0, 11.0, 11.5, 14.5, 15.0, 18.0, 18.5, 21.5, 22.0, 25.0, 25.5, 28.5, 29.0, 32.0, 32.5, 35.5]
 
 #+BEGIN_SRC ipython
   c = [2 + i * 3.5 for i in range(N_TRIALS)]
-  d = [3.5 + i * 3.5 for i in range(N_TRIALS)]
-
+  d = [4.5 + i * 3.5 for i in range(N_TRIALS)]
 
   T_STIM_OFF = [val for pair in zip(c, d) for val in pair]
   print(T_STIM_OFF)
@@ -120,8 +119,8 @@ Then, we create a sequence of stimuli onsets and offsets
 #+end_src
 
 #+RESULTS:
-: [2.0, 3.5, 5.5, 7.0, 9.0, 10.5, 12.5, 14.0, 16.0, 17.5, 19.5, 21.0, 23.0, 24.5, 26.5, 28.0, 30.0, 31.5, 33.5, 35.0]
-: 36.0
+: [2.0, 4.5, 5.5, 8.0, 9.0, 11.5, 12.5, 15.0, 16.0, 18.5, 19.5, 22.0, 23.0, 25.5, 26.5, 29.0, 30.0, 32.5, 33.5, 36.0]
+: 37.0
 
 ** Phase Batches
 Now, we need to create batches of stimuli phases to simulate to compute SB.
@@ -129,7 +128,7 @@ Now, we need to create batches of stimuli phases to simulate to compute SB.
 Let's batch the phases!
 
 #+begin_src ipython
-  N_BATCH = 512
+  N_BATCH = 1024
 
   PHI0 = torch.ones((1, 2 * N_TRIALS), device=DEVICE)
   PHI0 = PHI0.unsqueeze(-1).repeat((N_BATCH, 1, 1))
@@ -143,7 +142,7 @@ Let's batch the phases!
 #+end_src
 
 #+RESULTS:
-: PHI0 torch.Size([512, 20, 1])
+: PHI0 torch.Size([1024, 20, 1])
 
 #+begin_src ipython
   plt.hist(PHI0[:, 0, 0].cpu().numpy())
@@ -153,7 +152,7 @@ Let's batch the phases!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/024a8166796b2eb11448eda5f63f78e191687fde.png]]
+[[file:./.ob-jupyter/cbee3934eeaad69d25b67efa7074855eebae192e.png]]
 
 ** Model
 
@@ -162,7 +161,7 @@ Let's batch the phases!
                   N_BATCH=N_BATCH, DURATION=DURATION,
                   I0=I0, SIGMA0=SIGMA0, PHI0=PHI0,
                   T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,
-                  TAU_FAC= 1,
+                  TAU_FAC= 1.0,
                   J_STP=7.5)
 #+end_src
 
@@ -187,13 +186,15 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-: torch.Size([512, 361])
+: torch.Size([1024, 371])
 
 #+begin_src ipython
   targets = PHI0[:,::2,0].cpu().numpy() * np.pi / 180
+  print('targets', targets.shape)
 #+end_src
 
 #+RESULTS:
+: targets (1024, 10)
 
 #+begin_src ipython
   steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
@@ -214,8 +215,8 @@ Let's decode the bumps!
 
 #+RESULTS:
 : [ 29  64  99 134 169 204 239 274 309 344]
-: delay phase (512, 10)
-: 106.000000672989 111.73899882120052
+: delay phase (1024, 10)
+: 156.0000043410955 155.71386039600696
 
 #+begin_src ipython
   errors =  targets - phi_off
@@ -226,8 +227,8 @@ Let's decode the bumps!
  #+end_src
 
 #+RESULTS:
-: -0.10016441
-: errors (512, 10)
+: 0.004994154
+: errors (1024, 10)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -260,8 +261,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ca436334a0735e9a479640ab48b8ba5428f6729d.png]]
-
+[[file:./.ob-jupyter/1d85e3e158532e4ebb215e8b2d44e5554acaeda9.png]]
 
 #+begin_src ipython
   plt.hist(errors, bins=5)
@@ -271,26 +271,32 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/0bba8bde37cac7a26b7b70463cd3cd46ff69bd90.png]]
+[[file:./.ob-jupyter/fea55203919fa1cbeb371bb7f05e627f02a9dae6.png]]
 
 #+begin_src ipython
   rel_loc = np.diff(targets, axis=1)
+
+  # rel_loc = []
+  # for i in range(targets.shape[1]):
+  #     rel_loc.append(targets[:, i] - targets[:, 0])
+  # rel_loc = np.array(rel_loc).T
+
   rel_loc = (rel_loc + np.pi ) % (2*np.pi) - np.pi
   print(rel_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (512, 9)
+: (1024, 9)
 
 #+begin_src ipython
-  plt.hist(rel_loc *180 /np.pi)
+  plt.hist(rel_loc *180 /np.pi, bins=10)
   plt.xlabel('Rel. Loc (°)')
   plt.ylabel('Count')
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/72b7d8ba35886e74eaa4b49ff37ed006f47ebe28.png]]
+[[file:./.ob-jupyter/def1f263a70d34df840f8d7fa75dbad93ede6d7c.png]]
 
 #+begin_src ipython
   pal = sns.color_palette("rocket_r", n_colors= N_TRIALS)
@@ -308,13 +314,13 @@ Let's decode the bumps!
   plt.axhline(color='k', linestyle=":")
   plt.xlabel('Rel. Loc. (°)')
   plt.ylabel('Error (°)')
-  plt.ylim([-50, 50])
+  # plt.ylim([-20, 20])
   plt.legend(frameon=False, loc='best', fontsize=10)
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/9a40d7b1d5b6f35632f4eeded36dfbe28b2447c5.png]]
+[[file:./.ob-jupyter/c19ce510b84f2a56feec4df777437aea55c57b21.png]]
 
 #+begin_src ipython
 
