@@ -8,10 +8,10 @@ from src.configuration import Configuration
 from src.connectivity import Connectivity
 from src.activation import Activation
 from src.plasticity import Plasticity
-from src.ff_input import live_ff_input, init_ff_input
+from src.lr_utils import LowRankWeights, clamp_tensor
 
+from src.ff_input import live_ff_input, init_ff_input
 from src.utils import set_seed, clear_cache, print_activity
-from src.lr_utils import initLR, masked_normalize, clamp_tensor, normalize_tensor
 
 import warnings
 
@@ -19,20 +19,20 @@ warnings.filterwarnings("ignore")
 
 
 class Network(nn.Module):
-    def __init__(self, conf_name, repo_root, **kwargs):
-        """
-        Class: Network
-        Creates a recurrent network of rate units with customizable connectivity and dynamics.
-        The network can be trained with standard torch optimization technics.
-        Parameters:
-               conf_name: str, name of a .yml file contaning the model's parameters.
-               repo_root: str, root path of the NeuroFlame repository.
-               **kwargs: **dict, any parameter in conf_file can be passed here
-                                 and will then be overwritten.
-        Returns:
-               rates: tensorfloat of size (N_BATCH, N_STEPS or 1, N_NEURON).
-        """
+    """
+    Class: Network
+    Creates a recurrent network of rate units with customizable connectivity and dynamics.
+    The network can be trained with standard torch optimization technics.
+    Parameters:
+        conf_name: str, name of a .yml file contaning the model's parameters.
+        repo_root: str, root path of the NeuroFlame repository.
+        **kwargs: **dict, any parameter in conf_file can be passed here
+                             and will then be overwritten.
+    Returns:
+           rates: tensorfloat of size (N_BATCH, N_STEPS or 1, N_NEURON).
+    """
 
+    def __init__(self, conf_name, repo_root, **kwargs):
         super().__init__()
 
         # Load parameters from configuration file and create networks constants
@@ -44,7 +44,25 @@ class Network(nn.Module):
 
         # Initialize low rank connectivity for training
         if self.LR_TRAIN:
-            initLR(self)
+            self.odors = torch.randn(
+                (3, self.Na[0]),
+                device=self.device,
+            )
+
+            self.low_rank = LowRankWeights(
+                self.N_NEURON,
+                self.Na,
+                self.slices,
+                self.RANK,
+                self.LR_MN,
+                self.LR_KAPPA,
+                self.LR_BIAS,
+                self.LR_FIX_READ,
+                self.DROP_RATE,
+                self.LR_MASK,
+                self.LR_CLASS,
+                self.device,
+            )
 
         # Add STP
         if self.IF_STP:
@@ -61,8 +79,8 @@ class Network(nn.Module):
         Relies on class Connectivity from connetivity.py
         """
 
-        # Scale synaptic weights as 1/sqrt(K) for sparse nets
-        self.scaleWeights()
+        # # Scale synaptic weights as 1/sqrt(K) for sparse nets
+        # self.scaleWeights()
 
         # in pytorch, Wij is i to j.
         # self.register_buffer('Wab_T', torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device))
@@ -106,7 +124,7 @@ class Network(nn.Module):
             self.GAIN / torch.sqrt(self.Ka[0])
         )
 
-        # NEED .clone() here otherwise BAD THINGS HAPPEN
+        # NEED .clone() here otherwise BAD THINGS HAPPEN !!!
         self.W_stp_T = (
             self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
         )
@@ -149,11 +167,6 @@ class Network(nn.Module):
         if self.VERBOSE:
             print("Jab", self.Jab)
 
-        self.Jab = (
-            torch.tensor(self.Jab, device=self.device).reshape(self.N_POP, self.N_POP)
-            * self.GAIN
-        )
-
         for i_pop in range(self.N_POP):
             self.Jab[:, i_pop] = self.Jab[:, i_pop] / torch.sqrt(self.Ka[i_pop])
 
@@ -161,19 +174,12 @@ class Network(nn.Module):
         if self.VERBOSE:
             print("Ja0", self.Ja0)
 
-        self.Ja0 = torch.tensor(self.Ja0, device=self.device)
-        self.Ja0 = self.Ja0.unsqueeze(0)  # add batch dim
-        self.Ja0 = self.Ja0.unsqueeze(-1)  # add neural dim
-
         # now inputs are scaled in init_ff_input unless live update
         if self.LIVE_FF_UPDATE:
             self.Ja0 = self.M0 * torch.sqrt(self.Ka[0]) * self.Ja0
 
         # scaling ff variance as 1 / sqrt(K0)
-        self.VAR_FF = torch.sqrt(torch.tensor(self.VAR_FF, device=self.device))
         self.VAR_FF.mul_(self.M0 / torch.sqrt(self.Ka[0]))
-        self.VAR_FF = self.VAR_FF.unsqueeze(0)  # add batch dim
-        self.VAR_FF = self.VAR_FF.unsqueeze(-1)  # add neural dim
 
     def update_dynamics(self, rates, ff_input, rec_input, Wab_T, W_stp_T):
         """Updates the dynamics of the model at each timestep"""
@@ -181,7 +187,7 @@ class Network(nn.Module):
         # update hidden state
         if self.SPARSE == "full":
             hidden = torch.sparse.mm(rates, Wab_T)
-        elif self.SPARSE == 'semi':
+        elif self.SPARSE == "semi":
             hidden = (Wab_T @ rates.T).T
         else:
             hidden = rates @ Wab_T
@@ -189,7 +195,7 @@ class Network(nn.Module):
         # update stp variables
         if self.IF_STP:
             Aux = self.stp(rates[:, self.slices[0]])  # Aux is now u * x * rates
-            hidden_stp = self.J_STP * Aux @ W_stp_T
+            hidden_stp = self.J_STP * Aux @ W_stp_T  # / torch.sqrt(self.Ka[0])
             hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
 
         # update batched EtoE
@@ -272,32 +278,25 @@ class Network(nn.Module):
             self.x_list, self.u_list = [], []
             W_stp_T = self.W_stp_T
 
-        # I moved this outside of the temporal loop
-        # The downside is that I need to pass Wab_T to update_dynamics
-        # not sure it is more efficient
         if self.LR_TRAIN:
-            if self.LR_NORM:
-                self.lr = self.lr_kappa * (
-                    masked_normalize(self.U) @ masked_normalize(self.V).T
-                )
-            else:
-                if self.LR_MN:
-                    self.lr = self.lr_kappa * (self.U @ self.V.T)
-                else:
-                    self.lr = self.lr_kappa * (self.U @ self.U.T)
-
-            self.lr = self.lr_mask * self.lr
-            self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
-            self.lr = normalize_tensor(self.lr, 1, self.slices, self.Na)
+            self.lr = self.low_rank(self.LR_NORM, self.LR_CLAMP) * torch.sqrt(
+                self.Ka[0]
+            )
 
             if self.IF_STP:
-                W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
-                W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
+                # W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
+                W_stp_T = self.W_stp_T * (
+                    1.0 + self.lr[self.slices[0], self.slices[0]].T
+                )
+                # W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
 
-            Wab_T = self.Wab_T + self.lr.T
+                Wab_T = self.Wab_T
+            else:
+                # Wab_T = self.Wab_T + self.lr.T
+                Wab_T = self.Wab_T * (1.0 + self.lr.T)
 
-            Wab_T = clamp_tensor(Wab_T, 0, self.slices)
-            Wab_T = clamp_tensor(Wab_T, 1, self.slices)
+            # Wab_T = clamp_tensor(Wab_T, 0, self.slices)
+            # Wab_T = clamp_tensor(Wab_T, 1, self.slices)
 
         else:
             Wab_T = self.Wab_T
@@ -373,8 +372,7 @@ class Network(nn.Module):
 
         # Add Linear readout (N_BATCH, N_EVAL_WIN, 1) on last few steps
         if self.LR_READOUT:
-            y_pred = self.linear(self.dropout(rates))
-            # y_pred = self.linear(self.dropout(rates[:, -self.lr_eval_win :]))
+            y_pred = self.low_rank.linear(self.low_rank.dropout(rates))
             # del rates
 
             if self.LR_CLASS == 3:

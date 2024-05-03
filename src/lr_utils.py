@@ -20,10 +20,13 @@ def clamp_tensor(tensor, idx, slice):
     clamped_tensor = tensor.clone()
     if idx == 0:
         mask = tensor[slice[0]].clamp(min=0.0)
+        clamped_tensor[slice[0]] = mask
+    elif idx == 'lr':
+        mask = tensor[slice[0]].clamp(min=-1.0, max=1.0)
+        clamped_tensor[slice[0]] = mask
     else:
         mask = tensor[slice[1]].clamp(max=0.0)
-
-    clamped_tensor[slice[idx]] = mask
+        clamped_tensor[slice[1]] = mask
 
     return clamped_tensor
 
@@ -47,8 +50,11 @@ class LowRankWeights(nn.Module):
     def __init__(
         self,
         N_NEURON,
+        Na,
         slices,
         RANK=1,
+        LR_MN=1,
+        LR_KAPPA=0,
         LR_BIAS=1,
         LR_FIX_READ=0,
         DROP_RATE=0,
@@ -61,7 +67,8 @@ class LowRankWeights(nn.Module):
         self.N_NEURON = N_NEURON
         self.slices = slices
         self.RANK = RANK
-
+        self.LR_MN = LR_MN
+        self.LR_KAPPA = LR_KAPPA
         self.LR_BIAS = LR_BIAS
         self.LR_FIX_READ = LR_FIX_READ
         self.LR_CLASS = LR_CLASS
@@ -69,7 +76,7 @@ class LowRankWeights(nn.Module):
         self.DROP_RATE = DROP_RATE
         self.LR_MASK = LR_MASK
 
-        self.Na0 = self.slices[0].shape[0]
+        self.Na = Na
         self.device = DEVICE
 
         self.U = nn.Parameter(
@@ -88,7 +95,7 @@ class LowRankWeights(nn.Module):
         if self.LR_KAPPA == 1:
             self.lr_kappa = nn.Parameter(torch.rand(1, device=self.device))
         else:
-            self.lr_kappa = torch.tensor(1.0, device=self.device)
+            self.lr_kappa = torch.tensor(3.0, device=self.device)
 
         # Mask to train excitatory neurons only
         self.lr_mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
@@ -104,35 +111,35 @@ class LowRankWeights(nn.Module):
 
         # Linear readout for supervised learning
         self.linear = nn.Linear(
-            self.Na0, self.LR_CLASS, device=self.device, bias=self.LR_BIAS
+            self.Na[0], self.LR_CLASS, device=self.device, bias=self.LR_BIAS
         )
 
         self.dropout = nn.Dropout(self.DROP_RATE)
-
-        self.odors = torch.randn(
-            (3, self.Na0),
-            device=self.device,
-        )
 
         if self.LR_FIX_READ:
             for param in self.linear.parameters():
                 param.requires_grad = False
 
-        def forward(self, LR_NORM=0):
-
-            if self.LR_NORM:
-                self.lr = self.lr_kappa * (
-                    masked_normalize(self.U) @ masked_normalize(self.V).T
-                )
+    def forward(self, LR_NORM=0, LR_CLAMP=0):
+        if LR_NORM:
+            self.lr = self.lr_kappa * (
+                masked_normalize(self.U) @ masked_normalize(self.V).T
+            )
+        else:
+            if self.LR_MN:
+                self.lr = self.lr_kappa * (self.U @ self.V.T)
             else:
-                if self.LR_MN:
-                    self.lr = self.lr_kappa * (self.U @ self.V.T)
-                else:
-                    self.lr = self.lr_kappa * (self.U @ self.U.T)
+                self.lr = self.lr_kappa * (self.U @ self.U.T)
 
-            self.lr = self.lr_mask * self.lr
-            self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
-            self.lr = normalize_tensor(self.lr, 1, self.slices, self.Na)
+        self.lr = self.lr_mask * self.lr
+
+        self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
+        self.lr = normalize_tensor(self.lr, 1, self.slices, self.Na)
+
+        if LR_CLAMP:
+            self.lr = clamp_tensor(self.lr, 'lr', self.slices)
+
+        return self.lr
 
 
 def initLR(model):
