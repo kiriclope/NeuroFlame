@@ -14,9 +14,9 @@ FLOAT_PRECISION: 32
 # Number of batches (ie initializations)
 N_BATCH: 1
 # Time step in s
-DT: 0.01
+DT: 0.02
 # total simulation time in s
-DURATION: 7
+DURATION: 8
 # time to start saving simulation files
 T_STEADY: 1.0
 # Saving to files every T_WINDOW
@@ -28,18 +28,23 @@ T_WINDOW: 0.1
 # stimulus as a cosine shape
 TASK: 'dual'
 # # time for stimuli onset in s
-T_STIM_ON: [1.0, 3.0, 5.0]
-# # time for stimuli offset in s
-T_STIM_OFF: [2.0, 4.0, 6.0]
+T_STIM_ON: [1.0, 3.0, 5.0, 7.0]
+# # # time for stimuli offset in s
+T_STIM_OFF: [2.0, 4.0, 6.0, 8.0]
 # stimuli strengths
-I0: [0.2, 0.0, 0.0]
+I0: [0.2, 0.0, 0.0, 0.0]
 # stimuli phases
-PHI0: [180.0, 90.0, 0.0]
+PHI0: [180.0, 90.0, 0.0, 0.0]
 # stimuli phases
-PHI1: [180.0, 90.0, 0.0]
+PHI1: [180.0, 90.0, 0.0, 0.0]
 # stimuli tuning
-SIGMA0: [1.0, 1.0, 1.0]
+SIGMA0: [1.0, 1.0, 1.0, 1.0]
 
+##########################################
+## Reward go
+##########################################
+IF_RL: 1
+RWD: 2
 ##########################################
 # Network parameters
 ##########################################
@@ -48,7 +53,7 @@ N_POP: 2
 # number of neurons
 N_NEURON: 2000
 # number of average presynaptic input (set to 1 if all to all)
-K: 200.0
+K: 100.0
 # fraction of neuron in each population (must sum to 1)
 frac: [0.5, 0.5]
 
@@ -66,7 +71,7 @@ V_REST: -70.0
 # set to 0 for threshold linear, 1 for sigmoid
 TF_TYPE: 'relu'
 # threshold
-THRESH: [1.0, 1.0]
+THRESH: [0.0, 0.0]
 
 ##########################################
 # Dynamics of the rates
@@ -74,7 +79,7 @@ THRESH: [1.0, 1.0]
 # set to 0 if instantaneous rates, 1 if exponentially decaying
 RATE_DYN: 0
 # rate time constants
-TAU: [0.04, 0.04]
+TAU: [0.2, 0.1]
 RATE_NOISE: 0
 
 ##########################################
@@ -87,19 +92,20 @@ TAU_SYN: [0.2, 0.1]
 
 ##########################################
 # NMDA currents
-##########################################
+#########################################
 IF_NMDA: 0
 R_NMDA: 1.0
-TAU_NMDA: [0.40, 0.40]
+TAU_NMDA: [0.20, 0.20]
 
 ####################
 # Plasticity
 ####################
 IF_STP: 1
 USE: 0.03
-TAU_FAC: 0.65
+# TAU_FAC: 0.8
+TAU_FAC: 0.5
 TAU_REC: 0.2
-J_STP: 10.0
+J_STP: 7.0
 STP_TYPE: 'markram'
 
 ##########################################
@@ -111,7 +117,7 @@ Ja0: [2.0, 1.0]
 # External rate
 M0: 1.0
 # Variance of the noise
-VAR_FF: [1.0, 1.0]
+VAR_FF: [3.0, 3.0]
 # To add an attentional switch
 # if BUMP_SWITCH[i] == 1 it sets Iext[i] to zero before stimulus presentation
 BUMP_SWITCH: [0, 0]
@@ -120,7 +126,7 @@ BUMP_SWITCH: [0, 0]
 # Synaptic strengths
 ##########################################
 # Network's gain
-GAIN: 2.0
+GAIN: 0.75
 # Synaptic strengths
 Jab: [1.0, -1.5, 1, -1]
 # Batching Jab
@@ -153,7 +159,7 @@ LR_TRAIN: 1
 LR_READOUT: 1
 LR_CLASS: 1
 LR_BIAS: 1
-LR_FIX_READ: 0
+LR_FIX_READ: 1
 DROP_RATE: 0.0
 
 LR_MASK: 0
@@ -162,6 +168,6 @@ LR_CLAMP: 1
 LR_KAPPA: 1
 LR_MN: 1
 
-RANK: 1
+RANK: 2
 LR_MEAN: [0.0, 0.0, 0.0, 0.0]
 LR_COV: [[1.0, 0.9, 0.0, 0.0],[0.9, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.9], [0.0, 0.0, 0.9, 1.0]]

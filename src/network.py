@@ -10,7 +10,7 @@ from src.activation import Activation
 from src.plasticity import Plasticity
 from src.lr_utils import LowRankWeights, clamp_tensor
 
-from src.ff_input import live_ff_input, init_ff_input
+from src.ff_input import live_ff_input, init_ff_input, rl_ff_udpdate
 from src.utils import set_seed, clear_cache, print_activity
 
 import warnings
@@ -45,7 +45,7 @@ class Network(nn.Module):
         # Initialize low rank connectivity for training
         if self.LR_TRAIN:
             self.odors = torch.randn(
-                (3, self.Na[0]),
+                (4, self.Na[0]),
                 device=self.device,
             )
 
@@ -57,6 +57,7 @@ class Network(nn.Module):
                 self.LR_MN,
                 self.LR_KAPPA,
                 self.LR_BIAS,
+                self.LR_READOUT,
                 self.LR_FIX_READ,
                 self.DROP_RATE,
                 self.LR_MASK,
@@ -235,11 +236,10 @@ class Network(nn.Module):
         else:
             rates = non_linear
 
-        if self.IF_ADAPT:
-            self.thresh = self.thresh * self.EXP_DT_TAU_ADAPT
-            self.thresh = self.thresh + rates * self.DT_TAU_ADAPT * self.A_ADAPT
-
-        # del hidden, net_input, non_linear
+        # this makes autograd complain about the graph
+        # if self.IF_ADAPT:
+        #     self.thresh = self.thresh * self.EXP_DT_TAU_ADAPT
+        #     self.thresh = self.thresh + nn.ReLU()(rates * self.A_ADAPT) * self.DT_TAU_ADAPT
 
         return rates, rec_input
 
@@ -287,17 +287,20 @@ class Network(nn.Module):
                 self.Ka[0]
             )
 
+            # this breaks autograd :s
+            # self.odors[2] = self.low_rank.linear.weight[0]
+
             if self.IF_STP:
-                # W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
-                W_stp_T = self.W_stp_T * (
-                    1.0 + self.lr[self.slices[0], self.slices[0]].T
-                )
-                # W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
+                W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
+                # W_stp_T = self.W_stp_T * (
+                # 1.0 + self.lr[self.slices[0], self.slices[0]].T
+                # )
+                # # W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
 
                 Wab_T = self.Wab_T
             else:
-                # Wab_T = self.Wab_T + self.lr.T
-                Wab_T = self.Wab_T * (1.0 + self.lr.T)
+                Wab_T = self.Wab_T + self.Wab_T[0, 0] * self.lr.T
+                # Wab_T = self.Wab_T * (1.0 + self.lr.T)
 
             # Wab_T = clamp_tensor(Wab_T, 0, self.slices)
             # Wab_T = clamp_tensor(Wab_T, 1, self.slices)
@@ -330,6 +333,10 @@ class Network(nn.Module):
                     rates, ff_input[:, step], rec_input, Wab_T, W_stp_T
                 )
 
+                if self.LR_TRAIN:
+                    if self.IF_RL:
+                        ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD)
+
             # update moving average
             mv_rates += rates
             if self.LIVE_FF_UPDATE and RET_FF:
@@ -360,6 +367,7 @@ class Network(nn.Module):
 
         # returns last step
         rates = rates[..., self.slices[0]]
+
         # returns full sequence
         if REC_LAST_ONLY == 0:
             # Stack list on 1st dim so that output is (N_BATCH, N_STEPS, N_NEURON)
@@ -375,23 +383,16 @@ class Network(nn.Module):
                 self.x_list = torch.stack(self.x_list, dim=1)
 
         # Add Linear readout (N_BATCH, N_EVAL_WIN, 1) on last few steps
-        if self.LR_READOUT:
-            y_pred = self.low_rank.linear(self.low_rank.dropout(rates))
-            # del rates
-
-            if self.LR_CLASS == 3:
-                # Cross Entropy Loss needs output to be 1D
-                y_pred = y_pred.mean(1)
-                return y_pred
-            else:
-                # BCE can deal with multi dim
-                return y_pred.squeeze(-1)
+        # if self.LR_READOUT:
+        #     y_pred = self.low_rank.linear(self.low_rank.dropout(rates))
+        #     # del rates
+        #     return y_pred.squeeze(-1)
 
         if self.LIVE_FF_UPDATE == 0 and RET_FF:
             self.ff_input = ff_input[..., self.slices[0]]
 
         # del ff_input, rec_input
 
-        clear_cache()
+        # clear_cache()
 
         return rates

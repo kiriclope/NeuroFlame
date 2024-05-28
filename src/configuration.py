@@ -22,6 +22,7 @@ class Configuration:
 
         if self.FLOAT_PRECISION == 32:
             self.FLOAT = torch.float
+            torch.set_float32_matmul_precision('medium')
         elif self.FLOAT_PRECISION == 16:
             self.FLOAT = torch.float16
         elif self.FLOAT_PRECISION == "16b":

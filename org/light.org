@@ -93,7 +93,7 @@
 * Configuration
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroFlame"
-  conf_name = "config_train.yml"
+  conf_name = "config_light.yml"
   DEVICE = 'cuda:1'
   seed = np.random.randint(0, 1e6)
   print(seed)
@@ -101,9 +101,10 @@
 #+end_src
 
 #+RESULTS:
-: 796932
+: 840852
 
 * Model
+
 #+begin_src ipython
   model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=16)
 #+end_src
@@ -150,17 +151,14 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: rwd [ 20  21  22  23  24  25  26  27  28  29  30  31  32  33  34  35  36  37
-:   38  39  40  41  42  43  44  45  46  47  48  49  50  51  52  53  54  55
-:   56  57  58  59  60  61  62  63  64  65  66  67  68  69  70  71  72  73
-:   74  75  76  77  78  79  80  81  82  83  84  85  86  87  88  89  90  91
-:   92  93  94  95  96  97  98  99 100]
+: rwd [20 21 22 23 24 25 26 27 28 29 30]
 : zero [0 1 2 3 4 5 6 7 8 9]
+
 
 *** Inputs and Labels
 
 #+begin_src ipython
-  model.N_BATCH = 128
+  model.N_BATCH = 64
 
   model.I0[0] = 2.0
   model.I0[1] = 0
@@ -179,7 +177,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: torch.Size([256, 1110, 1000])
+: torch.Size([128, 410, 1000])
 
 #+begin_src ipython
   labels_A = torch.ones((model.N_BATCH, 1))
@@ -190,16 +188,16 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: labels torch.Size([256, 1])
+: labels torch.Size([128, 1])
 
 #+begin_src ipython
-  batch_size = 32
+  batch_size = 16
   train_loader, val_loader = split_data(ff_input.to(DEVICE), labels.to(DEVICE), train_perc=0.8, batch_size=batch_size)
 #+end_src
 
 #+RESULTS:
-: torch.Size([204, 1110, 1000]) torch.Size([52, 1110, 1000])
-: torch.Size([204, 1]) torch.Size([52, 1])
+: torch.Size([102, 410, 1000]) torch.Size([26, 410, 1000])
+: torch.Size([102, 1]) torch.Size([26, 1])
 
 * Run
 
@@ -210,18 +208,100 @@ Testing the network on steps from sample odor offset to test odor onset
 #+RESULTS:
 
 #+begin_src ipython
-  trainer = L.Trainer(devices=[1])
-  trainer.fit(model=autoencoder, train_dataloaders=train_loader)
+  y_pred = autoencoder()
 #+end_src
 
 #+RESULTS:
+
 #+begin_src ipython
-  trainer.log
+  print(y_pred.shape)
 #+end_src
 
 #+RESULTS:
-: 2a6785f5-83fa-4008-81b1-5e0053e39a6f
+: torch.Size([64, 1])
 
 #+begin_src ipython
+  from lightning.pytorch.callbacks import ModelCheckpoint
 
+  # Init ModelCheckpoint callback, monitoring 'val_loss'
+  checkpoint_callback = ModelCheckpoint(monitor="val_loss")
+
+  # Add your callback to the callbacks list
 #+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  trainer = L.Trainer(devices=[1], max_epochs=30, num_sanity_val_steps=0, callbacks=[checkpoint_callback], enable_progress_bar=0)
+#+end_src
+
+#+RESULTS:
+: GPU available: True (cuda), used: True
+: TPU available: False, using: 0 TPU cores
+: IPU available: False, using: 0 IPUs
+: HPU available: False, using: 0 HPUs
+#+RESULTS:
+
+
+#+begin_src ipython
+  trainer.fit(model=autoencoder, train_dataloaders=train_loader, val_dataloaders=val_loader);
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  Epoch 1 - Training loss: 0.06704595685005188 - Validation loss: 0.0834856778383255
+  Epoch 2 - Training loss: 0.060021109879016876 - Validation loss: 0.05904477462172508
+  Epoch 3 - Training loss: 0.03932273015379906 - Validation loss: 0.04328054189682007
+  Epoch 4 - Training loss: 0.04199071228504181 - Validation loss: 0.03238746151328087
+  Epoch 5 - Training loss: 0.03726363182067871 - Validation loss: 0.024486519396305084
+  Epoch 6 - Training loss: 0.0178943183273077 - Validation loss: 0.01860305666923523
+  Epoch 7 - Training loss: 0.009691016748547554 - Validation loss: 0.014304155483841896
+  Epoch 8 - Training loss: 0.01536739245057106 - Validation loss: 0.011173679493367672
+  Epoch 9 - Training loss: 0.013639538548886776 - Validation loss: 0.00878053717315197
+  Epoch 10 - Training loss: 0.007884226739406586 - Validation loss: 0.0068742032162845135
+  Epoch 11 - Training loss: 0.003983794711530209 - Validation loss: 0.005478280130773783
+  Epoch 12 - Training loss: 0.005142988637089729 - Validation loss: 0.00443229591473937
+  Epoch 13 - Training loss: 0.004213503561913967 - Validation loss: 0.003635395085439086
+  Epoch 14 - Training loss: 0.0013969286810606718 - Validation loss: 0.003002690616995096
+  Epoch 15 - Training loss: 0.002237213309854269 - Validation loss: 0.0025427157524973154
+  Epoch 16 - Training loss: 0.001377263804897666 - Validation loss: 0.002163103548809886
+  Epoch 17 - Training loss: 0.0013074110029265285 - Validation loss: 0.001859017414972186
+  Epoch 18 - Training loss: 0.0017423949902877212 - Validation loss: 0.0016099984059110284
+  Epoch 19 - Training loss: 0.001097857835702598 - Validation loss: 0.0013967609265819192
+  Epoch 20 - Training loss: 0.001008376362733543 - Validation loss: 0.0012279892107471824
+  Epoch 21 - Training loss: 0.0011198909487575293 - Validation loss: 0.0010823977645486593
+  Epoch 22 - Training loss: 0.0006780208786949515 - Validation loss: 0.0009628292173147202
+  Epoch 23 - Training loss: 0.0007404856733046472 - Validation loss: 0.0008571629296056926
+  Epoch 24 - Training loss: 0.000729889958165586 - Validation loss: 0.0007685404270887375
+  Epoch 25 - Training loss: 0.0005835747579112649 - Validation loss: 0.0006908354698680341
+  Epoch 26 - Training loss: 0.0005645986529998481 - Validation loss: 0.0006235477048903704
+  Epoch 27 - Training loss: 0.0006280404049903154 - Validation loss: 0.0005665569333359599
+  Epoch 28 - Training loss: 0.0005484010325744748 - Validation loss: 0.0005155388498678803
+  `Trainer.fit` stopped: `max_epochs=30` reached.
+  Epoch 29 - Training loss: 0.0003459947183728218 - Validation loss: 0.0004710112407337874
+#+end_example
+#+begin_example
+  LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0,1]
+
+    | Name      | Type              | Params
+  ------------------------------------------------
+  0 | model     | Network           | 2.5 K
+  1 | linear    | Linear            | 501
+  2 | criterion | BCEWithLogitsLoss | 0
+  ------------------------------------------------
+  3.0 K     Trainable params
+  0         Non-trainable params
+  3.0 K     Total params
+  0.012     Total estimated model params size (MB)
+  Epoch 0 - Training loss: 0.20096835494041443 - Validation loss: 0.12238327413797379
+#+end_example
+
+#+begin_src ipython
+  train_loss = trainer.logged_metrics.get('train_loss')
+  val_loss = trainer.logged_metrics.get('val_loss')
+
+  print(f'Training Loss: {train_loss}, Validation Loss: {val_loss}')
+#+end_src
+
+#+RESULTS:
+: Training Loss: 0.19053184986114502, Validation Loss: 0.18418894708156586

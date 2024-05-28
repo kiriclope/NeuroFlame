@@ -70,7 +70,7 @@
 Here we will study how Serial Bias (SB) depends on trial history. So we are going to compute SB over multiple previous trials
 
 #+BEGIN_SRC ipython
-  N_TRIALS = 10
+  N_TRIALS = 1
 #+end_src
 
 #+RESULTS:
@@ -90,8 +90,8 @@ First, we define a sequence of stimuli intensities and footprints
 #+end_src
 
 #+RESULTS:
-: I0 [1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5]
-: SIGMA0 [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+: I0 [1.75, -2.5]
+: SIGMA0 [1, 0]
 
 Then, we create a sequence of stimuli onsets and offsets
 
@@ -105,7 +105,7 @@ Then, we create a sequence of stimuli onsets and offsets
 #+end_src
 
 #+RESULTS:
-: [1.0, 4.0, 5.5, 8.5, 10.0, 13.0, 14.5, 17.5, 19.0, 22.0, 23.5, 26.5, 28.0, 31.0, 32.5, 35.5, 37.0, 40.0, 41.5, 44.5]
+: [1.0, 4.0]
 
 #+BEGIN_SRC ipython
   c = [2 + i * 4.5 for i in range(N_TRIALS)]
@@ -119,8 +119,8 @@ Then, we create a sequence of stimuli onsets and offsets
 #+end_src
 
 #+RESULTS:
-: [2.0, 4.5, 6.5, 9.0, 11.0, 13.5, 15.5, 18.0, 20.0, 22.5, 24.5, 27.0, 29.0, 31.5, 33.5, 36.0, 38.0, 40.5, 42.5, 45.0]
-: 46.0
+: [2.0, 4.5]
+: 5.5
 
 ** Phase Batches
 Now, we need to create batches of stimuli phases to simulate to compute SB.
@@ -128,7 +128,7 @@ Now, we need to create batches of stimuli phases to simulate to compute SB.
 Let's batch the phases!
 
 #+begin_src ipython
-  N_BATCH = 1024
+  N_BATCH = 10
 
   PHI0 = torch.ones((1, 2 * N_TRIALS), device=DEVICE)
   PHI0 = PHI0.unsqueeze(-1).repeat((N_BATCH, 1, 1))
@@ -142,7 +142,7 @@ Let's batch the phases!
 #+end_src
 
 #+RESULTS:
-: PHI0 torch.Size([1024, 20, 1])
+: PHI0 torch.Size([10, 2, 1])
 
 #+begin_src ipython
   plt.hist(PHI0[:, 0, 0].cpu().numpy())
@@ -152,7 +152,7 @@ Let's batch the phases!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/db7b84db41113be45fb47b309fb97467faee790a.png]]
+[[file:./.ob-jupyter/6428d920214d5f2ad8f465f0e0f186cc575e42b4.png]]
 
 ** Model
 
@@ -186,7 +186,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-: torch.Size([1024, 461])
+: torch.Size([10, 56])
 
 #+begin_src ipython
   targets = PHI0[:,::2,0].cpu().numpy() * np.pi / 180
@@ -194,7 +194,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-: targets (1024, 10)
+: targets (10, 1)
 
 #+begin_src ipython
   steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
@@ -214,9 +214,9 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-: [ 30  75 120 165 210 255 300 345 390 435]
-: delay phase (1024, 10)
-: 151.9999996763259 149.65257294161924
+: [30]
+: delay phase (10, 1)
+: 284.00000334956053 278.9453081939143
 
 #+begin_src ipython
   errors =  targets - phi_off
@@ -227,8 +227,8 @@ Let's decode the bumps!
  #+end_src
 
 #+RESULTS:
-: 0.040970325
-: errors (1024, 10)
+: 0.08822107
+: errors (10, 1)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -261,7 +261,17 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/6b02926f1697cc937e2fb26650f23052d1e0b927.png]]
+[[file:./.ob-jupyter/5bab09d0aa630149fb746dda0c53c849f4e7dcda.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+  ax[0].plot(rates[0, :, :10].T.cpu().numpy())
+  ax[1].hist(rates[0, :, :10].reshape(-1).cpu().numpy(), bins='auto')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/6ac5249336944ecd18264bbde89c016999b191d0.png]]
 
 #+begin_src ipython
   plt.hist(errors, bins=5)
@@ -271,7 +281,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ea994b59ec0247bc5c45ffe16ea10728d3206bf4.png]]
+[[file:./.ob-jupyter/8cb1fbc33ded74955718d8e2a8268e110b313bbc.png]]
 
 #+begin_src ipython
   rel_loc = np.diff(targets, axis=1)
@@ -286,7 +296,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-: (1024, 9)
+: (10, 0)
 
 #+begin_src ipython
   plt.hist(rel_loc *180 /np.pi, bins=10)
@@ -296,7 +306,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/9194a7259452b2ff922192f3303bef96966c1cf5.png]]
+[[file:./.ob-jupyter/a54dded786ff819603a35d6e734dcaee2cbf171f.png]]
 
 #+begin_src ipython
   pal = sns.color_palette("rocket_r", n_colors= N_TRIALS)
@@ -320,7 +330,10 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/bf36f0719d7c31e1b39035a5908fa6bbd2ad66af.png]]
+:RESULTS:
+: No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+[[file:./.ob-jupyter/197b05ff4cd08446512a908678ea61c8f86c8a74.png]]
+:END:
 
 #+begin_src ipython
 

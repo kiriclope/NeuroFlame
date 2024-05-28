@@ -22,7 +22,7 @@ def clamp_tensor(tensor, idx, slice):
         mask = tensor[slice[0]].clamp(min=0.0)
         clamped_tensor[slice[0]] = mask
     elif idx == 'lr':
-        mask = tensor[slice[0]].clamp(min=-1.0, max=1.0)
+        mask = tensor[slice[0]].clamp(min=-1.0)
         clamped_tensor[slice[0]] = mask
     else:
         mask = tensor[slice[1]].clamp(max=0.0)
@@ -56,6 +56,7 @@ class LowRankWeights(nn.Module):
         LR_MN=1,
         LR_KAPPA=0,
         LR_BIAS=1,
+        LR_READOUT=1,
         LR_FIX_READ=0,
         DROP_RATE=0,
         LR_MASK=0,
@@ -70,6 +71,7 @@ class LowRankWeights(nn.Module):
         self.LR_MN = LR_MN
         self.LR_KAPPA = LR_KAPPA
         self.LR_BIAS = LR_BIAS
+        self.LR_READOUT = LR_READOUT
         self.LR_FIX_READ = LR_FIX_READ
         self.LR_CLASS = LR_CLASS
 
@@ -80,22 +82,22 @@ class LowRankWeights(nn.Module):
         self.device = DEVICE
 
         self.U = nn.Parameter(
-            torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * 0.01
+            torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * 0.001
         )
 
         if self.LR_MN:
             self.V = nn.Parameter(
-                torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * 0.01
+                torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * 0.001
             )
         else:
             self.V = (
-                torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * 0.01
+                torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * 0.001
             )
 
         if self.LR_KAPPA == 1:
             self.lr_kappa = nn.Parameter(torch.rand(1, device=self.device))
         else:
-            self.lr_kappa = torch.tensor(3.0, device=self.device)
+            self.lr_kappa = torch.tensor(5.0, device=self.device)
 
         # Mask to train excitatory neurons only
         self.lr_mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
@@ -110,9 +112,10 @@ class LowRankWeights(nn.Module):
             )
 
         # Linear readout for supervised learning
-        self.linear = nn.Linear(
-            self.Na[0], self.LR_CLASS, device=self.device, bias=self.LR_BIAS
-        )
+        if self.LR_READOUT:
+            self.linear = nn.Linear(
+                self.Na[0], self.LR_CLASS, device=self.device, bias=self.LR_BIAS
+            )
 
         self.dropout = nn.Dropout(self.DROP_RATE)
 
@@ -140,62 +143,6 @@ class LowRankWeights(nn.Module):
             self.lr = clamp_tensor(self.lr, 'lr', self.slices)
 
         return self.lr
-
-
-def initLR(model):
-    # Low rank vector
-    model.U = nn.Parameter(
-        torch.randn((model.N_NEURON, int(model.RANK)), device=model.device) * 0.01
-    )
-
-    if model.LR_MN:
-        model.V = nn.Parameter(
-            torch.randn((model.N_NEURON, int(model.RANK)), device=model.device) * 0.01
-        )
-    else:
-        model.V = (
-            torch.randn((model.N_NEURON, int(model.RANK)), device=model.device) * 0.01
-        )
-
-    if model.LR_KAPPA == 1:
-        model.lr_kappa = nn.Parameter(torch.rand(1, device=model.device))
-    else:
-        model.lr_kappa = torch.tensor(1.0, device=model.device)
-
-    # Mask to train excitatory neurons only
-    model.lr_mask = torch.zeros((model.N_NEURON, model.N_NEURON), device=model.device)
-
-    if model.LR_MASK == 0:
-        model.lr_mask[model.slices[0], model.slices[0]] = 1.0
-    if model.LR_MASK == 1:
-        model.lr_mask[model.slices[1], model.slices[1]] = 1.0
-    if model.LR_MASK == -1:
-        model.lr_mask = torch.ones(
-            (model.N_NEURON, model.N_NEURON), device=model.device
-        )
-
-    # Linear readout for supervised learning
-    model.linear = nn.Linear(
-        model.Na[0], model.LR_CLASS, device=model.device, bias=model.LR_BIAS
-    )
-
-    model.dropout = nn.Dropout(model.DROP_RATE)
-
-    model.odors = torch.randn(
-        (3, model.Na[0]),
-        device=model.device,
-    )
-
-    if model.LR_FIX_READ:
-        for param in model.linear.parameters():
-            param.requires_grad = False
-
-    # Window where to evaluate loss
-    if model.LR_EVAL_WIN == -1:
-        model.lr_eval_win = -1
-    else:
-        model.lr_eval_win = int(model.LR_EVAL_WIN / model.DT / model.N_WINDOW)
-
 
 def get_theta(a, b, IF_NORM=0):
     u, v = a, b
