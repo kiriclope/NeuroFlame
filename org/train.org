@@ -1,6 +1,6 @@
 #+STARTUP: fold
 #+TITLE: Training Low Rank RNNs
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual :kernel torch
+#+PROPERTY: header-args:ipython :var B0="2.0" :results both :exports both :async yes :session dual :kernel torch :tangle ./train.py
 
 * Notebook Settings
 
@@ -141,7 +141,7 @@
           overlap = rates @ model.low_rank.U[model.slices[0], 0] / model.Na[0]
 
 
-          loss = loss_fn(y_pred, y) + F.relu(overlap[..., :9].abs() - 0.1).mean()
+          loss = loss_fn(y_pred, y) + F.relu(overlap[..., :9].abs() - 1.0).mean()
 
           if penalty is not None:
               reg_loss = 0
@@ -158,7 +158,10 @@
 
           if zero_grad > 0:
               model.low_rank.U.grad[:, zero_grad-1] = 0
-              model.low_rank.V.grad[:, zero_grad-1] = 0
+              try:
+                  model.low_rank.V.grad[:, zero_grad-1] = 0
+              except:
+                  pass
 
           # Clip gradients
           if clip_grad:
@@ -243,8 +246,8 @@
 
           print(f'Angle(U, W) : {angle} °', 'performance')
 
-          if val_loss < thresh:
-              print(f'Stopping training as loss has fallen below the threshold: {val_loss}')
+          if val_loss < thresh and loss < thresh:
+              print(f'Stopping training as loss has fallen below the threshold: {loss}, {val_loss}')
               break
 
           if val_loss > 300:
@@ -559,12 +562,10 @@
   DEVICE = 'cuda:1'
   seed = np.random.randint(0, 1e6)
   print(seed)
-  # seed = 760946
-  # seed = 563446
 #+end_src
 
 #+RESULTS:
-: 49821
+: 62982
 
 #+begin_src ipython
   model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=16)
@@ -584,7 +585,6 @@
 
 #+RESULTS:
 : low_rank.U torch.Size([2000, 2])
-: low_rank.V torch.Size([2000, 2])
 : low_rank.lr_kappa torch.Size([1])
 
 #+begin_src ipython
@@ -620,7 +620,7 @@ Testing the network on steps from sample odor offset to test odor onset
 *** Inputs and Labels
 
 #+begin_src ipython
-  model.N_BATCH = 64
+  model.N_BATCH = 80
 
   model.I0[0] = 2.0
   model.I0[1] = 0
@@ -641,7 +641,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: torch.Size([128, 455, 2000])
+: torch.Size([160, 455, 2000])
 
 #+begin_src ipython
   labels_A = torch.ones((model.N_BATCH, rwd_idx.shape[0]))
@@ -652,7 +652,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: labels torch.Size([128, 61])
+: labels torch.Size([160, 61])
 
 *** Run
 
@@ -662,8 +662,8 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: torch.Size([102, 455, 2000]) torch.Size([26, 455, 2000])
-: torch.Size([102, 61]) torch.Size([26, 61])
+: torch.Size([128, 455, 2000]) torch.Size([32, 455, 2000])
+: torch.Size([128, 61]) torch.Size([32, 61])
 
 #+begin_src ipython
   criterion = DualLoss(alpha=1.0, thresh=5.0, N=model.Na[0], rwd_idx=rwd_idx, zero_idx=zero_idx)
@@ -686,31 +686,29 @@ Testing the network on steps from sample odor offset to test odor onset
 
 #+RESULTS:
 #+begin_example
-  Epoch 1/15, Training Loss: 5.0103, Validation Loss: 4.9781
-  Angle(U, W) : 89.0 ° performance
-  Epoch 2/15, Training Loss: 5.0207, Validation Loss: 4.9655
-  Angle(U, W) : 89.0 ° performance
-  Epoch 3/15, Training Loss: 4.9513, Validation Loss: 4.9502
-  Angle(U, W) : 89.0 ° performance
-  Epoch 4/15, Training Loss: 4.9238, Validation Loss: 4.9186
-  Angle(U, W) : 89.0 ° performance
-  Epoch 5/15, Training Loss: 4.8449, Validation Loss: 4.8241
-  Angle(U, W) : 89.0 ° performance
-  Epoch 6/15, Training Loss: 4.3395, Validation Loss: 4.1844
-  Angle(U, W) : 89.0 ° performance
-  Epoch 7/15, Training Loss: 0.0465, Validation Loss: 0.0000
-  Angle(U, W) : 90.0 ° performance
-  Stopping training as loss has fallen below the threshold: 0.0
-  Elapsed (with compilation) = 0h 0m 34s
+  Epoch 1/15, Training Loss: 4.9871, Validation Loss: 4.9797
+  Angle(U, W) : 88.0 ° performance
+  Epoch 2/15, Training Loss: 4.9682, Validation Loss: 4.9650
+  Angle(U, W) : 88.0 ° performance
+  Epoch 3/15, Training Loss: 4.9468, Validation Loss: 4.9448
+  Angle(U, W) : 88.0 ° performance
+  Epoch 4/15, Training Loss: 4.9180, Validation Loss: 4.9014
+  Angle(U, W) : 88.0 ° performance
+  Epoch 5/15, Training Loss: 4.7730, Validation Loss: 4.7248
+  Angle(U, W) : 88.0 ° performance
+  Epoch 6/15, Training Loss: 3.1525, Validation Loss: 2.1419
+  Angle(U, W) : 88.0 ° performance
+  Epoch 7/15, Training Loss: 0.0342, Validation Loss: 0.0662
+  Angle(U, W) : 88.0 ° performance
+  Epoch 8/15, Training Loss: 0.7950, Validation Loss: 0.1256
+  Angle(U, W) : 88.0 ° performance
+  Epoch 9/15, Training Loss: 0.0652, Validation Loss: 0.0200
+  Angle(U, W) : 88.0 ° performance
+  Epoch 10/15, Training Loss: 0.0000, Validation Loss: 0.0000
+  Angle(U, W) : 88.0 ° performance
+  Stopping training as loss has fallen below the threshold: 0.0, 0.0
+  Elapsed (with compilation) = 0h 0m 56s
 #+end_example
-
-#+begin_src ipython
-    J_STP = model.J_STP.clone()
-    Jab = model.Jab.clone()
-    VAR_FF = model.VAR_FF
-#+end_src
-
-#+RESULTS:
 
 ** Testing
 
@@ -762,7 +760,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e1ebe2c31fc03689328582c3558ed06188c634aa.png]]
+[[file:./.ob-jupyter/5e482dc406587f0bb4b2207cac8217ee5bade76e.png]]
 
 
 #+begin_src ipython
@@ -773,7 +771,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+RESULTS:
 :RESULTS:
 : ksi torch.Size([5, 1000])
-[[file:./.ob-jupyter/1db466db900e019f4e1ee6aca9dd43f5fb7f67ca.png]]
+[[file:./.ob-jupyter/e292aa1f483eb2ea7679aa11621fbbd4f0f77e93.png]]
 :END:
 
 #+begin_src ipython
@@ -781,16 +779,7 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/24f9a3178f94c7507692c96e592542bf8f64cf85.png]]
-
-
-#+begin_src ipython
-    model.J_STP = J_STP
-    model.Jab = Jab
-    model.VAR_FF = VAR_FF
-#+end_src
-
-#+RESULTS:
+[[file:./.ob-jupyter/d6c4bacf78d9c7379f6cfa35672b13ab524e24e5.png]]
 
 * DPA
 ** Training
@@ -838,7 +827,7 @@ Here we only evaluate performance from test onset to test offset
 *** Inputs and Labels
 
 #+begin_src ipython
-  model.N_BATCH = 64
+  model.N_BATCH = 80
 
   A0 = 1
 
@@ -875,7 +864,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([256, 455, 2000])
+: ff_input torch.Size([320, 455, 2000])
 
  #+begin_src ipython
   labels_pair = torch.ones((2 * model.N_BATCH, model.lr_eval_win))
@@ -886,7 +875,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: labels torch.Size([256, 11])
+: labels torch.Size([320, 11])
 
 #+RESULTS:
 
@@ -898,8 +887,8 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: torch.Size([204, 455, 2000]) torch.Size([52, 455, 2000])
-: torch.Size([204, 11]) torch.Size([52, 11])
+: torch.Size([256, 455, 2000]) torch.Size([64, 455, 2000])
+: torch.Size([256, 11]) torch.Size([64, 11])
 
 #+begin_src ipython
   # Loss
@@ -916,33 +905,26 @@ Here we only evaluate performance from test onset to test offset
 #+begin_src ipython
   num_epochs = 30
   start = perf_counter()
-  loss, val_loss = optimization(model, train_loader, val_loader, criterion, criterion2, optimizer, num_epochs, zero_grad=1)
+  loss, val_loss = optimization(model, train_loader, val_loader, criterion, criterion2, optimizer, num_epochs, zero_grad=0)
   end = perf_counter()
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 #+end_src
 
 #+RESULTS:
 #+begin_example
-  Epoch 1/30, Training Loss: 4.9288, Validation Loss: 4.9841
-  Angle(U, W) : 90.0 ° performance
-  Epoch 2/30, Training Loss: 4.9421, Validation Loss: 4.9082
-  Angle(U, W) : 90.0 ° performance
-  Epoch 3/30, Training Loss: 4.4216, Validation Loss: 4.2951
-  Angle(U, W) : 90.0 ° performance
-  Epoch 4/30, Training Loss: 2.7528, Validation Loss: 3.5761
-  Angle(U, W) : 90.0 ° performance
-  Epoch 5/30, Training Loss: 1.7504, Validation Loss: 2.2367
-  Angle(U, W) : 90.0 ° performance
-  Epoch 6/30, Training Loss: 0.2784, Validation Loss: 0.3858
-  Angle(U, W) : 90.0 ° performance
-  Epoch 7/30, Training Loss: 0.5426, Validation Loss: 0.6067
-  Angle(U, W) : 90.0 ° performance
-  Epoch 8/30, Training Loss: 0.0298, Validation Loss: 0.0000
-  Angle(U, W) : 90.0 ° performance
-  Stopping training as loss has fallen below the threshold: 0.0
-  Elapsed (with compilation) = 0h 1m 15s
+  Epoch 1/30, Training Loss: 1.9564, Validation Loss: 1.7685
+  Angle(U, W) : 87.0 ° performance
+  Epoch 2/30, Training Loss: 0.0421, Validation Loss: 0.0441
+  Angle(U, W) : 87.0 ° performance
+  Epoch 3/30, Training Loss: 0.0458, Validation Loss: 0.0633
+  Angle(U, W) : 87.0 ° performance
+  Epoch 4/30, Training Loss: 0.0085, Validation Loss: 0.0059
+  Angle(U, W) : 87.0 ° performance
+  Epoch 5/30, Training Loss: 0.0000, Validation Loss: 0.0027
+  Angle(U, W) : 87.0 ° performance
+  Stopping training as loss has fallen below the threshold: 0.0, 0.0026940335519611835
+  Elapsed (with compilation) = 0h 0m 56s
 #+end_example
-
 
  #+begin_src ipython
     torch.save(model.state_dict(), 'models/dpa_%d.pth' % seed)
@@ -959,7 +941,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/eb2dfa5b50c68718dfa6c0d448210d34e34d2ef2.png]]
+[[file:./.ob-jupyter/fa499f7dd9939e716cf118453b3ce0bcee4ea67a.png]]
 
  #+begin_src ipython
   torch.save(model.state_dict(), 'models/dpa_%d.pth' % seed)
@@ -984,10 +966,10 @@ Here we only evaluate performance from test onset to test offset
 
 #+RESULTS:
 :    U  V  W  S  D
-: U  0 45 89 108 90
-: V  XXX 0 90 131 90
-: W  XXX XXX 0 89 87
-: S  XXX XXX XXX 0 88
+: U  0 89 87 62 90
+: V  XXX 2 94 89 90
+: W  XXX XXX 0 88 91
+: S  XXX XXX XXX 0 89
 : D  XXX XXX XXX XXX 0
 
 ** Testing
@@ -1078,7 +1060,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: 1.0
+: 0.5
 
 #+begin_src ipython
   # readout = model.low_rank.linear.weight.data.cpu().detach().numpy()[0]
@@ -1088,7 +1070,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/45844fd6e6e94e3761bd655522b244538a8bb8ba.png]]
+[[file:./.ob-jupyter/eeabadd6708cac15f634650469c163d480f12c5c.png]]
 
 #+begin_src ipython
   idx = get_idx(model, 1)
@@ -1098,7 +1080,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 :RESULTS:
 : ksi torch.Size([5, 1000])
-[[file:./.ob-jupyter/9b7fa5b91ccfdedee36ff8e45d815a004e6af5f1.png]]
+[[file:./.ob-jupyter/c7dc7a27884d95a80c3bdf342205c2bfcad9b123.png]]
 :END:
 
 #+begin_src ipython
@@ -1106,7 +1088,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/9826630020db20607fde2d814c80c3acd18afcfc.png]]
+[[file:./.ob-jupyter/42338640d3106c4d0b3b5ec32c8a771775eba4b6.png]]
 
 #+begin_src ipython
   print(rates.shape)
@@ -1142,7 +1124,164 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/a13abe1a80f7bc7d1880288b847818a7294400f3.png]]
+[[file:./.ob-jupyter/91a0cadba86b14a2ff6e989b39a5cdbba5998708.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+** Fixed points
+
+#+begin_src ipython
+  model.DURATION = 20
+  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+  model.IF_RL = 0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.eval()
+  model.LR_READOUT = 0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.N_BATCH = 1
+
+  model.I0[0] = A0
+  model.I0[1] = 0
+  model.I0[2] = 0
+  model.I0[3] = 0
+
+  AC_pair = model.init_ff_input()
+
+  model.I0[0] = A0
+  model.I0[1] = 0
+  model.I0[2] = 0
+  model.I0[3] = 0
+
+  AD_pair = model.init_ff_input()
+
+  model.I0[0] = -A0
+  model.I0[1] = 0
+  model.I0[2] = 0
+  model.I0[3] = 0
+
+  BC_pair = model.init_ff_input()
+
+  model.I0[0] = -A0
+  model.I0[1] = 0
+  model.I0[2] = 0
+  model.I0[3] = 0
+
+  BD_pair = model.init_ff_input()
+
+  ff_input = torch.cat((AC_pair, BD_pair, AD_pair, BC_pair))
+  print('ff_input', ff_input.shape, ff_input[0, 0, :4])
+#+end_src
+
+#+RESULTS:
+: ff_input torch.Size([4, 1055, 2000]) tensor([18.9461, 19.6419, 20.4188, 19.4582], device='cuda:1')
+
+#+begin_src ipython
+  rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 201, 1000)
+
+#+begin_src ipython
+  memory = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
+  readout = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 1]
+  # readout = model.low_rank.linear.weight.data[0].cpu().detach().numpy()
+  plot_overlap(rates, memory, readout, labels=['pair', 'unpair'])
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/a9d7f0171a490d194400b592cdb5e49b0d2170d4.png]]
+
+#+begin_src ipython
+  idx = get_idx(model, 1)
+  plot_rates_selec(rates, idx)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: ksi torch.Size([5, 1000])
+[[file:./.ob-jupyter/11e6c1a4a23a6a25b7a02066402c3f5f497c9a8a.png]]
+:END:
+
+#+begin_src ipython
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 201, 1000)
+
+#+begin_src ipython
+  plot_m0_m1_phi(rates, idx)
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/7877c737f6536949469068b94aaaa17e0beab852.png]]
+
+    #+begin_src ipython
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 201, 1000)
+
+#+begin_src ipython
+  plt.plot(rates[:, :,1].T)
+  # plt.xlim([0, 10])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/c8717feed25c9903440befb0ce3db646cdbc859c.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  from matplotlib.patches import Circle
+  m0, m1, phi = decode_bump(rates[..., idx], axis=-1)
+
+  x = m1 / m0 * np.cos(phi)
+  y = m1 / m0 * np.sin(phi)
+
+  xA = x
+  yA = y
+
+  fig, ax = plt.subplots(1, 1, figsize=[height, height])
+
+  # ax.plot(xA.T[0], yA.T[0], 'x', alpha=.5, ms=10)
+  # ax.plot(xA.T, yA.T, '-', alpha=.5)
+  ax.plot(xA.T[-1], yA.T[-1], 'o', alpha=.5, ms=20)
+  # ax.set_xlim([-.9, .9])
+  # ax.set_ylim([-.9, .9])
+  circle = Circle((0., 0.), 1.8, fill=False, edgecolor='k')
+  ax.add_patch(circle)
+
+  # Set the aspect of the plot to equal to make the circle circular
+  ax.set_aspect('equal')
+  plt.savefig('fp_dpa.svg', dpi=300)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/27877f4adb89f1552126f02d3f110678cdfa9fb0.png]]
+
+#+RESULTS:
 
 #+begin_src ipython
 
@@ -1180,11 +1319,15 @@ Here we only evaluate performance from test onset to test offset
 
 #+begin_src ipython
   steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
-  mask = (steps >= (model.N_STIM_ON[0] - model.N_STEADY)) # & (steps <= (model.N_STIM_ON[1] - model.N_STEADY))
+  mask = (steps >= (model.N_STIM_ON[0] - model.N_STEADY)) & (steps <= (model.N_STIM_ON[1] - model.N_STEADY))
   # mask = (steps >= (model.N_STIM_ON[1] - model.N_STEADY)) # & (steps <= (model.N_STIM_ON[1] - model.N_STEADY))
 
   rwd_idx = np.where(mask)[0]
   print('rwd', rwd_idx)
+
+  mask_cue = (steps >= (model.N_STIM_ON[1] - model.N_STEADY))
+  cue_idx = np.where(mask_cue)[0]
+  print('cue', cue_idx)
 
   stim_mask = (steps >= (model.N_STIM_ON[0] - model.N_STEADY)) # & (steps < (model.N_STIM_OFF[0] - model.N_STEADY))
 
@@ -1192,26 +1335,34 @@ Here we only evaluate performance from test onset to test offset
   zero_idx = np.where(mask_zero)[0]
   print('zero', zero_idx)
 
-  model.lr_eval_win = rwd_idx.shape[0]
+  model.lr_eval_win = np.max( (rwd_idx.shape[0], cue_idx.shape[0]))
 #+end_src
 
 #+RESULTS:
-: rwd [10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33
-:  34 35 36 37 38 39 40]
+: rwd [10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30]
+: cue [30 31 32 33 34 35 36 37 38 39 40]
 : zero [0 1 2 3 4 5 6 7 8 9]
+
+#+begin_src ipython
+  print(float(float(B0))+2)
+#+end_src
+
+#+RESULTS:
+: 4.0
 
 #+begin_src ipython
   # switching sample and distractor odors
   odors = model.odors.clone()
   model.odors[0] = odors[1]
+  model.odors[4] = odors[4+1]
 
-  model.N_BATCH = 64
+  model.N_BATCH = 80
 
   A0 = 1
-  B0 = 1
+  # float(B0) = 1
 
   model.I0[0] = A0
-  model.I0[1] = B0 # reward
+  model.I0[1] = float(float(B0)) # reward
   model.I0[2] = 0
   model.I0[3] = 0
 
@@ -1219,7 +1370,7 @@ Here we only evaluate performance from test onset to test offset
 
   model.I0[0] = -A0
   # model.I0[1] = 0
-  model.I0[1] = B0 # cue
+  model.I0[1] = float(float(B0)) # cue
   model.I0[2] = 0
   model.I0[3] = 0
 
@@ -1230,18 +1381,25 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: torch.Size([128, 255, 2000])
+: torch.Size([160, 255, 2000])
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 #+begin_src ipython
   labels_Go = torch.ones((model.N_BATCH, model.lr_eval_win))
   labels_NoGo = torch.zeros((model.N_BATCH, model.lr_eval_win))
   labels = torch.cat((labels_Go, labels_NoGo))
-
+  labels =  labels.repeat((2, 1, 1))
+  labels = torch.transpose(labels, 0, 1)
   print('labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: labels torch.Size([128, 31])
+: labels torch.Size([160, 2, 21])
 
 #+begin_src ipython
   batch_size = 16
@@ -1249,11 +1407,11 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: torch.Size([102, 255, 2000]) torch.Size([26, 255, 2000])
-: torch.Size([102, 31]) torch.Size([26, 31])
+: torch.Size([128, 255, 2000]) torch.Size([32, 255, 2000])
+: torch.Size([128, 2, 21]) torch.Size([32, 2, 21])
 
 #+begin_src ipython
-  criterion = DualLoss(alpha=1.0, thresh=15.0, N=model.Na[0], rwd_idx=rwd_idx, zero_idx=zero_idx)
+  criterion = DualLoss(alpha=1.0, thresh=5.0, N=model.Na[0], rwd_idx=rwd_idx, zero_idx=zero_idx, cue_idx=cue_idx)
   criterion2 = AccuracyLoss(N=model.Na[0], rwd_idx=rwd_idx)
 
   # SGD, Adam, Adam
@@ -1266,39 +1424,26 @@ Here we only evaluate performance from test onset to test offset
 #+begin_src ipython
   num_epochs = 15
   start = perf_counter()
-  loss, val_loss = optimization(model, train_loader, val_loader, criterion, criterion2, optimizer, num_epochs, zero_grad=1)
+  loss, val_loss = optimization(model, train_loader, val_loader, criterion, criterion2, optimizer, num_epochs, zero_grad=0)
   end = perf_counter()
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
   # switching back sample and distractor odors
   model.odors[0] = odors[0]
+  model.odors[4] = odors[4]
 #+end_src
 
 #+RESULTS:
 #+begin_example
-  Epoch 1/15, Training Loss: 13.1634, Validation Loss: 12.1880
-  Angle(U, W) : 90.0 ° performance
-  Epoch 2/15, Training Loss: 6.5843, Validation Loss: 9.6734
-  Angle(U, W) : 90.0 ° performance
-  Epoch 3/15, Training Loss: 11.5863, Validation Loss: 6.7103
-  Angle(U, W) : 90.0 ° performance
-  Epoch 4/15, Training Loss: 7.6725, Validation Loss: 4.2542
-  Angle(U, W) : 90.0 ° performance
-  Epoch 5/15, Training Loss: 1.5284, Validation Loss: 1.7257
-  Angle(U, W) : 90.0 ° performance
-  Epoch 6/15, Training Loss: 3.0909, Validation Loss: 3.4278
-  Angle(U, W) : 90.0 ° performance
-  Epoch 7/15, Training Loss: 4.9413, Validation Loss: 2.5248
-  Angle(U, W) : 90.0 ° performance
-  Epoch 8/15, Training Loss: 2.6028, Validation Loss: 2.5601
-  Angle(U, W) : 90.0 ° performance
-  Epoch 9/15, Training Loss: 1.6673, Validation Loss: 1.5874
-  Angle(U, W) : 90.0 ° performance
-  Epoch 10/15, Training Loss: 0.2953, Validation Loss: 0.1422
-  Angle(U, W) : 90.0 ° performance
-  Epoch 11/15, Training Loss: 0.0013, Validation Loss: 0.0000
-  Angle(U, W) : 90.0 ° performance
-  Stopping training as loss has fallen below the threshold: 0.0
-  Elapsed (with compilation) = 0h 0m 30s
+  Epoch 1/15, Training Loss: 1.5806, Validation Loss: 0.9498
+  Angle(U, W) : 87.0 ° performance
+  Epoch 2/15, Training Loss: 0.0853, Validation Loss: 0.0275
+  Angle(U, W) : 87.0 ° performance
+  Epoch 3/15, Training Loss: 0.2532, Validation Loss: 0.7616
+  Angle(U, W) : 87.0 ° performance
+  Epoch 4/15, Training Loss: 0.0000, Validation Loss: 0.0029
+  Angle(U, W) : 87.0 ° performance
+  Stopping training as loss has fallen below the threshold: 0.0, 0.0028653701301664114
+  Elapsed (with compilation) = 0h 0m 12s
 #+end_example
 
 ** Test
@@ -1318,13 +1463,13 @@ Here we only evaluate performance from test onset to test offset
     model.N_BATCH = 1
 
     model.I0[0] = A0
-    model.I0[1] = B0 # reward
+    model.I0[1] = float(float(B0)) # reward
     model.I0[2] = 0
 
     A = model.init_ff_input()
 
     model.I0[0] = -A0
-    model.I0[1] = B0
+    model.I0[1] = float(float(B0))
     model.I0[2] = 0
 
     B = model.init_ff_input()
@@ -1353,7 +1498,7 @@ Here we only evaluate performance from test onset to test offset
   #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f1939bf575b83a45f22a57ee5325b8724555204e.png]]
+[[file:./.ob-jupyter/d33baa66a14ab7c0d86fc0f743375c9838405628.png]]
 
   #+begin_src ipython
     idx = get_idx(model, 1)
@@ -1363,7 +1508,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 :RESULTS:
 : ksi torch.Size([5, 1000])
-[[file:./.ob-jupyter/0ad58e78f25d8a5ffc3b0879f9c7b3ffe45e330f.png]]
+[[file:./.ob-jupyter/b733caa7be587db6656c83480e6d242456cbd29c.png]]
 :END:
 
 #+begin_src ipython
@@ -1371,7 +1516,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/13e79a7fbb4e8efbd112c0540fc398433e073ba3.png]]
+[[file:./.ob-jupyter/152697cc0f69d6e18112c6431bded1937bacdf91.png]]
 
 * Dual
 
@@ -1396,32 +1541,32 @@ Here we only evaluate performance from test onset to test offset
   model.N_BATCH = 1
 
   A0 = 1
-  B0 = 1
+  # float(B0) = 1
 
   model.I0[0] = A0
   model.I0[1] = A0
-  model.I0[2] = B0
+  model.I0[2] = float(float(B0))
   model.I0[3] = A0
 
   AC_pair = model.init_ff_input()
 
   model.I0[0] = A0
   model.I0[1] = A0
-  model.I0[2] = B0
+  model.I0[2] = float(float(B0))
   model.I0[3] = -A0
 
   AD_pair = model.init_ff_input()
 
   model.I0[0] = -A0
   model.I0[1] = A0
-  model.I0[2] = B0
+  model.I0[2] = float(float(B0))
   model.I0[3] = A0
 
   BC_pair = model.init_ff_input()
 
   model.I0[0] = -A0
   model.I0[1] = A0
-  model.I0[2] = B0
+  model.I0[2] = float(float(B0))
   model.I0[3] = -A0
 
   BD_pair = model.init_ff_input()
@@ -1458,7 +1603,7 @@ Here we only evaluate performance from test onset to test offset
 
 #+RESULTS:
 : torch.Size([4, 81, 1000])
-: tensor(0.5000, device='cuda:1')
+: tensor(0.7500, device='cuda:1')
 
 #+begin_src ipython
   rates = rates.cpu().numpy()
@@ -1469,7 +1614,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/b92c0ebbf31e05bdc0d4c3c6d7f0a147ba137dba.png]]
+[[file:./.ob-jupyter/667f350880ac965ad820515da9cfcb3db397b864.png]]
 
 
 #+begin_src ipython
@@ -1480,7 +1625,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 :RESULTS:
 : ksi torch.Size([5, 1000])
-[[file:./.ob-jupyter/ab086c020584feec73fc4d215b9f59ae3087ea5c.png]]
+[[file:./.ob-jupyter/6580cc27e10500fee9a38010ae00c81d7315c220.png]]
 :END:
 
 #+begin_src ipython
@@ -1488,37 +1633,195 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/cc1c5627e7575744ff0bf2bde8fc2d603c354335.png]]
+[[file:./.ob-jupyter/aa42a6500ce44123648027ee977abbf8412e633a.png]]
 
 
 #+begin_src ipython
-    from matplotlib.patches import Circle
-    m0, m1, phi = decode_bump(rates[..., idx], axis=-1)
+  from matplotlib.patches import Circle
+  m0, m1, phi = decode_bump(rates[..., idx], axis=-1)
 
-    x = m1 / m0 * np.cos(phi)
-    y = m1 / m0 * np.sin(phi)
+  x = m1 / m0 * np.cos(phi)
+  y = m1 / m0 * np.sin(phi)
 
-    xA = x
-    yA = y
+  xA = x
+  yA = y
 
-    fig, ax = plt.subplots(1, 1, figsize=[height, height])
+  fig, ax = plt.subplots(1, 1, figsize=[height, height])
 
-    ax.plot(xA.T[0], yA.T[0], 'x', alpha=.5, ms=10)
-    ax.plot(xA.T, yA.T, '-', alpha=.5)
-    ax.plot(xA.T[-1], yA.T[-1], 'o', alpha=.5, ms=10)
-    # ax.set_xlim([-.9, .9])
-    # ax.set_ylim([-.9, .9])
-    circle = Circle((0., 0.), 1, fill=False, edgecolor='k')
-    ax.add_patch(circle)
+  # ax.plot(xA.T[0], yA.T[0], 'x', alpha=.5, ms=10)
+  # ax.plot(xA.T, yA.T, '-', alpha=.5)
+  ax.plot(xA.T[-1], yA.T[-1], 'o', alpha=.5, ms=20)
+  # ax.set_xlim([-.9, .9])
+  # ax.set_ylim([-.9, .9])
+  circle = Circle((0., 0.), 1.8, fill=False, edgecolor='k')
+  ax.add_patch(circle)
 
-    # Set the aspect of the plot to equal to make the circle circular
-    ax.set_aspect('equal')
+  # Set the aspect of the plot to equal to make the circle circular
+  ax.set_aspect('equal')
 
-    plt.show()
+  plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/40a12e48a69eeea4265c28f13549f57e8262380d.png]]
+[[file:./.ob-jupyter/a09bd506a65f5247646debc4bb75c74c831e72a3.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+
+** Fixed points
+
+#+begin_src ipython
+  model.DURATION = 20
+  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+  model.IF_RL = 0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.eval()
+  model.LR_READOUT = 0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.N_BATCH = 1
+
+  model.I0[0] = A0
+  model.I0[1] = 0
+  model.I0[2] = 0
+  model.I0[3] = 0
+
+  AC_pair = model.init_ff_input()
+
+  model.I0[0] = A0
+  model.I0[1] = 0
+  model.I0[2] = 0
+  model.I0[3] = 0
+
+  AD_pair = model.init_ff_input()
+
+  model.I0[0] = -A0
+  model.I0[1] = 0
+  model.I0[2] = 0
+  model.I0[3] = 0
+
+  BC_pair = model.init_ff_input()
+
+  model.I0[0] = -A0
+  model.I0[1] = 0
+  model.I0[2] = 0
+  model.I0[3] = 0
+
+  BD_pair = model.init_ff_input()
+
+  ff_input = torch.cat((AC_pair, BD_pair, AD_pair, BC_pair))
+  print('ff_input', ff_input.shape, ff_input[0, 0, :4])
+#+end_src
+
+#+RESULTS:
+: ff_input torch.Size([4, 1055, 2000]) tensor([23.4524, 20.3943, 20.5646, 21.7273], device='cuda:1')
+
+#+begin_src ipython
+  rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 201, 1000)
+
+#+begin_src ipython
+  memory = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
+  readout = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 1]
+  # readout = model.low_rank.linear.weight.data[0].cpu().detach().numpy()
+  plot_overlap(rates, memory, readout, labels=['pair', 'unpair'])
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/49e29b010c2946198da0bff22ca7682d98abda0f.png]]
+
+#+begin_src ipython
+  idx = get_idx(model, 1)
+  plot_rates_selec(rates, idx)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: ksi torch.Size([5, 1000])
+[[file:./.ob-jupyter/d9cfdb391b61d9d7830d9b7716c43cbb723b6ee8.png]]
+:END:
+
+#+begin_src ipython
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 201, 1000)
+
+#+begin_src ipython
+  plot_m0_m1_phi(rates, idx)
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/348e0388af9604f151424ef46c7189b29d0f289e.png]]
+
+    #+begin_src ipython
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (4, 201, 1000)
+
+#+begin_src ipython
+  plt.plot(rates[:, :,1].T)
+  # plt.xlim([0, 10])
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/113618652b654b029e612a4d8800f8c37703371e.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  from matplotlib.patches import Circle
+  m0, m1, phi = decode_bump(rates[..., idx], axis=-1)
+
+  x = m1 / m0 * np.cos(phi)
+  y = m1 / m0 * np.sin(phi)
+
+  xA = x
+  yA = y
+
+  fig, ax = plt.subplots(1, 1, figsize=[height, height])
+
+  # ax.plot(xA.T[0], yA.T[0], 'x', alpha=.5, ms=10)
+  # ax.plot(xA.T, yA.T, '-', alpha=.5)
+  ax.plot(xA.T[-1], yA.T[-1], 'o', alpha=.5, ms=20)
+  # ax.set_xlim([-.9, .9])
+  # ax.set_ylim([-.9, .9])
+  circle = Circle((0., 0.), 1.8, fill=False, edgecolor='k')
+  ax.add_patch(circle)
+
+  # Set the aspect of the plot to equal to make the circle circular
+  ax.set_aspect('equal')
+  plt.savefig('fp_dual_naive.svg', dpi=300)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/8d279f4aa39a05c69cce356ec58db8bc33e8e92b.png]]
+
+#+RESULTS:
 
 #+begin_src ipython
 
@@ -1527,6 +1830,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 
 ** Training
+
 #+begin_src ipython
   for param in model.low_rank.linear.parameters():
       param.requires_grad = True
@@ -1578,7 +1882,7 @@ Here we only evaluate performance from test onset to test offset
 : zero [0 1 2 3 4 5 6 7 8 9]
 
 #+begin_src ipython
-  model.N_BATCH = 64
+  model.N_BATCH = 80
 
   model.lr_eval_win = np.max( (rwd_idx.shape[0], cue_idx.shape[0]))
 
@@ -1601,10 +1905,10 @@ Here we only evaluate performance from test onset to test offset
               #     labels[0, l] = np.zeros((model.N_BATCH, model.lr_eval_win))
 
               if j==1: # Go
-                  model.I0[2] = B0
+                  model.I0[2] = float(float(B0))
                   labels[1, l] = np.ones((model.N_BATCH, model.lr_eval_win))
               elif j==-1: # NoGo
-                  model.I0[2] = B0
+                  model.I0[2] = float(B0)
               else:
                   model.I0[2] = 0
 
@@ -1618,7 +1922,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([768, 455, 2000]) labels torch.Size([768, 2, 31])
+: ff_input torch.Size([960, 455, 2000]) labels torch.Size([960, 2, 31])
 
 #+begin_src ipython
   batch_size = 16
@@ -1626,8 +1930,8 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: torch.Size([614, 455, 2000]) torch.Size([154, 455, 2000])
-: torch.Size([614, 2, 31]) torch.Size([154, 2, 31])
+: torch.Size([768, 455, 2000]) torch.Size([192, 455, 2000])
+: torch.Size([768, 2, 31]) torch.Size([192, 2, 31])
 
 #+begin_src ipython
   # criterion = nn.BCEWithLogitsLoss()
@@ -1642,7 +1946,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 
 #+begin_src ipython
-  num_epochs = 1
+  num_epochs = 15
   start = perf_counter()
   loss, val_loss = optimization(model, train_loader, val_loader, criterion, criterion2, optimizer, num_epochs)
   end = perf_counter()
@@ -1650,9 +1954,14 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: Epoch 1/1, Training Loss: 3.7719, Validation Loss: 3.4639
-: Angle(U, W) : 89.0 ° performance
-: Elapsed (with compilation) = 0h 0m 27s
+: Epoch 1/15, Training Loss: 1.6215, Validation Loss: 1.0529
+: Angle(U, W) : 86.0 ° performance
+: Epoch 2/15, Training Loss: 0.8821, Validation Loss: 1.4274
+: Angle(U, W) : 86.0 ° performance
+: Epoch 3/15, Training Loss: 0.0000, Validation Loss: 0.0000
+: Angle(U, W) : 87.0 ° performance
+: Stopping training as loss has fallen below the threshold: 0.0, 0.0
+: Elapsed (with compilation) = 0h 1m 41s
 
 #+begin_src ipython
     torch.save(model.state_dict(), 'models/dual_train_%d.pth' % seed)
@@ -1677,10 +1986,10 @@ Here we only evaluate performance from test onset to test offset
 
 #+RESULTS:
 :    U  V  W  S  D
-: U  0 62 88 104 89
-: V  XXX 0 89 130 89
-: W  XXX XXX 0 89 87
-: S  XXX XXX XXX 0 88
+: U  0 90 86 65 88
+: V  XXX 2 94 89 90
+: W  XXX XXX 0 88 91
+: S  XXX XXX XXX 0 89
 : D  XXX XXX XXX XXX 0
 
 *** Re-Testing
@@ -1692,7 +2001,7 @@ Here we only evaluate performance from test onset to test offset
 
 #+RESULTS:
 
-#+begin_src ipython
+    #+begin_src ipython
   model.eval()
   model.LR_READOUT = 0
 #+end_src
@@ -1704,28 +2013,28 @@ Here we only evaluate performance from test onset to test offset
 
   model.I0[0] = A0
   model.I0[1] = A0
-  model.I0[2] = B0
+  model.I0[2] = float(float(B0))
   model.I0[3] = A0
 
   AC_pair = model.init_ff_input()
 
   model.I0[0] = A0
   model.I0[1] = A0
-  model.I0[2] = B0
+  model.I0[2] = float(B0)
   model.I0[3] = -A0
 
   AD_pair = model.init_ff_input()
 
   model.I0[0] = -A0
   model.I0[1] = A0
-  model.I0[2] = B0
+  model.I0[2] = float(float(B0))
   model.I0[3] = A0
 
   BC_pair = model.init_ff_input()
 
   model.I0[0] = -A0
   model.I0[1] = A0
-  model.I0[2] = B0
+  model.I0[2] = float(B0)
   model.I0[3] = -A0
 
   BD_pair = model.init_ff_input()
@@ -1779,7 +2088,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/fc947ad546da8063aee148ce93b58f6f94c78ec8.png]]
+[[file:./.ob-jupyter/732992f68806e9eeffc80d1f66f4ece715501e79.png]]
 
 #+begin_src ipython
   idx = get_idx(model, 1)
@@ -1789,7 +2098,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 :RESULTS:
 : ksi torch.Size([5, 1000])
-[[file:./.ob-jupyter/bf764681e6dac4e0c1d41ca66739982aac3d8f25.png]]
+[[file:./.ob-jupyter/6177881d7b39791683ddc6223a13c1de5e5b805a.png]]
 :END:
 
 #+begin_src ipython
@@ -1797,7 +2106,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e441318f925746052ae81d76b03a64a41352af01.png]]
+[[file:./.ob-jupyter/04dea68cc74b3041820c76fcc4ec4fec85b7e756.png]]
 
 #+begin_src ipython
   from matplotlib.patches import Circle
@@ -1826,7 +2135,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5ec9786a276de36dbae8f66b0c17e7ad1c1ea74a.png]]
+[[file:./.ob-jupyter/13655121393761d4b224aa35dd775463c91cc93c.png]]
 
 #+begin_src ipython
 
@@ -1834,10 +2143,10 @@ Here we only evaluate performance from test onset to test offset
 
 #+RESULTS:
 
-** Re-Testing
+** Fixed points
 
 #+begin_src ipython
-  model.DURATION = 10
+  model.DURATION = 20
   model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
   model.IF_RL = 0
 #+end_src
@@ -1887,7 +2196,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([4, 555, 2000]) tensor([19.8599, 17.6087, 21.5094, 20.9079], device='cuda:1')
+: ff_input torch.Size([4, 1055, 2000]) tensor([21.7684, 19.5697, 18.4613, 19.7729], device='cuda:1')
 
 #+begin_src ipython
   rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
@@ -1895,7 +2204,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: (4, 101, 1000)
+: (4, 201, 1000)
 
 #+begin_src ipython
   memory = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
@@ -1905,7 +2214,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/314db472773fbb1d95ae97e0bc9f27ce92f99135.png]]
+[[file:./.ob-jupyter/40a7e4b3880b5777c363794022a1308eb748fb01.png]]
 
 #+begin_src ipython
   idx = get_idx(model, 1)
@@ -1915,7 +2224,7 @@ Here we only evaluate performance from test onset to test offset
 #+RESULTS:
 :RESULTS:
 : ksi torch.Size([5, 1000])
-[[file:./.ob-jupyter/1e415423405ed999bf963b313a03aab43873f8b6.png]]
+[[file:./.ob-jupyter/f7a58f5a6e38c0ef9a03e88b6517656332d57b2c.png]]
 :END:
 
 #+begin_src ipython
@@ -1923,21 +2232,21 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-: (4, 101, 1000)
+: (4, 201, 1000)
 
 #+begin_src ipython
   plot_m0_m1_phi(rates, idx)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/e34673705e6249e6ea8cc354c403c7ef25670db0.png]]
+[[file:./.ob-jupyter/31cebcd38acb00fd6bde95654d9f765ee1b5433c.png]]
 
-    #+begin_src ipython
+#+begin_src ipython
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (4, 101, 1000)
+: (4, 201, 1000)
 
 #+begin_src ipython
   plt.plot(rates[:, :,1].T)
@@ -1946,7 +2255,7 @@ Here we only evaluate performance from test onset to test offset
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2946e71292fc676032d1e4bc1685e00020d89766.png]]
+[[file:./.ob-jupyter/26d65c1b2e78daf9e2aec7f9699622a7532d69be.png]]
 
 #+begin_src ipython
 
@@ -1966,27 +2275,28 @@ Here we only evaluate performance from test onset to test offset
 
   fig, ax = plt.subplots(1, 1, figsize=[height, height])
 
-  ax.plot(xA.T[0], yA.T[0], 'x', alpha=.5, ms=10)
-  ax.plot(xA.T, yA.T, '-', alpha=.5)
-  ax.plot(xA.T[-1], yA.T[-1], 'o', alpha=.5, ms=10)
+  # ax.plot(xA.T[0], yA.T[0], 'x', alpha=.5, ms=10)
+  # ax.plot(xA.T, yA.T, '-', alpha=.5)
+  ax.plot(xA.T[-1], yA.T[-1], 'o', alpha=.5, ms=20)
   # ax.set_xlim([-.9, .9])
   # ax.set_ylim([-.9, .9])
-  circle = Circle((0., 0.), 2, fill=False, edgecolor='k')
+  circle = Circle((0., 0.), 1.7, fill=False, edgecolor='k')
   ax.add_patch(circle)
 
   # Set the aspect of the plot to equal to make the circle circular
   ax.set_aspect('equal')
-
+  plt.savefig('fp_dual_train.svg', dpi=300)
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/4ea0024f6cf050c744829efbdeb19ac4020e2551.png]]
+[[file:./.ob-jupyter/deb302fb30920a24809f034040f26c3d637f1f51.png]]
 
 #+RESULTS:
 
 #+begin_src ipython
-
+  print(float(B0))
 #+end_src
 
 #+RESULTS:
+: 2.0

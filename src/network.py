@@ -45,7 +45,7 @@ class Network(nn.Module):
         # Initialize low rank connectivity for training
         if self.LR_TRAIN:
             self.odors = torch.randn(
-                (4, self.Na[0]),
+                (8, self.Na[0]),
                 device=self.device,
             )
 

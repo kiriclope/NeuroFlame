@@ -64,9 +64,12 @@ def live_ff_input(model, step, ff_input):
                         )
                 else:
                     if model.LR_TRAIN:
-                        stimulus = Stimulus(
-                            model.I0[i], model.SIGMA0[i], model.odors[i]
-                        )
+                        if model.I0[i] > 0:
+                            stimulus = Stimulus(
+                                model.I0[i], model.SIGMA0[i], model.odors[i])
+                        else:
+                            stimulus = Stimulus(
+                                model.I0[i], model.SIGMA0[i], model.odors[4+i])
                     else:
                         stimulus = Stimulus(
                             model.I0[i], model.SIGMA0[i], model.PHI0[2 * i + 1]
