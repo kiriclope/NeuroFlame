@@ -1,6 +1,7 @@
 import time
 import torch
 from torch import nn
+import torch.nn.init as init
 
 
 def normalize_tensor(tensor, idx, slice, Na):
@@ -122,6 +123,12 @@ class LowRankWeights(nn.Module):
         if self.LR_FIX_READ:
             for param in self.linear.parameters():
                 param.requires_grad = False
+
+            # Initialize the weights with a Gaussian (normal) distribution
+            init.normal_(self.linear.weight, mean=0.0, std=1.0)
+
+            # Optionally initialize the biases as well
+            init.normal_(self.linear.bias, mean=0.0, std=1.0)
 
     def forward(self, LR_NORM=0, LR_CLAMP=0):
         if LR_NORM:

@@ -45,7 +45,7 @@ class Network(nn.Module):
         # Initialize low rank connectivity for training
         if self.LR_TRAIN:
             self.odors = torch.randn(
-                (8, self.Na[0]),
+                (10, self.Na[0]),
                 device=self.device,
             )
 
@@ -329,13 +329,14 @@ class Network(nn.Module):
                         rates, ff_input + noise, rec_input, Wab_T, W_stp_T
                     )
             else:
+                if self.LR_TRAIN:
+                    ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD-1)
+                    if self.IF_RL:
+                        ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD)
+
                 rates, rec_input = self.update_dynamics(
                     rates, ff_input[:, step], rec_input, Wab_T, W_stp_T
                 )
-
-                if self.LR_TRAIN:
-                    if self.IF_RL:
-                        ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD)
 
             # update moving average
             mv_rates += rates

@@ -69,7 +69,7 @@ def live_ff_input(model, step, ff_input):
                                 model.I0[i], model.SIGMA0[i], model.odors[i])
                         else:
                             stimulus = Stimulus(
-                                model.I0[i], model.SIGMA0[i], model.odors[4+i])
+                                model.I0[i], model.SIGMA0[i], model.odors[5+i])
                     else:
                         stimulus = Stimulus(
                             model.I0[i], model.SIGMA0[i], model.PHI0[2 * i + 1]
@@ -156,7 +156,17 @@ def init_ff_seq(model):
                 )
             elif "dual" in model.TASK:
                 if model.LR_TRAIN:
-                    stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.odors[i])
+                    if (model.IF_RL == 1 and i!=model.RWD) or (model.IF_RL==0 and i!=model.RWD-1):
+                        # stimulus = Stimulus(
+                        #     model.I0[i], model.SIGMA0[i], model.odors[i])
+                        if model.I0[i] > 0:
+                            stimulus = Stimulus(
+                                model.I0[i], model.SIGMA0[i], model.odors[i])
+                        else:
+                            stimulus = Stimulus(
+                                model.I0[i], model.SIGMA0[i], model.odors[5+i])
+                    else:
+                        stimulus = 0
                 else:
                     stimulus = Stimulus(
                         model.I0[i], model.SIGMA0[i], model.PHI0[2 * i + 1]
@@ -168,9 +178,10 @@ def init_ff_seq(model):
             # stimulus = stimulus.unsqueeze(1)
             # print(stimulus.shape)
 
-            ff_input[:, model.N_STIM_ON[i] : model.N_STIM_OFF[i], model.slices[0]].add_(
-                stimulus
-            )
+            if model.N_STIM_ON[i] < model.N_STEPS:
+                ff_input[:, model.N_STIM_ON[i] : model.N_STIM_OFF[i], model.slices[0]].add_(
+                    stimulus
+                )
             del stimulus
 
     return ff_input * torch.sqrt(model.Ka[0]) * model.M0
@@ -180,14 +191,16 @@ def rl_ff_udpdate(model, ff_input, rates, step, rwd):
     if step == model.N_STIM_ON[rwd]:
         size = (model.N_BATCH, model.Na[0])
 
-        overlap = 1.0 * ( (rates[:, model.slices[0]] @ model.low_rank.linear.weight[0]) > 0).unsqueeze(-1).unsqueeze(-1)
+        # overlap = 1.0 * ( (rates[:, model.slices[0]] @ model.low_rank.linear.weight[0]) > 0).unsqueeze(-1).unsqueeze(-1)
+        overlap = 1.0 * ( (rates[:, model.slices[0]] @ model.low_rank.U[model.slices[0], 1]) > 0).unsqueeze(-1).unsqueeze(-1)
 
         if model.VERBOSE:
             print('overlap', overlap)
 
         Stimulus = Stimuli(model.TASK, size, device=model.device)
         # print('RWD', model.I0[rwd])
-        stimulus = Stimulus(model.I0[rwd], model.SIGMA0[rwd], model.low_rank.U[model.slices[0], 1])
+        stimulus = Stimulus(model.I0[rwd], 1.0, model.low_rank.U[model.slices[0], 1])
+        # stimulus = Stimulus(1.0, 1.0, model.low_rank.U[model.slices[0], 1])
         # stimulus = Stimulus(model.I0[rwd], model.SIGMA0[rwd], model.low_rank.linear.weight[0])
 
         # print(rates.shape, overlap.shape, stimulus.shape, (overlap * stimulus).shape)
