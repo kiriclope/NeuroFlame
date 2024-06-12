@@ -330,7 +330,7 @@ class Network(nn.Module):
                     )
             else:
                 if self.LR_TRAIN:
-                    ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD-1)
+                    # ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD-1)
                     if self.IF_RL:
                         ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD)
 

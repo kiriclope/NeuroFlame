@@ -156,7 +156,7 @@ def init_ff_seq(model):
                 )
             elif "dual" in model.TASK:
                 if model.LR_TRAIN:
-                    if (model.IF_RL == 1 and i!=model.RWD) or (model.IF_RL==0 and i!=model.RWD-1):
+                    if 0==0: # (model.IF_RL == 1 and i!=model.RWD) or (model.IF_RL==0 and i!=model.RWD-1):
                         # stimulus = Stimulus(
                         #     model.I0[i], model.SIGMA0[i], model.odors[i])
                         if model.I0[i] > 0:
@@ -199,9 +199,9 @@ def rl_ff_udpdate(model, ff_input, rates, step, rwd):
 
         Stimulus = Stimuli(model.TASK, size, device=model.device)
         # print('RWD', model.I0[rwd])
-        stimulus = Stimulus(model.I0[rwd], 1.0, model.low_rank.U[model.slices[0], 1])
+        # stimulus = Stimulus(model.I0[rwd], 1.0, model.low_rank.U[model.slices[0], 1])
         # stimulus = Stimulus(1.0, 1.0, model.low_rank.U[model.slices[0], 1])
-        # stimulus = Stimulus(model.I0[rwd], model.SIGMA0[rwd], model.low_rank.linear.weight[0])
+        stimulus = Stimulus(model.I0[rwd], model.SIGMA0[rwd], model.low_rank.linear.weight[0])
 
         # print(rates.shape, overlap.shape, stimulus.shape, (overlap * stimulus).shape)
 
@@ -210,10 +210,16 @@ def rl_ff_udpdate(model, ff_input, rates, step, rwd):
         #     + overlap * stimulus * torch.sqrt(model.Ka[0]) * model.M0
         # )
 
-        ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]] = (
-            ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]]
-            + stimulus * torch.sqrt(model.Ka[0]) * model.M0
-        )
+        if rwd == model.RWD:
+            ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]] = (
+                ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]]
+                + overlap * stimulus * torch.sqrt(model.Ka[0]) * model.M0
+            )
+        else:
+            ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]] = (
+                ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]]
+                + stimulus * torch.sqrt(model.Ka[0]) * model.M0
+            )
 
     return ff_input
 
