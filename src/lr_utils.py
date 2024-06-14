@@ -23,7 +23,7 @@ def clamp_tensor(tensor, idx, slice):
         mask = tensor[slice[0]].clamp(min=0.0)
         clamped_tensor[slice[0]] = mask
     elif idx == 'lr':
-        mask = tensor[slice[0]].clamp(min=-1.0, max=1.0)
+        mask = tensor[slice[0]].clamp(min=-1.0)
         clamped_tensor[slice[0]] = mask
     else:
         mask = tensor[slice[1]].clamp(max=0.0)

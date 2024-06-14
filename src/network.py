@@ -119,6 +119,9 @@ class Network(nn.Module):
             # take weights transpose for optim
             self.Wab_T = self.Wab_T.T
 
+        if self.LR_TRAIN==0:
+            self.Wab_T = self.Wab_T
+
     def initSTP(self):
         """Creates stp model for population 0"""
         self.J_STP = torch.tensor(self.J_STP, device=self.device) * (

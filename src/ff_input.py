@@ -156,7 +156,8 @@ def init_ff_seq(model):
                 )
             elif "dual" in model.TASK:
                 if model.LR_TRAIN:
-                    if 0==0: # (model.IF_RL == 1 and i!=model.RWD) or (model.IF_RL==0 and i!=model.RWD-1):
+                    if 0==0:
+                    # if (model.IF_RL == 0 or i!=model.RWD): # or (model.IF_RL==0 and i!=model.RWD-1):
                         # stimulus = Stimulus(
                         #     model.I0[i], model.SIGMA0[i], model.odors[i])
                         if model.I0[i] > 0:
@@ -192,7 +193,7 @@ def rl_ff_udpdate(model, ff_input, rates, step, rwd):
         size = (model.N_BATCH, model.Na[0])
 
         # overlap = 1.0 * ( (rates[:, model.slices[0]] @ model.low_rank.linear.weight[0]) > 0).unsqueeze(-1).unsqueeze(-1)
-        overlap = 1.0 * ( (rates[:, model.slices[0]] @ model.low_rank.U[model.slices[0], 1]) > 0).unsqueeze(-1).unsqueeze(-1)
+        # overlap = 1.0 * ( (rates[:, model.slices[0]] @ model.low_rank.U[model.slices[0], 1]) > 0).unsqueeze(-1).unsqueeze(-1)
 
         if model.VERBOSE:
             print('overlap', overlap)
@@ -210,16 +211,16 @@ def rl_ff_udpdate(model, ff_input, rates, step, rwd):
         #     + overlap * stimulus * torch.sqrt(model.Ka[0]) * model.M0
         # )
 
-        if rwd == model.RWD:
-            ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]] = (
-                ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]]
-                + overlap * stimulus * torch.sqrt(model.Ka[0]) * model.M0
-            )
-        else:
-            ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]] = (
-                ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]]
-                + stimulus * torch.sqrt(model.Ka[0]) * model.M0
-            )
+        # if rwd == model.RWD:
+        #     ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]] = (
+        #         ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]]
+        #         + overlap * stimulus * torch.sqrt(model.Ka[0]) * model.M0
+        #     )
+        # else:
+        ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]] = (
+            ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]]
+            + stimulus * torch.sqrt(model.Ka[0]) * model.M0
+        )
 
     return ff_input
 
