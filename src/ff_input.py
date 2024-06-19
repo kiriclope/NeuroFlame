@@ -156,8 +156,8 @@ def init_ff_seq(model):
                 )
             elif "dual" in model.TASK:
                 if model.LR_TRAIN:
-                    if 0==0:
-                    # if (model.IF_RL == 0 or i!=model.RWD): # or (model.IF_RL==0 and i!=model.RWD-1):
+                    # if 0==0:
+                    if (i!=model.RWD): # or (model.IF_RL==0 and i!=model.RWD-1):
                         # stimulus = Stimulus(
                         #     model.I0[i], model.SIGMA0[i], model.odors[i])
                         if model.I0[i] > 0:
@@ -201,8 +201,10 @@ def rl_ff_udpdate(model, ff_input, rates, step, rwd):
         Stimulus = Stimuli(model.TASK, size, device=model.device)
         # print('RWD', model.I0[rwd])
         # stimulus = Stimulus(model.I0[rwd], 1.0, model.low_rank.U[model.slices[0], 1])
-        # stimulus = Stimulus(1.0, 1.0, model.low_rank.U[model.slices[0], 1])
-        stimulus = Stimulus(model.I0[rwd], model.SIGMA0[rwd], model.low_rank.linear.weight[0])
+
+        stimulus = Stimulus(model.I0[rwd], 1.0, model.low_rank.U[model.slices[0], 1])
+        if model.low_rank.LR_FIX_READ == 0:
+            stimulus = Stimulus(model.I0[rwd], model.SIGMA0[rwd], model.low_rank.linear.weight[0])
 
         # print(rates.shape, overlap.shape, stimulus.shape, (overlap * stimulus).shape)
 

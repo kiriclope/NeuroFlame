@@ -336,6 +336,8 @@ class Network(nn.Module):
                     # ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD-1)
                     if self.IF_RL:
                         ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD)
+                    else:
+                        self.RWD = -1
 
                 rates, rec_input = self.update_dynamics(
                     rates, ff_input[:, step], rec_input, Wab_T, W_stp_T
