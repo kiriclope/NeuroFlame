@@ -157,7 +157,7 @@ def init_ff_seq(model):
             elif "dual" in model.TASK:
                 if model.LR_TRAIN:
                     # if 0==0:
-                    if (i!=model.RWD): # or (model.IF_RL==0 and i!=model.RWD-1):
+                    if (i!=model.RWD) or (model.IF_RL==0): # or (model.IF_RL==0 and i!=model.RWD-1):
                         # stimulus = Stimulus(
                         #     model.I0[i], model.SIGMA0[i], model.odors[i])
                         if model.I0[i] > 0:

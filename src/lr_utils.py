@@ -23,7 +23,7 @@ def clamp_tensor(tensor, idx, slice):
         mask = tensor[slice[0]].clamp(min=0.0)
         clamped_tensor[slice[0]] = mask
     elif idx == 'lr':
-        mask = tensor[slice[0]].clamp(min=-1.0)
+        mask = tensor[slice[0]].clamp(min=-1.0, max=1.0)
         clamped_tensor[slice[0]] = mask
     else:
         mask = tensor[slice[1]].clamp(max=0.0)
@@ -128,7 +128,8 @@ class LowRankWeights(nn.Module):
             init.normal_(self.linear.weight, mean=0.0, std=1.0)
 
             # Optionally initialize the biases as well
-            init.normal_(self.linear.bias, mean=0.0, std=1.0)
+            if self.LR_BIAS:
+                init.normal_(self.linear.bias, mean=0.0, std=1.0)
 
     def forward(self, LR_NORM=0, LR_CLAMP=0):
         if LR_NORM:

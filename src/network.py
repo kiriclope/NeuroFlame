@@ -329,7 +329,7 @@ class Network(nn.Module):
                     rates = rates + noise
                 else:
                     rates, rec_input = self.update_dynamics(
-                        rates, ff_input + noise, rec_input, Wab_T, W_stp_T
+                        self.low_rank.dropout(rates), ff_input + noise, rec_input, Wab_T, W_stp_T
                     )
             else:
                 if self.LR_TRAIN:
@@ -337,7 +337,7 @@ class Network(nn.Module):
                     if self.IF_RL:
                         ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD)
                     else:
-                        self.RWD = -1
+                        self.RWD = 22
 
                 rates, rec_input = self.update_dynamics(
                     rates, ff_input[:, step], rec_input, Wab_T, W_stp_T
