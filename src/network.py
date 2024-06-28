@@ -84,8 +84,8 @@ class Network(nn.Module):
         # self.scaleWeights()
 
         # in pytorch, Wij is i to j.
-        # self.register_buffer('Wab_T', torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device))
-        self.Wab_T = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
+        self.register_buffer('Wab_T', torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device))
+        # self.Wab_T = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
 
         # Creates connetivity matrix in blocks
         for i_pop in range(self.N_POP):
@@ -129,6 +129,8 @@ class Network(nn.Module):
         )
 
         # NEED .clone() here otherwise BAD THINGS HAPPEN !!!
+        self.register_buffer('W_stp_T', torch.zeros((self.Na[0], self.Na[0]), device=self.device))
+
         self.W_stp_T = (
             self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
         )
@@ -290,14 +292,14 @@ class Network(nn.Module):
                 self.Ka[0]
             )
 
+            # self.lr = self.low_rank(self.LR_NORM, self.LR_CLAMP)
+
             # this breaks autograd :s
             # self.odors[2] = self.low_rank.linear.weight[0]
 
             if self.IF_STP:
                 W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
-                # W_stp_T = self.W_stp_T * (
-                # 1.0 + self.lr[self.slices[0], self.slices[0]].T
-                # )
+                # W_stp_T = self.W_stp_T * (1.0 + self.lr[self.slices[0], self.slices[0]].T)
                 # # W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
 
                 Wab_T = self.Wab_T
