@@ -84,8 +84,15 @@ class Network(nn.Module):
         # self.scaleWeights()
 
         # in pytorch, Wij is i to j.
-        self.register_buffer('Wab_T', torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device))
-        # self.Wab_T = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
+        if self.ODR_TRAIN:
+            self.Wab_T = nn.Parameter(torch.ones((self.N_NEURON, self.N_NEURON),
+                                                 device=self.device)* 0.01)
+
+            self.odr_mask = torch.ones((self.N_NEURON, self.N_NEURON), device=self.device)
+            self.odr_mask[self.slices[0], self.slices[0]] = 0.0
+        else:
+            self.register_buffer('Wab_T', torch.zeros((self.N_NEURON, self.N_NEURON),
+                                                      device=self.device))
 
         # Creates connetivity matrix in blocks
         for i_pop in range(self.N_POP):
@@ -105,7 +112,7 @@ class Network(nn.Module):
                     ksi=self.PHI0,
                 )
 
-                self.Wab_T[self.slices[i_pop], self.slices[j_pop]] = (
+                self.Wab_T.data[self.slices[i_pop], self.slices[j_pop]] = (
                     self.Jab[i_pop][j_pop] * weights
                 )
 
@@ -117,7 +124,8 @@ class Network(nn.Module):
             self.Wab_T = to_sparse_semi_structured(self.Wab_T)
         else:
             # take weights transpose for optim
-            self.Wab_T = self.Wab_T.T
+            if self.ODR_TRAIN==0:
+                self.Wab_T = self.Wab_T.T
 
         if self.LR_TRAIN==0:
             self.Wab_T = self.Wab_T
@@ -135,7 +143,7 @@ class Network(nn.Module):
             self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
         )
 
-        self.Wab_T[self.slices[0], self.slices[0]] = 0
+        self.Wab_T.data[self.slices[0], self.slices[0]] = 0
 
     def init_ff_input(self):
         return init_ff_input(self)
@@ -268,7 +276,7 @@ class Network(nn.Module):
                 self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
             )
 
-            self.Wab_T[self.slices[0], self.slices[0]] = 0
+            self.Wab_T.data[self.slices[0], self.slices[0]] = 0
 
         # Add STP
         W_stp_T = None
@@ -284,6 +292,7 @@ class Network(nn.Module):
                 device=self.device,
             )
 
+            # self.Wab_T.data[self.slices[0], self.slices[0]] = 0
             self.x_list, self.u_list = [], []
             W_stp_T = self.W_stp_T
 
@@ -300,16 +309,22 @@ class Network(nn.Module):
             if self.IF_STP:
                 W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
                 # W_stp_T = self.W_stp_T * (1.0 + self.lr[self.slices[0], self.slices[0]].T)
-                # # W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
+                W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
 
                 Wab_T = self.Wab_T
             else:
-                Wab_T = self.Wab_T + self.Wab_T[0, 0] * self.lr.T
+                Wab_T = self.Wab_T + self.lr.T
+                # Wab_T = self.Wab_T + self.Wab_T[0, 0] * self.lr.T
                 # Wab_T = self.Wab_T * (1.0 + self.lr.T)
 
             # Wab_T = clamp_tensor(Wab_T, 0, self.slices)
             # Wab_T = clamp_tensor(Wab_T, 1, self.slices)
-
+        elif self.ODR_TRAIN:
+            if self.IF_STP:
+                Wab_T = self.odr_mask * self.Wab_T - 1.0 / self.N_NEURON
+                W_stp_T = self.Wab_T[self.slices[0], self.slices[0]] / self.N_NEURON
+            else:
+                Wab_T = self.Wab_T
         else:
             Wab_T = self.Wab_T
             if self.IF_STP:

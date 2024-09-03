@@ -29,10 +29,10 @@ class Stimuli:
                 0,
                 2.0 * torch.pi,
                 self.size[-1] + 1,
-
                 device=self.device,
             )[:-1]
             theta = theta.unsqueeze(0).expand((1, self.size[-1]))
+            # print(theta.shape, phase.shape)
 
         return strength * (1.0 + footprint * torch.cos(theta - phase))
 
