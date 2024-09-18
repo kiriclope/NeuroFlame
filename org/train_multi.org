@@ -1,0 +1,942 @@
+#+STARTUP: fold
+#+TITLE: Training Low Rank RNNs
+#+PROPERTY: header-args:ipython :var B0="1.0" :results none :exports both :async yes :session multi :kernel torch :tangle ./train.py
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+
+  REPO_ROOT = "/home/leon/models/NeuroFlame"
+  pal = sns.color_palette("tab10")
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+The autoreload extension is already loaded. To reload it, use:
+  %reload_ext autoreload
+Python exe
+/home/leon/mambaforge/bin/python
+<Figure size 600x370.82 with 0 Axes>
+:END:
+
+* Imports
+
+#+begin_src ipython
+  import torch
+  import torch.nn as nn
+  import torch.optim as optim
+  from torch.utils.data import Dataset, TensorDataset, DataLoader
+  from matplotlib.patches import Circle
+
+  DEVICE = 'cuda:1'
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../')
+
+  import pandas as pd
+  import torch.nn as nn
+  from time import perf_counter
+  from scipy.stats import circmean
+
+  from src.network import Network
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump, circcvl
+  from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
+#+end_src
+
+#+RESULTS:
+
+* Helpers
+** Data Split
+
+#+begin_src ipython
+  from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
+
+  def split_data(X, Y, train_perc=0.8, batch_size=32):
+
+    if Y.ndim==3:
+      X_train, X_test, Y_train, Y_test = train_test_split(X, Y,
+                                                          train_size=train_perc,
+                                                          stratify=Y[:, 0, 0].cpu().numpy(),
+                                                          shuffle=True)
+    else:
+      X_train, X_test, Y_train, Y_test = train_test_split(X, Y,
+                                                          train_size=train_perc,
+                                                          stratify=Y[:, 0].cpu().numpy(),
+                                                          shuffle=True)
+    print(X_train.shape, X_test.shape)
+    print(Y_train.shape, Y_test.shape)
+
+    train_dataset = TensorDataset(X_train, Y_train)
+    val_dataset = TensorDataset(X_test, Y_test)
+
+    # Create data loaders
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False)
+
+    return train_loader, val_loader
+#+end_src
+
+#+RESULTS:
+
+** Optimization
+
+#+begin_src ipython
+  def accuracy_score(y_pred, labels):
+    probs = torch.sigmoid(y_pred)
+    # Assuming 'outputs' are logits from your model (raw scores before sigmoid)
+    predicted = (probs > 0.5).float()  # Convert to 0 or 1 based on comparison with 0
+    # 'labels' should be your ground truth labels for the binary classification, also in 0 or 1
+    correct = (predicted == labels).sum()
+    accuracy = correct / labels.size(0) / labels.size(-1)
+
+    return accuracy
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def torch_angle_AB(U, V):
+      # Calculate the dot product
+      dot_product = torch.dot(U, V)
+
+      # Calculate the magnitudes of U and V
+      magnitude_U = torch.linalg.norm(U)
+      magnitude_V = torch.linalg.norm(V)
+
+      # Compute the cosine of the angle
+      cos_theta = dot_product / (magnitude_U * magnitude_V)
+
+      # Calculate the angle in radians, then convert to degrees
+      angle_radians = torch.acos(cos_theta)
+      return torch.round(torch.rad2deg(angle_radians))
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def training_step(dataloader, model, loss_fn, optimizer, penalty=None, lbd=1, clip_grad=0, zero_grad=0, read_idx=1):
+      device = torch.device(DEVICE if torch.cuda.is_available() else "cpu")
+
+      model.train()
+      for batch, (X, y) in enumerate(dataloader):
+          X, y = X.to(device), y.to(device)
+
+          rates = model(X)
+
+          if read_idx < 0:
+              y_pred = model.low_rank.linear(model.low_rank.dropout(rates)).squeeze(-1)
+          else:
+              y_pred = rates @ model.low_rank.U[model.slices[0], read_idx]
+
+          # if zero_grad == 0:
+          # overlap = rates @ model.low_rank.U[model.slices[0]] / model.Na[0]
+          # elif zero_grad == 1:
+          overlap = rates @ model.low_rank.U[model.slices[0], 0] / model.Na[0]
+          # elif zero_grad == 2:
+          #     overlap = rates @ model.low_rank.U[model.slices[0], 1] / model.Na[0]
+
+          loss = loss_fn(y_pred, y) + F.relu(overlap[..., :9].abs()-0.1).mean()
+
+          if penalty is not None:
+              reg_loss = 0
+              for param in model.parameters():
+                  if penalty=='l1':
+                      reg_loss += torch.sum(torch.abs(param))
+                  else:
+                      reg_loss += torch.sum(torch.square(param))
+
+                  loss = loss + lbd * reg_loss
+
+          # Backpropagation
+          loss.backward()
+
+          if zero_grad > 0:
+              try:
+                  model.low_rank.U.grad[:, zero_grad-1] = 0
+                  model.low_rank.V.grad[:, zero_grad-1] = 0
+              except:
+                  pass
+
+          # Clip gradients
+          if clip_grad:
+              torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+              #torch.nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
+
+          optimizer.step()
+          optimizer.zero_grad()
+
+      return loss
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def validation_step(dataloader, model, loss_fn, zero_grad=0, read_idx=1):
+      size = len(dataloader.dataset)
+      num_batches = len(dataloader)
+
+      device = torch.device(DEVICE if torch.cuda.is_available() else "cpu")
+      # metric = torchmetrics.classification.Accuracy(task="binary")
+
+      # Validation loop.
+      model.eval()
+      val_loss = 0.0
+
+      with torch.no_grad():
+          for X, y in dataloader:
+              X, y = X.to(device), y.to(device)
+
+              rates = model(X)
+
+              if read_idx < 0:
+                  y_pred = model.low_rank.linear(model.low_rank.dropout(rates)).squeeze(-1)
+              else:
+                  y_pred = rates @ model.low_rank.U[model.slices[0], read_idx]
+
+              # if zero_grad == 0:
+              #     overlap = rates @ model.low_rank.U[model.slices[0]] / model.Na[0]
+              # elif zero_grad == 1:
+              overlap = rates @ model.low_rank.U[model.slices[0], 0] / model.Na[0]
+              # elif zero_grad == 2:
+              #     overlap = rates @ model.low_rank.U[model.slices[0], 1] / model.Na[0]
+
+              loss = loss_fn(y_pred, y) + F.relu(overlap[..., :9].abs()-0.1).mean()
+
+              # acc = metric(y_pred, y)
+
+              val_loss += loss.item() * X.size(0)
+
+          val_loss /= size
+          # acc = metric.compute()
+          # print(f"Accuracy: {acc}")
+          # metric.reset()
+      return val_loss
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100, penalty=None, lbd=1, thresh=.005, zero_grad=0, read_idx=1):
+      scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+      # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.1, verbose=True)
+      # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+
+      device = torch.device(DEVICE if torch.cuda.is_available() else 'cpu')
+      model.to(device)
+
+      loss_list = []
+      val_loss_list = []
+      accuracies = []
+      angle_list = []
+
+      for epoch in range(num_epochs):
+          loss = training_step(train_loader, model, loss_fn, optimizer, penalty, lbd, zero_grad=zero_grad, read_idx=read_idx)
+          val_loss = validation_step(val_loader, model, loss_fn, zero_grad, read_idx=read_idx)
+
+          scheduler.step(val_loss)
+
+          loss_list.append(loss.item())
+          val_loss_list.append(val_loss)
+
+          memory = model.low_rank.U[model.slices[0], 0]
+
+          if read_idx <0:
+              readout = model.low_rank.linear.weight.data[0]
+          else:
+              readout = model.low_rank.U[model.slices[0], read_idx]
+
+          angle = torch_angle_AB(memory, readout).item()
+          angle_list.append(angle)
+
+          # if epoch % int(num_epochs  / 10) == 0:
+          print(f'Epoch {epoch+1}/{num_epochs}, Training Loss: {loss.item():.4f}, Validation Loss: {val_loss:.4f}, Angle(U, W) : {angle} °')
+
+          if val_loss < thresh and loss < thresh:
+              print(f'Stopping training as loss has fallen below the threshold: {loss}, {val_loss}')
+              break
+
+          if val_loss > 300:
+              print(f'Stopping training as loss is too high: {val_loss}')
+              break
+
+          if torch.isnan(loss):
+              print(f'Stopping training as loss is NaN.')
+              break
+
+      return loss_list, val_loss_list
+#+end_src
+
+#+RESULTS:
+
+** Loss
+
+#+begin_src ipython
+  def performance_score(model, rates, labels):
+      print(rates.shape)
+      y_pred = model.low_rank.linear(rates[:, -2:]).squeeze(-1)
+      accuracy = accuracy_score(y_pred, labels)
+      return accuracy
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def imbalance_func(target, imbalance):
+    output = torch.zeros_like(target)
+
+    # Update values
+    output[target == 1] = 1
+    output[target == 0] = imbalance
+
+    return output
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  import torch
+  import torch.nn as nn
+  import torch.nn.functional as F
+
+  class SignBCELoss(nn.Module):
+      def __init__(self, alpha=1.0, thresh=4.0, N=1000, imbalance=0):
+          super(SignBCELoss, self).__init__()
+          self.alpha = alpha
+          self.thresh = thresh
+          self.N = N
+          self.imbalance = imbalance
+          self.bce_with_logits = nn.BCEWithLogitsLoss()
+
+      def forward(self, readout, targets):
+          if self.alpha != 1.0:
+              bce_loss = self.bce_with_logits(readout, targets)
+          else:
+              bce_loss = 0.0
+
+          mean_activation = readout.mean(dim=1).unsqueeze(-1)
+
+          # if self.type == 'DPA':
+          #     sign_overlap = torch.sign(2 * targets - 1) * mean_activation / (1.0 * self.N)
+          #     sign_loss = F.relu(self.thresh - sign_overlap).mean()
+          # else:
+          #     sign_overlap = torch.sign(targets) * mean_activation / (1.0 * self.N)
+          #     sign_loss = F.relu((sign_overlap>0) * self.thresh - sign_overlap).mean()
+
+          # sign_loss = F.relu(self.thresh - sign_overlap).mean()
+
+          # Let's penalize more the wrong licks
+
+          # only penalizing not licking when pair
+          if self.imbalance == -1:
+              sign_overlap = torch.sign(targets) * mean_activation / (1.0 * self.N)
+              self.imbalance = 0
+          else:
+              sign_overlap = torch.sign(2 * targets - 1) * mean_activation / (1.0 * self.N)
+
+          if self.imbalance > 1.0:
+              sign_loss = F.relu(torch.sign(targets) * self.thresh - imbalance_func(targets, self.imbalance) * sign_overlap).mean()
+          elif self.imbalance == 0:
+              sign_loss = F.relu(imbalance_func(targets, self.imbalance) * self.thresh - sign_overlap).mean()
+          elif self.imbalance ==-1 :
+              sign_loss = F.relu(imbalance_func(targets, self.imbalance) * self.thresh - sign_overlap).mean()
+          else:
+              sign_loss = F.relu(self.thresh - sign_overlap).mean()
+
+          combined_loss = (1-self.alpha) * bce_loss + self.alpha * sign_loss
+          return combined_loss
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  class DualLoss(nn.Module):
+      def __init__(self, alpha=1.0, thresh=4.0, N=1000, cue_idx=[], rwd_idx=-1, zero_idx=[], imbalance=0):
+          super(DualLoss, self).__init__()
+          self.alpha = alpha
+          self.thresh = thresh
+          self.N = N
+          self.imbalance = imbalance
+
+          self.zero_idx = zero_idx
+          self.cue_idx = torch.tensor(cue_idx, dtype=torch.int, device=DEVICE)
+          self.rwd_idx = torch.tensor(rwd_idx, dtype=torch.int, device=DEVICE)
+
+          self.loss = SignBCELoss(self.alpha, self.thresh, self.N, self.imbalance)
+
+      def forward(self, readout, targets):
+
+          # ensuring zero bl overlap
+          bl_loss = F.relu((readout[:, self.zero_idx] / self.N).abs() -1.0).mean()
+
+          is_empty = self.cue_idx.numel() == 0
+          if is_empty:
+              self.DPA_loss = self.loss(readout[:, self.rwd_idx], targets)
+              return (self.DPA_loss + bl_loss)
+          else:
+              self.loss.imbalance = self.imbalance[0]
+              self.DPA_loss = self.loss(readout[:, self.rwd_idx], targets[:, 0, :self.rwd_idx.shape[0]])
+
+              self.loss.imbalance = self.imbalance[1]
+              self.DRT_loss = self.loss(readout[:, self.cue_idx], targets[:, 1, :self.cue_idx.shape[0]])
+
+              return (0.5 * self.DPA_loss + 0.5 * self.DRT_loss) + bl_loss
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  class AccuracyLoss(nn.Module):
+      def __init__(self, N=1000, cue_idx=[], rwd_idx=-1):
+          super(AccuracyLoss, self).__init__()
+          self.N = N
+
+          # self.loss = nn.BCEWithLogitsLoss()
+          self.cue_idx = torch.tensor(cue_idx, dtype=torch.int, device=DEVICE)
+          self.rwd_idx = torch.tensor(rwd_idx, dtype=torch.int, device=DEVICE)
+
+      def forward(self, readout, targets):
+
+          is_empty = self.cue_idx.numel() == 0
+          if is_empty:
+              self.DPA_loss = accuracy_score(readout[:, self.rwd_idx], targets)
+              return self.DPA_loss
+          else:
+              self.DPA_loss = accuracy_score(readout[:, self.rwd_idx], targets[:, 0, :self.rwd_idx.shape[0]])
+              self.DRT_loss = accuracy_score(readout[:, self.cue_idx], targets[:, 1, :self.cue_idx.shape[0]])
+              return (self.DPA_loss + self.DRT_loss) / 2.0
+#+end_src
+
+#+RESULTS:
+
+** Other
+
+#+begin_src ipython
+  def angle_AB(A, B):
+      A_norm = A / (np.linalg.norm(A) + 1e-5)
+      B_norm = B / (np.linalg.norm(B) + 1e-5)
+
+      return int(np.arccos(A_norm @ B_norm) * 180 / np.pi)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_theta(a, b, GM=0, IF_NORM=0):
+
+      u, v = a, b
+
+      if GM:
+          v = b - np.dot(b, a) / np.dot(a, a) * a
+
+      if IF_NORM:
+          u = a / np.linalg.norm(a)
+          v = b / np.linalg.norm(b)
+
+      return np.arctan2(v, u) % (2.0 * np.pi)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_idx(model, rank=2):
+      ksi = torch.hstack((model.low_rank.U, model.low_rank.V)).T
+      ksi = ksi[:, :model.Na[0]]
+
+      readout = model.low_rank.linear.weight.data
+      ksi = torch.vstack((ksi, readout))
+
+      print('ksi', ksi.shape)
+
+      ksi = ksi.cpu().detach().numpy()
+      theta = get_theta(ksi[0], ksi[rank])
+
+      return theta.argsort()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def get_overlap(model, rates):
+      ksi = model.odors.cpu().detach().numpy()
+      return rates @ ksi.T / rates.shape[-1]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  import scipy.stats as stats
+
+  def plot_smooth(data, ax, color):
+      mean = data.mean(axis=0)
+      ci = smooth.std(axis=0, ddof=1) * 1.96
+
+      # Plot
+      ax.plot(mean, color=color)
+      ax.fill_between(range(data.shape[1]), mean - ci, mean + ci, alpha=0.25, color=color)
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def convert_seconds(seconds):
+      h = seconds // 3600
+      m = (seconds % 3600) // 60
+      s = seconds % 60
+      return h, m, s
+#+end_src
+
+#+RESULTS:
+
+** plots
+
+#+begin_src ipython
+def add_vlines(ax=None, mouse=""):
+    t_BL = [0, 1]
+    t_STIM = [1 , 2]
+    t_ED = [2, 3]
+    t_DIST = [3 , 4]
+    t_MD = [4 , 5]
+    t_CUE = [5 , 5.5]
+    t_RWD = [5.5, 6.0]
+    t_LD = [6.0 , 7.0]
+    t_TEST = [7.0, 8.0]
+    t_RWD2 = [11 , 12]
+
+    time_periods = [t_STIM, t_DIST, t_TEST, t_CUE]
+    colors = ["b", "b", "b", "g"]
+
+    if ax is None:
+        for period, color in zip(time_periods, colors):
+            plt.axvspan(period[0], period[1], alpha=0.1, color=color)
+    else:
+        for period, color in zip(time_periods, colors):
+            ax.axvspan(period[0], period[1], alpha=0.1, color=color)
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def plot_rates_selec(rates, idx, thresh=0.5, figname='fig.svg'):
+        ordered = rates[..., idx]
+        fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+        r_max = thresh * np.max(rates[0])
+
+        ax[0].imshow(rates[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+        ax[0].set_ylabel('Neuron #')
+        ax[0].set_xlabel('Step')
+
+        ax[1].imshow(ordered[0].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
+        ax[1].set_yticks(np.linspace(0, model.Na[0].cpu().detach(), 5), np.linspace(0, 360, 5).astype(int))
+        ax[1].set_ylabel('Pref. Location (°)')
+        ax[1].set_xlabel('Step')
+        plt.savefig(figname, dpi=300)
+        plt.show()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def plot_overlap(rates, memory, readout, labels=['A', 'B'], figname='fig.svg'):
+      fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+      overlap =(rates @ memory) / rates.shape[-1]
+
+      time = np.linspace(0, 8, overlap.T.shape[0])
+      if overlap.shape[0]>2:
+          ax[0].plot(time, overlap.T[..., :2], label=labels[0])
+          ax[0].plot(time, overlap.T[..., 2:], '--', label=labels[1])
+      else:
+          ax[0].plot(time, overlap.T[..., 0], label=labels[0])
+          ax[0].plot(time, overlap.T[..., 1], '--', label=labels[1])
+
+      ax[0].set_xlabel('Time (s)')
+      ax[0].set_ylabel('Sample Overlap (Hz)')
+      # ax[0].set_title('Memory')
+      add_vlines(ax[0])
+      overlap =(rates @ readout) / rates.shape[-1]
+
+      if overlap.shape[0]>2:
+          ax[1].plot(time, overlap.T[..., :2], label=labels[0])
+          ax[1].plot(time, overlap.T[..., 2:], '--', label=labels[1])
+      else:
+          ax[1].plot(time, overlap.T[..., 0], label=labels[0])
+          ax[1].plot(time, overlap.T[..., 1], '--', label=labels[1])
+
+      ax[1].set_xlabel('Time (s)')
+      ax[1].set_ylabel('Readout (Hz)')
+      # ax[1].set_title('Readout')
+      add_vlines(ax[1])
+
+      # plt.legend(fontsize=10, frameon=False)
+      plt.savefig(figname, dpi=300)
+      plt.show()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def plot_m0_m1_phi(rates, idx, figname='fig.svg'):
+
+      m0, m1, phi = decode_bump(rates[..., idx], axis=-1)
+      fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
+
+      time = np.linspace(0, 8, m0.T.shape[0])
+
+      ax[0].plot(time, m0[:2].T)
+      ax[0].plot(time, m0[2:].T, '--')
+      #ax[0].set_ylim([0, 360])
+      #ax[0].set_yticks([0, 90, 180, 270, 360])
+      ax[0].set_ylabel('$\mathcal{F}_0$ (Hz)')
+      ax[0].set_ylabel('Activity (Hz)')
+      ax[0].set_xlabel('Time (s)')
+      add_vlines(ax[0])
+
+      ax[1].plot(time, m1[:2].T)
+      ax[1].plot(time, m1[2:].T, '--')
+      # ax[1].set_ylim([0, 360])
+      # ax[1].set_yticks([0, 90, 180, 270, 360])
+      ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
+      ax[1].set_ylabel('Bump Amplitude (Hz)')
+      ax[1].set_xlabel('Time (s)')
+      add_vlines(ax[1])
+
+      ax[2].plot(time, phi[:2].T * 180 / np.pi)
+      ax[2].plot(time, phi[2:].T * 180 / np.pi, '--')
+      ax[2].set_ylim([0, 360])
+      ax[2].set_yticks([0, 90, 180, 270, 360])
+      ax[2].set_ylabel('Bump Center (°)')
+      ax[2].set_xlabel('Time (s)')
+      add_vlines(ax[2])
+
+      plt.savefig(figname, dpi=300)
+      plt.show()
+    #+end_src
+
+#+RESULTS:
+
+* Model
+
+#+begin_src ipython
+        REPO_ROOT = "/home/leon/models/NeuroFlame"
+        conf_name = "config_train.yml"
+        DEVICE = 'cuda:1'
+        seed = np.random.randint(0, 1e6)
+        # seed = 21881
+        print(seed)
+        # 789395
+        # 453642
+        # : 577806
+
+        A0 = 1.0
+        B0 = 1.0
+        C0 = 0.0
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+134607
+:END:
+
+#+begin_src ipython
+  model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=16)
+  model.odors[2] = model.odors[1] # cue same as Go
+#+end_src
+
+#+RESULTS:
+
+* Load models
+
+#+begin_src emacs-lisp
+  (defun lc/org-reevaluate-buffer-n-times (n)
+    "Reevaluate the current Org buffer N times."
+    (interactive "nHow many times to reevaluate the buffer? ")
+    (dotimes (_ n)
+      (org-babel-execute-buffer)))
+#+end_src
+
+#+RESULTS:
+: lc/org-reevaluate-buffer-n-times
+
+#+begin_src ipython
+  import os
+
+  model_directory = "./models/"
+  model_files = [f for f in os.listdir(model_directory) if f.startswith("dual_train_") and f.endswith(".pth")]
+
+  model.DURATION = 20
+  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def create_input(model):
+      model.N_BATCH = 1
+
+      model.I0[0] = A0
+      model.I0[1] = 0
+      model.I0[2] = 0
+      model.I0[3] = 0
+      model.I0[4] = 0
+
+      AC_pair = model.init_ff_input()
+
+      model.I0[0] = -A0
+      model.I0[1] = 0
+      model.I0[2] = 0
+      model.I0[3] = 0
+      model.I0[4] = 0
+
+      AD_pair = model.init_ff_input()
+
+      return torch.cat((AC_pair, AD_pair))
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  def plot_circle(rates, idx, ax):
+      m0, m1, phi = decode_bump(rates[..., idx], axis=-1)
+
+      x = m1 / m0 * np.cos(phi)
+      y = m1 / m0 * np.sin(phi)
+
+      ax.plot(x.T[-1], y.T[-1], 'o', alpha=.5, ms=20)
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 1, figsize=[height, height])
+
+  rates_list = []
+  idx_list = []
+
+  for model_file in model_files:
+      model_path = os.path.join(model_directory, model_file)
+      model_state_dict = torch.load(model_path)
+
+      seed_str = model_file.split('_')[2].split('.')[0]  # Assumes format dual_train_XXXX.pth
+      seed = int(seed_str)
+      # print(model_file)
+      # print(seed)
+
+      model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=4)
+      model.load_state_dict(model_state_dict)
+      model.eval()  # Set to evaluation mode
+
+
+      model.DURATION = 20
+      model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+
+      ff_input = create_input(model)
+
+      rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
+      rates_list.append(rates)
+      # plot_m0_m1_phi(rates, idx)
+
+      idx = get_idx(model, 1)
+      idx_list.append(idx)
+
+      plot_circle(rates, idx, ax)
+
+  circle = Circle((0., 0.), 1.7, fill=False, edgecolor='k')
+  ax.add_patch(circle)
+  ax.set_aspect('equal')
+  plt.savefig('dual_naive_multi.svg', dpi=300)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+ksi torch.Size([5, 1000])
+ksi torch.Size([5, 1000])
+ksi torch.Size([5, 1000])
+ksi torch.Size([5, 1000])
+ksi torch.Size([5, 1000])
+ksi torch.Size([5, 1000])
+ksi torch.Size([5, 1000])
+ksi torch.Size([5, 1000])
+[[file:./.ob-jupyter/84137ba08204432d1490ab91e81af8da2adf0be0.png]]
+:END:
+
+* Opto
+
+#+begin_src ipython
+  model_file = model_files[0]
+  model_path = os.path.join(model_directory, model_file)
+  model_state_dict = torch.load(model_path)
+
+  seed_str = model_file.split('_')[2].split('.')[0]  # Assumes format dual_train_XXXX.pth
+  seed = int(seed_str)
+  # print(model_file)
+  # print(seed)
+
+  model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=4)
+  model.load_state_dict(model_state_dict)
+
+  model.DURATION = 8
+  model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+  model.IF_RL = 0
+  model.RWD = 5
+#+end_src
+
+#+RESULTS:
+
+    #+begin_src ipython
+  model.eval()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+Network(
+  (low_rank): LowRankWeights(
+    (linear): Linear(in_features=1000, out_features=1, bias=True)
+    (dropout): Dropout(p=0.0, inplace=False)
+  )
+)
+:END:
+
+#+begin_src ipython
+  memory = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
+  readout = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 1]
+
+  plt.hist(memory, bins='auto');
+  # plt.hist(readout, bins='auto');
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/fff6d0b9dc0b3833151bb2163f29cde035c54b30.png]]
+:END:
+
+#+begin_src ipython
+  N_OPTO = 250
+  readout = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 1]
+  # idx = np.random.choice(range(1000), N_OPTO, replace=False)
+  idx = readout.argsort()[:N_OPTO]
+  # idx = []
+  # idx = np.flip(readout.argsort())[:N_OPTO]
+  # print(idx)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  Wab_T = model.Wab_T.clone()
+  W_stp_T = model.W_stp_T.clone()
+
+  # model.Wab_T[idx, :1000] = 0
+  model.W_stp_T[idx, :1000] = 0
+  model.low_rank.lr_mask[:1000, idx] = 0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  model.N_BATCH = 1
+
+  model.I0[0] = A0
+  model.I0[1] = A0
+  model.I0[2] = float(B0)
+  model.I0[3] = float(C0) * model.IF_RL # rwd
+  model.I0[4] = A0
+
+  AC_pair = model.init_ff_input()
+
+  model.I0[0] = A0
+  model.I0[1] = A0
+  model.I0[2] = float(B0)
+  model.I0[3] = float(C0) * model.IF_RL # rwd
+  model.I0[4] = -A0
+
+  AD_pair = model.init_ff_input()
+
+  model.I0[0] = -A0
+  model.I0[1] = A0
+  model.I0[2] = float(B0)
+  model.I0[3] = float(C0) * model.IF_RL # rwd
+  model.I0[4] = A0
+
+  BC_pair = model.init_ff_input()
+
+  model.I0[0] = -A0
+  model.I0[1] = A0
+  model.I0[2] = float(B0)
+  model.I0[3] = float(C0) * model.IF_RL # rwd
+  model.I0[4] = -A0
+
+  BD_pair = model.init_ff_input()
+
+  ff_input = torch.cat((AC_pair, BD_pair, AD_pair, BC_pair))
+  print('ff_input', ff_input.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+ff_input torch.Size([4, 455, 2000])
+:END:
+
+#+begin_src ipython
+  labels_A = torch.ones((2*model.N_BATCH, 2))
+  labels_B = torch.zeros((2*model.N_BATCH, 2))
+  labels = torch.cat((labels_A, labels_B))
+
+  print('labels', labels.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+labels torch.Size([4, 2])
+:END:
+
+#+begin_src ipython
+  rates = model.forward(ff_input=ff_input).detach()
+  model.Wab_T = Wab_T.clone()
+  model.W_stp_T = W_stp_T.clone()
+  model.low_rank.lr_mask[:1000, idx] = 1
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+torch.Size([4, 81, 1000])
+:END:
+
+ #+begin_src ipython
+   rates = rates.cpu().detach().numpy()
+   memory = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
+   readout = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 1]
+   # readout = model.low_rank.linear.weight.data[0].cpu().detach().numpy()
+   plot_overlap(rates, memory, readout, labels=['pair', 'unpair'], figname='dual_opto_overlap.svg')
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/0a25d18b45975977e5b74c1a5312bd00a5bb820f.png]]
+:END:
+
+ #+begin_src ipython
+   rates = model.forward(ff_input=ff_input).detach()
+   rates = rates.cpu().detach().numpy()
+   plot_overlap(rates, memory, readout, labels=['pair', 'unpair'], figname='dual_ctrl_overlap.svg')
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/f9ad97c8ad1f9265ae59f6e22b977b02b1fe205f.png]]
+:END:

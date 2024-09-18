@@ -1,0 +1,279 @@
+#+STARTUP: fold
+#+TITLE: Serial Biases in the ODR
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_sb :kernel torch :exports results :output-dir ./figures/odr :file (lc/org-babel-tangle-figure-filename)
+
+* Notebook Settings
+
+#+begin_src ipython
+  %load_ext autoreload
+  %autoreload 2
+  %reload_ext autoreload
+
+  %run ../notebooks/setup.py
+  %matplotlib inline
+  %config InlineBackend.figure_format = 'png'
+
+  REPO_ROOT = "/home/leon/models/NeuroFlame"
+  pal = sns.color_palette("tab10")
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Imports
+
+#+begin_src ipython
+  import torch
+  import torch.nn as nn
+  import torch.optim as optim
+  import torch.nn.functional as F
+  from torch.utils.data import Dataset, TensorDataset, DataLoader
+
+  DEVICE = 'cuda:0'
+#+end_src
+
+#+RESULTS:
+
+#+RESULTS:
+
+#+begin_src ipython
+  import sys
+  sys.path.insert(0, '../')
+
+  import pandas as pd
+  import torch.nn as nn
+  from time import perf_counter
+  from scipy.stats import circmean
+
+  from src.network import Network
+  from src.plot_utils import plot_con
+  from src.decode import decode_bump, circcvl, decode_bump_torch
+  from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
+#+end_src
+
+#+RESULTS:
+
+* Serial Bias
+
+#+begin_src ipython
+import torch
+import numpy as np
+
+def generate_weighted_phase_samples(N_BATCH, angles, preferred_angle, sigma):
+    # Convert angles list to a tensor
+    angles_tensor = torch.tensor(angles)
+
+    # Calculate Gaussian probability distribution centered at preferred_angle
+    probs = np.exp(-0.5 * ((angles - preferred_angle) / sigma) ** 2)
+    probs /= probs.sum()  # Normalize to get probabilities
+
+    # Create a categorical distribution from the computed probabilities
+    distribution = torch.distributions.Categorical(torch.tensor(probs))
+
+    # Sample from the distribution
+    indices = distribution.sample((N_BATCH,))
+
+    # Map indices to angles and reshape to (N_BATCH, 1)
+    phase_samples = angles_tensor[indices].reshape(N_BATCH, 1)
+
+    return phase_samples
+
+# Parameters
+N_BATCH = 10000
+angles = np.array([0., 45., 90., 135., 180., 225., 270., 315.])
+preferred_angle = 90.  # Example preferred angle
+sigma = 90.  # Standard deviation of the Gaussian
+
+# Generate samples
+phase_samples = generate_weighted_phase_samples(N_BATCH, angles, preferred_angle, sigma)
+plt.hist(phase_samples[:,0], bins=8);
+#+end_src
+
+#+RESULTS:
+[[./figures/odr/figure_3.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+*** Model
+
+#+begin_src ipython
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+conf_name = "test_odr_EI.yml"
+DEVICE = 'cuda:0'
+seed = np.random.randint(0, 1e6)
+print(seed)
+#+end_src
+
+#+RESULTS:
+: 19874
+
+#+begin_src ipython
+model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=16, LIVE_FF_UPDATE=1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+model_state_dict = torch.load('models/odr.pth')
+# model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=4)
+model.load_state_dict(model_state_dict)
+model.eval()  # Set to evaluation mode
+#+end_src
+
+#+RESULTS:
+: Network()
+
+*** Batching Live Inputs
+
+#+begin_src ipython
+  N_PHASE = 256
+  print(model.PHI0.shape)
+
+  PHI0 = model.PHI0.unsqueeze(-1).repeat((N_PHASE, 1, 1))
+
+  # print(PHI0.shape)
+  # PHI0[:, -1] = torch.randint(0, 360, (N_PHASE,)).unsqueeze(1)
+  # PHI0[:, 0] = torch.randint(0, 360, (N_PHASE,)).unsqueeze(1)
+  # print(PHI0[:, :, 0])
+
+  phases =  [  0.,  45.,  90., 135., 180., 225., 270., 315.]
+  phases_tensor = torch.tensor(phases)
+  PHI0[:, 0] = phases_tensor[torch.randint(0, len(phases), (N_PHASE,))].unsqueeze(1)
+  PHI0[:, -1] = phases_tensor[torch.randint(0, len(phases), (N_PHASE,))].unsqueeze(1)
+ #+end_src
+
+#+RESULTS:
+: torch.Size([1, 3])
+
+#+begin_src ipython
+  model.PHI0 = PHI0
+  model.N_BATCH = N_PHASE
+  rates = model(RET_FF=0).cpu().detach().numpy()
+  print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (256, 81, 500)
+
+#+begin_src ipython
+  m0, m1, phi = decode_bump(rates, axis=-1)
+  print(phi.shape)
+#+end_src
+
+#+RESULTS:
+: (256, 81)
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+idx = np.random.randint(0, model.N_BATCH)
+ax[0].imshow(rates[idx].T, aspect='auto', cmap='jet', vmin=0, vmax=1, origin='lower')
+ax[0].set_ylabel('Pref. Location (°)')
+ax[0].set_yticks(np.linspace(0, model.Na[0].cpu(), 5), np.linspace(0, 360, 5).astype(int))
+ax[0].set_xlabel('Step')
+
+idx = np.random.randint(0, model.N_BATCH, 16)
+ax[1].plot(phi[idx].T * 180 / np.pi,)
+ax[1].set_yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
+ax[1].set_ylabel('Pref. Location (°)')
+ax[1].set_xlabel('Step')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr/figure_11.png]]
+
+#+begin_src ipython
+print(PHI0[0, -1], PHI0[0, 0], phi[0, -1] * 180 / np.pi)
+#+end_src
+
+#+RESULTS:
+: tensor([315.], device='cuda:0') tensor([0.], device='cuda:0') 43.25146260724818
+
+*** errors
+
+#+begin_src ipython
+target_loc = model.PHI0[:, -1].cpu().numpy()
+
+rel_loc = (model.PHI0[:, 0].cpu().numpy() - target_loc) * np.pi / 180.0
+rel_loc = (rel_loc + np.pi) % (2 * np.pi) - np.pi
+rel_loc *= 180 / np.pi
+rel_loc = rel_loc[:, -1]
+
+errors = (phi - target_loc * np.pi / 180.0) % (2*np.pi)
+errors = (errors + np.pi) % (2 * np.pi) - np.pi
+errors *= 180 / np.pi
+mask = np.abs(errors) <= 25
+print(mask.shape)
+
+errors = np.where(mask, errors, np.nan)[:, -1]
+rel_loc = rel_loc[~np.isnan(errors), np.newaxis]
+target_loc = target_loc[:, -1][~np.isnan(errors), np.newaxis]
+errors = errors[~np.isnan(errors), np.newaxis]
+
+# errors = errors[mask]
+print(errors.shape)
+#+end_src
+
+#+RESULTS:
+: (256, 81)
+: (33, 1)
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+ax[0].hist(rel_loc, bins='auto')
+ax[0].set_xlabel('Rel. Location (°)')
+
+ax[1].hist(errors[:, -1], bins='auto')
+ax[1].set_xlabel('Errors (°)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr/figure_14.png]]
+
+*** biases
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+ax[0].plot(target_loc[:, 0], errors[:,-1], 'o')
+ax[0].set_xlabel('Target Loc. (°)')
+ax[0].set_ylabel('Error (°)')
+
+from scipy.stats import binned_statistic
+stt = binned_statistic(target_loc[:,0], errors[:,-1], statistic='mean', bins=8, range=[0, 360])
+dstt = np.mean(np.diff(stt.bin_edges))
+ax[0].plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
+
+ax[0].axhline(color='k', linestyle=":")
+
+ax[1].plot(rel_loc[:, 0], errors[:,-1], 'o')
+ax[1].set_xlabel('Rel. Loc. (°)')
+ax[1].set_ylabel('Error (°)')
+
+from scipy.stats import binned_statistic
+stt = binned_statistic(rel_loc[:, 0], errors[:, -1], statistic='mean', bins=6, range=[-180, 180])
+dstt = np.mean(np.diff(stt.bin_edges))
+ax[1].plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
+
+ax[1].axhline(color='k', linestyle=":")
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr/figure_15.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:

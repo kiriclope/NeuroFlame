@@ -16,7 +16,7 @@ N_BATCH: 1
 # Time step in s
 DT: 0.02
 # total simulation time in s
-DURATION: 4.0
+DURATION: 8.0
 # time to start saving simulation files
 T_STEADY: 1.0
 # Saving to files every T_WINDOW
@@ -28,17 +28,17 @@ T_WINDOW: 0.1
 # stimulus as a cosine shape
 TASK: 'odr'
 # # time for stimuli onset in s
-T_STIM_ON: [1.0, 4.0]
+T_STIM_ON: [1.0, 4.0, 6.0]
 # # # time for stimuli offset in s
-T_STIM_OFF: [2.0, 5.0]
+T_STIM_OFF: [2.0, 5.0, 7.0]
 # stimuli strengths
-I0: [1.0, 0]
+I0: [1.0, -50.0, 1.0]
 # stimuli phases
-PHI0: [180.0, 180]
+PHI0: [180.0, 180, 180]
 # stimuli phases
-PHI1: [180.0, 180.0]
+PHI1: [180.0, 180.0, 180]
 # stimuli tuning
-SIGMA0: [1.0, 0.0]
+SIGMA0: [1.0, 0.0, 1.0]
 
 ##########################################
 ## Reward go
@@ -49,13 +49,13 @@ RWD: 2
 # Network parameters
 ##########################################
 # number of populations
-N_POP: 1
+N_POP: 2
 # number of neurons
 N_NEURON: 1000
 # number of average presynaptic input (set to 1 if all to all)
 K: 100.0
 # fraction of neuron in each population (must sum to 1)
-frac: [1.0]
+frac: [0.5, 0.5]
 
 ##########################################
 # Voltage Dynamics for LIF model
@@ -71,7 +71,7 @@ V_REST: -70.0
 # set to 0 for threshold linear, 1 for sigmoid
 TF_TYPE: 'relu'
 # threshold
-THRESH: [1.0]
+THRESH: [1.0, 1.0]
 
 ##########################################
 # Dynamics of the rates
@@ -79,7 +79,7 @@ THRESH: [1.0]
 # set to 0 if instantaneous rates, 1 if exponentially decaying
 RATE_DYN: 0
 # rate time constants
-TAU: [0.4]
+TAU: [0.4, 0.2]
 RATE_NOISE: 0
 
 ##########################################
@@ -88,14 +88,14 @@ RATE_NOISE: 0
 # set to 0 if instantaneous, 1 if exponentially decaying
 SYN_DYN: 1
 # Synaptic time constants for each population
-TAU_SYN: [.1]
+TAU_SYN: [.2, .1]
 
 ##########################################
 # NMDA currents
 #########################################
 IF_NMDA: 1
 R_NMDA: 1
-TAU_NMDA: [1.0]
+TAU_NMDA: [1.0, 1.0]
 
 ####################
 # Plasticity
@@ -112,14 +112,14 @@ STP_TYPE: 'markram'
 ##########################################
 LIVE_FF_UPDATE: 0
 # External inputs strengths
-Ja0: [2.0]
+Ja0: [2.0, 1.0]
 # External rate
 M0: 1.0
 # Variance of the noise
-VAR_FF: [0.1]
+VAR_FF: [1.0, 1.0]
 # To add an attentional switch
 # if BUMP_SWITCH[i] == 1 it sets Iext[i] to zero before stimulus presentation
-BUMP_SWITCH: [0]
+BUMP_SWITCH: [0, 0]
 
 ##########################################
 # Synaptic strengths
@@ -127,7 +127,7 @@ BUMP_SWITCH: [0]
 # Network's gain
 GAIN: 0.75
 # Synaptic strengths
-Jab: [-1.0]
+Jab: [1.0, -1.0, 1.0, -1.0]
 # Batching Jab
 IF_BATCH_J: 0
 
@@ -141,11 +141,11 @@ SEED: 1
 # CON_TYPE can be 'all2all' or 'sparse'
 CON_TYPE: 'all2all'
 # PROBA_TYPE can be 'cosine', 'cosine_spec' or 'lr'
-PROBA_TYPE: ['gaussian']
+PROBA_TYPE: ['None', 'None', 'None', 'None']
 # strength of the asymmetries if all to all
-SIGMA: [0.0]
+SIGMA: [0.0, 0.0, 0.0, 0.0]
 # tuning of the recurrent connections
-KAPPA: [0.0]
+KAPPA: [0.0, 0.0, 0.0, 0.0]
 # phase of the connectivity
 PHASE: 0.0
 

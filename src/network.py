@@ -4,6 +4,7 @@ from torch.sparse import to_sparse_semi_structured, SparseSemiStructuredTensor
 
 SparseSemiStructuredTensor._FORCE_CUTLASS = True
 
+
 from src.configuration import Configuration
 from src.connectivity import Connectivity
 from src.activation import Activation
@@ -85,14 +86,14 @@ class Network(nn.Module):
 
         # in pytorch, Wij is i to j.
         if self.ODR_TRAIN:
-            self.Wab_T = nn.Parameter(torch.ones((self.N_NEURON, self.N_NEURON),
-                                                 device=self.device)* 0.01)
+            self.Wab_train = nn.Parameter(torch.randn((self.Na[0], self.Na[0]),
+                                                     device=self.device)* 0.01)
 
             self.odr_mask = torch.ones((self.N_NEURON, self.N_NEURON), device=self.device)
             self.odr_mask[self.slices[0], self.slices[0]] = 0.0
-        else:
-            self.register_buffer('Wab_T', torch.zeros((self.N_NEURON, self.N_NEURON),
-                                                      device=self.device))
+
+        self.register_buffer('Wab_T', torch.zeros((self.N_NEURON, self.N_NEURON),
+                                                  device=self.device))
 
         # Creates connetivity matrix in blocks
         for i_pop in range(self.N_POP):
@@ -115,6 +116,22 @@ class Network(nn.Module):
                 self.Wab_T.data[self.slices[i_pop], self.slices[j_pop]] = (
                     self.Jab[i_pop][j_pop] * weights
                 )
+
+        # if self.ODR_TRAIN:
+        #     weights = weight_mat(
+        #         self.CON_TYPE,
+        #         'cosine',
+        #         kappa=torch.tensor(1.0).to(self.device),
+        #         phase=self.PHASE,
+        #         sigma=self.SIGMA[0][0],
+        #         lr_mean=self.LR_MEAN,
+        #         lr_cov=self.LR_COV,
+        #         ksi=self.PHI0,
+        #     )
+
+        #     self.Wab_train.data = (
+        #         self.Jab[0][0] * weights
+        #     )
 
         del weights, weight_mat
 
@@ -321,8 +338,9 @@ class Network(nn.Module):
             # Wab_T = clamp_tensor(Wab_T, 1, self.slices)
         elif self.ODR_TRAIN:
             if self.IF_STP:
-                Wab_T = self.odr_mask * self.Wab_T - 1.0 / self.N_NEURON
-                W_stp_T = self.Wab_T[self.slices[0], self.slices[0]] / self.N_NEURON
+                Wab_T = self.odr_mask * self.Wab_T
+                W_stp_T = self.Wab_train / torch.sqrt(self.Na[0])
+                # W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
             else:
                 Wab_T = self.Wab_T
         else:
@@ -346,7 +364,7 @@ class Network(nn.Module):
                     rates = rates + noise
                 else:
                     rates, rec_input = self.update_dynamics(
-                        self.low_rank.dropout(rates), ff_input + noise, rec_input, Wab_T, W_stp_T
+                        rates, ff_input + noise, rec_input, Wab_T, W_stp_T
                     )
             else:
                 if self.LR_TRAIN:

@@ -65,6 +65,7 @@
 
 #+RESULTS:
 
+
 * Sequential Serial Bias
 ** Stimuli sequences
 Here we will study how Serial Bias (SB) depends on trial history. So we are going to compute SB over multiple previous trials
@@ -90,8 +91,8 @@ First, we define a sequence of stimuli intensities and footprints
 #+end_src
 
 #+RESULTS:
-: I0 [1.75, -2.5]
-: SIGMA0 [1, 0]
+: I0 [1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5, 1.75, -2.5]
+: SIGMA0 [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
 
 Then, we create a sequence of stimuli onsets and offsets
 
@@ -105,7 +106,7 @@ Then, we create a sequence of stimuli onsets and offsets
 #+end_src
 
 #+RESULTS:
-: [1.0, 4.0]
+: [1.0, 4.0, 5.5, 8.5, 10.0, 13.0, 14.5, 17.5, 19.0, 22.0, 23.5, 26.5, 28.0, 31.0, 32.5, 35.5, 37.0, 40.0, 41.5, 44.5, 46.0, 49.0, 50.5, 53.5, 55.0, 58.0, 59.5, 62.5, 64.0, 67.0, 68.5, 71.5, 73.0, 76.0, 77.5, 80.5, 82.0, 85.0, 86.5, 89.5, 91.0, 94.0, 95.5, 98.5, 100.0, 103.0, 104.5, 107.5, 109.0, 112.0, 113.5, 116.5, 118.0, 121.0, 122.5, 125.5, 127.0, 130.0, 131.5, 134.5, 136.0, 139.0, 140.5, 143.5]
 
 #+BEGIN_SRC ipython
   c = [2 + i * 4.5 for i in range(N_TRIALS)]
@@ -119,8 +120,8 @@ Then, we create a sequence of stimuli onsets and offsets
 #+end_src
 
 #+RESULTS:
-: [2.0, 4.5]
-: 5.5
+: [2.0, 4.5, 6.5, 9.0, 11.0, 13.5, 15.5, 18.0, 20.0, 22.5, 24.5, 27.0, 29.0, 31.5, 33.5, 36.0, 38.0, 40.5, 42.5, 45.0, 47.0, 49.5, 51.5, 54.0, 56.0, 58.5, 60.5, 63.0, 65.0, 67.5, 69.5, 72.0, 74.0, 76.5, 78.5, 81.0, 83.0, 85.5, 87.5, 90.0, 92.0, 94.5, 96.5, 99.0, 101.0, 103.5, 105.5, 108.0, 110.0, 112.5, 114.5, 117.0, 119.0, 121.5, 123.5, 126.0, 128.0, 130.5, 132.5, 135.0, 137.0, 139.5, 141.5, 144.0]
+: 145.0
 
 ** Phase Batches
 Now, we need to create batches of stimuli phases to simulate to compute SB.
@@ -142,7 +143,7 @@ Let's batch the phases!
 #+end_src
 
 #+RESULTS:
-: PHI0 torch.Size([10, 2, 1])
+: PHI0 torch.Size([10, 64, 1])
 
 #+begin_src ipython
   plt.hist(PHI0[:, 0, 0].cpu().numpy())
@@ -152,7 +153,7 @@ Let's batch the phases!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/6428d920214d5f2ad8f465f0e0f186cc575e42b4.png]]
+[[./.ob-jupyter/b6a335a9d278b3ec0a946eeac937f1966845110a.png]]
 
 ** Model
 
@@ -186,7 +187,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-: torch.Size([10, 56])
+: torch.Size([10, 1451])
 
 #+begin_src ipython
   targets = PHI0[:,::2,0].cpu().numpy() * np.pi / 180
@@ -194,7 +195,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-: targets (10, 1)
+: targets (10, 32)
 
 #+begin_src ipython
   steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
@@ -214,9 +215,11 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-: [30]
-: delay phase (10, 1)
-: 284.00000334956053 278.9453081939143
+: [  30   75  120  165  210  255  300  345  390  435  480  525  570  615
+:   660  705  750  795  840  885  930  975 1020 1065 1110 1155 1200 1245
+:  1290 1335 1380 1425]
+: delay phase (10, 32)
+: 162.99999201387476 148.45372447812025
 
 #+begin_src ipython
   errors =  targets - phi_off
@@ -227,8 +230,8 @@ Let's decode the bumps!
  #+end_src
 
 #+RESULTS:
-: 0.08822107
-: errors (10, 1)
+: 0.25388026
+: errors (10, 32)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -261,7 +264,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/5bab09d0aa630149fb746dda0c53c849f4e7dcda.png]]
+[[./.ob-jupyter/ae3982e88ce2f3a6097be5ff8e6a332da7d4aa8c.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -271,7 +274,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/6ac5249336944ecd18264bbde89c016999b191d0.png]]
+[[./.ob-jupyter/79fdff59779ed6a3fe6622152c46970b9df0cf9b.png]]
 
 #+begin_src ipython
   plt.hist(errors, bins=5)
@@ -281,7 +284,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/8cb1fbc33ded74955718d8e2a8268e110b313bbc.png]]
+[[./.ob-jupyter/4b3192de46f4833ff9e44228ea1996c9d4a2ebc1.png]]
 
 #+begin_src ipython
   rel_loc = np.diff(targets, axis=1)
@@ -296,7 +299,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-: (10, 0)
+: (10, 31)
 
 #+begin_src ipython
   plt.hist(rel_loc *180 /np.pi, bins=10)
@@ -306,7 +309,7 @@ Let's decode the bumps!
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/a54dded786ff819603a35d6e734dcaee2cbf171f.png]]
+[[./.ob-jupyter/0394db7a5db514e27a773de39b6f777a6f029aad.png]]
 
 #+begin_src ipython
   pal = sns.color_palette("rocket_r", n_colors= N_TRIALS)
@@ -325,15 +328,12 @@ Let's decode the bumps!
   plt.xlabel('Rel. Loc. (°)')
   plt.ylabel('Error (°)')
   # plt.ylim([-20, 20])
-  plt.legend(frameon=False, loc='best', fontsize=10)
+  # plt.legend(frameon=False, loc='best', fontsize=10)
   plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
-[[file:./.ob-jupyter/197b05ff4cd08446512a908678ea61c8f86c8a74.png]]
-:END:
+[[./.ob-jupyter/5984052d9380d7932faed11c6747ecf89d17d08a.png]]
 
 #+begin_src ipython
 
