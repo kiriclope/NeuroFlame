@@ -105,20 +105,27 @@ plt.hist(phase_samples[:,0], bins=8);
 
 #+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
-conf_name = "test_odr_EI.yml"
+conf_name = "test_odr.yml"
 DEVICE = 'cuda:0'
 seed = np.random.randint(0, 1e6)
 print(seed)
 #+end_src
 
 #+RESULTS:
-: 19874
+: 822853
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=16, LIVE_FF_UPDATE=1)
 #+end_src
 
 #+RESULTS:
+
+#+begin_src ipython
+print(model.slices[0])
+#+end_src
+
+#+RESULTS:
+: slice(tensor(0, device='cuda:0'), tensor(1000, device='cuda:0'), None)
 
 #+begin_src ipython
 model_state_dict = torch.load('models/odr.pth')
@@ -128,12 +135,14 @@ model.eval()  # Set to evaluation mode
 #+end_src
 
 #+RESULTS:
-: Network()
+: Network(
+:   (dropout): Dropout(p=0.0, inplace=False)
+: )
 
 *** Batching Live Inputs
 
 #+begin_src ipython
-  N_PHASE = 256
+  N_PHASE = 512
   print(model.PHI0.shape)
 
   PHI0 = model.PHI0.unsqueeze(-1).repeat((N_PHASE, 1, 1))
@@ -160,7 +169,7 @@ model.eval()  # Set to evaluation mode
 #+end_src
 
 #+RESULTS:
-: (256, 81, 500)
+: (512, 81, 1000)
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates, axis=-1)
@@ -168,34 +177,47 @@ model.eval()  # Set to evaluation mode
 #+end_src
 
 #+RESULTS:
-: (256, 81)
+: (512, 81)
 
 #+begin_src ipython
-fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+fig, ax = plt.subplots(1, 3, figsize=[2.5*width, height])
 
 idx = np.random.randint(0, model.N_BATCH)
-ax[0].imshow(rates[idx].T, aspect='auto', cmap='jet', vmin=0, vmax=1, origin='lower')
+ax[0].imshow(rates[idx].T, aspect='auto', cmap='jet', vmin=0, origin='lower')
 ax[0].set_ylabel('Pref. Location (°)')
 ax[0].set_yticks(np.linspace(0, model.Na[0].cpu(), 5), np.linspace(0, 360, 5).astype(int))
 ax[0].set_xlabel('Step')
 
-idx = np.random.randint(0, model.N_BATCH, 16)
-ax[1].plot(phi[idx].T * 180 / np.pi,)
-ax[1].set_yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
-ax[1].set_ylabel('Pref. Location (°)')
+idx = np.random.randint(0, model.N_BATCH, 100)
+ax[1].plot(m1[idx].T)
+# ax[1].set_yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
+ax[1].set_ylabel('m1 (Hz)')
 ax[1].set_xlabel('Step')
+
+# idx = np.random.randint(0, model.N_BATCH, 100)
+ax[2].plot(phi[idx].T * 180 / np.pi)
+ax[2].set_yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
+ax[2].set_ylabel('Pref. Location (°)')
+ax[2].set_xlabel('Step')
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_11.png]]
+[[./figures/odr/figure_12.png]]
 
 #+begin_src ipython
 print(PHI0[0, -1], PHI0[0, 0], phi[0, -1] * 180 / np.pi)
 #+end_src
 
 #+RESULTS:
-: tensor([315.], device='cuda:0') tensor([0.], device='cuda:0') 43.25146260724818
+: tensor([90.], device='cuda:0') tensor([270.], device='cuda:0') 83.14013308981532
+
+#+begin_src ipython
+print(PHI0.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([512, 3, 1])
 
 *** errors
 
@@ -210,8 +232,18 @@ rel_loc = rel_loc[:, -1]
 errors = (phi - target_loc * np.pi / 180.0) % (2*np.pi)
 errors = (errors + np.pi) % (2 * np.pi) - np.pi
 errors *= 180 / np.pi
+
 mask = np.abs(errors) <= 25
 print(mask.shape)
+
+print('rel_loc', rel_loc.shape)
+print('errors', errors.shape)
+
+
+errors2 = np.where(mask, errors, np.nan)[:, -5]
+rel_loc2 = rel_loc[~np.isnan(errors2), np.newaxis]
+target_loc2 = target_loc[:, -1][~np.isnan(errors2), np.newaxis]
+errors2 = errors2[~np.isnan(errors2), np.newaxis]
 
 errors = np.where(mask, errors, np.nan)[:, -1]
 rel_loc = rel_loc[~np.isnan(errors), np.newaxis]
@@ -223,21 +255,25 @@ print(errors.shape)
 #+end_src
 
 #+RESULTS:
-: (256, 81)
-: (33, 1)
+: (512, 81)
+: rel_loc (512,)
+: errors (512, 81)
+: (322, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-ax[0].hist(rel_loc, bins='auto')
+ax[0].hist(rel_loc, bins=15)
 ax[0].set_xlabel('Rel. Location (°)')
 
 ax[1].hist(errors[:, -1], bins='auto')
+ax[1].hist(errors2[:, -1], bins='auto')
 ax[1].set_xlabel('Errors (°)')
+ax[1].set_xlim([-45, 45])
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_14.png]]
+[[./figures/odr/figure_16.png]]
 
 *** biases
 
@@ -255,22 +291,27 @@ ax[0].plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
 
 ax[0].axhline(color='k', linestyle=":")
 
-ax[1].plot(rel_loc[:, 0], errors[:,-1], 'o')
+ax[1].plot(rel_loc[:, 0], errors[:,-1], 'bo')
+# ax[1].plot(rel_loc2[:, 0], errors2[:,-1], 'ro')
 ax[1].set_xlabel('Rel. Loc. (°)')
 ax[1].set_ylabel('Error (°)')
 
 from scipy.stats import binned_statistic
 stt = binned_statistic(rel_loc[:, 0], errors[:, -1], statistic='mean', bins=6, range=[-180, 180])
 dstt = np.mean(np.diff(stt.bin_edges))
-ax[1].plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
+ax[1].plot(stt.bin_edges[:-1]+dstt/2,stt.statistic, 'b')
 
+stt = binned_statistic(rel_loc2[:, 0], errors2[:, -1], statistic='mean', bins=8, range=[-180, 180])
+dstt = np.mean(np.diff(stt.bin_edges))
+# ax[1].plot(stt.bin_edges[:-1]+dstt/2,stt.statistic, 'r')
+# ax[1].set_ylim([-20, 20])
 ax[1].axhline(color='k', linestyle=":")
 
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_15.png]]
+[[./figures/odr/figure_17.png]]
 
 #+begin_src ipython
 

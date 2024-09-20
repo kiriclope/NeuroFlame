@@ -66,6 +66,9 @@ class Network(nn.Module):
                 self.device,
             )
 
+        if self.LR_TRAIN or self.ODR_TRAIN:
+            self.dropout = nn.Dropout(self.DROP_RATE)
+
         # Add STP
         if self.IF_STP:
             self.initSTP()
@@ -77,20 +80,22 @@ class Network(nn.Module):
     def initWeights(self):
         """
         Initializes the connectivity matrix self.Wab.
-        Scales weights Jab and loops over blocks to create the full matrix.
+        Loops over blocks to create the full matrix.
         Relies on class Connectivity from connetivity.py
         """
 
-        # # Scale synaptic weights as 1/sqrt(K) for sparse nets
-        # self.scaleWeights()
-
         # in pytorch, Wij is i to j.
         if self.ODR_TRAIN:
-            self.Wab_train = nn.Parameter(torch.randn((self.Na[0], self.Na[0]),
-                                                     device=self.device)* 0.01)
+            if self.IF_STP:
+                self.Wab_train = nn.Parameter(torch.randn((self.Na[0], self.Na[0]),
+                                                          device=self.device)* 0.01)
+            else:
+                self.Wab_train = nn.Parameter(torch.randn((self.N_NEURON, self.N_NEURON),
+                                                          device=self.device)* 0.01)
 
-            self.odr_mask = torch.ones((self.N_NEURON, self.N_NEURON), device=self.device)
-            self.odr_mask[self.slices[0], self.slices[0]] = 0.0
+        # self.train_mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
+        # self.train_mask[self.slices[0], self.slices[0]] = 1.0
+        # self.train_mask[self.slices[0], self.slices[0]] = 0.0
 
         self.register_buffer('Wab_T', torch.zeros((self.N_NEURON, self.N_NEURON),
                                                   device=self.device))
@@ -113,25 +118,12 @@ class Network(nn.Module):
                     ksi=self.PHI0,
                 )
 
+                if i_pop==0 and j_pop==0:
+                    self.sparse_mask = weights
+
                 self.Wab_T.data[self.slices[i_pop], self.slices[j_pop]] = (
                     self.Jab[i_pop][j_pop] * weights
                 )
-
-        # if self.ODR_TRAIN:
-        #     weights = weight_mat(
-        #         self.CON_TYPE,
-        #         'cosine',
-        #         kappa=torch.tensor(1.0).to(self.device),
-        #         phase=self.PHASE,
-        #         sigma=self.SIGMA[0][0],
-        #         lr_mean=self.LR_MEAN,
-        #         lr_cov=self.LR_COV,
-        #         ksi=self.PHI0,
-        #     )
-
-        #     self.Wab_train.data = (
-        #         self.Jab[0][0] * weights
-        #     )
 
         del weights, weight_mat
 
@@ -140,12 +132,7 @@ class Network(nn.Module):
         elif self.SPARSE == "semi":
             self.Wab_T = to_sparse_semi_structured(self.Wab_T)
         else:
-            # take weights transpose for optim
-            if self.ODR_TRAIN==0:
-                self.Wab_T = self.Wab_T.T
-
-        if self.LR_TRAIN==0:
-            self.Wab_T = self.Wab_T
+            self.Wab_T = self.Wab_T.T
 
     def initSTP(self):
         """Creates stp model for population 0"""
@@ -153,14 +140,17 @@ class Network(nn.Module):
             self.GAIN / torch.sqrt(self.Ka[0])
         )
 
-        # NEED .clone() here otherwise BAD THINGS HAPPEN !!!
         self.register_buffer('W_stp_T', torch.zeros((self.Na[0], self.Na[0]), device=self.device))
 
+        # NEED .clone() here otherwise BAD THINGS HAPPEN !!!
         self.W_stp_T = (
             self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
         )
 
         self.Wab_T.data[self.slices[0], self.slices[0]] = 0
+
+        # self.stp_mask = torch.ones((self.N_NEURON, self.N_NEURON), device=self.device)
+        # self.stp_mask[self.slices[0], self.slices[0]] = 0.0
 
     def init_ff_input(self):
         return init_ff_input(self)
@@ -192,25 +182,6 @@ class Network(nn.Module):
             )
 
         return rates, ff_input, rec_input
-
-    def scaleWeights(self):
-        # scaling recurrent weights Jab as 1 / sqrt(Kb)
-        if self.VERBOSE:
-            print("Jab", self.Jab)
-
-        for i_pop in range(self.N_POP):
-            self.Jab[:, i_pop] = self.Jab[:, i_pop] / torch.sqrt(self.Ka[i_pop])
-
-        # scaling FF weights as sqrt(K0)
-        if self.VERBOSE:
-            print("Ja0", self.Ja0)
-
-        # now inputs are scaled in init_ff_input unless live update
-        if self.LIVE_FF_UPDATE:
-            self.Ja0 = self.M0 * torch.sqrt(self.Ka[0]) * self.Ja0
-
-        # scaling ff variance as 1 / sqrt(K0)
-        self.VAR_FF.mul_(self.M0 / torch.sqrt(self.Ka[0]))
 
     def update_dynamics(self, rates, ff_input, rec_input, Wab_T, W_stp_T):
         """Updates the dynamics of the model at each timestep"""
@@ -295,6 +266,7 @@ class Network(nn.Module):
 
             self.Wab_T.data[self.slices[0], self.slices[0]] = 0
 
+
         # Add STP
         W_stp_T = None
         if self.IF_STP:
@@ -309,44 +281,39 @@ class Network(nn.Module):
                 device=self.device,
             )
 
-            # self.Wab_T.data[self.slices[0], self.slices[0]] = 0
             self.x_list, self.u_list = [], []
+
+        Wab_T = self.Wab_T
+        if self.IF_STP:
             W_stp_T = self.W_stp_T
 
+        # Train Low rank vectors
         if self.LR_TRAIN:
-            self.lr = self.low_rank(self.LR_NORM, self.LR_CLAMP) * torch.sqrt(
-                self.Ka[0]
-            )
+            self.Wab_train = self.low_rank(self.LR_NORM, self.LR_CLAMP) * torch.sqrt(self.Ka[0])
 
-            # self.lr = self.low_rank(self.LR_NORM, self.LR_CLAMP)
-
-            # this breaks autograd :s
-            # self.odors[2] = self.low_rank.linear.weight[0]
-
+        # Training
+        if self.ODR_TRAIN or self.LR_TRAIN:
             if self.IF_STP:
-                W_stp_T = self.W_stp_T + self.lr[self.slices[0], self.slices[0]].T
-                # W_stp_T = self.W_stp_T * (1.0 + self.lr[self.slices[0], self.slices[0]].T)
-                W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
+                # Do not forget the .clone() otherwise torch messes things
+                W_stp_T = self.Wab_train[self.slices[0], self.slices[0]].clone()
 
-                Wab_T = self.Wab_T
+                if self.ODR_TRAIN:
+                    W_stp_T = W_stp_T / torch.sqrt(self.Na[0])
+
             else:
-                Wab_T = self.Wab_T + self.lr.T
-                # Wab_T = self.Wab_T + self.Wab_T[0, 0] * self.lr.T
-                # Wab_T = self.Wab_T * (1.0 + self.lr.T)
+                Wab_T = self.Wab_T + self.Wab_train
 
-            # Wab_T = clamp_tensor(Wab_T, 0, self.slices)
-            # Wab_T = clamp_tensor(Wab_T, 1, self.slices)
-        elif self.ODR_TRAIN:
-            if self.IF_STP:
-                Wab_T = self.odr_mask * self.Wab_T
-                W_stp_T = self.Wab_train / torch.sqrt(self.Na[0])
-                # W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
-            else:
-                Wab_T = self.Wab_T
-        else:
-            Wab_T = self.Wab_T
-            if self.IF_STP:
-                W_stp_T = self.W_stp_T
+            # train weights other than E
+            # Wab_T = self.Wab_T + self.stp_mask * self.train_mask * self.Wab_train
+
+            if self.CLAMP:
+                if self.IF_STP:
+                    W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
+                else:
+                    # Check indices Think need some transpose
+                    Wab_T = clamp_tensor(Wab_T.T, 0, self.slices).T
+                    Wab_T = clamp_tensor(Wab_T.T, 1, self.slices).T
+
 
         # Moving average
         mv_rates, mv_ff = 0, 0
@@ -364,8 +331,9 @@ class Network(nn.Module):
                     rates = rates + noise
                 else:
                     rates, rec_input = self.update_dynamics(
-                        rates, ff_input + noise, rec_input, Wab_T, W_stp_T
+                        self.dropout(rates), ff_input + noise, rec_input, Wab_T, W_stp_T
                     )
+
             else:
                 if self.LR_TRAIN:
                     # ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD-1)
@@ -422,12 +390,6 @@ class Network(nn.Module):
             if self.IF_STP and RET_STP:  # returns stp u and x
                 self.u_list = torch.stack(self.u_list, dim=1)
                 self.x_list = torch.stack(self.x_list, dim=1)
-
-        # Add Linear readout (N_BATCH, N_EVAL_WIN, 1) on last few steps
-        # if self.LR_READOUT:
-        #     y_pred = self.low_rank.linear(self.low_rank.dropout(rates))
-        #     # del rates
-        #     return y_pred.squeeze(-1)
 
         if self.LIVE_FF_UPDATE == 0 and RET_FF:
             self.ff_input = ff_input[..., self.slices[0]]

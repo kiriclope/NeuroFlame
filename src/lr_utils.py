@@ -118,19 +118,17 @@ class LowRankWeights(nn.Module):
             self.linear = nn.Linear(
                 self.Na[0], self.LR_CLASS, device=self.device, bias=self.LR_BIAS
             )
+            if self.LR_FIX_READ:
+                for param in self.linear.parameters():
+                    param.requires_grad = False
 
-        self.dropout = nn.Dropout(self.DROP_RATE)
+                # Initialize the weights with a Gaussian (normal) distribution
+                init.normal_(self.linear.weight, mean=0.0, std=1.0)
 
-        if self.LR_FIX_READ:
-            for param in self.linear.parameters():
-                param.requires_grad = False
+                # Optionally initialize the biases as well
+                if self.LR_BIAS:
+                    init.normal_(self.linear.bias, mean=0.0, std=1.0)
 
-            # Initialize the weights with a Gaussian (normal) distribution
-            init.normal_(self.linear.weight, mean=0.0, std=1.0)
-
-            # Optionally initialize the biases as well
-            if self.LR_BIAS:
-                init.normal_(self.linear.bias, mean=0.0, std=1.0)
 
     def forward(self, LR_NORM=0, LR_CLAMP=0):
         if LR_NORM:
@@ -146,7 +144,6 @@ class LowRankWeights(nn.Module):
         self.lr = self.lr_mask * self.lr
 
         self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
-        self.lr = normalize_tensor(self.lr, 1, self.slices, self.Na)
 
         if LR_CLAMP:
             self.lr = clamp_tensor(self.lr, 'lr', self.slices)
