@@ -87,7 +87,7 @@ class Network(nn.Module):
         # in pytorch, Wij is i to j.
         if self.ODR_TRAIN:
             if self.IF_STP:
-                self.Wab_train = nn.Parameter(torch.randn((self.Na[0], self.Na[0]),
+                self.Wab_train = nn.Parameter(torch.zeros((self.Na[0], self.Na[0]),
                                                           device=self.device)* 0.01)
             else:
                 self.Wab_train = nn.Parameter(torch.randn((self.N_NEURON, self.N_NEURON),
@@ -295,7 +295,7 @@ class Network(nn.Module):
         if self.ODR_TRAIN or self.LR_TRAIN:
             if self.IF_STP:
                 # Do not forget the .clone() otherwise torch messes things
-                W_stp_T = self.Wab_train[self.slices[0], self.slices[0]].clone()
+                W_stp_T = self.Wab_train[self.slices[0], self.slices[0]]
 
                 if self.ODR_TRAIN:
                     W_stp_T = W_stp_T / torch.sqrt(self.Na[0])
@@ -313,7 +313,6 @@ class Network(nn.Module):
                     # Check indices Think need some transpose
                     Wab_T = clamp_tensor(Wab_T.T, 0, self.slices).T
                     Wab_T = clamp_tensor(Wab_T.T, 1, self.slices).T
-
 
         # Moving average
         mv_rates, mv_ff = 0, 0

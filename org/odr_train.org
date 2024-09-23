@@ -18,10 +18,13 @@
 #+end_src
 
 #+RESULTS:
+:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
+: <Figure size 600x370.82 with 0 Axes>
+:END:
 
 * Imports
 
@@ -272,23 +275,38 @@ def compute_fourier_moments(signal, dim=-1):
 #+begin_src ipython
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-class AngularErrorLoss2(nn.Module):
-    def __init__(self, rwd_idx=-1):
+class AngularErrorLoss(nn.Module):
+    def __init__(self, rwd_idx=-1, zero_idx=0, stim_idx=0):
         super(AngularErrorLoss, self).__init__()
         self.loss = nn.SmoothL1Loss()
+        self.loss = nn.MSELoss()
         self.rwd_idx = rwd_idx
+        self.zero_idx = zero_idx
+        self.stim_idx = stim_idx
 
     def forward(self, readout, targets):
-        # Ensure the readout and targets are in the same shape
-        predicted_angles = readout[:, self.rwd_idx]
+        m0, m1, m2, phi = compute_fourier_moments(readout, dim=-1)
+
+        ones = torch.ones_like(m0[:, self.rwd_idx])
+        zeros = torch.zeros_like(m0[:, self.zero_idx])
 
         # Compute the angular difference
+        predicted_angles = phi[:, self.rwd_idx]
         angular_diff = torch.atan2(torch.sin(predicted_angles - targets), torch.cos(predicted_angles - targets))
 
-        # Use MSE loss on angular differences
-        loss = self.loss(angular_diff)
-        return loss
+        # Compute Smooth L1 Loss based on angular differences
+        loss_angular = self.loss(angular_diff, torch.zeros_like(angular_diff))
+
+        # Regularization losses
+        loss_zero = self.loss(m1[:, self.zero_idx], zeros)
+        regularization = F.relu(ones - m1[:, self.rwd_idx] / m0[:, self.rwd_idx]).mean()
+
+        # Combine losses
+        total_loss = loss_angular + loss_zero + regularization
+
+        return total_loss
 #+end_src
 
 #+RESULTS:
@@ -298,47 +316,38 @@ class AngularErrorLoss2(nn.Module):
   import torch.nn as nn
   import torch.nn.functional as F
 
-  class AngularErrorLoss(nn.Module):
-      def __init__(self, rwd_idx=-1, zero_idx=0):
+  class AngularErrorLoss2(nn.Module):
+      def __init__(self, rwd_idx=-1, zero_idx=0, stim_idx=0):
           super(AngularErrorLoss, self).__init__()
           self.mse_loss = nn.MSELoss()
           self.loss = nn.SmoothL1Loss()
+
           self.rwd_idx = rwd_idx
           self.zero_idx = zero_idx
+          self.stim_idx = stim_idx
 
       def forward(self, readout, targets):
-          m0, m1 , phi = decode_bump_torch(readout)
-          # m0, m1, m2, phi = compute_fourier_moments(readout, dim=-1)
+          # m0, m1 , phi = decode_bump_torch(readout)
+          m0, m1, m2, phi = compute_fourier_moments(readout, dim=-1)
 
           ones = torch.ones_like(m0[:, self.rwd_idx])
           zeros = torch.zeros_like(m0[:, self.zero_idx])
 
-          predicted_sin = torch.sin(phi[:, self.rwd_idx])
-          predicted_cos = torch.cos(phi[:, self.rwd_idx])
-
-          target_sin = torch.sin(targets)
-          target_cos = torch.cos(targets)
-
           loss = 0
-          loss_sin = self.mse_loss(predicted_sin, target_sin)
-          loss_cos = self.mse_loss(predicted_cos, target_cos)
+
+          predicted_sin = torch.sin(phi[:, self.rwd_idx] - targets)
+          predicted_cos = torch.cos(phi[:, self.rwd_idx] - targets)
+
+          # target_sin = torch.sin(targets)
+          # target_cos = torch.cos(targets)
+
+          loss_sin = self.loss(predicted_sin, target_sin)
+          loss_cos = self.loss(predicted_cos, target_cos)
           loss += (loss_sin + loss_cos) / 2
 
-          # unique_targets = torch.unique(targets)
-          # loss = 0
-          # for unique_target in unique_targets:
-          #     mask = (targets == unique_target)
-          #     if mask.sum() > 0:  # Only compute loss if there are samples for this target
-          #         loss_sin = self.mse_loss(predicted_sin[mask], target_sin[mask])
-          #         loss_cos = self.mse_loss(predicted_cos[mask], target_cos[mask])
-          #         loss += (loss_sin + loss_cos) / 2  # Average sin and cos loss for this target
-          # loss /= unique_targets.size(0)  # Normalize by the number of unique targets
-
-          loss += self.mse_loss(m1[:, self.zero_idx], zeros)
-          # loss += self.mse_loss(m2[:, self.zero_idx], zeros) / 2.0
-          # loss += self.mse_loss(m1[:, self.rwd_idx] / m0[:, self.rwd_idx], ones)
-          loss += F.relu(ones - m1[:, self.rwd_idx] / m0[:, self.rwd_idx]).mean()
-
+          loss += self.loss(m1[:, self.zero_idx], zeros) * len(self.zero_idx)
+          # loss += self.loss(m1[:, self.rwd_idx] / m0[:, self.rwd_idx], ones) * len(self.rwd_idx)
+          loss += F.relu(ones - m1[:, self.rwd_idx] / m0[:, self.rwd_idx]).mean() * len(self.rwd_idx)
           return loss
 #+end_src
 
@@ -372,14 +381,14 @@ class AngularErrorLoss2(nn.Module):
 
 #+begin_src ipython
     REPO_ROOT = "/home/leon/models/NeuroFlame"
-    conf_name = "train_odr.yml"
+    conf_name = "train_odr_EI.yml"
     DEVICE = 'cuda:0'
     seed = np.random.randint(0, 1e6)
     print(seed)
 #+end_src
 
 #+RESULTS:
-: 558468
+: 917800
 
 #+begin_src ipython
   model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1)
@@ -397,7 +406,7 @@ class AngularErrorLoss2(nn.Module):
 #+end_src
 
 #+RESULTS:
-: Wab_train torch.Size([1000, 1000])
+: Wab_train torch.Size([500, 500])
 
 Testing the network on steps from sample odor offset to test odor onset
 
@@ -405,13 +414,16 @@ Testing the network on steps from sample odor offset to test odor onset
   steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
 
   # mask = (steps >= (model.N_STIM_OFF[0] - model.N_STEADY)) & (steps <= (model.N_STEPS - model.N_STEADY))
-  mask = (steps >= (model.N_STIM_ON[0] - model.N_STEADY)) & (steps <= (model.N_STIM_ON[1] - model.N_STEADY))
+  stim_mask = (steps >= (model.N_STIM_ON[0] - model.N_STEADY)) & (steps <= (model.N_STIM_OFF[0] - model.N_STEADY))
 
+  stim_idx = np.where(stim_mask)[0]
+  print('stim', stim_idx)
+
+  mask = (steps >= (model.N_STIM_ON[0] - model.N_STEADY)) & (steps <= (model.N_STIM_ON[1] - model.N_STEADY))
   rwd_idx = np.where(mask)[0]
   print('rwd', rwd_idx)
 
   model.lr_eval_win = rwd_idx.shape[0]
-  print(model.lr_eval_win)
 
   stim_mask = (steps >= (model.N_STIM_ON[0] - model.N_STEADY)) & (steps <= (model.N_STIM_ON[1] - model.N_STEADY))
 
@@ -422,23 +434,20 @@ Testing the network on steps from sample odor offset to test odor onset
 #+end_src
 
 #+RESULTS:
-: rwd [10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33
-:  34 35 36 37 38 39 40]
-: 31
-: zero [ 0  1  2  3  4  5  6  7  8  9 41 42 43 44 45 46 47 48 49 50 51 52 53 54
-:  55 56 57 58 59 60]
+: stim [10 11 12 13 14 15 16 17 18 19 20]
+: rwd [20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40]
+: zero [0 1 2 3 4 5 6 7 8 9]
 
 *** Inputs and Labels
 
 #+begin_src ipython
-N_TARGETS = 16
+N_TARGETS = 8
 phase_list = np.linspace(0, 360, N_TARGETS+1)[:-1]
 print(phase_list)
 #+end_src
 
 #+RESULTS:
-: [  0.   22.5  45.   67.5  90.  112.5 135.  157.5 180.  202.5 225.  247.5
-:  270.  292.5 315.  337.5]
+: [  0.  45.  90. 135. 180. 225. 270. 315.]
 
 #+begin_src ipython
   print(model.PHI0.shape)
@@ -467,7 +476,7 @@ print(phase_list)
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([1024, 355, 1000]) labels torch.Size([1024, 31])
+: ff_input torch.Size([512, 355, 1000]) labels torch.Size([512, 21])
 
 *** Run
 
@@ -477,11 +486,11 @@ print(phase_list)
 #+end_src
 
 #+RESULTS:
-: torch.Size([819, 355, 1000]) torch.Size([205, 355, 1000])
-: torch.Size([819, 31]) torch.Size([205, 31])
+: torch.Size([409, 355, 1000]) torch.Size([103, 355, 1000])
+: torch.Size([409, 21]) torch.Size([103, 21])
 
 #+begin_src ipython
-  criterion = AngularErrorLoss(rwd_idx=rwd_idx, zero_idx=zero_idx)
+  criterion = AngularErrorLoss(rwd_idx=rwd_idx, zero_idx=zero_idx, stim_idx=stim_idx)
   # SGD, Adam, Adam
   learning_rate = 0.1
   optimizer = optim.Adam(model.parameters(), lr=learning_rate)
@@ -499,20 +508,22 @@ print(phase_list)
 
 #+RESULTS:
 #+begin_example
-Epoch 1/15, Training Loss: 1.2681, Validation Loss: 1.0810
-Epoch 2/15, Training Loss: 1.0550, Validation Loss: 1.0739
-Epoch 3/15, Training Loss: 0.8983, Validation Loss: 1.0724
-Epoch 4/15, Training Loss: 1.3183, Validation Loss: 1.0711
-Epoch 5/15, Training Loss: 1.2293, Validation Loss: 1.0699
-Epoch 6/15, Training Loss: 1.2128, Validation Loss: 1.0685
-Epoch 7/15, Training Loss: 0.9416, Validation Loss: 1.0668
-Epoch 8/15, Training Loss: 0.9192, Validation Loss: 1.0657
-Epoch 9/15, Training Loss: 1.0333, Validation Loss: 1.0640
-Epoch 10/15, Training Loss: 0.9060, Validation Loss: 1.0624
-Epoch 11/15, Training Loss: 1.0202, Validation Loss: 1.0601
-Epoch 12/15, Training Loss: 1.1799, Validation Loss: 1.0538
-Epoch 13/15, Training Loss: 0.9549, Validation Loss: 1.0325
-Epoch 14/15, Training Loss: 1.1178, Validation Loss: 0.9929
+Epoch 1/15, Training Loss: 0.7294, Validation Loss: 0.6180
+Epoch 2/15, Training Loss: 0.4091, Validation Loss: 0.4625
+Epoch 3/15, Training Loss: 0.3379, Validation Loss: 0.3560
+Epoch 4/15, Training Loss: 0.2888, Validation Loss: 0.2788
+Epoch 5/15, Training Loss: 0.1654, Validation Loss: 0.1950
+Epoch 6/15, Training Loss: 0.1278, Validation Loss: 0.0944
+Epoch 7/15, Training Loss: 0.0624, Validation Loss: 0.0703
+Epoch 8/15, Training Loss: 0.0499, Validation Loss: 0.0644
+Epoch 9/15, Training Loss: 0.0678, Validation Loss: 0.0545
+Epoch 10/15, Training Loss: 0.0440, Validation Loss: 0.0437
+Epoch 11/15, Training Loss: 0.0256, Validation Loss: 0.0307
+Epoch 12/15, Training Loss: 0.0271, Validation Loss: 0.0257
+Epoch 13/15, Training Loss: 0.0273, Validation Loss: 0.0203
+Epoch 14/15, Training Loss: 0.0194, Validation Loss: 0.0166
+Epoch 15/15, Training Loss: 0.0176, Validation Loss: 0.0144
+Elapsed (with compilation) = 0h 2m 35s
 #+end_example
 
 #+begin_src ipython
@@ -520,15 +531,8 @@ torch.save(model.state_dict(), 'models/odr.pth')
 #+end_src
 
 #+RESULTS:
-: 4b159158-7e56-4e4b-ad46-cca703d0bfa2
 
 * Testing
-
-   #+begin_src emacs-lisp
-;;   (conda-env-activate "dual_data")
-   #+end_src
-
-#+RESULTS:
 
 #+begin_src ipython
 model_state_dict = torch.load('models/odr.pth')
@@ -537,21 +541,23 @@ model.load_state_dict(model_state_dict)
 #+end_src
 
 #+RESULTS:
-: 0baae174-6c68-450f-884d-5cb122d7f08a
+: <All keys matched successfully>
 
 #+begin_src ipython
   model.eval()
 #+end_src
 
 #+RESULTS:
-: 4a00b3fc-944d-4ee7-9036-55eec3bb0fc3
+: Network(
+:   (dropout): Dropout(p=0.5, inplace=False)
+: )
 
 #+begin_src ipython
 print(phase_list)
 #+end_src
 
 #+RESULTS:
-: 49e92fa3-4b8c-43d4-b2ee-abab2f3311de
+: [  0.  45.  90. 135. 180. 225. 270. 315.]
 
 #+begin_src ipython
   model.N_BATCH = 8
@@ -570,14 +576,14 @@ print('ff_input', ff_input.shape)
 #+end_src
 
 #+RESULTS:
-: 5ac283a9-c475-491e-ae10-0a96ed6ff41a
+: ff_input torch.Size([64, 355, 1000])
 
 #+begin_src ipython
 print(model.PHI0)
 #+end_src
 
 #+RESULTS:
-: 436cf44f-9b5c-4cc1-9b26-24a21cb99022
+: tensor([[315., 315.]], device='cuda:0')
 
 #+begin_src ipython
   rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
@@ -585,43 +591,42 @@ print(model.PHI0)
 #+end_src
 
 #+RESULTS:
-: 2d77d827-bb83-4727-b4c3-52d191aab5ea
+: rates (64, 61, 500)
 
 #+begin_src ipython
 print(ff_input.shape)
 #+end_src
 
 #+RESULTS:
-: a4849d9a-5c29-4f7b-bd15-5c66ec0da69c
+: torch.Size([64, 355, 1000])
 
 #+begin_src ipython
 plot_rates_selec(rates=ff_input.cpu().detach().numpy(), idx=20, thresh=.5)
 #+end_src
 
 #+RESULTS:
-: 55c96eda-a1ab-4831-921f-bc2980713804
+[[./figures/odr/figure_32.png]]
 
 #+begin_src ipython
 plot_m0_m1_phi(ff_input.cpu().numpy()[..., model.slices[0]], 10)
 #+end_src
 
 #+RESULTS:
-: fc9cd526-863b-4ffb-9e7a-9e0951332b5f
+[[./figures/odr/figure_33.png]]
 
 #+begin_src ipython
 m0, m1, phi = decode_bump(ff_input.cpu().numpy()[..., model.slices[0]], axis=-1)
 #+end_src
 
 #+RESULTS:
-: 1463ddad-d576-4989-a24b-3ae9821c264f
 
 
 #+begin_src ipython
-plot_rates_selec(rates, idx=30, thresh=1)
+plot_rates_selec(rates, idx=30, thresh=.2)
 #+end_src
 
 #+RESULTS:
-: 21e9314d-163b-4ddc-8425-7245b58dec8d
+[[./figures/odr/figure_35.png]]
 
 
 #+begin_src ipython
@@ -629,4 +634,4 @@ plot_m0_m1_phi(rates, 3)
 #+end_src
 
 #+RESULTS:
-: b227cefd-8923-4a32-ad92-6ec9055bc9e4
+[[./figures/odr/figure_36.png]]
