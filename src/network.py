@@ -86,7 +86,7 @@ class Network(nn.Module):
 
         # in pytorch, Wij is i to j.
         if self.ODR_TRAIN:
-            if self.IF_STP:
+            if self.TRAIN_EI==0:
                 self.Wab_train = nn.Parameter(torch.zeros((self.Na[0], self.Na[0]),
                                                           device=self.device)* 0.01)
             else:
@@ -136,9 +136,11 @@ class Network(nn.Module):
 
     def initSTP(self):
         """Creates stp model for population 0"""
-        self.J_STP = torch.tensor(self.J_STP, device=self.device) * (
-            self.GAIN / torch.sqrt(self.Ka[0])
-        )
+
+        self.J_STP = torch.tensor(self.J_STP, device=self.device) / torch.sqrt(self.Ka[0])
+
+        if self.ODR_TRAIN:
+            self.J_STP = nn.Parameter(torch.tensor(1.0, device=self.device))
 
         self.register_buffer('W_stp_T', torch.zeros((self.Na[0], self.Na[0]), device=self.device))
 
@@ -147,10 +149,13 @@ class Network(nn.Module):
             self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
         )
 
+        if self.TRAIN_EI:
+            self.stp_mask = torch.ones((self.N_NEURON, self.N_NEURON), device=self.device)
+            self.stp_mask[self.slices[0], self.slices[0]] = 0.0
+
+        # self.stp_mask = self.W_stp_T.clone()
         self.Wab_T.data[self.slices[0], self.slices[0]] = 0
 
-        # self.stp_mask = torch.ones((self.N_NEURON, self.N_NEURON), device=self.device)
-        # self.stp_mask[self.slices[0], self.slices[0]] = 0.0
 
     def init_ff_input(self):
         return init_ff_input(self)
@@ -283,9 +288,9 @@ class Network(nn.Module):
 
             self.x_list, self.u_list = [], []
 
-        Wab_T = self.Wab_T
+        Wab_T = self.GAIN * self.Wab_T
         if self.IF_STP:
-            W_stp_T = self.W_stp_T
+            W_stp_T = self.GAIN * self.W_stp_T
 
         # Train Low rank vectors
         if self.LR_TRAIN:
@@ -294,17 +299,15 @@ class Network(nn.Module):
         # Training
         if self.ODR_TRAIN or self.LR_TRAIN:
             if self.IF_STP:
-                # Do not forget the .clone() otherwise torch messes things
-                W_stp_T = self.Wab_train[self.slices[0], self.slices[0]]
+                W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]]
 
                 if self.ODR_TRAIN:
-                    W_stp_T = W_stp_T / torch.sqrt(self.Na[0])
-
+                    W_stp_T = W_stp_T / self.Na[0]
+                if self.TRAIN_EI:
+                    Wab_T = self.GAIN * (self.Wab_T + self.stp_mask * self.Wab_train / self.Na[0])
             else:
-                Wab_T = self.Wab_T + self.Wab_train
+                Wab_T = self.GAIN * (self.Wab_T + self.Wab_train / torch.sqrt(self.Ka[0]))
 
-            # train weights other than E
-            # Wab_T = self.Wab_T + self.stp_mask * self.train_mask * self.Wab_train
 
             if self.CLAMP:
                 if self.IF_STP:

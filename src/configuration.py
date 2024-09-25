@@ -145,7 +145,6 @@ def init_const(model):
     ##########################################
     model.Jab = (
         torch.tensor(model.Jab, device=model.device).reshape(model.N_POP, model.N_POP)
-        * model.GAIN
     )
 
     for i_pop in range(model.N_POP):
