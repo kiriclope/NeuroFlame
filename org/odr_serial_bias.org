@@ -75,7 +75,7 @@
 #+RESULTS:
 
 * Serial Bias
-*** Bias targets
+** Bias targets
 
 #+begin_src ipython
 import torch
@@ -104,15 +104,19 @@ def generate_weighted_phase_samples(N_BATCH, angles, preferred_angle, sigma):
 N_BATCH = 10000
 angles = np.array([0., 45., 90., 135., 180., 225., 270., 315.])
 preferred_angle = 90.  # Example preferred angle
-sigma = 90.  # Standard deviation of the Gaussian
+sigma = 75.  # Standard deviation of the Gaussian
 
 # Generate samples
 phase_samples = generate_weighted_phase_samples(N_BATCH, angles, preferred_angle, sigma)
+print(phase_samples.shape)
 plt.hist(phase_samples[:,0], bins=8);
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+: torch.Size([10000, 1])
 [[./figures/odr/figure_4.png]]
+:END:
 
 #+begin_src ipython
 
@@ -120,7 +124,7 @@ plt.hist(phase_samples[:,0], bins=8);
 
 #+RESULTS:
 
-*** Model
+** Model
 
 #+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
@@ -131,20 +135,13 @@ print(seed)
 #+end_src
 
 #+RESULTS:
-: 662951
+: 405492
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=16, LIVE_FF_UPDATE=1)
 #+end_src
 
 #+RESULTS:
-
-#+begin_src ipython
-print(model.slices[0])
-#+end_src
-
-#+RESULTS:
-: slice(tensor(0, device='cuda:1'), tensor(500, device='cuda:1'), None)
 
 #+begin_src ipython
 model_state_dict = torch.load('models/odr.pth')
@@ -158,10 +155,10 @@ model.eval()  # Set to evaluation mode
 :   (dropout): Dropout(p=0.0, inplace=False)
 : )
 
-*** Batching Live Inputs
+** Batching Live Inputs
 
 #+begin_src ipython
-  N_PHASE = 512 + 256
+  N_PHASE = 512 + 256 + 128
   print(model.PHI0.shape)
 
   PHI0 = model.PHI0.unsqueeze(-1).repeat((N_PHASE, 1, 1))
@@ -175,10 +172,17 @@ model.eval()  # Set to evaluation mode
   phases_tensor = torch.tensor(phases)
   PHI0[:, 0] = phases_tensor[torch.randint(0, len(phases), (N_PHASE,))].unsqueeze(1)
   PHI0[:, -1] = phases_tensor[torch.randint(0, len(phases), (N_PHASE,))].unsqueeze(1)
+  print(PHI0.shape)
+
+  # PHI0[:, 0] = generate_weighted_phase_samples(N_PHASE, angles, preferred_angle, sigma)
+  # PHI0[:, 1] = generate_weighted_phase_samples(N_PHASE, angles, preferred_angle, sigma)
+  # print(PHI0.shape)
+
  #+end_src
 
 #+RESULTS:
 : torch.Size([1, 3])
+: torch.Size([896, 3, 1])
 
 #+begin_src ipython
   model.PHI0 = PHI0
@@ -188,18 +192,18 @@ model.eval()  # Set to evaluation mode
 #+end_src
 
 #+RESULTS:
-: (768, 81, 500)
+: (896, 91, 500)
 
 #+begin_src ipython
-name = 'rates_1'
+name = 'rates_2'
 pkl_save(rates, '%s' % name, path="../data/serial_bias/")
-name = 'PHI0_1'
+name = 'PHI0_2'
 pkl_save(PHI0.cpu().detach().numpy(), '%s' % name, path="../data/serial_bias/")
 #+end_src
 
 #+RESULTS:
-: saving to ../data/serial_bias//rates_1.pkl
-: saving to ../data/serial_bias//PHI0_1.pkl
+: saving to ../data/serial_bias//rates_2.pkl
+: saving to ../data/serial_bias//PHI0_2.pkl
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates, axis=-1)
@@ -207,9 +211,9 @@ pkl_save(PHI0.cpu().detach().numpy(), '%s' % name, path="../data/serial_bias/")
 #+end_src
 
 #+RESULTS:
-: (768, 81)
+: (896, 91)
 
-*** Results
+** Results
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.5*width, height])
@@ -220,7 +224,7 @@ ax[0].set_ylabel('Pref. Location (°)')
 ax[0].set_yticks(np.linspace(0, model.Na[0].cpu(), 5), np.linspace(0, 360, 5).astype(int))
 ax[0].set_xlabel('Step')
 
-idx = np.random.randint(0, model.N_BATCH, 32)
+idx = np.random.randint(0, model.N_BATCH, 8)
 ax[1].plot(m1[idx].T)
 # ax[1].set_yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
 ax[1].set_ylabel('m1 (Hz)')
@@ -234,14 +238,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_14.png]]
-
-#+begin_src ipython
-print(PHI0[0, -1], PHI0[0, 0], phi[0, -1] * 180 / np.pi)
-#+end_src
-
-#+RESULTS:
-: tensor([180.], device='cuda:1') tensor([180.], device='cuda:1') 209.68207399802935
+[[./figures/odr/figure_13.png]]
 
 #+begin_src ipython
 PHI0 = PHI0.cpu().detach().numpy()
@@ -249,9 +246,9 @@ print(PHI0.shape)
 #+end_src
 
 #+RESULTS:
-: (768, 3, 1)
+: (896, 3, 1)
 
-*** errors
+** errors
 
 #+begin_src ipython
 target_loc = PHI0[:, -1]
@@ -261,35 +258,33 @@ rel_loc = (rel_loc + np.pi) % (2 * np.pi) - np.pi
 rel_loc *= 180 / np.pi
 rel_loc = rel_loc[:, -1]
 
+ref_loc = (PHI0[:, 0] - preferred_angle) * np.pi / 180.0
+ref_loc = (ref_loc + np.pi) % (2 * np.pi) - np.pi
+ref_loc *= 180 / np.pi
+ref_loc = ref_loc[:, -1]
+
 errors = (phi - target_loc * np.pi / 180.0) % (2*np.pi)
 errors = (errors + np.pi) % (2 * np.pi) - np.pi
 errors *= 180 / np.pi
 
-mask = np.abs(errors) <= 45
-print(mask.shape)
+# errors = errors[:, -1]
+# target_loc = target_loc[:, -1]
 
-print('rel_loc', rel_loc.shape)
-print('errors', errors.shape)
-
-errors2 = np.where(mask, errors, np.nan)[:, -5]
-rel_loc2 = rel_loc[~np.isnan(errors2), np.newaxis]
-target_loc2 = target_loc[:, -1][~np.isnan(errors2), np.newaxis]
-errors2 = errors2[~np.isnan(errors2), np.newaxis]
+mask = np.abs(errors) <= 25
+# print(mask.shape)
 
 errors = np.where(mask, errors, np.nan)[:, -1]
 rel_loc = rel_loc[~np.isnan(errors), np.newaxis]
+ref_loc = ref_loc[~np.isnan(errors), np.newaxis]
 target_loc = target_loc[:, -1][~np.isnan(errors), np.newaxis]
 errors = errors[~np.isnan(errors), np.newaxis]
-
 # errors = errors[mask]
-print(errors.shape)
+
+print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (768, 81)
-: rel_loc (768,)
-: errors (768, 81)
-: (276, 1)
+: (241, 1) (241, 1) (241, 1) (241, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -297,19 +292,18 @@ ax[0].hist(rel_loc[:, 0], bins=15)
 ax[0].set_xlabel('Rel. Location (°)')
 
 ax[1].hist(errors[:, -1], bins='auto')
-# ax[1].hist(errors2[:, -1], bins='auto')
 ax[1].set_xlabel('Errors (°)')
-ax[1].set_xlim([-45, 45])
+# ax[1].set_xlim([-45, 45])
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_18.png]]
+[[./figures/odr/figure_16.png]]
 
-*** biases
+** biases
 
 #+begin_src ipython
-fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+fig, ax = plt.subplots(1, 3, figsize=[2.5*width, height])
 
 ax[0].plot(target_loc[:, 0], errors[:,-1], 'o')
 ax[0].set_xlabel('Target Loc. (°)')
@@ -331,6 +325,15 @@ stt = binned_statistic(rel_loc[:, 0], errors[:, -1], statistic='mean', bins=6, r
 dstt = np.mean(np.diff(stt.bin_edges))
 ax[1].plot(stt.bin_edges[:-1]+dstt/2, stt.statistic, 'b')
 
+ax[2].plot(ref_loc[:, 0], errors[:,-1], 'bo')
+# ax[2].plot(ref_loc2[:, 0], errors2[:,-1], 'ro')
+ax[2].set_xlabel('Ref. Loc. (°)')
+ax[2].set_ylabel('Error (°)')
+
+stt = binned_statistic(ref_loc[:, 0], errors[:, -1], statistic='mean', bins=6, range=[-180, 180])
+dstt = np.mean(np.diff(stt.bin_edges))
+ax[2].plot(stt.bin_edges[:-1]+dstt/2, stt.statistic, 'b')
+
 # stt = binned_statistic(rel_loc2[:, 0], errors2[:, -1], statistic='mean', bins=6, range=[-180, 180])
 # dstt = np.mean(np.diff(stt.bin_edges))
 # ax[1].plot(stt.bin_edges[:-1]+dstt/2,stt.statistic, 'r')
@@ -341,7 +344,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_19.png]]
+[[./figures/odr/figure_17.png]]
 
 #+begin_src ipython
 import pandas as pd
@@ -349,60 +352,53 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Assuming rel_loc and errors are defined earlier
-data = pd.DataFrame({'rel_loc': rel_loc[:, 0], 'errors': errors[:, -1]})
+data = pd.DataFrame({'rel_loc': rel_loc[:, 0], 'errors': errors[:, -1], 'ref_loc': ref_loc[:, -1]})
 
 # Bin data using pandas cut
 data['bin'] = pd.cut(data['rel_loc'], bins=8)
-
-# Calculate mean for each bin
-binned_data = data.groupby('bin')['errors'].mean()
-
+# Calculate mean and standard error for each bin
+binned_data = data.groupby('bin')['errors'].agg(['mean', 'sem'])
 # Get bin centers
 bin_edges = binned_data.index.get_level_values(0)
 bin_centers = (bin_edges.categories.left + bin_edges.categories.right) / 2
 
 # Plot
-fig, ax = plt.subplots()
-ax.plot(bin_centers, binned_data, 'b')
-# ax.set_ylim([-30, 30])
-ax.axhline(color='k', linestyle=":")
-ax.set_xlabel('Rel. Loc. (°)')
-ax.set_ylabel('Error (°)')
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+ax[0].plot(bin_centers, binned_data['mean'], 'b')
+ax[0].fill_between(bin_centers,
+                binned_data['mean'] - binned_data['sem'],
+                binned_data['mean'] + binned_data['sem'],
+                color='b', alpha=0.2)
+# ax[0].set_ylim([-30, 30])
+ax[0].axhline(color='k', linestyle=":")
+ax[0].set_xlabel('Rel. Loc. (°)')
+ax[0].set_ylabel('Error (°)')
+
+data['bin'] = pd.cut(data['ref_loc'], bins=8)
+# Calculate mean and standard error for each bin
+binned_data = data.groupby('bin')['errors'].agg(['mean', 'sem'])
+# Get bin centers
+bin_edges = binned_data.index.get_level_values(0)
+bin_centers = (bin_edges.categories.left + bin_edges.categories.right) / 2
+
+ax[1].plot(bin_centers, binned_data['mean'], 'b')
+ax[1].fill_between(bin_centers,
+                binned_data['mean'] - binned_data['sem'],
+                binned_data['mean'] + binned_data['sem'],
+                color='b', alpha=0.2)
+# ax[1].set_ylim([-30, 30])
+ax[1].axhline(color='k', linestyle=":")
+ax[1].set_xlabel('Ref. Loc. (°)')
+ax[1].set_ylabel('Error (°)')
+
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_20.png]]
+[[./figures/odr/figure_18.png]]
 
 #+begin_src ipython
-model.GAIN
-#+end_src
 
-#+RESULTS:
-: 1.0
-
-*** Load
-
-#+begin_src ipython
-# rates = []
-# PHI0 = []
-# for i in ['1', '2', '3']:
-#      rates.append(pkl_load('rates_' + i , path="../data/serial_bias/"))
-#      PHI0.append(pkl_load( 'PHI0_' + i , path="../data/serial_bias/"))
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-# rates = np.vstack(rates)
-# print(rates.shape)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-# PHI0 = np.vstack(PHI0)
-# print(PHI0.shape)
 #+end_src
 
 #+RESULTS:

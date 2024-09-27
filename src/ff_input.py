@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 
 from src.stimuli import Stimuli
 from src.lr_utils import get_theta
@@ -27,7 +26,7 @@ def live_ff_input(model, step, ff_input):
 
     if model.TASK != "None":
         if step in model.N_STIM_ON:
-            i = np.where(model.N_STIM_ON == step)[0][0]
+            i = torch.where(model.N_STIM_ON == step)[0][0]
 
             size = (model.N_BATCH, model.Na[0])
             Stimulus = Stimuli(model.TASK, size, device=model.device)
@@ -176,13 +175,24 @@ def init_ff_seq(model):
                 stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[:, i])
 
             # reshape stimulus to be (N_BATCH, 1, NE) adding dummy time dimension
-            # stimulus = stimulus.unsqueeze(1)
+
+            if stimulus.ndim!=3:
+                stimulus = stimulus.unsqueeze(1)
+
             # print(stimulus.shape)
 
             if model.N_STIM_ON[i] < model.N_STEPS:
-                ff_input[:, model.N_STIM_ON[i] : model.N_STIM_OFF[i], model.slices[0]].add_(
-                    stimulus
-                )
+
+                if model.RANDOM_DELAY:
+                    for j in range(model.N_BATCH):
+                        mask = slice(model.start_indices[i, j], model.end_indices[i, j])
+                        # print(j, mask, ff_input[j, mask, model.slices[0]].shape, stimulus.shape)
+                        ff_input[j, mask, model.slices[0]].add_(stimulus[j])
+                else:
+                    ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[0]].add_(
+                        stimulus
+                    )
+
             del stimulus
 
     return ff_input * torch.sqrt(model.Ka[0]) * model.M0

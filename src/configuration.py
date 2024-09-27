@@ -52,10 +52,35 @@ def init_const(model):
     model.N_WINDOW = int(model.T_WINDOW / model.DT)
     model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
 
-    model.N_STIM_ON = np.array(
+    model.N_STIM_ON = torch.tensor(
         [int(i / model.DT) + model.N_STEADY for i in model.T_STIM_ON]
-    )
-    model.N_STIM_OFF = [int(i / model.DT) + model.N_STEADY for i in model.T_STIM_OFF]
+    ).to(model.device)
+
+    model.N_STIM_OFF = torch.tensor([int(i / model.DT) + model.N_STEADY for i in model.T_STIM_OFF]).to(model.device)
+
+    if model.RANDOM_DELAY:
+        N_MAX_DELAY = model.MAX_DELAY / model.DT
+        N_MIN_DELAY = model.MIN_DELAY / model.DT
+
+        model.random_shifts = torch.randint(int(N_MIN_DELAY), int(N_MAX_DELAY), (model.N_BATCH,)).to(model.device)
+
+        model.start_indices = (model.N_STIM_ON.unsqueeze(-1) + model.random_shifts)
+        model.end_indices = (model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts)
+
+        model.start_indices[0] = model.N_STIM_ON[0]
+        model.end_indices[0] = model.N_STIM_OFF[0]
+
+        # model.rwd_mask = torch.zeros((model.N_BATCH, int((model.N_STEPS-model.N_STEADY) / model.N_WINDOW)),
+        #                              device=model.device, dtype=torch.bool)
+
+        # print('rwd_mask', model.rwd_mask.shape)
+
+        # for i in range(model.N_BATCH):
+        #     # from first stim onset to second stim onset
+        #     mask = torch.arange((model.start_indices[0, i] - model.N_STEADY)/ model.N_WINDOW,
+        #                         (model.start_indices[1, i] - model.N_STEADY) / model.N_WINDOW).to(torch.int)
+        #     # print(mask)
+        #     model.rwd_mask[i, mask] = True
 
     ##########################################
     # defining N and K per population
@@ -160,8 +185,10 @@ def init_const(model):
 
     model.VAR_FF = torch.sqrt(torch.tensor(model.VAR_FF, device=model.device))
 
-    # scaling ff variance as 1 / sqrt(K0)
-    model.VAR_FF.mul_(model.M0 / torch.sqrt(model.Ka[0]))
+    # scaling ff variance as O(1) because we multiply by sqrtK in seq input
+    if model.LIVE_FF_UPDATE==0:
+        model.VAR_FF.mul_(model.M0 / torch.sqrt(model.Ka[0]))
+
     model.VAR_FF = model.VAR_FF.unsqueeze(0)  # add batch dim
     model.VAR_FF = model.VAR_FF.unsqueeze(-1)  # add neural dim
 

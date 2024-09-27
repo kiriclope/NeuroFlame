@@ -4,11 +4,11 @@ from torch import nn
 import torch.nn.init as init
 
 
-def normalize_tensor(tensor, idx, slice, Na):
+def normalize_tensor(tensor, idx, slices, Na):
     norm_tensor = tensor.clone()
 
-    mask = tensor[:, slice[idx]] / Na[idx]
-    norm_tensor[:, slice[idx]] = mask
+    mask = tensor[:, slices[idx]] / Na[idx]
+    norm_tensor[:, slices[idx]] = mask
 
     # mask = tensor[slice[idx]] / Na[idx]
     # norm_tensor[slice[idx]] = mask
@@ -16,19 +16,19 @@ def normalize_tensor(tensor, idx, slice, Na):
     return norm_tensor
 
 
-def clamp_tensor(tensor, idx, slice):
+def clamp_tensor(tensor, idx, slices):
     # Create a mask for non-zero elements
     clamped_tensor = tensor.clone()
     if idx == 0:
-        mask = tensor[slice[0]].clamp(min=0.0)
-        clamped_tensor[slice[0]] = mask
+        mask = tensor[slices[0]].clamp(min=0.0)
+        clamped_tensor[slices[0]] = mask
     elif idx == 'lr':
         # mask = tensor[slice[0]].clamp(min=-1.0, max=1.0)
-        mask = tensor[slice[0]].clamp(min=-1.0)
-        clamped_tensor[slice[0]] = mask
+        mask = tensor[slices[0]].clamp(min=-1.0)
+        clamped_tensor[slices[0]] = mask
     else:
-        mask = tensor[slice[1]].clamp(max=0.0)
-        clamped_tensor[slice[1]] = mask
+        mask = tensor[slices[1]].clamp(max=0.0)
+        clamped_tensor[slices[1]] = mask
 
     return clamped_tensor
 
@@ -60,7 +60,6 @@ class LowRankWeights(nn.Module):
         LR_BIAS=1,
         LR_READOUT=1,
         LR_FIX_READ=0,
-        DROP_RATE=0,
         LR_MASK=0,
         LR_CLASS=1,
         DEVICE="cuda",
@@ -77,7 +76,6 @@ class LowRankWeights(nn.Module):
         self.LR_FIX_READ = LR_FIX_READ
         self.LR_CLASS = LR_CLASS
 
-        self.DROP_RATE = DROP_RATE
         self.LR_MASK = LR_MASK
 
         self.Na = Na

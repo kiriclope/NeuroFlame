@@ -60,7 +60,6 @@ class Network(nn.Module):
                 self.LR_BIAS,
                 self.LR_READOUT,
                 self.LR_FIX_READ,
-                self.DROP_RATE,
                 self.LR_MASK,
                 self.LR_CLASS,
                 self.device,
@@ -68,6 +67,7 @@ class Network(nn.Module):
 
         if self.LR_TRAIN or self.ODR_TRAIN:
             self.dropout = nn.Dropout(self.DROP_RATE)
+            # self.dropout = nn.Dropout(1.0-self.Ka[0]/self.Na[0])
 
         # Add STP
         if self.IF_STP:
@@ -299,20 +299,20 @@ class Network(nn.Module):
         # Training
         if self.ODR_TRAIN or self.LR_TRAIN:
             if self.IF_STP:
-                W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]]
+                W_stp_T = self.GAIN * self.dropout(self.Wab_train[self.slices[0], self.slices[0]])
 
                 if self.ODR_TRAIN:
+                    # W_stp_T = self.dropout(W_stp_T) / torch.sqrt(self.Ka[0])
                     W_stp_T = W_stp_T / self.Na[0]
                 if self.TRAIN_EI:
-                    Wab_T = self.GAIN * (self.Wab_T + self.stp_mask * self.Wab_train / self.Na[0])
+                    Wab_T = self.GAIN * self.dropout(self.Wab_T + self.stp_mask * self.Wab_train / self.Na[0])
             else:
-                Wab_T = self.GAIN * (self.Wab_T + self.Wab_train / torch.sqrt(self.Ka[0]))
-
+                Wab_T = self.GAIN * self.dropout(self.Wab_T + self.Wab_train)
 
             if self.CLAMP:
                 if self.IF_STP:
                     W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
-                else:
+                if self.TRAIN_EI:
                     # Check indices Think need some transpose
                     Wab_T = clamp_tensor(Wab_T.T, 0, self.slices).T
                     Wab_T = clamp_tensor(Wab_T.T, 1, self.slices).T
@@ -333,7 +333,7 @@ class Network(nn.Module):
                     rates = rates + noise
                 else:
                     rates, rec_input = self.update_dynamics(
-                        self.dropout(rates), ff_input + noise, rec_input, Wab_T, W_stp_T
+                        rates, ff_input + noise, rec_input, Wab_T, W_stp_T
                     )
 
             else:
@@ -378,6 +378,15 @@ class Network(nn.Module):
 
         # returns last step
         rates = rates[..., self.slices[0]]
+
+        # if self.RANDOM_DELAY:
+        #     n_steps = torch.randint(self.N_STIM_OFF[0], self.N_STIM_ON[-1], (self.N_BATCH,))
+
+        #     batch_indices = torch.arange(self.N_BATCH).repeat_interleave(n_steps)
+        #     step_indices = torch.cat([torch.arange(-n, 0) for n in n_steps])
+
+        #     # Replace the elements with NaNs
+        #     rates[batch_indices, step_indices] = float('nan')
 
         # returns full sequence
         if REC_LAST_ONLY == 0:

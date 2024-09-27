@@ -149,7 +149,7 @@
 #+RESULTS:
 :RESULTS:
 : (1, 1000)
-[[file:./.ob-jupyter/44857dff6ad30decd3dc5c58e64b55e7447d8c62.png]]
+[[./.ob-jupyter/44857dff6ad30decd3dc5c58e64b55e7447d8c62.png]]
 :END:
 
 #+begin_src ipython
@@ -183,7 +183,7 @@
 #+RESULTS:
 :RESULTS:
 : (1000,)
-[[file:./.ob-jupyter/869f7a3d837a59d1794e4e60aeab890fa2a4337a.png]]
+[[./.ob-jupyter/eda7fb9431e77cac311ea76e91119a752f3e23dc.png]]
 :END:
 
 #+begin_src ipython
@@ -192,7 +192,7 @@
 #+end_src
 
 #+RESULTS:
-: 89.88686868091703
+: 89.83281694304326
 
 * FF Inputs
 ** SEQ FF UPDATE
@@ -392,6 +392,7 @@
 
 #+RESULTS:
 
+
 ** LIVE FF UPDATE
 *** ODR
 
@@ -576,4 +577,81 @@
 #+begin_src ipython
 
 #+end_src
+#+RESULTS:
+
+
+* Random Delay
+** SEQ FF UPDATE
+*** ODR
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroFlame"
+  model = Network('config_odr.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='odr_rand', LIVE_FF_UPDATE=0, N_BATCH=10, seed=0)
+#+end_src
+
+#+RESULTS:
+
+   #+begin_src ipython
+  Ne = model.Na[0].cpu().numpy()
+  N = model.N_NEURON
+
+  ff_input = model.init_ff_input().cpu().numpy()
+  print(ff_input.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 222, 1000)
+
+#+begin_src ipython
+print(model.random_shifts)
+#+end_src
+
+#+RESULTS:
+: tensor([118,  76,  88,  23,  44,  42,  34,  78,  29,  99], device='cuda:0')
+
+#+begin_src ipython
+  m0, m1, phase = decode_bump(ff_input[..., model.slices[0]])
+  print(m0.shape)
+#+end_src
+
+#+RESULTS:
+: (10, 222)
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=(2.25*width, height))
+
+  idx = np.random.randint(model.N_BATCH, size=(1,))
+
+  ax[0].imshow(ff_input[idx].T, cmap='jet', aspect='auto')
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_ylim([0, Ne])
+
+  ax[1].plot(m1[idx].T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+
+  ax[2].plot(phase[idx].T * 180 / np.pi)
+  ax[2].set_xlabel('Step')
+  ax[2].set_ylabel('Phase (°)')
+
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/1383096ed3bf0e6470d13981fcb5f52122f3cb87.png]]
+
+#+begin_src ipython
+  plt.hist(model.phase.cpu().numpy() * 180 / np.pi, bins='auto')
+  plt.hist(360 - phase[:, model.N_STIM_ON[0]]* 180 / np.pi, bins='auto')
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/d9f17d4889abb55ddff1754b3fef53f2aede3c35.png]]
+
+#+begin_src ipython
+
+#+end_src
+
 #+RESULTS:
