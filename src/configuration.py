@@ -62,25 +62,13 @@ def init_const(model):
         N_MAX_DELAY = model.MAX_DELAY / model.DT
         N_MIN_DELAY = model.MIN_DELAY / model.DT
 
-        model.random_shifts = torch.randint(int(N_MIN_DELAY), int(N_MAX_DELAY), (model.N_BATCH,)).to(model.device)
+        model.random_shifts = torch.randint(low=int(N_MIN_DELAY), high=int(N_MAX_DELAY), size=(model.N_BATCH,)).to(model.device)
 
         model.start_indices = (model.N_STIM_ON.unsqueeze(-1) + model.random_shifts)
         model.end_indices = (model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts)
 
         model.start_indices[0] = model.N_STIM_ON[0]
         model.end_indices[0] = model.N_STIM_OFF[0]
-
-        # model.rwd_mask = torch.zeros((model.N_BATCH, int((model.N_STEPS-model.N_STEADY) / model.N_WINDOW)),
-        #                              device=model.device, dtype=torch.bool)
-
-        # print('rwd_mask', model.rwd_mask.shape)
-
-        # for i in range(model.N_BATCH):
-        #     # from first stim onset to second stim onset
-        #     mask = torch.arange((model.start_indices[0, i] - model.N_STEADY)/ model.N_WINDOW,
-        #                         (model.start_indices[1, i] - model.N_STEADY) / model.N_WINDOW).to(torch.int)
-        #     # print(mask)
-        #     model.rwd_mask[i, mask] = True
 
     ##########################################
     # defining N and K per population

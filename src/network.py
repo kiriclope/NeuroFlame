@@ -139,8 +139,8 @@ class Network(nn.Module):
 
         self.J_STP = torch.tensor(self.J_STP, device=self.device) / torch.sqrt(self.Ka[0])
 
-        if self.ODR_TRAIN:
-            self.J_STP = nn.Parameter(torch.tensor(1.0, device=self.device))
+        # if self.ODR_TRAIN:
+        #     self.J_STP = nn.Parameter(torch.tensor(10.0, device=self.device))
 
         self.register_buffer('W_stp_T', torch.zeros((self.Na[0], self.Na[0]), device=self.device))
 
@@ -262,6 +262,7 @@ class Network(nn.Module):
 
         # Initialization (if  ff_input is None, ff_input is generated)
         rates, ff_input, rec_input = self.initRates(ff_input)
+        # ff_input = self.dropout(ff_input)
 
         # NEED .clone() here otherwise BAD THINGS HAPPEN
         if self.IF_BATCH_J:
@@ -299,15 +300,15 @@ class Network(nn.Module):
         # Training
         if self.ODR_TRAIN or self.LR_TRAIN:
             if self.IF_STP:
-                W_stp_T = self.GAIN * self.dropout(self.Wab_train[self.slices[0], self.slices[0]])
+                W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]]
 
                 if self.ODR_TRAIN:
                     # W_stp_T = self.dropout(W_stp_T) / torch.sqrt(self.Ka[0])
                     W_stp_T = W_stp_T / self.Na[0]
                 if self.TRAIN_EI:
-                    Wab_T = self.GAIN * self.dropout(self.Wab_T + self.stp_mask * self.Wab_train / self.Na[0])
+                    Wab_T = self.GAIN * self.Wab_T + self.stp_mask * self.Wab_train / self.Na[0]
             else:
-                Wab_T = self.GAIN * self.dropout(self.Wab_T + self.Wab_train)
+                Wab_T = self.GAIN * self.Wab_T + self.Wab_train
 
             if self.CLAMP:
                 if self.IF_STP:
@@ -406,7 +407,6 @@ class Network(nn.Module):
             self.ff_input = ff_input[..., self.slices[0]]
 
         # del ff_input, rec_input
-
         # clear_cache()
 
         return rates

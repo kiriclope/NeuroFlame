@@ -74,8 +74,23 @@
 
 #+RESULTS:
 
-* Serial Bias
-** Bias targets
+* Helpers
+
+#+begin_src ipython
+def add_vlines(model, ax=None):
+
+    if ax is None:
+        for i in range(len(model.T_STIM_ON)):
+            plt.axvspan(model.T_STIM_ON[i], model.T_STIM_OFF[i], alpha=0.25)
+    else:
+        for i in range(len(model.T_STIM_ON)):
+            ax.axvspan(model.T_STIM_ON[i], model.T_STIM_OFF[i], alpha=0.25)
+
+#+end_src
+
+#+RESULTS:
+
+* Bias targets
 
 #+begin_src ipython
 import torch
@@ -103,11 +118,11 @@ def generate_weighted_phase_samples(N_BATCH, angles, preferred_angle, sigma):
 # Parameters
 N_BATCH = 10000
 angles = np.array([0., 45., 90., 135., 180., 225., 270., 315.])
-preferred_angle = 90.  # Example preferred angle
+reference = 90.  # Example preferred angle
 sigma = 75.  # Standard deviation of the Gaussian
 
 # Generate samples
-phase_samples = generate_weighted_phase_samples(N_BATCH, angles, preferred_angle, sigma)
+phase_samples = generate_weighted_phase_samples(N_BATCH, angles, reference, sigma)
 print(phase_samples.shape)
 plt.hist(phase_samples[:,0], bins=8);
 #+end_src
@@ -115,7 +130,7 @@ plt.hist(phase_samples[:,0], bins=8);
 #+RESULTS:
 :RESULTS:
 : torch.Size([10000, 1])
-[[./figures/odr/figure_4.png]]
+[[./figures/odr/figure_5.png]]
 :END:
 
 #+begin_src ipython
@@ -124,7 +139,7 @@ plt.hist(phase_samples[:,0], bins=8);
 
 #+RESULTS:
 
-** Model
+* Model
 
 #+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
@@ -135,10 +150,10 @@ print(seed)
 #+end_src
 
 #+RESULTS:
-: 405492
+: 237239
 
 #+begin_src ipython
-model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=16, LIVE_FF_UPDATE=1)
+model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, LIVE_FF_UPDATE=1)
 #+end_src
 
 #+RESULTS:
@@ -155,10 +170,23 @@ model.eval()  # Set to evaluation mode
 :   (dropout): Dropout(p=0.0, inplace=False)
 : )
 
-** Batching Live Inputs
+#+begin_src ipython
+print(model.J_STP)
+print(model.N_BATCH)
+print(model.RANDOM_DELAY)
+#+end_src
+
+#+RESULTS:
+: Parameter containing:
+: tensor(24.2866, device='cuda:1', requires_grad=True)
+: 1
+: 0
+
+* Batching Live Inputs
 
 #+begin_src ipython
-  N_PHASE = 512 + 256 + 128
+  N_BATCH = 160
+  N_PHASE = N_BATCH * 8
   print(model.PHI0.shape)
 
   PHI0 = model.PHI0.unsqueeze(-1).repeat((N_PHASE, 1, 1))
@@ -174,36 +202,36 @@ model.eval()  # Set to evaluation mode
   PHI0[:, -1] = phases_tensor[torch.randint(0, len(phases), (N_PHASE,))].unsqueeze(1)
   print(PHI0.shape)
 
-  # PHI0[:, 0] = generate_weighted_phase_samples(N_PHASE, angles, preferred_angle, sigma)
-  # PHI0[:, 1] = generate_weighted_phase_samples(N_PHASE, angles, preferred_angle, sigma)
+  # PHI0[:, 0] = generate_weighted_phase_samples(N_PHASE, angles, reference, sigma)
+  # PHI0[:, 1] = generate_weighted_phase_samples(N_PHASE, angles, reference, sigma)
   # print(PHI0.shape)
-
  #+end_src
 
 #+RESULTS:
 : torch.Size([1, 3])
-: torch.Size([896, 3, 1])
+: torch.Size([1280, 3, 1])
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+ax[0].hist(PHI0[:, 0, 0].cpu(), bins=15)
+ax[0].set_xlabel('Prev. Stim')
+ax[1].hist(PHI0[:,-1, 0].cpu(), bins=15)
+ax[1].set_xlabel('Curr. Stim')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr/figure_12.png]]
 
 #+begin_src ipython
   model.PHI0 = PHI0
   model.N_BATCH = N_PHASE
-  rates = model(RET_FF=0).cpu().detach().numpy()
+  rates = model().cpu().detach().numpy()
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (896, 91, 500)
-
-#+begin_src ipython
-name = 'rates_2'
-pkl_save(rates, '%s' % name, path="../data/serial_bias/")
-name = 'PHI0_2'
-pkl_save(PHI0.cpu().detach().numpy(), '%s' % name, path="../data/serial_bias/")
-#+end_src
-
-#+RESULTS:
-: saving to ../data/serial_bias//rates_2.pkl
-: saving to ../data/serial_bias//PHI0_2.pkl
+: (1280, 91, 750)
 
 #+begin_src ipython
   m0, m1, phi = decode_bump(rates, axis=-1)
@@ -211,44 +239,106 @@ pkl_save(PHI0.cpu().detach().numpy(), '%s' % name, path="../data/serial_bias/")
 #+end_src
 
 #+RESULTS:
-: (896, 91)
+: (1280, 91)
 
-** Results
+* Batching Inputs Sequentially
+
+#+begin_src ipython
+# model.N_BATCH = 96
+# ff_input = []
+# labels = []
+
+# phase_list =  torch.tensor([  0.,  45.,  90., 135., 180., 225., 270., 315.], device=DEVICE)
+
+# model.PHI0 = torch.ones((model.N_BATCH, 3, 1), device=DEVICE, dtype=torch.float
+#                         )
+
+# for i in range(len(phase_list)):
+#     model.PHI0[:, 0] = phase_list[i]
+#     model.PHI0[:, -1] = phase_list[torch.randint(0, len(phase_list), (model.N_BATCH,))].unsqueeze(1)
+
+#     label0 = torch.ones(model.N_BATCH, device=DEVICE, dtype=torch.float) * model.PHI0[:, 0, 0] * torch.pi / 180.0
+#     label1 = torch.ones(model.N_BATCH, device=DEVICE, dtype=torch.float) * model.PHI0[:, -1, 0] * torch.pi / 180.0
+
+#     labels.append(torch.vstack((label0, label1)))
+#     ff_input.append(model.init_ff_input())
+
+# labels = torch.hstack(labels).T
+# ff_input = torch.vstack(ff_input)
+# print('ff_input', ff_input.shape, 'labels', labels.shape)
+# PHI0 = labels.unsqueeze(-1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+# fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+# ax[0].hist(PHI0[:, 0, 0].cpu(), bins=15)
+# ax[1].hist(PHI0[:,-1, 0].cpu(), bins=15)
+# plt.show()
+ #+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+# rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
+# print('ff_input', ff_input.shape)
+# print('rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  # m0, m1, phi = decode_bump(rates, axis=-1)
+  # print(phi.shape)
+#+end_src
+
+#+RESULTS:
+
+* Results
+** Rates
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.5*width, height])
 
 idx = np.random.randint(0, model.N_BATCH)
-ax[0].imshow(rates[idx].T, aspect='auto', cmap='jet', vmin=0, vmax=2, origin='lower')
+ax[0].imshow(rates[idx].T, aspect='auto', cmap='jet', vmin=0, vmax=2, origin='lower', extent=[0, model.DURATION, 0, model.Na[0].cpu()])
 ax[0].set_ylabel('Pref. Location (°)')
 ax[0].set_yticks(np.linspace(0, model.Na[0].cpu(), 5), np.linspace(0, 360, 5).astype(int))
-ax[0].set_xlabel('Step')
+ax[0].set_xlabel('Time (s)')
 
+xtime = np.linspace(0, model.DURATION, phi.shape[-1])
 idx = np.random.randint(0, model.N_BATCH, 8)
-ax[1].plot(m1[idx].T)
-# ax[1].set_yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
+ax[1].plot(xtime, m1[idx].T)
 ax[1].set_ylabel('m1 (Hz)')
-ax[1].set_xlabel('Step')
+ax[1].set_xlabel('Time (s)')
+add_vlines(model, ax[1])
 
-ax[2].plot(phi[idx].T * 180 / np.pi, alpha=0.5)
+ax[2].plot(xtime, phi[idx].T * 180 / np.pi, alpha=0.5)
 ax[2].set_yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
-ax[2].set_ylabel('Pref. Location (°)')
-ax[2].set_xlabel('Step')
+ax[2].set_ylabel('Bump Center (°)')
+ax[2].set_xlabel('Time (s)')
+add_vlines(model, ax[2])
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_13.png]]
+[[./figures/odr/figure_19.png]]
 
 #+begin_src ipython
 PHI0 = PHI0.cpu().detach().numpy()
-print(PHI0.shape)
 #+end_src
 
 #+RESULTS:
-: (896, 3, 1)
 
 ** errors
+
+#+begin_src ipython
+print(PHI0[3, :, 0])
+#+end_src
+
+#+RESULTS:
+: [315.          3.1415927  90.       ]
 
 #+begin_src ipython
 target_loc = PHI0[:, -1]
@@ -256,35 +346,45 @@ target_loc = PHI0[:, -1]
 rel_loc = (PHI0[:, 0] - target_loc) * np.pi / 180.0
 rel_loc = (rel_loc + np.pi) % (2 * np.pi) - np.pi
 rel_loc *= 180 / np.pi
-rel_loc = rel_loc[:, -1]
+# rel_loc = rel_loc[:, -1]
 
-ref_loc = (PHI0[:, 0] - preferred_angle) * np.pi / 180.0
+ref_loc = (PHI0[:, 0] - reference) * np.pi / 180.0
 ref_loc = (ref_loc + np.pi) % (2 * np.pi) - np.pi
 ref_loc *= 180 / np.pi
-ref_loc = ref_loc[:, -1]
+# ref_loc = ref_loc[:, -1]
 
-errors = (phi - target_loc * np.pi / 180.0) % (2*np.pi)
+errors = (phi - target_loc * np.pi / 180.0)
 errors = (errors + np.pi) % (2 * np.pi) - np.pi
 errors *= 180 / np.pi
 
 # errors = errors[:, -1]
 # target_loc = target_loc[:, -1]
 
-mask = np.abs(errors) <= 25
-# print(mask.shape)
+# mask = np.abs(errors) <= 360
+# # print(mask.shape)
 
-errors = np.where(mask, errors, np.nan)[:, -1]
-rel_loc = rel_loc[~np.isnan(errors), np.newaxis]
-ref_loc = ref_loc[~np.isnan(errors), np.newaxis]
-target_loc = target_loc[:, -1][~np.isnan(errors), np.newaxis]
-errors = errors[~np.isnan(errors), np.newaxis]
+# errors = np.where(mask, errors, np.nan)[:, -1]
+# rel_loc = rel_loc[~np.isnan(errors), np.newaxis]
+# ref_loc = ref_loc[~np.isnan(errors), np.newaxis]
+# target_loc = target_loc[:, -1][~np.isnan(errors), np.newaxis]
+# errors = errors[~np.isnan(errors), np.newaxis]
 # errors = errors[mask]
 
 print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (241, 1) (241, 1) (241, 1) (241, 1)
+: (1280, 91) (1280, 1) (1280, 1) (1280, 1)
+
+#+begin_src ipython
+plt.plot(errors[:32].T)
+plt.xlabel('t')
+plt.ylabel('error (°)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr/figure_23.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -298,7 +398,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_16.png]]
+[[./figures/odr/figure_24.png]]
 
 ** biases
 
@@ -344,7 +444,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_17.png]]
+[[./figures/odr/figure_23.png]]
 
 #+begin_src ipython
 import pandas as pd
@@ -395,7 +495,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_18.png]]
+[[./figures/odr/figure_24.png]]
 
 #+begin_src ipython
 
