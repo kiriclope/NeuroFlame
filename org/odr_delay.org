@@ -85,8 +85,8 @@ def plot_rates_selec(rates, idx=0, thresh=0.5, figname='fig.svg'):
         ax[1].imshow(rates[idx].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
         ax[1].set_ylabel('Neuron #')
         ax[1].set_xlabel('Step')
-
-        plt.savefig(figname, dpi=300)
+        # ax[1].set_ylim([745, 755])
+        # plt.savefig(figname, dpi=300)
         plt.show()
 #+end_src
 
@@ -95,13 +95,14 @@ def plot_rates_selec(rates, idx=0, thresh=0.5, figname='fig.svg'):
 #+begin_src ipython
   def plot_m0_m1_phi(model, rates, idx, figname='fig.svg'):
 
-      # m0, m1, phi = decode_bump(rates, axis=-1)
-      m0, m1, phi = get_fourier_moments(rates, axis=-1)
+      m0, m1, phi = decode_bump(rates, axis=-1)
+      # m0, m1, phi = get_fourier_moments(rates, axis=-1)
       fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
 
       xtime = np.linspace(0, model.DURATION, m0.shape[-1])
       idx = np.random.randint(0, 96*8, 16)
       print(idx)
+
       ax[0].plot(xtime, m0[idx].T)
       #ax[0].set_ylim([0, 360])
       #ax[0].set_yticks([0, 90, 180, 270, 360])
@@ -140,6 +141,12 @@ def plot_rates_selec(rates, idx=0, thresh=0.5, figname='fig.svg'):
                                                          train_size=train_perc,
                                                          stratify=Y[:, 0].cpu().numpy(),
                                                          shuffle=True)
+
+     plt.hist(Y_train[Y_train!=-999].cpu(), bins=15, label='train')
+     plt.hist(Y_test[Y_test!=-999].cpu(), bins=15, label='test')
+     plt.xlabel('Target Loc. (°)')
+     plt.ylabel('Count')
+     plt.show()
 
      print(X_train.shape, X_test.shape)
      print(Y_train.shape, Y_test.shape)
@@ -318,15 +325,16 @@ import torch.nn.functional as F
 class AngularErrorLoss(nn.Module):
     def __init__(self, rwd_idx=-1, zero_idx=0, stim_idx=0):
         super(AngularErrorLoss, self).__init__()
-        self.loss = nn.SmoothL1Loss()
-        self.loss = nn.MSELoss()
-        # self.loss = NanMeanMSELoss()
+        self.loss = nn.SmoothL1Loss(reduction='none')
+        self.loss = nn.MSELoss(reduction='none')
+
         self.rwd_idx = rwd_idx
         self.zero_idx = zero_idx
         self.stim_idx = stim_idx
 
     def forward(self, readout, targets):
         m0, m1, phi = compute_fourier_moments(readout, dim=-1)
+        # m0, m1, phi = decode_bump_torch(readout, dim=-1)
 
         total_loss = 0
         for i in range(targets.shape[0]):
@@ -344,15 +352,13 @@ class AngularErrorLoss(nn.Module):
 
             loss_sin = self.loss(predicted_sin, target_sin)
             loss_cos = self.loss(predicted_cos, target_cos)
-            loss_angular = (loss_sin + loss_cos)
+            loss_angular = (loss_sin + loss_cos).mean()
+            total_loss += loss_angular
 
             # Regularization losses
-            loss_zero = self.loss(m1[i, self.zero_idx], zeros)
+            loss_zero = self.loss(m1[i, self.zero_idx], zeros).mean()
             regularization = F.relu(ones * m0[i, self.rwd_idx]- m1[i, self.rwd_idx]).mean()
-
-            # Combine losses
-            total_loss += (loss_angular + loss_zero + regularization)
-            # total_loss += loss_angular + regularization
+            total_loss += loss_zero + regularization
 
         return total_loss / targets.shape[0]
 #+end_src
@@ -360,7 +366,66 @@ class AngularErrorLoss(nn.Module):
 #+RESULTS:
 
 ** Other
+#+begin_src ipython
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
 
+def continuous_biased_phases(N_BATCH, preferred_angle, sigma):
+    # Generate samples from a normal distribution using PyTorch
+    phase_samples = torch.normal(mean=preferred_angle, std=sigma, size=(N_BATCH, 1))
+
+    # Normalize angles to the range [0, 360)
+    phase_samples = phase_samples % 360
+
+    return phase_samples
+
+# Parameters
+N_BATCH = 1000
+reference = 90.0  # Example preferred angle
+sigma = 75.0  # Standard deviation of the Gaussian
+
+# Generate continuous samples
+phase_samples = continuous_biased_phases(N_BATCH, reference, sigma)
+print(phase_samples.shape)
+# Convert to numpy for plotting
+phase_samples_np = phase_samples.numpy()
+
+plt.hist(phase_samples_np[:, 0], bins=36, range=(0, 360))
+plt.xlabel('Angle (degrees)')
+plt.ylabel('Frequency')
+plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: torch.Size([1000, 1])
+[[./figures/odr/figure_13.png]]
+:END:
+
+#+begin_src ipython
+import torch
+import numpy as np
+
+def generate_weighted_phase_samples(N_BATCH, angles, preferred_angle, sigma):
+    # Convert angles list to a tensor
+    angles_tensor = torch.tensor(angles)
+
+    # Calculate Gaussian probability distribution centered at preferred_angle
+    probs = np.exp(-0.5 * ((angles - preferred_angle) / sigma) ** 2)
+    probs /= probs.sum()  # Normalize to get probabilities
+
+    # Create a categorical distribution from the computed probabilities
+    distribution = torch.distributions.Categorical(torch.tensor(probs))
+
+    # Sample from the distribution
+    indices = distribution.sample((N_BATCH,))
+
+    # Map indices to angles and reshape to (N_BATCH, 1)
+    phase_samples = angles_tensor[indices].reshape(N_BATCH, 1)
+
+    return phase_samples
+#+end_src
 
 #+RESULTS:
 
@@ -382,11 +447,23 @@ class AngularErrorLoss(nn.Module):
     DEVICE = 'cuda:0'
     seed = np.random.randint(0, 1e6)
     print(seed)
-    N_BATCH = int(96)
+
+    IF_RANDOM_PHASES = 1
+    IF_BIASED_PHASES = 1
+
+    if IF_RANDOM_PHASES:
+        N_BATCH = int(96 * 8)
+    else:
+        N_BATCH = 96
 #+end_src
 
 #+RESULTS:
-: 231957
+: 664505
+
+#+begin_src ipython
+seed = 197553
+#+end_src
+#+RESULTS:
 
 #+begin_src ipython
 96 * 32 / 4
@@ -405,6 +482,9 @@ class AngularErrorLoss(nn.Module):
 N_TARGETS = 8
 phase_list = np.linspace(0, 360, N_TARGETS+1)[:-1]
 print(phase_list)
+
+reference = 90.  # Example preferred angle
+sigma = 75.  # Standard deviation of the Gaussian
 #+end_src
 
 #+RESULTS:
@@ -426,8 +506,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: torch.Size([96])
-[[./figures/odr/figure_19.png]]
+: torch.Size([768])
+[[./figures/odr/figure_22.png]]
 :END:
 
 * Training
@@ -441,6 +521,7 @@ plt.show()
 
 #+RESULTS:
 : Wab_train torch.Size([750, 750])
+: J_STP torch.Size([])
 
 Testing the network on steps from sample odor offset to test odor onset
 
@@ -468,7 +549,7 @@ print(torch.where(stim_mask[1]==1)[0])
 #+end_src
 
 #+RESULTS:
-: stim_mask torch.Size([96, 81])
+: stim_mask torch.Size([768, 81])
 : tensor([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
 :         28, 29], device='cuda:0')
 
@@ -493,11 +574,10 @@ print(torch.where(rwd_mask[idx]==1)[0])
 #+end_src
 
 #+RESULTS:
-: rwd_mask torch.Size([96, 81])
+: rwd_mask torch.Size([768, 81])
 : tensor([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
 :         28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-:         46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62],
-:        device='cuda:0')
+:         46, 47, 48, 49, 50, 51, 52], device='cuda:0')
 
 #+begin_src ipython
 zero_mask = torch.zeros((model.N_BATCH, int((model.N_STEPS-model.N_STEADY) / model.N_WINDOW)), device=DEVICE, dtype=torch.bool)
@@ -515,8 +595,9 @@ print(torch.where(zero_mask[idx]==1)[0])
 #+end_src
 
 #+RESULTS:
-: zero_mask torch.Size([96, 81])
-: tensor([ 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 59, 60, 61, 62, 63, 64, 65, 66,
+: zero_mask torch.Size([768, 81])
+: tensor([ 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 41, 42, 43, 44, 45, 46, 47, 48,
+:         49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66,
 :         67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80],
 :        device='cuda:0')
 
@@ -554,53 +635,91 @@ print('zero', zero_idx)
 *** Inputs and Labels
 
 #+begin_src ipython
-model.N_BATCH = N_BATCH
-ff_input = []
-labels = []
+if IF_RANDOM_PHASES:
+    if IF_BIASED_PHASES:
+        labels = continuous_biased_phases(N_BATCH, reference, sigma)
+    else:
+        labels = torch.randint(0, 360, (N_BATCH, 1)).to(DEVICE)
 
-model.PHI0 = torch.ones((N_BATCH, 2, 1), device=DEVICE, dtype=torch.float)
+    model.PHI0 = torch.ones((N_BATCH, 2, 1), device=DEVICE, dtype=torch.float)
+    model.PHI0[:, 0] = labels * np.pi / 180.0
 
-for i in range(len(phase_list)):
-    model.PHI0[:, 0] = phase_list[i]
+    window_size = int((model.N_STEPS-model.N_STEADY) / model.N_WINDOW)
+    labels = labels.repeat(1, window_size) * np.pi / 180.0
+    labels[~rwd_mask] = -999
 
-    label = torch.ones((model.N_BATCH, int((model.N_STEPS-model.N_STEADY) / model.N_WINDOW)),
-                       device=DEVICE, dtype=torch.float) * phase_list[i] * torch.pi / 180.0
-
-    label[~rwd_mask] = -999
-    labels.append(label)
-
-    ff_input.append(model.init_ff_input())
-
-labels = torch.vstack(labels)
-ff_input = torch.vstack(ff_input)
-print('ff_input', ff_input.shape, 'labels', labels.shape)
+    ff_input = model.init_ff_input()
+    print(model.PHI0.shape, ff_input.shape, labels.shape)
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([768, 505, 1000]) labels torch.Size([768, 81])
+: torch.Size([1, 750]) torch.Size([768, 1])
+: torch.Size([1, 750]) torch.Size([768, 1])
+: torch.Size([768, 2, 1]) torch.Size([768, 505, 1000]) torch.Size([768, 81])
+
+#+begin_src ipython
+if IF_RANDOM_PHASES==0:
+    model.N_BATCH = N_BATCH
+    ff_input = []
+    labels = []
+
+    model.PHI0 = torch.ones((N_BATCH, 2, 1), device=DEVICE, dtype=torch.float)
+
+    for i in range(len(phase_list)):
+        model.PHI0[:, 0] = phase_list[i] * torch.pi / 180.0
+
+        label = torch.ones((model.N_BATCH, int((model.N_STEPS-model.N_STEADY) / model.N_WINDOW)),
+                           device=DEVICE, dtype=torch.float) * phase_list[i] * torch.pi / 180.0
+
+        label[~rwd_mask] = -999
+        labels.append(label)
+
+        ff_input.append(model.init_ff_input())
+
+    labels = torch.vstack(labels)
+    ff_input = torch.vstack(ff_input)
+    print('ff_input', ff_input.shape, 'labels', labels.shape)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+print(labels[labels!=-999].shape)
+plt.hist(labels[labels!=-999].cpu(), bins=15)
+plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: torch.Size([35262])
+[[./figures/odr/figure_31.png]]
+:END:
 
 *** Run
 
 #+begin_src ipython
-  batch_size = 32
+  batch_size = 16
   train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+[[./figures/odr/figure_32.png]]
 : torch.Size([614, 505, 1000]) torch.Size([154, 505, 1000])
 : torch.Size([614, 81]) torch.Size([154, 81])
+:END:
 
 #+begin_src ipython
   criterion = AngularErrorLoss(rwd_idx=rwd_mask, zero_idx=zero_mask, stim_idx=stim_mask)
   # SGD, Adam, Adam
-  learning_rate = 0.05
-  optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+  learning_rate = 0.1
+  optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
 #+RESULTS:
 
         #+begin_src ipython
-  num_epochs = 5
+  num_epochs = 15
   start = perf_counter()
   loss, val_loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs)
   end = perf_counter()
@@ -608,15 +727,36 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: Epoch 1/5, Training Loss: 1.5285, Validation Loss: 2.1808
-: Epoch 2/5, Training Loss: 1.4112, Validation Loss: 1.5009
-: Epoch 3/5, Training Loss: 1.4164, Validation Loss: 1.2360
-: Epoch 4/5, Training Loss: 1.2982, Validation Loss: 1.0544
-: Epoch 5/5, Training Loss: 1.1824, Validation Loss: 1.0341
-: Elapsed (with compilation) = 0h 2m 9s
+#+begin_example
+Epoch 1/15, Training Loss: 0.0396, Validation Loss: 0.0581
+Epoch 2/15, Training Loss: 0.0688, Validation Loss: 0.0470
+Epoch 3/15, Training Loss: 0.0440, Validation Loss: 0.0430
+Epoch 4/15, Training Loss: 0.0338, Validation Loss: 0.0423
+Epoch 5/15, Training Loss: 0.0453, Validation Loss: 0.0397
+Epoch 6/15, Training Loss: 0.0326, Validation Loss: 0.0377
+Epoch 7/15, Training Loss: 0.0386, Validation Loss: 0.0417
+Epoch 8/15, Training Loss: 0.0487, Validation Loss: 0.0376
+Epoch 9/15, Training Loss: 0.0247, Validation Loss: 0.0392
+Epoch 10/15, Training Loss: 0.0382, Validation Loss: 0.0410
+Epoch 11/15, Training Loss: 0.0101, Validation Loss: 0.0380
+Epoch 12/15, Training Loss: 0.0518, Validation Loss: 0.0343
+Epoch 13/15, Training Loss: 0.0205, Validation Loss: 0.0323
+Epoch 14/15, Training Loss: 0.0083, Validation Loss: 0.0330
+Epoch 15/15, Training Loss: 0.0202, Validation Loss: 0.0330
+Elapsed (with compilation) = 0h 8m 35s
+#+end_example
 
 #+begin_src ipython
-torch.save(model.state_dict(), 'models/odr.pth')
+if IF_BIASED_PHASES:
+    torch.save(model.state_dict(), 'models/odr_bias_%d.pth' % seed)
+else:
+    torch.save(model.state_dict(), 'models/odr_%d.pth' % seed)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+
 #+end_src
 
 #+RESULTS:
@@ -624,8 +764,10 @@ torch.save(model.state_dict(), 'models/odr.pth')
 * Testing
 
  #+begin_src ipython
-model_state_dict = torch.load('models/odr.pth')
-# model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=4)
+if IF_BIASED_PHASES:
+    model_state_dict = torch.load('models/odr_bias_%d.pth' % seed)
+else:
+    model_state_dict = torch.load('models/odr_%d.pth' % seed)
 model.load_state_dict(model_state_dict)
 #+end_src
 
@@ -642,26 +784,42 @@ model.load_state_dict(model_state_dict)
 : )
 
 #+begin_src ipython
-model.N_BATCH = N_BATCH
-ff_input = []
-labels = []
+ model.N_BATCH = N_BATCH
+ if IF_RANDOM_PHASES:
+    labels = torch.randint(0, 360, (N_BATCH, 1)).to(DEVICE) * torch.pi / 180.0
+    model.PHI0 = torch.ones((N_BATCH, 2, 1), device=DEVICE, dtype=torch.float)
+    model.PHI0[:, 0] = labels
 
-model.PHI0 = torch.ones((N_BATCH, 2, 1), device=DEVICE, dtype=torch.float)
-
-for i in range(len(phase_list)):
-    model.PHI0[:, 0] = phase_list[i]
-    label = torch.ones(model.N_BATCH, device=DEVICE, dtype=torch.float) * phase_list[i] * torch.pi / 180.0
-
-    labels.append(label)
-    ff_input.append(model.init_ff_input())
-
-labels = torch.hstack(labels)
-ff_input = torch.vstack(ff_input)
-print('ff_input', ff_input.shape, 'labels', labels.shape)
+    ff_input = model.init_ff_input()
+    print(model.PHI0.shape, ff_input.shape, labels.shape)
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([768, 505, 1000]) labels torch.Size([768])
+: torch.Size([1, 750]) torch.Size([768, 1])
+: torch.Size([1, 750]) torch.Size([768, 1])
+: torch.Size([768, 2, 1]) torch.Size([768, 505, 1000]) torch.Size([768, 1])
+
+#+begin_src ipython
+if IF_RANDOM_PHASES==0:
+    model.N_BATCH = N_BATCH
+    ff_input = []
+    labels = []
+
+    model.PHI0 = torch.ones((N_BATCH, 2, 1), device=DEVICE, dtype=torch.float)
+
+    for i in range(len(phase_list)):
+        model.PHI0[:, 0] = phase_list[i]
+        label = torch.ones(model.N_BATCH, device=DEVICE, dtype=torch.float) * phase_list[i] * torch.pi / 180.0
+
+        labels.append(label)
+        ff_input.append(model.init_ff_input())
+
+    labels = torch.hstack(labels)
+    ff_input = torch.vstack(ff_input)
+    print('ff_input', ff_input.shape, 'labels', labels.shape)
+#+end_src
+
+#+RESULTS:
 
 #+begin_src ipython
 rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
@@ -678,7 +836,7 @@ plot_rates_selec(rates=ff_input.cpu().detach().numpy(), idx=20, thresh=.5)
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_35.png]]
+[[./figures/odr/figure_42.png]]
 
 #+begin_src ipython
 plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
@@ -686,8 +844,8 @@ plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
 
 #+RESULTS:
 :RESULTS:
-: [125 716 619 636 158 591 485 248 530 478 280 566 754 142 723 374]
-[[./figures/odr/figure_36.png]]
+: [549 275 661 402 242 767 342 151 384 613 103 215 648 390 332 450]
+[[./figures/odr/figure_43.png]]
 :END:
 
 #+begin_src ipython
@@ -695,62 +853,68 @@ plot_rates_selec(rates, idx=20, thresh=.1)
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_37.png]]
+[[./figures/odr/figure_44.png]]
 
         #+begin_src ipython
-plot_m0_m1_phi(model, rates, 1)
+plot_m0_m1_phi(model, rates, 3)
 #+end_src
 
 #+RESULTS:
 :RESULTS:
-: [ 28 612 250 102 556 316 501 326 523  33 695 401 117 328 153 751]
-[[./figures/odr/figure_38.png]]
+: [ 40 716  53  55 244 247 133 543 438 681 366 717 340 372  44 503]
+[[./figures/odr/figure_45.png]]
 :END:
 
 #+begin_src ipython
 m0, m1, phi = get_fourier_moments(rates, axis=-1)
-print(phi.shape)
+# m0, m1, phi = decode_bump(rates, axis=-1)
+print(phi.shape, labels.shape)
 
-target_loc = labels.unsqueeze(-1).cpu().numpy()
+target_loc = labels.cpu().numpy()
+print(target_loc.shape)
 
-errors = (phi - target_loc) % (2*np.pi)
+errors = (phi - target_loc)
 errors = (errors + np.pi) % (2 * np.pi) - np.pi
 errors *= 180 / np.pi
 
 errors2 = errors[:, int((model.N_STIM_OFF[0].cpu().numpy()-model.N_STEADY) / model.N_WINDOW)]
+print(errors2.shape)
 
 error_list = []
 for i in range(errors.shape[0]):
-    idx_stim = model.start_indices[1, i%8].cpu().numpy()
+    idx_stim = model.start_indices[1, i%N_TARGETS].cpu().numpy()
     idx = int((idx_stim - model.N_STEADY) / model.N_WINDOW)
 
     error_list.append(errors[i, idx])
 # errors = errors[:, int((model.N_STIM_ON[1].cpu().numpy()-model.N_STEADY) / model.N_WINDOW)-1]
 errors = np.array(error_list)
-print(errors.shape, target_loc.shape)
+print(errors.shape, errors2.shape, target_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (768, 81)
-: (768,) (768, 1)
+: (768, 81) torch.Size([768, 1])
+: (768, 1)
+: (768,)
+: (768,) (768,) (768, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-ax[0].hist(errors2, bins='auto')
+ax[0].hist(errors2, bins=32)
 ax[0].set_xlabel('Encoding Errors (°)')
 
-ax[1].hist(errors, bins=17)
+ax[1].hist(errors, bins=32)
 ax[1].set_xlabel('Memory Errors (°)')
 # ax[1].set_xlim([-45, 45])
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_40.png]]
+[[./figures/odr/figure_47.png]]
 
 #+begin_src ipython
 print(model.J_STP)
 #+end_src
 
 #+RESULTS:
-: tensor(15., device='cuda:0')
+: Parameter containing:
+: tensor(39.9862, device='cuda:0', requires_grad=True)

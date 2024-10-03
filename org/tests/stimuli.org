@@ -149,7 +149,7 @@
 #+RESULTS:
 :RESULTS:
 : (1, 1000)
-[[./.ob-jupyter/44857dff6ad30decd3dc5c58e64b55e7447d8c62.png]]
+[[./.ob-jupyter/4a19b57067626943679db7b0d4baf43c4198ac01.png]]
 :END:
 
 #+begin_src ipython
@@ -214,40 +214,7 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-#+begin_example
-  ---------------------------------------------------------------------------
-  RuntimeError                              Traceback (most recent call last)
-  Cell In[20], line 4
-        1 Ne = model.Na[0].cpu().numpy()
-        2 N = model.N_NEURON
-  ----> 4 ff_input = model.init_ff_input().cpu().numpy()
-        5 print(ff_input.shape)
-
-  File ~/models/NeuroFlame/org/tests/../../src/network.py:116, in Network.init_ff_input(self)
-      115 def init_ff_input(self):
-  --> 116     return init_ff_input(self)
-
-  File ~/models/NeuroFlame/org/tests/../../src/ff_input.py:176, in init_ff_input(model)
-      174 if model.LIVE_FF_UPDATE:
-      175     return init_ff_live(model)
-  --> 176 return init_ff_seq(model)
-
-  File ~/models/NeuroFlame/org/tests/../../src/ff_input.py:165, in init_ff_seq(model)
-      159             stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[:, i])
-      161         # reshape stimulus to be (N_BATCH, 1, NE) adding dummy time dimension
-      162         # stimulus = stimulus.unsqueeze(1)
-      163         # print(stimulus.shape)
-  --> 165         ff_input[:, model.N_STIM_ON[i] : model.N_STIM_OFF[i], model.slices[0]].add_(
-      166             stimulus
-      167         )
-      168         del stimulus
-      170 return ff_input * torch.sqrt(model.Ka[0]) * model.M0
-
-  RuntimeError: The size of tensor a (4000) must match the size of tensor b (10) at non-singleton dimension 1
-#+end_example
-:END:
+: (10, 222, 1000)
 
 #+begin_src ipython
   m0, m1, phase = decode_bump(ff_input[..., model.slices[0]])
@@ -255,7 +222,7 @@
 #+end_src
 
 #+RESULTS:
-: (30, 44400)
+: (10, 222)
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=(2.25*width, height))
@@ -277,16 +244,16 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7bbda54d68ec6df61bf7677ad30d21d6cbf78030.png]]
+[[./.ob-jupyter/70a3c56825fadd5cb4a69ab04cefc8daf5a23e5f.png]]
 
 #+begin_src ipython
-  plt.hist(model.phase.cpu().numpy() * 180 / np.pi, bins='auto')
-  plt.hist(360 - phase[:, model.N_STIM_ON[0]]* 180 / np.pi, bins='auto')
+  plt.hist(model.phase.cpu().numpy() * 180 / np.pi, bins=20)
+  plt.hist(phase[:, model.N_STIM_ON[0]]* 180 / np.pi, bins=20, histtype='step')
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/97edbdc69846a716650db4b8fd248918ec293ec6.png]]
+[[./.ob-jupyter/7b3f6505c85a94c10d0ab6538b09e3de47ad314a.png]]
 
 #+begin_src ipython
 
@@ -302,6 +269,60 @@
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+RuntimeError                              Traceback (most recent call last)
+Cell In[23], line 2
+      1 REPO_ROOT = "/home/leon/models/NeuroFlame"
+----> 2 model = Network('config_EI.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='dual_rand', LIVE_FF_UPDATE=0, N_BATCH=10)
+
+File ~/models/NeuroFlame/org/tests/../../src/network.py:44, in Network.__init__(self, conf_name, repo_root, **kwargs)
+     41 self.__dict__.update(config.__dict__)
+     43 # Initialize weight matrix
+---> 44 self.initWeights()
+     46 # Initialize low rank connectivity for training
+     47 if self.LR_TRAIN:
+
+File ~/models/NeuroFlame/org/tests/../../src/network.py:133, in Network.initWeights(self)
+    131     self.Wab_T = self.Wab_T.T.to_sparse()
+    132 elif self.SPARSE == "semi":
+--> 133     self.Wab_T = to_sparse_semi_structured(self.Wab_T)
+    134 else:
+    135     self.Wab_T = self.Wab_T.T
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/sparse/semi_structured.py:515, in to_sparse_semi_structured(original_tensor, transposed)
+    464 def to_sparse_semi_structured(
+    465     original_tensor: torch.Tensor,
+    466     transposed: bool = False,
+    467 ) -> SparseSemiStructuredTensor:
+    468     """
+    469     This function converts a dense tensor into a sparse semi-structured tensor.
+    470     It will return a SparseSemiStructuredTensor, a subclass of torch.Tensor.
+   (...)
+    513        dtype=torch.int16))
+    514     """
+--> 515     return SparseSemiStructuredTensor(
+    516         original_tensor, original_shape=original_tensor.shape, transposed=transposed
+    517     )
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/sparse/semi_structured.py:192, in SparseSemiStructuredTensor.__init__(self, original_tensor, original_shape, compressed_tensor_cusparselt, sparse_tensor_cutlass, meta_tensor_cutlass, transposed)
+    187 min_cols = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG[
+    188     original_tensor.dtype
+    189 ].min_cols
+    190 if m < min_rows or m % min_rows or n < min_cols or n % min_cols:
+    191     # TODO in the future we can add in padding to support dimensions that aren't perfect multiples
+--> 192     raise RuntimeError(
+    193         f"Error original_tensor.shape {original_tensor.shape} is not supported! "
+    194         f"Both dimensions must be larger or equal than and a multiple of ({min_rows}, {min_cols})"
+    195     )
+    197 compressed_tensor_cusparselt = None
+    198 sparse_tensor_cutlass = None
+
+RuntimeError: Error original_tensor.shape torch.Size([2500, 2500]) is not supported! Both dimensions must be larger or equal than and a multiple of (32, 64)
+#+end_example
+:END:
 
 #+begin_src ipython
   Ne = model.Na[0].cpu().numpy()

@@ -87,8 +87,8 @@ class Network(nn.Module):
         # in pytorch, Wij is i to j.
         if self.ODR_TRAIN:
             if self.TRAIN_EI==0:
-                self.Wab_train = nn.Parameter(torch.zeros((self.Na[0], self.Na[0]),
-                                                          device=self.device)* 0.01)
+                self.Wab_train = nn.Parameter(torch.randn((self.Na[0], self.Na[0]),
+                                                          device=self.device)* 0.001)
             else:
                 self.Wab_train = nn.Parameter(torch.randn((self.N_NEURON, self.N_NEURON),
                                                           device=self.device)* 0.01)
@@ -137,10 +137,10 @@ class Network(nn.Module):
     def initSTP(self):
         """Creates stp model for population 0"""
 
-        self.J_STP = torch.tensor(self.J_STP, device=self.device) / torch.sqrt(self.Ka[0])
+        # self.J_STP = torch.tensor(self.J_STP, device=self.device) # / torch.sqrt(self.Ka[0])
 
-        # if self.ODR_TRAIN:
-        #     self.J_STP = nn.Parameter(torch.tensor(10.0, device=self.device))
+        if self.ODR_TRAIN:
+            self.J_STP = nn.Parameter(torch.tensor(self.J_STP, device=self.device))
 
         self.register_buffer('W_stp_T', torch.zeros((self.Na[0], self.Na[0]), device=self.device))
 
@@ -176,15 +176,15 @@ class Network(nn.Module):
         )
 
         if self.LIVE_FF_UPDATE:
-            rates = Activation()(
-                ff_input + rec_input[0], func_name=self.TF_TYPE, thresh=self.thresh
-            )
+            ff = ff_input
         else:
-            rates = Activation()(
-                ff_input[:, 0] + rec_input[0],
-                func_name=self.TF_TYPE,
-                thresh=self.thresh,
-            )
+            ff = ff_input[:, 0]
+
+        rates = Activation()(
+            ff + rec_input[0],
+            func_name=self.TF_TYPE,
+            thresh=self.thresh,
+        )
 
         return rates, ff_input, rec_input
 
@@ -272,7 +272,6 @@ class Network(nn.Module):
 
             self.Wab_T.data[self.slices[0], self.slices[0]] = 0
 
-
         # Add STP
         W_stp_T = None
         if self.IF_STP:
@@ -324,35 +323,28 @@ class Network(nn.Module):
 
         # Temporal loop
         for step in range(self.N_STEPS):
+            if self.RATE_NOISE:
+                rate_noise = torch.randn((self.N_BATCH, self.N_NEURON), device=self.device)
+                rates = rates + rate_noise * self.VAR_RATE / torch.sqrt(self.Ka[0])
             # update dynamics
             if self.LIVE_FF_UPDATE:
-                ff_input, noise = live_ff_input(self, step, ff_input)
-                if self.RATE_NOISE:
-                    rates, rec_input = self.update_dynamics(
-                        rates, ff_input, rec_input, Wab_T, W_stp_T
-                    )
-                    rates = rates + noise
-                else:
-                    rates, rec_input = self.update_dynamics(
-                        rates, ff_input + noise, rec_input, Wab_T, W_stp_T
-                    )
-
+                ff_input = live_ff_input(self, step, ff_input)
+                rates, rec_input = self.update_dynamics(rates, ff_input, rec_input, Wab_T, W_stp_T)
             else:
-                if self.LR_TRAIN:
-                    # ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD-1)
-                    if self.IF_RL:
-                        ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD)
-                    else:
-                        self.RWD = 22
+                # if self.LR_TRAIN:
+                #     # ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD-1)
+                #     if self.IF_RL:
+                #         ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD)
+                #     else:
+                #         self.RWD = 22
 
-                rates, rec_input = self.update_dynamics(
-                    rates, ff_input[:, step], rec_input, Wab_T, W_stp_T
-                )
+                rates, rec_input = self.update_dynamics(rates, ff_input[:, step], rec_input, Wab_T, W_stp_T)
+
 
             # update moving average
             mv_rates += rates
             if self.LIVE_FF_UPDATE and RET_FF:
-                mv_ff += ff_input + noise
+                mv_ff += ff_input
 
             # Reset moving average to start at 0
             if step == self.N_STEADY - self.N_WINDOW - 1:
@@ -379,15 +371,6 @@ class Network(nn.Module):
 
         # returns last step
         rates = rates[..., self.slices[0]]
-
-        # if self.RANDOM_DELAY:
-        #     n_steps = torch.randint(self.N_STIM_OFF[0], self.N_STIM_ON[-1], (self.N_BATCH,))
-
-        #     batch_indices = torch.arange(self.N_BATCH).repeat_interleave(n_steps)
-        #     step_indices = torch.cat([torch.arange(-n, 0) for n in n_steps])
-
-        #     # Replace the elements with NaNs
-        #     rates[batch_indices, step_indices] = float('nan')
 
         # returns full sequence
         if REC_LAST_ONLY == 0:

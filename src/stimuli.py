@@ -32,7 +32,8 @@ class Stimuli:
                 device=self.device,
             )[:-1]
             theta = theta.unsqueeze(0).expand((1, self.size[-1]))
-            # print(theta.shape, phase.shape)
+
+            print(theta.shape, phase.shape)
 
         return strength * nn.ReLU()(1.0 + footprint * torch.cos(theta - phase))
 

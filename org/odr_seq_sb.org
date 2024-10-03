@@ -75,6 +75,28 @@
 #+RESULTS:
 
 * Helpers
+#+begin_src ipython
+def compute_fourier_moments(signal, dim=-1):
+    # Perform the FFT
+    fft_coeffs = torch.fft.fft(signal, dim=dim)
+
+    # Calculate the zero, first, and second Fourier moments
+    zero_moment = fft_coeffs[..., 0]
+    first_moment = fft_coeffs[..., 1]
+    # second_moment = fft_coeffs[..., 2]
+
+    # Calculate magnitude m0, m1, and m2
+    m0 = torch.abs(zero_moment) / signal.size(dim)  # Normalize m0 by the signal length
+    m1 = 2.0 * torch.abs(first_moment) / signal.size(dim)
+    # m2 = 2.0 * torch.abs(second_moment) / signal.size(dim)
+
+    # Calculate the phase of the signal
+    phases = torch.angle(first_moment) % (2.0 * torch.pi)
+
+    return m0, m1, phases
+#+end_src
+
+#+RESULTS:
 
 #+begin_src ipython
 def get_fourier_moments(signal, axis=-1):
@@ -137,7 +159,7 @@ def generate_weighted_phase_samples(N_BATCH, angles, preferred_angle, sigma):
     return phase_samples
 
 # Parameters
-N_BATCH = 10000
+N_BATCH = 1000
 angles = np.array([0., 45., 90., 135., 180., 225., 270., 315.])
 reference = 90.  # Example preferred angle
 sigma = 75.  # Standard deviation of the Gaussian
@@ -150,9 +172,47 @@ plt.hist(phase_samples[:,0], bins=8);
 
 #+RESULTS:
 :RESULTS:
-: torch.Size([10000, 1])
-[[./figures/odr/figure_6.png]]
+: torch.Size([1000, 1])
+[[./figures/odr/figure_7.png]]
 :END:
+
+#+begin_src ipython
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+
+def continuous_biased_phases(N_BATCH, preferred_angle, sigma):
+    # Generate samples from a normal distribution using PyTorch
+    phase_samples = torch.normal(mean=preferred_angle, std=sigma, size=(N_BATCH, 1))
+
+    # Normalize angles to the range [0, 360)
+    phase_samples = phase_samples % 360
+
+    return phase_samples
+
+# Parameters
+N_BATCH = 1000
+reference = 90.0  # Example preferred angle
+sigma = 75.0  # Standard deviation of the Gaussian
+
+# Generate continuous samples
+phase_samples = continuous_biased_phases(N_BATCH, reference, sigma)
+print(phase_samples.shape)
+# Convert to numpy for plotting
+phase_samples_np = phase_samples.numpy()
+
+plt.hist(phase_samples_np[:, 0], bins=36, range=(0, 360))
+plt.xlabel('Angle (degrees)')
+plt.ylabel('Frequency')
+plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: torch.Size([1000, 1])
+[[./figures/odr/figure_8.png]]
+:END:
+
 
 #+begin_src ipython
 
@@ -170,110 +230,126 @@ seed = np.random.randint(0, 1e6)
 print(seed)
 
 seed = 181678
-seed = 975532
+seed = 1975532
+seed = 197553
+IF_BIASED_PHASES = 1
 
 #+end_src
 
 #+RESULTS:
-: 269396
+: 269977
 
 #+begin_src ipython
-model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, LIVE_FF_UPDATE=1)
+model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, LIVE_FF_UPDATE=0)
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-model_state_dict = torch.load('models/odr_%d.pth' % seed)
-# model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=4)
+if IF_BIASED_PHASES:
+    model_state_dict = torch.load('models/odr_bias_%d.pth' % seed)
+else:
+    model_state_dict = torch.load('models/odr_%d.pth' % seed)
+
 model.load_state_dict(model_state_dict)
-model.eval()  # Set to evaluation mode
+model.eval()
 #+end_src
 
 #+RESULTS:
-: Network(
-:   (dropout): Dropout(p=0.0, inplace=False)
-: )
+:RESULTS:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+FileNotFoundError                         Traceback (most recent call last)
+Cell In[12], line 2
+      1 if IF_BIASED_PHASES:
+----> 2     model_state_dict = torch.load('models/odr_bias_%d.pth' % seed)
+      3 else:
+      4     model_state_dict = torch.load('models/odr_%d.pth' % seed)
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/serialization.py:998, in load(f, map_location, pickle_module, weights_only, mmap, **pickle_load_args)
+    995 if 'encoding' not in pickle_load_args.keys():
+    996     pickle_load_args['encoding'] = 'utf-8'
+--> 998 with _open_file_like(f, 'rb') as opened_file:
+    999     if _is_zipfile(opened_file):
+   1000         # The zipfile reader is going to advance the current file position.
+   1001         # If we want to actually tail call to torch.jit.load, we need to
+   1002         # reset back to the original position.
+   1003         orig_position = opened_file.tell()
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/serialization.py:445, in _open_file_like(name_or_buffer, mode)
+    443 def _open_file_like(name_or_buffer, mode):
+    444     if _is_path(name_or_buffer):
+--> 445         return _open_file(name_or_buffer, mode)
+    446     else:
+    447         if 'w' in mode:
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/serialization.py:426, in _open_file.__init__(self, name, mode)
+    425 def __init__(self, name, mode):
+--> 426     super().__init__(open(name, mode))
+
+FileNotFoundError: [Errno 2] No such file or directory: 'models/odr_bias_197553.pth'
+#+end_example
+:END:
 
 #+begin_src ipython
 print(model.J_STP)
-print(model.N_BATCH)
-print(model.RANDOM_DELAY)
 #+end_src
 
 #+RESULTS:
 : Parameter containing:
-: tensor(41.7043, device='cuda:1', requires_grad=True)
-: 1
-: 0
-
-* Batching Live Inputs
-
-#+begin_src ipython
-  N_PHASE = 8
-  N_BATCH = 160 * N_PHASE
-
-  PHI0 = model.PHI0.unsqueeze(-1).repeat((N_BATCH, 1, 1))
-
-  # phases =  [  0.,  45.,  90., 135., 180., 225., 270., 315.]
-  # phases_tensor = torch.tensor(phases)
-  # PHI0[:, 0] = phases_tensor[torch.randint(0, len(phases), (N_BATCH,))].unsqueeze(1)
-  # PHI0[:, -1] = phases_tensor[torch.randint(0, len(phases), (N_BATCH,))].unsqueeze(1)
-  # print(PHI0.shape)
-
-  PHI0[:, 0] = torch.randint(0, 360, (N_BATCH, 1)).to(DEVICE)
-  PHI0[:, -1] = torch.randint(0, 360, (N_BATCH, 1)).to(DEVICE)
-
-  # PHI0[:, 0] = generate_weighted_phase_samples(N_BATCH, angles, reference, sigma)
-  # PHI0[:, 1] = generate_weighted_phase_samples(N_BATCH, angles, reference, sigma)
-  # print(PHI0.shape)
- #+end_src
-
-#+RESULTS:
-: torch.Size([1, 3])
-
-#+begin_src ipython
-fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-ax[0].hist(PHI0[:, 0, 0].cpu(), bins=15)
-ax[0].set_xlabel('Prev. Stim')
-ax[1].hist(PHI0[:,-1, 0].cpu(), bins=15)
-ax[1].set_xlabel('Curr. Stim')
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr/figure_13.png]]
-
-#+begin_src ipython
-  model.PHI0 = PHI0
-  model.N_BATCH = N_PHASE
-  rates = model().cpu().detach().numpy()
-  print(rates.shape)
-#+end_src
-
-#+RESULTS:
-: (1280, 81, 750)
-
-#+begin_src ipython
-  #  m0, m1, phi = decode_bump(rates, axis=-1)
-  m0, m1, phi = get_fourier_moments(rates, axis=-1)
-  print(phi.shape)
-#+end_src
-
-#+RESULTS:
-: (1280, 81)
+: tensor(20., device='cuda:1', requires_grad=True)
 
 * Batching Inputs Sequentially
 
 #+begin_src ipython
-    model.N_BATCH = N_BATCH
-    labels = torch.randint(0, 360, (N_BATCH, 1)).to(DEVICE)
-    model.PHI0 = torch.ones((N_BATCH, 2, 1), device=DEVICE, dtype=torch.float)
-    model.PHI0[:, 0] = labels
-
-    ff_input = model.init_ff_input()
-    print(model.PHI0.shape, ff_input.shape, labels.shape)
+768+128
 #+end_src
+
+#+RESULTS:
+: 896
+
+#+begin_src ipython
+N_BATCH = 800
+model.N_BATCH = N_BATCH
+
+if IF_BIASED_PHASES:
+    model.PHI0 = torch.zeros(size=(N_BATCH, 3, 1), device=DEVICE, dtype=torch.float)
+    model.PHI0[:, 0] = continuous_biased_phases(N_BATCH, reference, sigma)
+    model.PHI0[:, -1] = continuous_biased_phases(N_BATCH, reference, sigma)
+else:
+    model.PHI0 = torch.randint(low=0, high=360, size=(N_BATCH, 3, 1), device=DEVICE, dtype=torch.float)
+
+ff_input = model.init_ff_input()
+
+# m0, m1, phi = decode_bump_torch(ff_input[..., model.slices[0]], axis=-1)
+# m0, m1, phi = decode_bump(ff_input.cpu().numpy()[..., model.slices[0]], axis=-1)
+# m0, m1, phi = get_fourier_moments(ff_input.cpu().numpy()[..., model.slices[0]], axis=-1)
+m0, m1, phase = compute_fourier_moments(ff_input[..., model.slices[0]], dim=-1)
+window_size = int((model.N_STIM_ON[0]-model.N_STEADY+1) / model.N_WINDOW)
+#+end_src
+
+#+RESULTS:
+: torch.Size([1, 750]) torch.Size([800, 1])
+: torch.Size([1, 750]) torch.Size([800, 1])
+: torch.Size([1, 750]) torch.Size([800, 1])
+
+#+begin_src ipython
+idx = np.random.randint(32)
+xtime = np.linspace(0, model.DURATION, phase.shape[-1])
+plt.plot(xtime, phase[idx].cpu().detach().numpy() * 180 / np.pi)
+plt.axhline(model.PHI0[idx,0,0].cpu() * 180/np.pi, color='k', ls='--')
+
+print(model.PHI0[idx, 0, 0].cpu()*180/np.pi)
+# print(phase[idx, window_size].cpu().detach().numpy() * 180 / np.pi)
+plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: tensor(122.4382)
+[[./figures/odr/figure_16.png]]
+:END:
 
 #+begin_src ipython
 # model.N_BATCH = 96
@@ -304,28 +380,49 @@ plt.show()
 #+RESULTS:
 
 #+begin_src ipython
-# fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-# ax[0].hist(PHI0[:, 0, 0].cpu(), bins=15)
-# ax[1].hist(PHI0[:,-1, 0].cpu(), bins=15)
-# plt.show()
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+ax[0].hist(model.PHI0[:, 0, 0].cpu(), bins=15)
+ax[1].hist(model.PHI0[:,-1, 0].cpu(), bins=15)
+plt.show()
  #+end_src
 
 #+RESULTS:
+[[./figures/odr/figure_18.png]]
 
 #+begin_src ipython
-# rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
-# print('ff_input', ff_input.shape)
-# print('rates', rates.shape)
+rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
+print('rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: rates (800, 91, 750)
+
+#+begin_src ipython
+# m0, m1, phi = decode_bump_torch(rates, axis=-1)
+m0, m1, phi = get_fourier_moments(rates, axis=-1)
+# m0, m1, phi = compute_fourier_moments(rates, dim=-1)
+# print(phi.shape)
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-  # m0, m1, phi = decode_bump(rates, axis=-1)
-  # print(phi.shape)
+idx = np.random.randint(32)
+xtime = np.linspace(0, model.DURATION, phi.shape[-1])
+plt.plot(xtime, phi[idx]* 180 / np.pi)
+plt.axhline(model.PHI0[idx,0,0].cpu() * 180/np.pi, color='k', ls='--')
+
+print(model.PHI0[idx, 0, 0].cpu()*180/np.pi)
+# print(phi[idx, window_size]* 180 / np.pi)
+plt.show()
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+: tensor(73.4401)
+[[./figures/odr/figure_21.png]]
+:END:
+
 
 * Results
 ** Rates
@@ -355,15 +452,22 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_20.png]]
+[[./figures/odr/figure_22.png]]
 
 #+begin_src ipython
-PHI0 = PHI0.cpu().detach().numpy()
+PHI0 = model.PHI0.cpu().detach().numpy() * 180.0 / np.pi
 print(PHI0.shape)
+
+idx = np.random.randint(0, 32)
+print(PHI0[idx, 0, 0])
+window_size = int((model.N_STIM_ON[1]-model.N_STEADY) / model.N_WINDOW)
+print(phi[idx, window_size] * 180 / np.pi)
 #+end_src
 
 #+RESULTS:
-: (1280, 3, 1)
+: (800, 3, 1)
+: 49.40541
+: 55.13599427461926
 
 ** errors
 
@@ -378,11 +482,15 @@ ref_loc = (PHI0[:, 0] - reference) * np.pi / 180.0
 ref_loc = (ref_loc + np.pi) % (2 * np.pi) - np.pi
 ref_loc *= 180 / np.pi
 
+window_size = int((model.N_STIM_OFF[-1]-model.N_STEADY) / model.N_WINDOW)
+# errors = phi - phi[:, window_size][:, np.newaxis]
 errors = (phi - target_loc * np.pi / 180.0)
 errors = (errors + np.pi) % (2 * np.pi) - np.pi
 errors *= 180 / np.pi
 
-errors2 = (phi - PHI0[:, 0] * np.pi / 180.0)
+window_size = int((model.N_STIM_OFF[0]-model.N_STEADY) / model.N_WINDOW)
+errors2 = ((phi - PHI0[:, 0] * np.pi / 180.0))
+# errors2 = phi - phi[:, window_size][:, np.newaxis]
 errors2 = (errors2 + np.pi) % (2 * np.pi) - np.pi
 errors2 *= 180 / np.pi
 
@@ -390,7 +498,7 @@ print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (1280, 81) (1280, 1) (1280, 1) (1280, 1)
+: (800, 91) (800, 1) (800, 1) (800, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -408,7 +516,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_23.png]]
+[[./figures/odr/figure_25.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
@@ -425,10 +533,10 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_24.png]]
+[[./figures/odr/figure_26.png]]
 
 #+begin_src ipython
-mask = np.abs(errors) <= 35
+mask = np.abs(errors) <= 45
 print(mask.shape)
 
 errors = np.where(mask, errors, np.nan)[:, -1]
@@ -442,9 +550,9 @@ print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (1280, 81)
-: (1280,)
-: (269, 1) (269, 1) (269, 1) (269, 1)
+: (800, 91)
+: (800,)
+: (215, 1) (215, 1) (215, 1) (215, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
@@ -461,14 +569,14 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_26.png]]
+[[./figures/odr/figure_28.png]]
 
 ** biases
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.5*width, height])
 
-ax[0].plot(target_loc[:, 0], errors[:,-1], 'o')
+ax[0].plot(target_loc[:, 0], errors[:,-1], 'o', alpha=.1)
 ax[0].set_xlabel('Target Loc. (°)')
 ax[0].set_ylabel('Error (°)')
 
@@ -479,7 +587,7 @@ ax[0].plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
 
 ax[0].axhline(color='k', linestyle=":")
 
-ax[1].plot(rel_loc[:, 0], errors[:,-1], 'bo')
+ax[1].plot(rel_loc[:, 0], errors[:,-1], 'bo', alpha=.1)
 # ax[1].plot(rel_loc2[:, 0], errors2[:,-1], 'ro')
 ax[1].set_xlabel('Rel. Loc. (°)')
 ax[1].set_ylabel('Error (°)')
@@ -488,7 +596,7 @@ stt = binned_statistic(rel_loc[:, 0], errors[:, -1], statistic='mean', bins=6, r
 dstt = np.mean(np.diff(stt.bin_edges))
 ax[1].plot(stt.bin_edges[:-1]+dstt/2, stt.statistic, 'b')
 
-ax[2].plot(ref_loc[:, 0], errors[:,-1], 'bo')
+ax[2].plot(ref_loc[:, 0], errors[:,-1], 'bo', alpha=.1)
 # ax[2].plot(ref_loc2[:, 0], errors2[:,-1], 'ro')
 ax[2].set_xlabel('Ref. Loc. (°)')
 ax[2].set_ylabel('Error (°)')
@@ -507,7 +615,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_27.png]]
+[[./figures/odr/figure_29.png]]
 
 #+begin_src ipython
 import pandas as pd
@@ -515,13 +623,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Assuming rel_loc and errors are defined earlier
-data = pd.DataFrame({'rel_loc': rel_loc[:, 0], 'errors': errors[:, -1], 'ref_loc': ref_loc[:, -1]})
+data = pd.DataFrame({'target_loc': target_loc[:, -1], 'rel_loc': rel_loc[:, -1], 'errors': errors[:, -1], 'ref_loc': ref_loc[:, -1]})
 
 # Bin data using pandas cut
-data['bin'] = pd.cut(data['rel_loc'], bins=8)
+data['bin'] = pd.cut(data['rel_loc'], bins=6)
 # Calculate mean and standard error for each bin
+means = data.groupby('target_loc')['errors'].apply('mean')
 binned_data = data.groupby('bin')['errors'].agg(['mean', 'sem'])
-# Get bin centers
+
 bin_edges = binned_data.index.get_level_values(0)
 bin_centers = (bin_edges.categories.left + bin_edges.categories.right) / 2
 
@@ -532,15 +641,13 @@ ax[0].fill_between(bin_centers,
                 binned_data['mean'] - binned_data['sem'],
                 binned_data['mean'] + binned_data['sem'],
                 color='b', alpha=0.2)
-# ax[0].set_ylim([-30, 30])
+
 ax[0].axhline(color='k', linestyle=":")
 ax[0].set_xlabel('Rel. Loc. (°)')
 ax[0].set_ylabel('Curr. Error (°)')
 
-data['bin'] = pd.cut(data['ref_loc'], bins=8)
-# Calculate mean and standard error for each bin
+data['bin'] = pd.cut(data['ref_loc'], bins=6)
 binned_data = data.groupby('bin')['errors'].agg(['mean', 'sem'])
-# Get bin centers
 bin_edges = binned_data.index.get_level_values(0)
 bin_centers = (bin_edges.categories.left + bin_edges.categories.right) / 2
 
@@ -549,7 +656,6 @@ ax[1].fill_between(bin_centers,
                 binned_data['mean'] - binned_data['sem'],
                 binned_data['mean'] + binned_data['sem'],
                 color='b', alpha=0.2)
-# ax[1].set_ylim([-30, 30])
 ax[1].axhline(color='k', linestyle=":")
 ax[1].set_xlabel('Ref. Loc. (°)')
 ax[1].set_ylabel('Curr. Error (°)')
@@ -558,7 +664,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_28.png]]
+[[./figures/odr/figure_30.png]]
 
 #+begin_src ipython
 

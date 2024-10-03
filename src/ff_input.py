@@ -63,7 +63,7 @@ def live_ff_input(model, step, ff_input):
         if step in model.N_STIM_OFF:
             ff_input[:, model.slices[0]] = model.Ja0[:, 0]
 
-    return ff_input, noise
+    return ff_input + noise
 
 
 def init_ff_live(model):
@@ -75,7 +75,7 @@ def init_ff_live(model):
     model.stim_mask[model.N_BATCH // 2 :] = -1
 
     ff_input = torch.zeros((model.N_BATCH, model.N_NEURON), device=model.device)
-    ff_input, _ = live_ff_input(model, 0, ff_input)
+    ff_input = live_ff_input(model, 0, ff_input)
 
     return ff_input
 
@@ -149,7 +149,6 @@ def init_ff_seq(model):
                 stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[:, i])
 
             # reshape stimulus to be (N_BATCH, 1, NE) adding dummy time dimension
-
             if stimulus.ndim!=3:
                 stimulus = stimulus.unsqueeze(1)
 
@@ -211,6 +210,12 @@ def rl_ff_udpdate(model, ff_input, rates, step, rwd):
     return ff_input
 
 def init_ff_input(model):
+    if model.TASK=='odr':
+        model.PHI0 = torch.deg2rad(model.PHI0) if torch.any(model.PHI0 > 2 * torch.pi) else model.PHI0
+        # print(model.PHI0[0, 0, 0])
     if model.LIVE_FF_UPDATE:
+        model.Ja0 = model.M0 * torch.sqrt(model.Ka[0]) * model.Ja0
+        model.VAR_FF.mul_(torch.sqrt(model.Ka[0]))
         return init_ff_live(model)
+
     return init_ff_seq(model)
