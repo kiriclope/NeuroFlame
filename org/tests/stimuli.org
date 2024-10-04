@@ -31,7 +31,7 @@
   from time import perf_counter
 
   from src.network import Network
-  from src.decode import decode_bump
+  from src.decode import decode_bump, decode_bump_torch
 #+end_src
 
 #+RESULTS:
@@ -123,6 +123,50 @@
 
 #+RESULTS:
 
+#+begin_src ipython
+def get_fourier_moments(signal, axis=-1):
+    # Perform the FFT
+    fft_coeffs = np.fft.fft(signal, axis=axis)
+
+    # Calculate the zero, first, and second Fourier moments
+    zero_moment = fft_coeffs[..., 0]
+    first_moment = fft_coeffs[..., 1]
+
+    # Calculate magnitude m0, m1, and m2
+    m0 = np.abs(zero_moment) / signal.shape[axis]  # Normalize m0 by the signal length
+    m1 = 2.0 * np.abs(first_moment) / signal.shape[axis]
+
+    # Calculate the phase of the signal
+    phases = (np.angle(first_moment) + np.pi) % (2.0 * np.pi) - np.pi
+
+    return m0, m1, phases
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def compute_fourier_moments(signal, dim=-1):
+    # Perform the FFT
+    fft_coeffs = torch.fft.fft(signal, dim=dim)
+
+    # Calculate the zero, first, and second Fourier moments
+    zero_moment = fft_coeffs[..., 0]
+    first_moment = fft_coeffs[..., 1]
+    # second_moment = fft_coeffs[..., 2]
+
+    # Calculate magnitude m0, m1, and m2
+    m0 = torch.abs(zero_moment) / signal.size(dim)  # Normalize m0 by the signal length
+    m1 = 2.0 * torch.abs(first_moment) / signal.size(dim)
+    # m2 = 2.0 * torch.abs(second_moment) / signal.size(dim)
+
+    # Calculate the phase of the signal
+    phases = torch.angle(first_moment) % (2.0 * torch.pi)
+
+    return m0, m1, phases
+#+end_src
+
+#+RESULTS:
+
 * Stimuli
 ** Imports
 
@@ -200,7 +244,120 @@
 
 #+begin_src ipython
   REPO_ROOT = "/home/leon/models/NeuroFlame"
-  model = Network('config_odr.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='odr_rand', LIVE_FF_UPDATE=0, N_BATCH=10, seed=0)
+  model = Network('train_odr.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='odr', N_BATCH=10, seed=0)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+  Ne = model.Na[0].cpu().numpy()
+  N = model.N_NEURON
+  print(model.PHI0.shape)
+
+  model.PHI0 = torch.randint(0, 360, (model.N_BATCH, 2, 1)).to('cuda')
+
+  ff_input = model.init_ff_input()
+  print('ff', ff_input.shape)
+  rates = model(ff_input=ff_input)
+  print('rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([1, 2])
+: torch.Size([1, 1000]) torch.Size([10, 1])
+: torch.Size([1, 1000]) torch.Size([10, 1])
+: ff torch.Size([10, 405, 1000])
+: rates torch.Size([10, 61, 1000])
+
+#+begin_src ipython
+  # m0, m1, phase = decode_bump(ff_input[..., model.slices[0]].cpu().numpy())
+  # F0, F1, phi = decode_bump(rates.cpu().detach().numpy())
+
+  m0, m1, phase = get_fourier_moments(ff_input[..., model.slices[0]].cpu().numpy())
+  F0, F1, phi = get_fourier_moments(rates.cpu().detach().numpy())
+
+  m0, m1, phase = decode_bump_torch(ff_input[..., model.slices[0]])
+  F0, F1, phi = decode_bump_torch(rates)
+
+  try:
+      phase = phase.cpu().numpy()
+      phi = phi.cpu().detach().numpy()
+      m1 = m1.cpu().numpy()
+      F1 = F1.cpu().detach().numpy()
+  except:
+      pass
+  print(m0.shape, F0.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([10, 405]) torch.Size([10, 61])
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=(2.5*width, height))
+
+  xtime = np.linspace(-model.T_STEADY, model.DURATION, ff_input.shape[1])
+  idx = np.random.randint(model.N_BATCH)
+  ax[0].imshow(ff_input[idx].T.cpu().numpy(),
+               cmap='jet', aspect='auto',
+               extent=[-model.T_STEADY, model.DURATION, 0, 1000])
+
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_ylim([0, Ne])
+
+  ax[1].plot(xtime, m1[idx].T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+
+  ax[2].plot(xtime, phase[idx].T * 180 / np.pi)
+  ax[2].set_xlabel('Step')
+  ax[2].set_ylabel('Phase (°)')
+
+  ax[2].axhline(model.PHI0.cpu().numpy()[idx, 0]*180/np.pi, color='k', ls='--', label='Stim 1')
+  ax[2].axhline(model.PHI0.cpu().numpy()[idx, 1]*180/np.pi, color='r', ls='--', label='Stim 2')
+  # plt.legend(fontsize=12)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/004699938657f7e9e0ed4a46c5b1d07c46d1c127.png]]
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 3, figsize=(2.5*width, height))
+
+  xtime = np.linspace(0, model.DURATION, rates.shape[1])
+
+  idx = np.random.randint(model.N_BATCH)
+  ax[0].imshow(rates[idx].T.cpu().detach().numpy(),
+               cmap='jet', aspect='auto',
+               extent=[0, model.DURATION, 0, 1000])
+
+  ax[0].set_xlabel('Step')
+  ax[0].set_ylabel('Neuron #')
+  ax[0].set_ylim([0, Ne])
+
+  ax[1].plot(xtime, F1[idx].T)
+  ax[1].set_xlabel('Step')
+  ax[1].set_ylabel('$\mathcal{F}_1$')
+
+  ax[2].plot(xtime, phi[idx].T * 180 / np.pi)
+  ax[2].set_xlabel('Step')
+  ax[2].set_ylabel('Phase (°)')
+
+  ax[2].axhline(model.PHI0.cpu().numpy()[idx, 0]*180/np.pi, color='k', ls='--', label='Stim 1')
+  ax[2].axhline(model.PHI0.cpu().numpy()[idx, 1]*180/np.pi, color='r', ls='--', label='Stim 2')
+  # plt.legend(fontsize=12)
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/65f767f85635fb094dbfbd8e3f9a140a8f2707c4.png]]
+
+*** RANDOM ODR
+
+#+begin_src ipython
+  REPO_ROOT = "/home/leon/models/NeuroFlame"
+  model = Network('config_odr.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='odr_rand', N_BATCH=10)
 #+end_src
 
 #+RESULTS:
@@ -214,6 +371,8 @@
 #+end_src
 
 #+RESULTS:
+: torch.Size([1, 500]) torch.Size([10, 1])
+: torch.Size([1, 500]) torch.Size([10, 1])
 : (10, 222, 1000)
 
 #+begin_src ipython
@@ -227,24 +386,30 @@
 #+begin_src ipython
   fig, ax = plt.subplots(1, 3, figsize=(2.25*width, height))
 
-  ax[0].imshow(ff_input[0].T, cmap='jet', aspect='auto')
+  idx = np.random.randint(model.N_BATCH)
+  ax[0].imshow(ff_input[idx].T, cmap='jet', aspect='auto')
   ax[0].set_xlabel('Step')
   ax[0].set_ylabel('Neuron #')
   ax[0].set_ylim([0, Ne])
 
-  ax[1].plot(m1.T)
+  ax[1].plot(m1[idx].T)
   ax[1].set_xlabel('Step')
   ax[1].set_ylabel('$\mathcal{F}_1$')
 
-  ax[2].plot(phase.T * 180 / np.pi)
+  ax[2].plot(phase[idx].T * 180 / np.pi)
   ax[2].set_xlabel('Step')
   ax[2].set_ylabel('Phase (°)')
 
+  ax[2].axhline(model.phase.cpu().numpy()[idx]*180/np.pi, color='k', ls='--')
+  print(model.phase[idx].item()*180/np.pi)
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/70a3c56825fadd5cb4a69ab04cefc8daf5a23e5f.png]]
+:RESULTS:
+: 237.45950415644387
+[[./.ob-jupyter/397d9bec0eb0c12cd7e3de024c982700d0dd688c.png]]
+:END:
 
 #+begin_src ipython
   plt.hist(model.phase.cpu().numpy() * 180 / np.pi, bins=20)
@@ -253,7 +418,7 @@
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/7b3f6505c85a94c10d0ab6538b09e3de47ad314a.png]]
+[[./.ob-jupyter/0198c215a7fffbd439038225c6e8df11cc67f19d.png]]
 
 #+begin_src ipython
 
@@ -412,7 +577,6 @@ RuntimeError: Error original_tensor.shape torch.Size([2500, 2500]) is not suppor
 #+end_src
 
 #+RESULTS:
-
 
 ** LIVE FF UPDATE
 *** ODR
@@ -599,7 +763,6 @@ RuntimeError: Error original_tensor.shape torch.Size([2500, 2500]) is not suppor
 
 #+end_src
 #+RESULTS:
-
 
 * Random Delay
 ** SEQ FF UPDATE

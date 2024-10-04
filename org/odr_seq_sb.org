@@ -1,6 +1,6 @@
 #+STARTUP: fold
 #+TITLE: Serial Biases in the ODR
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_sb :kernel torch :exports results :output-dir ./figures/odr :file (lc/org-babel-tangle-figure-filename)
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_sb :kernel torch :exports results :output-dir ./figures/odr_sb :file (lc/org-babel-tangle-figure-filename)
 
 * Notebook Settings
 
@@ -157,24 +157,9 @@ def generate_weighted_phase_samples(N_BATCH, angles, preferred_angle, sigma):
     phase_samples = angles_tensor[indices].reshape(N_BATCH, 1)
 
     return phase_samples
-
-# Parameters
-N_BATCH = 1000
-angles = np.array([0., 45., 90., 135., 180., 225., 270., 315.])
-reference = 90.  # Example preferred angle
-sigma = 75.  # Standard deviation of the Gaussian
-
-# Generate samples
-phase_samples = generate_weighted_phase_samples(N_BATCH, angles, reference, sigma)
-print(phase_samples.shape)
-plt.hist(phase_samples[:,0], bins=8);
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: torch.Size([1000, 1])
-[[./figures/odr/figure_7.png]]
-:END:
 
 #+begin_src ipython
 import torch
@@ -192,7 +177,7 @@ def continuous_biased_phases(N_BATCH, preferred_angle, sigma):
 
 # Parameters
 N_BATCH = 1000
-reference = 90.0  # Example preferred angle
+reference = 180  # Example preferred angle
 sigma = 75.0  # Standard deviation of the Gaussian
 
 # Generate continuous samples
@@ -210,7 +195,7 @@ plt.show()
 #+RESULTS:
 :RESULTS:
 : torch.Size([1000, 1])
-[[./figures/odr/figure_8.png]]
+[[./figures/odr_sb/figure_8.png]]
 :END:
 
 
@@ -231,23 +216,29 @@ print(seed)
 
 seed = 181678
 seed = 1975532
-seed = 197553
-IF_BIASED_PHASES = 1
+seed = 1975
 
+IF_BIASED_PHASES = 0
+IF_BIAS = 1
+
+reference = 0.  # Example preferred angle
+sigma = 75.  # Standard deviation of the Gaussian
 #+end_src
 
 #+RESULTS:
-: 269977
+: 527944
 
 #+begin_src ipython
-model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, LIVE_FF_UPDATE=0)
+model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1)
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-if IF_BIASED_PHASES:
-    model_state_dict = torch.load('models/odr_bias_%d.pth' % seed)
+if IF_BIAS:
+    print('Biased ODR')
+    model_state_dict = torch.load('models/odr_bias_%d_ref_%d.pth' % (reference, seed) )
+    # model_state_dict = torch.load('models/odr_bias_%d.pth' % seed)
 else:
     model_state_dict = torch.load('models/odr_%d.pth' % seed)
 
@@ -257,39 +248,10 @@ model.eval()
 
 #+RESULTS:
 :RESULTS:
-# [goto error]
-#+begin_example
----------------------------------------------------------------------------
-FileNotFoundError                         Traceback (most recent call last)
-Cell In[12], line 2
-      1 if IF_BIASED_PHASES:
-----> 2     model_state_dict = torch.load('models/odr_bias_%d.pth' % seed)
-      3 else:
-      4     model_state_dict = torch.load('models/odr_%d.pth' % seed)
-
-File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/serialization.py:998, in load(f, map_location, pickle_module, weights_only, mmap, **pickle_load_args)
-    995 if 'encoding' not in pickle_load_args.keys():
-    996     pickle_load_args['encoding'] = 'utf-8'
---> 998 with _open_file_like(f, 'rb') as opened_file:
-    999     if _is_zipfile(opened_file):
-   1000         # The zipfile reader is going to advance the current file position.
-   1001         # If we want to actually tail call to torch.jit.load, we need to
-   1002         # reset back to the original position.
-   1003         orig_position = opened_file.tell()
-
-File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/serialization.py:445, in _open_file_like(name_or_buffer, mode)
-    443 def _open_file_like(name_or_buffer, mode):
-    444     if _is_path(name_or_buffer):
---> 445         return _open_file(name_or_buffer, mode)
-    446     else:
-    447         if 'w' in mode:
-
-File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/serialization.py:426, in _open_file.__init__(self, name, mode)
-    425 def __init__(self, name, mode):
---> 426     super().__init__(open(name, mode))
-
-FileNotFoundError: [Errno 2] No such file or directory: 'models/odr_bias_197553.pth'
-#+end_example
+: Biased ODR
+: Network(
+:   (dropout): Dropout(p=0.0, inplace=False)
+: )
 :END:
 
 #+begin_src ipython
@@ -298,16 +260,9 @@ print(model.J_STP)
 
 #+RESULTS:
 : Parameter containing:
-: tensor(20., device='cuda:1', requires_grad=True)
+: tensor(26.5926, device='cuda:1', requires_grad=True)
 
 * Batching Inputs Sequentially
-
-#+begin_src ipython
-768+128
-#+end_src
-
-#+RESULTS:
-: 896
 
 #+begin_src ipython
 N_BATCH = 800
@@ -322,10 +277,8 @@ else:
 
 ff_input = model.init_ff_input()
 
-# m0, m1, phi = decode_bump_torch(ff_input[..., model.slices[0]], axis=-1)
-# m0, m1, phi = decode_bump(ff_input.cpu().numpy()[..., model.slices[0]], axis=-1)
-# m0, m1, phi = get_fourier_moments(ff_input.cpu().numpy()[..., model.slices[0]], axis=-1)
-m0, m1, phase = compute_fourier_moments(ff_input[..., model.slices[0]], dim=-1)
+m0, m1, phase = decode_bump_torch(ff_input[..., model.slices[0]], axis=-1)
+# m0, m1, phase = compute_fourier_moments(ff_input[..., model.slices[0]], dim=-1)
 window_size = int((model.N_STIM_ON[0]-model.N_STEADY+1) / model.N_WINDOW)
 #+end_src
 
@@ -347,8 +300,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: tensor(122.4382)
-[[./figures/odr/figure_16.png]]
+: tensor(172.)
+[[./figures/odr_sb/figure_15.png]]
 :END:
 
 #+begin_src ipython
@@ -387,7 +340,7 @@ plt.show()
  #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_18.png]]
+[[./figures/odr_sb/figure_17.png]]
 
 #+begin_src ipython
 rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
@@ -398,8 +351,8 @@ print('rates', rates.shape)
 : rates (800, 91, 750)
 
 #+begin_src ipython
-# m0, m1, phi = decode_bump_torch(rates, axis=-1)
-m0, m1, phi = get_fourier_moments(rates, axis=-1)
+m0, m1, phi = decode_bump(rates, axis=-1)
+# m0, m1, phi = get_fourier_moments(rates, axis=-1)
 # m0, m1, phi = compute_fourier_moments(rates, dim=-1)
 # print(phi.shape)
 #+end_src
@@ -419,10 +372,9 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: tensor(73.4401)
-[[./figures/odr/figure_21.png]]
+: tensor(172.)
+[[./figures/odr_sb/figure_20.png]]
 :END:
-
 
 * Results
 ** Rates
@@ -452,7 +404,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_22.png]]
+[[./figures/odr_sb/figure_21.png]]
 
 #+begin_src ipython
 PHI0 = model.PHI0.cpu().detach().numpy() * 180.0 / np.pi
@@ -466,8 +418,8 @@ print(phi[idx, window_size] * 180 / np.pi)
 
 #+RESULTS:
 : (800, 3, 1)
-: 49.40541
-: 55.13599427461926
+: 249.0
+: 250.09466251516002
 
 ** errors
 
@@ -478,7 +430,7 @@ rel_loc = (PHI0[:, 0] - target_loc) * np.pi / 180.0
 rel_loc = (rel_loc + np.pi) % (2 * np.pi) - np.pi
 rel_loc *= 180 / np.pi
 
-ref_loc = (PHI0[:, 0] - reference) * np.pi / 180.0
+ref_loc = (PHI0[:, -1] - reference) * np.pi / 180.0
 ref_loc = (ref_loc + np.pi) % (2 * np.pi) - np.pi
 ref_loc *= 180 / np.pi
 
@@ -516,7 +468,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_25.png]]
+[[./figures/odr_sb/figure_24.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
@@ -533,10 +485,10 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_26.png]]
+[[./figures/odr_sb/figure_25.png]]
 
 #+begin_src ipython
-mask = np.abs(errors) <= 45
+mask = np.abs(errors) <= 450
 print(mask.shape)
 
 errors = np.where(mask, errors, np.nan)[:, -1]
@@ -552,7 +504,7 @@ print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
 #+RESULTS:
 : (800, 91)
 : (800,)
-: (215, 1) (215, 1) (215, 1) (215, 1)
+: (800, 1) (800, 1) (800, 1) (800, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
@@ -569,19 +521,27 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_28.png]]
+[[./figures/odr_sb/figure_27.png]]
 
 ** biases
 
 #+begin_src ipython
-fig, ax = plt.subplots(1, 3, figsize=[2.5*width, height])
+   df_naive = pkl_load('df_naive', path="./figures/odr")
+#+end_src
 
-ax[0].plot(target_loc[:, 0], errors[:,-1], 'o', alpha=.1)
+#+RESULTS:
+: loading from ./figures/odr/df_naive.pkl
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
+
+n_bins=12
+ax[0].plot(df_naive['target_loc'], df_naive['errors'], 'o', alpha=.1)
 ax[0].set_xlabel('Target Loc. (°)')
 ax[0].set_ylabel('Error (°)')
 
 from scipy.stats import binned_statistic
-stt = binned_statistic(target_loc[:,0], errors[:,-1], statistic='mean', bins=3, range=[0, 360])
+stt = binned_statistic(df_naive['target_loc'], df_naive['errors'], statistic='mean', bins=n_bins, range=[0, 360])
 dstt = np.mean(np.diff(stt.bin_edges))
 ax[0].plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
 
@@ -592,7 +552,7 @@ ax[1].plot(rel_loc[:, 0], errors[:,-1], 'bo', alpha=.1)
 ax[1].set_xlabel('Rel. Loc. (°)')
 ax[1].set_ylabel('Error (°)')
 
-stt = binned_statistic(rel_loc[:, 0], errors[:, -1], statistic='mean', bins=6, range=[-180, 180])
+stt = binned_statistic(rel_loc[:, 0], errors[:, -1], statistic='mean', bins=n_bins, range=[-180, 180])
 dstt = np.mean(np.diff(stt.bin_edges))
 ax[1].plot(stt.bin_edges[:-1]+dstt/2, stt.statistic, 'b')
 
@@ -601,7 +561,7 @@ ax[2].plot(ref_loc[:, 0], errors[:,-1], 'bo', alpha=.1)
 ax[2].set_xlabel('Ref. Loc. (°)')
 ax[2].set_ylabel('Error (°)')
 
-stt = binned_statistic(ref_loc[:, 0], errors[:, -1], statistic='mean', bins=6, range=[-180, 180])
+stt = binned_statistic(ref_loc[:, 0], errors[:, -1], statistic='mean', bins=n_bins, range=[-180, 180])
 dstt = np.mean(np.diff(stt.bin_edges))
 ax[2].plot(stt.bin_edges[:-1]+dstt/2, stt.statistic, 'b')
 
@@ -615,59 +575,102 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_29.png]]
+[[./figures/odr_sb/figure_29.png]]
+
 
 #+begin_src ipython
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-
-# Assuming rel_loc and errors are defined earlier
 data = pd.DataFrame({'target_loc': target_loc[:, -1], 'rel_loc': rel_loc[:, -1], 'errors': errors[:, -1], 'ref_loc': ref_loc[:, -1]})
+n_bins = 16
+angle_min = 0
+angle_max = 360
 
-# Bin data using pandas cut
-data['bin'] = pd.cut(data['rel_loc'], bins=6)
-# Calculate mean and standard error for each bin
-means = data.groupby('target_loc')['errors'].apply('mean')
-binned_data = data.groupby('bin')['errors'].agg(['mean', 'sem'])
+bin_edges = np.linspace(angle_min, angle_max, n_bins + 1)
+data['bin_target'] = pd.cut(data['target_loc'], bins=bin_edges, include_lowest=True)
 
-bin_edges = binned_data.index.get_level_values(0)
-bin_centers = (bin_edges.categories.left + bin_edges.categories.right) / 2
+mean_errors_per_bin = data.groupby('bin_target')['errors'].mean()
+data['adjusted_errors'] = data.apply(
+    lambda row: row['errors'] - mean_errors_per_bin.loc[row['bin_target']],
+    axis=1
+)
 
-# Plot
-fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-ax[0].plot(bin_centers, binned_data['mean'], 'b')
-ax[0].fill_between(bin_centers,
-                binned_data['mean'] - binned_data['sem'],
-                binned_data['mean'] + binned_data['sem'],
-                color='b', alpha=0.2)
+if IF_BIAS:
+   df_naive['bin_target'] = pd.cut(df_naive['target_loc'], bins=bin_edges, include_lowest=True)
+
+   mean_errors_per_bin = df_naive.groupby('bin_target')['errors'].mean()
+   data['errors_naive'] = data.apply(
+      lambda row: row['errors'] - mean_errors_per_bin.loc[row['bin_target']],
+      axis=1
+   )
+
+bin_target = data.groupby('bin_target')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
+edges = bin_target['bin_target'].cat.categories
+target_centers = (edges.left + edges.right) / 2
+
+data['bin_rel'] = pd.cut(data['rel_loc'], bins=n_bins)
+bin_rel = data.groupby('bin_rel')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
+
+edges = bin_rel['bin_rel'].cat.categories
+centers = (edges.left + edges.right) / 2
+
+data['bin_ref'] = pd.cut(data['ref_loc'], bins=n_bins)
+if IF_BIAS:
+   bin_ref = data.groupby('bin_ref')['errors_naive'].agg(['mean', 'sem']).reset_index()
+else:
+   bin_ref = data.groupby('bin_ref')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
+
+ref_edges = bin_ref['bin_ref'].cat.categories
+ref_centers = (ref_edges.left + ref_edges.right) / 2
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
+ax[0].plot(centers, bin_target['mean'], 'b')
+ax[0].fill_between(centers,
+                   bin_target['mean'] - bin_target['sem'],
+                   bin_target['mean'] + bin_target['sem'],
+                   color='b', alpha=0.2)
 
 ax[0].axhline(color='k', linestyle=":")
-ax[0].set_xlabel('Rel. Loc. (°)')
+ax[0].set_xlabel('Target Loc. (°)')
 ax[0].set_ylabel('Curr. Error (°)')
 
-data['bin'] = pd.cut(data['ref_loc'], bins=6)
-binned_data = data.groupby('bin')['errors'].agg(['mean', 'sem'])
-bin_edges = binned_data.index.get_level_values(0)
-bin_centers = (bin_edges.categories.left + bin_edges.categories.right) / 2
-
-ax[1].plot(bin_centers, binned_data['mean'], 'b')
-ax[1].fill_between(bin_centers,
-                binned_data['mean'] - binned_data['sem'],
-                binned_data['mean'] + binned_data['sem'],
+ax[1].plot(centers, bin_rel['mean'], 'b')
+ax[1].fill_between(centers,
+                bin_rel['mean'] - bin_rel['sem'],
+                bin_rel['mean'] + bin_rel['sem'],
                 color='b', alpha=0.2)
+
 ax[1].axhline(color='k', linestyle=":")
-ax[1].set_xlabel('Ref. Loc. (°)')
+ax[1].set_xlabel('Rel. Loc. (°)')
 ax[1].set_ylabel('Curr. Error (°)')
+
+ax[2].plot(ref_centers, bin_ref['mean'], 'b')
+ax[2].fill_between(ref_centers,
+                bin_ref['mean'] - bin_ref['sem'],
+                bin_ref['mean'] + bin_ref['sem'],
+                color='b', alpha=0.2)
+
+ax[2].axhline(color='k', linestyle=":")
+ax[2].set_xlabel('Ref. Loc. (°)')
+ax[2].set_ylabel('Curr. Error (°)')
+
+if IF_BIAS:
+    plt.savefig('./figures/odr/odr_biases_train.svg', dpi=300)
+else:
+    plt.savefig('./figures/odr/odr_biases_naive.svg', dpi=300)
 
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_30.png]]
+[[./figures/odr_sb/figure_31.png]]
+
 
 #+begin_src ipython
-
+if IF_BIAS==0:
+   pkl_save(data, 'df_naive', path="./figures/odr")
 #+end_src
 
 #+RESULTS:
