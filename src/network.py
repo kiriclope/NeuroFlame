@@ -4,12 +4,11 @@ from torch.sparse import to_sparse_semi_structured, SparseSemiStructuredTensor
 
 SparseSemiStructuredTensor._FORCE_CUTLASS = True
 
-
 from src.configuration import Configuration
 from src.connectivity import Connectivity
 from src.activation import Activation
 from src.plasticity import Plasticity
-from src.lr_utils import LowRankWeights, clamp_tensor
+from src.lr_utils import LowRankWeights, clamp_tensor, normalize_tensor
 
 from src.ff_input import live_ff_input, init_ff_input, rl_ff_udpdate
 from src.utils import set_seed, clear_cache, print_activity
@@ -51,7 +50,7 @@ class Network(nn.Module):
             )
 
             self.low_rank = LowRankWeights(
-                self.N_NEURON,
+                self.Na[0], # N_NEURON
                 self.Na,
                 self.slices,
                 self.RANK,
@@ -137,9 +136,9 @@ class Network(nn.Module):
     def initSTP(self):
         """Creates stp model for population 0"""
 
-        # self.J_STP = torch.tensor(self.J_STP, device=self.device) # / torch.sqrt(self.Ka[0])
+        self.J_STP = torch.tensor(self.J_STP, device=self.device) / torch.sqrt(self.Ka[0])
 
-        if self.ODR_TRAIN:
+        if self.ODR_TRAIN or self.LR_TRAIN:
             self.J_STP = nn.Parameter(torch.tensor(self.J_STP, device=self.device))
 
         self.register_buffer('W_stp_T', torch.zeros((self.Na[0], self.Na[0]), device=self.device))
@@ -155,7 +154,6 @@ class Network(nn.Module):
 
         # self.stp_mask = self.W_stp_T.clone()
         self.Wab_T.data[self.slices[0], self.slices[0]] = 0
-
 
     def init_ff_input(self):
         return init_ff_input(self)
@@ -234,7 +232,7 @@ class Network(nn.Module):
             net_input = net_input + rec_input[1]
 
         # compute non linearity
-        non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=0)
+        non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.thresh)
 
         # update rates
         if self.RATE_DYN:
@@ -294,20 +292,26 @@ class Network(nn.Module):
 
         # Train Low rank vectors
         if self.LR_TRAIN:
-            self.Wab_train = self.low_rank(self.LR_NORM, self.LR_CLAMP) * torch.sqrt(self.Ka[0])
+            self.Wab_train = self.low_rank(self.LR_NORM, self.LR_CLAMP)
 
         # Training
         if self.ODR_TRAIN or self.LR_TRAIN:
             if self.IF_STP:
-                W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]]
 
                 if self.ODR_TRAIN:
+                    W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]] / self.Na[0]
                     # W_stp_T = self.dropout(W_stp_T) / torch.sqrt(self.Ka[0])
-                    W_stp_T = W_stp_T / self.Na[0]
-                if self.TRAIN_EI:
-                    Wab_T = self.GAIN * self.Wab_T + self.stp_mask * self.Wab_train / self.Na[0]
-            else:
-                Wab_T = self.GAIN * self.Wab_T + self.Wab_train
+
+                if self.LR_TRAIN:
+                    # W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]] / self.Na[0]
+                    W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
+                    # W_stp_T = self.GAIN * (self.W_stp_T + self.Wab_train[self.slices[0], self.slices[0]] / self.Na[0])
+                    # W_stp_T = self.GAIN * self.W_stp_T * (1.0 + self.Wab_train[self.slices[0], self.slices[0]])
+
+            if self.TRAIN_EI:
+                self.Wab_train = normalize_tensor(self.Wab_train, 0, self.slices, self.Na)
+                self.Wab_train = normalize_tensor(self.Wab_train, 1, self.slices, self.Na)
+                Wab_T = self.GAIN * (self.Wab_T + self.stp_mask * self.Wab_train)
 
             if self.CLAMP:
                 if self.IF_STP:
@@ -385,6 +389,12 @@ class Network(nn.Module):
             if self.IF_STP and RET_STP:  # returns stp u and x
                 self.u_list = torch.stack(self.u_list, dim=1)
                 self.x_list = torch.stack(self.x_list, dim=1)
+
+        if self.LR_TRAIN:
+            self.readout = rates @ self.low_rank.U[self.slices[0]] / self.Na[0]
+            if self.LR_READOUT==1:
+                linear = self.low_rank.linear(self.dropout(rates)) / self.Na[0]
+                self.readout = torch.cat((self.readout, linear), dim=-1)
 
         if self.LIVE_FF_UPDATE == 0 and RET_FF:
             self.ff_input = ff_input[..., self.slices[0]]

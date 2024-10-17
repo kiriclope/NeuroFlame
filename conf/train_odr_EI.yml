@@ -40,12 +40,7 @@ PHI1: [180.0, 180.0]
 # stimuli tuning
 SIGMA0: [1.0, 0.0]
 
-##########################################
-## Reward go
-##########################################
-IF_RL: 0
-RWD: 2
-##########################################
+#########################################
 # Network parameters
 ##########################################
 # number of populations
@@ -58,20 +53,12 @@ K: 100.0
 frac: [0.75, 0.25]
 
 ##########################################
-# Voltage Dynamics for LIF model
-##########################################
-# Threshold in mV
-V_THRESH: -50.0
-# Resting potential in mV
-V_REST: -70.0
-
-##########################################
 # Transfert Function for rate model
 ##########################################
 # set to 0 for threshold linear, 1 for sigmoid
 TF_TYPE: 'relu'
 # threshold
-THRESH: [1.0, 1.0]
+THRESH: [0.0, 0.0]
 
 ##########################################
 # Dynamics of the rates
@@ -80,7 +67,9 @@ THRESH: [1.0, 1.0]
 RATE_DYN: 0
 # rate time constants
 TAU: [0.2, 0.1]
-RATE_NOISE: 1
+
+# adding rate noise for diffusion
+RATE_NOISE: 0
 VAR_RATE: 1.0
 
 ##########################################
@@ -126,7 +115,7 @@ BUMP_SWITCH: [0, 0]
 # Synaptic strengths
 ##########################################
 # Network's gain
-GAIN: 0.75
+GAIN: 1.25
 # Synaptic strengths
 Jab: [1.0, -1.5, 1, -1]
 # Batching Jab
@@ -150,30 +139,13 @@ KAPPA: [0.0, 0.0, 0.0, 0.0]
 # phase of the connectivity
 PHASE: 0.0
 
-##########
-# Low rank
-##########
-LR_TRAIN: 0
-
-LR_READOUT: 1
-LR_CLASS: 1
-LR_BIAS: 1
-LR_FIX_READ: 1
-
-LR_MASK: 0
-LR_NORM: 0
-LR_CLAMP: 1
-LR_KAPPA: 1
-LR_MN: 0
-
+###############
+# ODR TRAINING
+###############
 ODR_TRAIN: 1
 RANDOM_DELAY: 1
-CLAMP: 0
-DROP_RATE: 0.0
 TRAIN_EI: 0
+CLAMP: 1
+DROP_RATE: 0.0
 MAX_DELAY: 3.0
 MIN_DELAY: 0.0
-
-RANK: 0
-LR_MEAN: [0.0]
-LR_COV: [[1.0, 0.9, 0.0, 0.0],[0.9, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.9], [0.0, 0.0, 0.9, 1.0]]

@@ -67,8 +67,14 @@ def init_const(model):
         model.start_indices = (model.N_STIM_ON.unsqueeze(-1) + model.random_shifts)
         model.end_indices = (model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts)
 
-        model.start_indices[0] = model.N_STIM_ON[0]
-        model.end_indices[0] = model.N_STIM_OFF[0]
+        if 'odr' in model.TASK:
+            model.start_indices[0] = model.N_STIM_ON[0]
+            model.end_indices[0] = model.N_STIM_OFF[0]
+
+        if 'dual' in model.TASK:
+            # random DPA delay
+            model.start_indices[:-1] = model.N_STIM_ON[:-1]
+            model.end_indices[:-1] = model.N_STIM_OFF[:-1]
 
     ##########################################
     # defining N and K per population
@@ -119,6 +125,7 @@ def init_const(model):
     for i_pop in range(model.N_POP):
         model.thresh[model.slices[i_pop]] = model.THRESH[i_pop]
 
+    # add dummy dimension for sum with rates of size (N_BATCH, N_NEURON)
     model.thresh = model.thresh.unsqueeze(0)
 
     if model.IF_ADAPT:
@@ -172,7 +179,7 @@ def init_const(model):
     model.VAR_FF = torch.sqrt(torch.tensor(model.VAR_FF, device=model.device))
     model.VAR_RATE = torch.sqrt(torch.tensor(model.VAR_RATE, device=model.device))
     # scaling ff variance as O(1) because we multiply by sqrtK in seq input
-    model.VAR_FF.mul_(1.0 / torch.sqrt(model.Ka[0]))
+    # model.VAR_FF.mul_(1.0 / torch.sqrt(model.Ka[0]))
 
     model.VAR_FF.mul_(model.M0)
     model.VAR_FF = model.VAR_FF.unsqueeze(0)  # add batch dim

@@ -97,19 +97,19 @@ class LowRankWeights(nn.Module):
         if self.LR_KAPPA == 1:
             self.lr_kappa = nn.Parameter(torch.rand(1, device=self.device))
         else:
-            self.lr_kappa = torch.tensor(5.0, device=self.device)
+            self.lr_kappa = torch.tensor(3.0, device=self.device)
 
         # Mask to train excitatory neurons only
-        self.lr_mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
+        # self.lr_mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
 
-        if self.LR_MASK == 0:
-            self.lr_mask[self.slices[0], self.slices[0]] = 1.0
-        if self.LR_MASK == 1:
-            self.lr_mask[self.slices[1], self.slices[1]] = 1.0
-        if self.LR_MASK == -1:
-            self.lr_mask = torch.ones(
-                (self.N_NEURON, self.N_NEURON), device=self.device
-            )
+        # if self.LR_MASK == 0:
+        #     self.lr_mask[self.slices[0], self.slices[0]] = 1.0
+        # if self.LR_MASK == 1:
+        #     self.lr_mask[self.slices[1], self.slices[1]] = 1.0
+        # if self.LR_MASK == -1:
+        #     self.lr_mask = torch.ones(
+        #         (self.N_NEURON, self.N_NEURON), device=self.device
+        #     )
 
         # Linear readout for supervised learning
         if self.LR_READOUT:
@@ -129,17 +129,17 @@ class LowRankWeights(nn.Module):
 
 
     def forward(self, LR_NORM=0, LR_CLAMP=0):
-        if LR_NORM:
-            self.lr = self.lr_kappa * (
-                masked_normalize(self.U) @ masked_normalize(self.V).T
-            )
-        else:
-            if self.LR_MN:
-                self.lr = self.lr_kappa * (self.U @ self.V.T)
-            else:
-                self.lr = self.lr_kappa * (self.U @ self.U.T)
+        # if LR_NORM:
+        #     self.lr = self.lr_kappa * (
+        #         masked_normalize(self.U) @ masked_normalize(self.V).T
+        #     )
 
-        self.lr = self.lr_mask * self.lr
+        if self.LR_MN:
+            self.lr = self.lr_kappa * (self.U @ self.V.T)
+        else:
+            self.lr = self.lr_kappa * (self.U @ self.U.T)
+
+        # self.lr = self.lr_mask * self.lr
 
         self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
 

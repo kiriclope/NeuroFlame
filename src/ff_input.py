@@ -128,29 +128,26 @@ def init_ff_seq(model):
                     model.I0[i], model.SIGMA0[i], model.phase, theta=theta
                 )
             elif "dual" in model.TASK:
-                if model.LR_TRAIN:
+                if model.LR_TRAIN and model.RANDOM_DELAY==0:
                     # if 0==0:
                     if (i!=model.RWD) or (model.IF_RL==0): # or (model.IF_RL==0 and i!=model.RWD-1):
                         # stimulus = Stimulus(
                         #     model.I0[i], model.SIGMA0[i], model.odors[i])
                         if model.I0[i] > 0:
-                            stimulus = Stimulus(
-                                model.I0[i], model.SIGMA0[i], model.odors[i])
+                            stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.odors[i])
                         else:
-                            stimulus = Stimulus(
-                                model.I0[i], model.SIGMA0[i], model.odors[5+i])
+                            stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.odors[5+i])
                     else:
                         stimulus = 0
-                else:
-                    stimulus = Stimulus(
-                        model.I0[i], model.SIGMA0[i], model.PHI0[2 * i + 1]
-                    )
+                elif model.RANDOM_DELAY==0:
+                    stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[2*i+1])
             else:
                 stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[:, i])
 
             # reshape stimulus to be (N_BATCH, 1, NE) adding dummy time dimension
-            if stimulus.ndim!=3:
-                stimulus = stimulus.unsqueeze(1)
+            if model.ODR_TRAIN:
+                if stimulus.ndim!=3:
+                    stimulus = stimulus.unsqueeze(1)
 
             # print(stimulus.shape)
 
@@ -160,7 +157,16 @@ def init_ff_seq(model):
                     for j in range(model.N_BATCH):
                         mask = slice(model.start_indices[i, j], model.end_indices[i, j])
                         # print(j, mask, ff_input[j, mask, model.slices[0]].shape, stimulus.shape)
-                        ff_input[j, mask, model.slices[0]].add_(stimulus[j])
+
+                        if 'dual' in model.TASK:
+                            if model.I0[j, i] > 0:
+                                stimulus = Stimulus(model.I0[j, i], model.SIGMA0[i], model.odors[i])
+                            else:
+                                stimulus = Stimulus(model.I0[j, i], model.SIGMA0[i], model.odors[5+i])
+
+                            ff_input[j, mask, model.slices[0]].add_(stimulus)
+                        else:
+                            ff_input[j, mask, model.slices[0]].add_(stimulus[j])
                 else:
                     ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[0]].add_(
                         stimulus
@@ -212,7 +218,7 @@ def rl_ff_udpdate(model, ff_input, rates, step, rwd):
 def init_ff_input(model):
     if model.TASK=='odr':
         model.PHI0 = torch.deg2rad(model.PHI0) if torch.any(model.PHI0 > 2 * torch.pi) else model.PHI0
-        # print(model.PHI0[0, 0, 0])
+
     if model.LIVE_FF_UPDATE:
         model.Ja0 = model.M0 * torch.sqrt(model.Ka[0]) * model.Ja0
         model.VAR_FF.mul_(torch.sqrt(model.Ka[0]))
