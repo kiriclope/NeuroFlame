@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 04 Oct. 2024 -->
+<!-- 17 Oct. 2024 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NeuroFlame: Fast Learning And Modeling Engine</title>
@@ -9,9 +9,11 @@
 <meta name="author" content="Alexandre Mahrach">
 <link rel="stylesheet" type="text/css" href="https://fniessen.github.io/org-html-themes/src/readtheorg_theme/css/htmlize.css"/>
 <link rel="stylesheet" type="text/css" href="https://fniessen.github.io/org-html-themes/src/readtheorg_theme/css/readtheorg.css"/>
+<link rel="stylesheet" type="text/css" href="src/readtheorg_theme/css/search.css"/>
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
 <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/js/bootstrap.min.js"></script>
 <script type="text/javascript" src="https://fniessen.github.io/org-html-themes/src/lib/js/jquery.stickytableheaders.min.js"></script>
+<script type="text/javascript" src="https://fniessen.github.io/org-html-themes/src/readtheorg_theme/js/search.js"></script>
 <script type="text/javascript" src="https://fniessen.github.io/org-html-themes/src/readtheorg_theme/js/readtheorg.js"></script>
 <script type="text/javascript">
 // @license magnet:?xt=urn:btih:e95b018ef3580986a04669f1b5879592219e2a7a&dn=public-domain.txt Public Domain
@@ -66,41 +68,41 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#org1f29bcc">Introduction</a></li>
-<li><a href="#org306b2a7">Installation</a></li>
-<li><a href="#org31100f5">Project Structure</a></li>
-<li><a href="#org7a011cb">Network Dynamics</a>
+<li><a href="#org5b1bdcb">Introduction</a></li>
+<li><a href="#orga211691">Installation</a></li>
+<li><a href="#org8078cfd">Project Structure</a></li>
+<li><a href="#orgd5078b5">Network Dynamics</a>
 <ul>
 <li>
 <ul>
-<li><a href="#orgb8f7b3a">Dynamics</a></li>
-<li><a href="#orge8cf82d">Connectivity</a></li>
+<li><a href="#orgac2f84a">Dynamics</a></li>
+<li><a href="#org4a4c14b">Connectivity</a></li>
 </ul>
 </li>
 </ul>
 </li>
-<li><a href="#orgd2e67f0">Network Simulations</a>
+<li><a href="#orgee5830d">Network Simulations</a>
 <ul>
-<li><a href="#org3a2a5ff">Basic Usage</a></li>
-<li><a href="#org46922c1">Parallel Network Simulations</a></li>
+<li><a href="#org4951055">Basic Usage</a></li>
+<li><a href="#orgf8e11ad">Parallel Network Simulations</a></li>
 </ul>
 </li>
-<li><a href="#org491c674">Network Training</a></li>
-<li><a href="#org08bebf8">Tutorials</a>
+<li><a href="#orgfb7f461">Network Training</a></li>
+<li><a href="#org64f68ea">Tutorials</a>
 <ul>
-<li><a href="#orga6050ed">Balanced Networks</a></li>
-<li><a href="#org125cbf8">Multistability</a></li>
-<li><a href="#org1f04281">Short Term Plasticity</a></li>
-<li><a href="#org40656c9">Behavioral Tasks</a></li>
-<li><a href="#org82edfda">Serial Bias</a></li>
+<li><a href="#orgf43cdac">Balanced Networks</a></li>
+<li><a href="#org3a463c9">Multistability</a></li>
+<li><a href="#org55510f6">Short Term Plasticity</a></li>
+<li><a href="#org530b7e2">Behavioral Tasks</a></li>
+<li><a href="#org50d5f4c">Serial Bias</a></li>
 </ul>
 </li>
-<li><a href="#org005b1a7">Contributing</a></li>
+<li><a href="#org74952c6">Contributing</a></li>
 </ul>
 </div>
 </nav>
 
-<figure id="org44458ae">
+<figure id="orgefc7378">
 <img src="./neuroflame.jpeg" alt="neuroflame.jpeg" width="400px">
 
 </figure>
@@ -109,9 +111,9 @@
 Copyright © 2024 by Melanie Tschiersch. All rights reserved.
 </p>
 
-<section id="outline-container-org1f29bcc" class="outline-2">
-<h2 id="org1f29bcc">Introduction</h2>
-<div class="outline-text-2" id="text-org1f29bcc">
+<section id="outline-container-org5b1bdcb" class="outline-2">
+<h2 id="org5b1bdcb">Introduction</h2>
+<div class="outline-text-2" id="text-org5b1bdcb">
 <p>
 This package provides an implementation of a recurrent neural network trainer and simulator with Pytorch.
 Networks can have multiple neural populations with different connectivity types (all-to-all, sparse) and structures (feature selective, spatially tuned, low rank).
@@ -123,9 +125,9 @@ Networks models can be trained in a unsupervised or supervised manner just as va
 </div>
 </section>
 
-<section id="outline-container-org306b2a7" class="outline-2">
-<h2 id="org306b2a7">Installation</h2>
-<div class="outline-text-2" id="text-org306b2a7">
+<section id="outline-container-orga211691" class="outline-2">
+<h2 id="orga211691">Installation</h2>
+<div class="outline-text-2" id="text-orga211691">
 <div class="org-src-container">
 <pre class="src src-sh">pip install -r requirements.txt
 </pre>
@@ -142,9 +144,9 @@ or alternatively using conda (I recommend using mamba&rsquo;s <a href="https://g
 </div>
 </section>
 
-<section id="outline-container-org31100f5" class="outline-2">
-<h2 id="org31100f5">Project Structure</h2>
-<div class="outline-text-2" id="text-org31100f5">
+<section id="outline-container-org8078cfd" class="outline-2">
+<h2 id="org8078cfd">Project Structure</h2>
+<div class="outline-text-2" id="text-org8078cfd">
 <div class="org-src-container">
 <pre class="src src-sh">.
 &#9500;&#9472;&#9472; conf  <span class="org-comment-delimiter"># </span><span class="org-comment">contains configuration files in yaml format.</span>
@@ -174,17 +176,17 @@ or alternatively using conda (I recommend using mamba&rsquo;s <a href="https://g
 </div>
 </section>
 
-<section id="outline-container-org7a011cb" class="outline-2">
-<h2 id="org7a011cb"><a href="file:///org/doc/dynamics.html">Network Dynamics</a></h2>
-<div class="outline-text-2" id="text-org7a011cb">
+<section id="outline-container-orgd5078b5" class="outline-2">
+<h2 id="orgd5078b5"><a href="file:///org/doc/dynamics.html">Network Dynamics</a></h2>
+<div class="outline-text-2" id="text-orgd5078b5">
 </div>
-<div id="outline-container-orgb8f7b3a" class="outline-4">
-<h4 id="orgb8f7b3a">Dynamics</h4>
-<div class="outline-text-4" id="text-orgb8f7b3a">
+<div id="outline-container-orgac2f84a" class="outline-4">
+<h4 id="orgac2f84a">Dynamics</h4>
+<div class="outline-text-4" id="text-orgac2f84a">
 </div>
 <ul class="org-ul">
-<li><a id="org4debbed"></a>Currents<br>
-<div class="outline-text-5" id="text-org4debbed">
+<li><a id="orga0dcdcd"></a>Currents<br>
+<div class="outline-text-5" id="text-orga0dcdcd">
 <p>
 Neuron \(i\) in population \(A\) has a reccurent input \(h^A_i\),
 </p>
@@ -203,8 +205,8 @@ or not
 </div>
 </li>
 
-<li><a id="orgd8fab3d"></a>Rates<br>
-<div class="outline-text-5" id="text-orgd8fab3d">
+<li><a id="org5f0efdc"></a>Rates<br>
+<div class="outline-text-5" id="text-org5f0efdc">
 <p>
 The models can have rate dynamics (setting <b>RATE_DYN</b> to 1 in the configuration file):
 </p>
@@ -233,9 +235,9 @@ Here \(\Phi\) is the transfer function defined in <b>src/activation.py</b> and c
 </ul>
 </div>
 
-<div id="outline-container-orge8cf82d" class="outline-4">
-<h4 id="orge8cf82d">Connectivity</h4>
-<div class="outline-text-4" id="text-orge8cf82d">
+<div id="outline-container-org4a4c14b" class="outline-4">
+<h4 id="org4a4c14b">Connectivity</h4>
+<div class="outline-text-4" id="text-org4a4c14b">
 <p>
 The connectivities available in NeuroFlame are described <a href="file:///org/tests/connectivity.html">here</a>.
 </p>
@@ -246,8 +248,8 @@ Probability of connection from population B to A:
 </div>
 
 <ul class="org-ul">
-<li><a id="orgf2ebde6"></a>Sparse Nets<br>
-<div class="outline-text-5" id="text-orgf2ebde6">
+<li><a id="org5d154c0"></a>Sparse Nets<br>
+<div class="outline-text-5" id="text-org5d154c0">
 <p>
 by default it is a sparse net
 </p>
@@ -276,8 +278,8 @@ and also low rank
 </div>
 </li>
 
-<li><a id="org3c42387"></a>All to all<br>
-<div class="outline-text-5" id="text-org3c42387">
+<li><a id="org27bfe77"></a>All to all<br>
+<div class="outline-text-5" id="text-org27bfe77">
 <p>
 \[ J_{ij}^{AB} =  \frac{J_{AB}}{N_B} P_{ij}^{AB} \]
 </p>
@@ -291,13 +293,13 @@ where Pij can be as above.
 </div>
 </section>
 
-<section id="outline-container-orgd2e67f0" class="outline-2">
-<h2 id="orgd2e67f0">Network Simulations</h2>
-<div class="outline-text-2" id="text-orgd2e67f0">
+<section id="outline-container-orgee5830d" class="outline-2">
+<h2 id="orgee5830d">Network Simulations</h2>
+<div class="outline-text-2" id="text-orgee5830d">
 </div>
-<div id="outline-container-org3a2a5ff" class="outline-3">
-<h3 id="org3a2a5ff">Basic Usage</h3>
-<div class="outline-text-3" id="text-org3a2a5ff">
+<div id="outline-container-org4951055" class="outline-3">
+<h3 id="org4951055">Basic Usage</h3>
+<div class="outline-text-3" id="text-org4951055">
 <p>
 Here is how to run a simulation
 </p>
@@ -325,9 +327,9 @@ rates = model()
 </div>
 </div>
 
-<div id="outline-container-org46922c1" class="outline-3">
-<h3 id="org46922c1"><a href="file:///org/doc/neurotorch.html">Parallel Network Simulations</a></h3>
-<div class="outline-text-3" id="text-org46922c1">
+<div id="outline-container-orgf8e11ad" class="outline-3">
+<h3 id="orgf8e11ad"><a href="file:///org/doc/neurotorch.html">Parallel Network Simulations</a></h3>
+<div class="outline-text-3" id="text-orgf8e11ad">
 <p>
 I describe in detail how to run a network simulation and use NeuroFlame to effectively run parallel simulations for different parameters <a href="file:///org/doc/neurotorch.html">here</a>.
 </p>
@@ -335,40 +337,40 @@ I describe in detail how to run a network simulation and use NeuroFlame to effec
 </div>
 </section>
 
-<section id="outline-container-org491c674" class="outline-2">
-<h2 id="org491c674"><a href="file:///org/train.html">Network Training</a></h2>
-<div class="outline-text-2" id="text-org491c674">
+<section id="outline-container-orgfb7f461" class="outline-2">
+<h2 id="orgfb7f461"><a href="file:///org/train.html">Network Training</a></h2>
+<div class="outline-text-2" id="text-orgfb7f461">
 <p>
 <a href="file:///org/train.html">Here</a>, I show how to train networks.
 </p>
 </div>
 </section>
-<section id="outline-container-org08bebf8" class="outline-2">
-<h2 id="org08bebf8">Tutorials</h2>
-<div class="outline-text-2" id="text-org08bebf8">
+<section id="outline-container-org64f68ea" class="outline-2">
+<h2 id="org64f68ea">Tutorials</h2>
+<div class="outline-text-2" id="text-org64f68ea">
 </div>
-<div id="outline-container-orga6050ed" class="outline-3">
-<h3 id="orga6050ed"><a href="file:///org/tests/balance.html">Balanced Networks</a></h3>
-<div class="outline-text-3" id="text-orga6050ed">
+<div id="outline-container-orgf43cdac" class="outline-3">
+<h3 id="orgf43cdac"><a href="file:///org/tests/balance.html">Balanced Networks</a></h3>
+<div class="outline-text-3" id="text-orgf43cdac">
 <p>
 <a href="file:///org/tests/balance.html">Here</a>, a tutorial on balanced networks.
 </p>
 </div>
 </div>
-<div id="outline-container-org125cbf8" class="outline-3">
-<h3 id="org125cbf8"><a href="file:///org/search/multi_stable.html">Multistability</a></h3>
-<div class="outline-text-3" id="text-org125cbf8">
+<div id="outline-container-org3a463c9" class="outline-3">
+<h3 id="org3a463c9"><a href="file:///org/search/multi_stable.html">Multistability</a></h3>
+<div class="outline-text-3" id="text-org3a463c9">
 </div>
 <ul class="org-ul">
-<li><a id="orge72c1f7"></a>Fully connected<br>
-<div class="outline-text-5" id="text-orge72c1f7">
+<li><a id="org5033e42"></a>Fully connected<br>
+<div class="outline-text-5" id="text-org5033e42">
 <p>
 <a href="file:///org/search/ring_attractor.html">Here</a>, a notebook that shows how to use NeuroFlame to locate ring attractors in parameter space.
 </p>
 </div>
 </li>
-<li><a id="orgbf04d31"></a>Sparse<br>
-<div class="outline-text-5" id="text-orgbf04d31">
+<li><a id="org33c1dcf"></a>Sparse<br>
+<div class="outline-text-5" id="text-org33c1dcf">
 <p>
 <a href="file:///org/search/multi_stable.html">Here</a>, a notebook that shows how to use NeuroFlame to locate multistable balance states in parameter space.
 </p>
@@ -377,25 +379,25 @@ I describe in detail how to run a network simulation and use NeuroFlame to effec
 </ul>
 </div>
 
-<div id="outline-container-org1f04281" class="outline-3">
-<h3 id="org1f04281"><a href="file:///org/tests/stp.html">Short Term Plasticity</a></h3>
-<div class="outline-text-3" id="text-org1f04281">
+<div id="outline-container-org55510f6" class="outline-3">
+<h3 id="org55510f6"><a href="file:///org/tests/stp.html">Short Term Plasticity</a></h3>
+<div class="outline-text-3" id="text-org55510f6">
 <p>
 <a href="file:///org/tests/stp.html">Here</a>, a tutorial on STP with NeuroFlame.
 </p>
 </div>
 </div>
-<div id="outline-container-org40656c9" class="outline-3">
-<h3 id="org40656c9"><a href="file:///org/tests/stimuli.html">Behavioral Tasks</a></h3>
-<div class="outline-text-3" id="text-org40656c9">
+<div id="outline-container-org530b7e2" class="outline-3">
+<h3 id="org530b7e2"><a href="file:///org/tests/stimuli.html">Behavioral Tasks</a></h3>
+<div class="outline-text-3" id="text-org530b7e2">
 <p>
 <a href="file:///org/tests/stimuli.html">Here</a>, a tutorial on how to use different stimuli to get the model to perform different behavioral tasks.
 </p>
 </div>
 </div>
-<div id="outline-container-org82edfda" class="outline-3">
-<h3 id="org82edfda"><a href="file:///org/serial_bias.html">Serial Bias</a></h3>
-<div class="outline-text-3" id="text-org82edfda">
+<div id="outline-container-org50d5f4c" class="outline-3">
+<h3 id="org50d5f4c"><a href="file:///org/serial_bias.html">Serial Bias</a></h3>
+<div class="outline-text-3" id="text-org50d5f4c">
 <p>
 <a href="file:///org/serial_bias.html">Here</a>, a tutorial on how to get serial bias in a balanced network model.
 </p>
@@ -403,14 +405,14 @@ I describe in detail how to run a network simulation and use NeuroFlame to effec
 </div>
 </section>
 
-<section id="outline-container-org005b1a7" class="outline-2">
-<h2 id="org005b1a7">Contributing</h2>
-<div class="outline-text-2" id="text-org005b1a7">
+<section id="outline-container-org74952c6" class="outline-2">
+<h2 id="org74952c6">Contributing</h2>
+<div class="outline-text-2" id="text-org74952c6">
 <p>
 Feel free to contribute.
 </p>
 
-<pre class="example" id="org78b4ed6">
+<pre class="example" id="orgca798fd">
 MIT License
 Copyright (c) [2023] [A. Mahrach]
 </pre>
@@ -419,7 +421,7 @@ Copyright (c) [2023] [A. Mahrach]
 </main>
 <footer id="postamble" class="status">
 <p class="author">Author: Alexandre Mahrach</p>
-<p class="date">Created: 04 Oct. 2024</p>
+<p class="date">Created: 17 Oct. 2024</p>
 </footer>
 </body>
 </html>
