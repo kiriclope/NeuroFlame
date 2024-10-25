@@ -82,12 +82,12 @@ class LowRankWeights(nn.Module):
         self.device = DEVICE
 
         self.U = nn.Parameter(
-            torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * 0.001
+            torch.randn((self.N_NEURON, int(self.RANK)), device=self.device)
         )
 
         if self.LR_MN:
             self.V = nn.Parameter(
-                torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * 0.001
+                torch.randn((self.N_NEURON, int(self.RANK)), device=self.device)
             )
         else:
             self.V = (
@@ -97,7 +97,7 @@ class LowRankWeights(nn.Module):
         if self.LR_KAPPA == 1:
             self.lr_kappa = nn.Parameter(torch.rand(1, device=self.device))
         else:
-            self.lr_kappa = torch.tensor(3.0, device=self.device)
+            self.lr_kappa = torch.tensor(1.0, device=self.device)
 
         # Mask to train excitatory neurons only
         # self.lr_mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)

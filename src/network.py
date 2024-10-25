@@ -136,10 +136,10 @@ class Network(nn.Module):
     def initSTP(self):
         """Creates stp model for population 0"""
 
-        self.J_STP = torch.tensor(self.J_STP, device=self.device) / torch.sqrt(self.Ka[0])
-
         if self.ODR_TRAIN or self.LR_TRAIN:
             self.J_STP = nn.Parameter(torch.tensor(self.J_STP, device=self.device))
+        else:
+            self.J_STP = torch.tensor(self.J_STP, device=self.device) / torch.sqrt(self.Ka[0])
 
         self.register_buffer('W_stp_T', torch.zeros((self.Na[0], self.Na[0]), device=self.device))
 
