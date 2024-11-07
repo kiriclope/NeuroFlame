@@ -287,8 +287,8 @@ import torch.nn.functional as F
 class AngularErrorLoss(nn.Module):
     def __init__(self, rwd_idx=-1):
         super(AngularErrorLoss, self).__init__()
-        # self.loss = nn.SmoothL1Loss(reduction='none')
-        self.loss = nn.MSELoss(reduction='none')
+        self.loss = nn.SmoothL1Loss(reduction='none')
+        # self.loss = nn.MSELoss(reduction='none')
         self.rwd_idx = rwd_idx
 
     def forward(self, readout, targets):
@@ -384,33 +384,35 @@ conf_name = "train_odr_EI.yml"
 DEVICE = 'cuda:0'
 
 IF_BIASED_PHASES = 1
+IF_BIAS = 1
+
 IF_RAND_REF = 0
 reference = np.random.randint(0, 360)
-reference = 110
+reference = 0
 print(reference)
 
-sigma = 75
+sigma = 60
 
 N_BATCH = int(96 * 8)
 
 seed = np.random.randint(0, 1e6)
-seed = 19
-# seed = 1975
+# seed = 3
+seed = 1975
 print(seed)
 #+end_src
 
 #+RESULTS:
-: 110
-: 19
+: 0
+: 1975
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=N_BATCH)
 try:
     if IF_RAND_REF:
-        model_state_dict = torch.load('models/odr_bias_rand_ref_%d.pth' % seed)
+        model_state_dict = torch.load('models/odr/odr_bias_rand_ref_%d.pth' % seed)
         print('rand_ref')
-    else:
-        model_state_dict = torch.load('models/odr_%d.pth' % seed)
+    elif IF_BIASED_PHASES:
+        model_state_dict = torch.load('models/odr/odr_%d.pth' % seed)
     model.load_state_dict(model_state_dict)
 except:
      pass
@@ -441,7 +443,7 @@ print(reference)
     #+end_src
 
 #+RESULTS:
-: 110
+: 0
 
 *** Parameters
 
@@ -479,7 +481,7 @@ print(torch.where(rwd_mask[idx]==1)[0])
 : rwd_mask torch.Size([768, 81])
 : tensor([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
 :         28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-:         46, 47, 48, 49, 50, 51, 52, 53, 54, 55], device='cuda:0')
+:         46, 47], device='cuda:0')
 
 *** Inputs and Labels
 
@@ -543,7 +545,7 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: torch.Size([34655])
+: torch.Size([21440])
 [[./figures/odr/figure_22.png]]
 :END:
 
@@ -571,7 +573,7 @@ plt.show()
 #+RESULTS:
 
         #+begin_src ipython
-  num_epochs = 10
+  num_epochs = 15
   start = perf_counter()
   loss, val_loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs)
   end = perf_counter()
@@ -580,27 +582,32 @@ plt.show()
 
 #+RESULTS:
 #+begin_example
-Epoch 1/10, Training Loss: 0.0046, Validation Loss: 0.0063
-Epoch 2/10, Training Loss: 0.0053, Validation Loss: 0.0062
-Epoch 3/10, Training Loss: 0.0057, Validation Loss: 0.0063
-Epoch 4/10, Training Loss: 0.0051, Validation Loss: 0.0061
-Epoch 5/10, Training Loss: 0.0059, Validation Loss: 0.0060
-Epoch 6/10, Training Loss: 0.0053, Validation Loss: 0.0061
-Epoch 7/10, Training Loss: 0.0047, Validation Loss: 0.0060
-Epoch 8/10, Training Loss: 0.0060, Validation Loss: 0.0059
-Epoch 9/10, Training Loss: 0.0076, Validation Loss: 0.0060
-Epoch 10/10, Training Loss: 0.0052, Validation Loss: 0.0059
-Elapsed (with compilation) = 0h 3m 15s
+Epoch 1/15, Training Loss: 0.0305, Validation Loss: 0.0307
+Epoch 2/15, Training Loss: 0.0304, Validation Loss: 0.0304
+Epoch 3/15, Training Loss: 0.0299, Validation Loss: 0.0301
+Epoch 4/15, Training Loss: 0.0314, Validation Loss: 0.0299
+Epoch 5/15, Training Loss: 0.0270, Validation Loss: 0.0298
+Epoch 6/15, Training Loss: 0.0298, Validation Loss: 0.0294
+Epoch 7/15, Training Loss: 0.0297, Validation Loss: 0.0292
+Epoch 8/15, Training Loss: 0.0295, Validation Loss: 0.0291
+Epoch 9/15, Training Loss: 0.0263, Validation Loss: 0.0288
+Epoch 10/15, Training Loss: 0.0294, Validation Loss: 0.0286
+Epoch 11/15, Training Loss: 0.0272, Validation Loss: 0.0285
+Epoch 12/15, Training Loss: 0.0305, Validation Loss: 0.0286
+Epoch 13/15, Training Loss: 0.0244, Validation Loss: 0.0282
+Epoch 14/15, Training Loss: 0.0282, Validation Loss: 0.0280
+Epoch 15/15, Training Loss: 0.0274, Validation Loss: 0.0280
+Elapsed (with compilation) = 0h 4m 18s
 #+end_example
 
 #+begin_src ipython
 if IF_BIASED_PHASES:
     if IF_RAND_REF:
-        torch.save(model.state_dict(), 'models/odr_bias_rand_ref_%d.pth' % seed)
+        torch.save(model.state_dict(), 'models/odr/odr_bias_rand_ref_%d.pth' % seed)
     else:
-        torch.save(model.state_dict(), 'models/odr_bias_%d_ref_%d.pth' % (reference, seed) )
+        torch.save(model.state_dict(), 'models/odr/odr_bias_%d_ref_%d.pth' % (reference, seed) )
 else:
-    torch.save(model.state_dict(), 'models/odr_%d.pth' % seed)
+    torch.save(model.state_dict(), 'models/odr/odr_%d.pth' % seed)
 #+end_src
 
 #+RESULTS:
@@ -611,11 +618,11 @@ else:
 if IF_BIASED_PHASES:
     print('Biased ODR')
     if IF_RAND_REF:
-        model_state_dict = torch.load('models/odr_bias_rand_ref_%d.pth' % seed )
+        model_state_dict = torch.load('models/odr/odr_bias_rand_ref_%d.pth' % seed )
     else:
-        model_state_dict = torch.load('models/odr_bias_%d_ref_%d.pth' % (reference, seed) )
+        model_state_dict = torch.load('models/odr/odr_bias_%d_ref_%d.pth' % (reference, seed) )
 else:
-    model_state_dict = torch.load('models/odr_%d.pth' % seed)
+    model_state_dict = torch.load('models/odr/odr_%d.pth' % seed)
 model.load_state_dict(model_state_dict)
 model.eval()
 #+end_src
@@ -630,7 +637,7 @@ model.eval()
 
 #+begin_src ipython
     model.N_BATCH = N_BATCH
-    if IF_BIASED_PHASES:
+    if IF_BIAS:
         model.PHI0 = torch.zeros(size=(N_BATCH, 3, 1), device=DEVICE, dtype=torch.float)
         labels = continuous_biased_phases(N_BATCH, reference, sigma) * torch.pi / 180.0
         model.PHI0[:, 0] = labels
@@ -701,7 +708,7 @@ plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
 
 #+RESULTS:
 :RESULTS:
-: [584 342 485 429 638 527 694 481   5 573 370  62 402 686 218 268]
+: [620 317 488 391 724 678  51 374 393 265 180 421 467 290 221 535]
 [[./figures/odr/figure_33.png]]
 :END:
 
@@ -713,12 +720,12 @@ plot_rates_selec(rates, idx=20, thresh=.1)
 [[./figures/odr/figure_34.png]]
 
         #+begin_src ipython
-plot_m0_m1_phi(model, rates, 3)
+plot_m0_m1_phi(model, rates, 4)
 #+end_src
 
 #+RESULTS:
 :RESULTS:
-: [517 498 428 142 578 578 112  41 113 309 304 454 122 689 143 327]
+: [682 236 718 122 495 440 678 474 203 583 491 156 271 331 629 369]
 [[./figures/odr/figure_35.png]]
 :END:
 
@@ -816,5 +823,3 @@ Cij = clamp_tensor(Cij, 0, model.slices).cpu().detach().numpy()
 #+end_src
 
 #+RESULTS:
-
-[[./figures/odr/figure_38.png]]

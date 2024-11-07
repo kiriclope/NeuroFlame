@@ -1,0 +1,155 @@
+
+* opto
+
+#+begin_src ipython
+model_state_dict = torch.load('models/dual/dual_train_%d.pth' % seed)
+model.load_state_dict(model_state_dict)
+#+end_src
+
+#+RESULTS:
+: <All keys matched successfully>
+
+#+begin_src ipython
+k = 100
+# _, idx = torch.sort(model.low_rank.U[:, 1])
+# model.W_stp_T[:, idx[:k]] = 0
+#+end_src
+
+#+RESULTS:
+
+    #+begin_src ipython
+model.eval()
+#+end_src
+
+#+RESULTS:
+: Network(
+:   (low_rank): LowRankWeights()
+:   (dropout): Dropout(p=0.0, inplace=False)
+: )
+
+#+begin_src ipython
+model.N_BATCH = 1
+
+model.I0[0] = A0
+model.I0[1] = A0
+model.I0[2] = float(B0)
+model.I0[3] = float(C0) * model.IF_RL # rwd
+model.I0[4] = A0
+
+AC_pair = model.init_ff_input()
+
+model.I0[0] = A0
+model.I0[1] = A0
+model.I0[2] = float(B0)
+model.I0[3] = float(C0) * model.IF_RL # rwd
+model.I0[4] = -A0
+
+AD_pair = model.init_ff_input()
+
+model.I0[0] = -A0
+model.I0[1] = A0
+model.I0[2] = float(B0)
+model.I0[3] = float(C0) * model.IF_RL # rwd
+model.I0[4] = A0
+
+BC_pair = model.init_ff_input()
+
+model.I0[0] = -A0
+model.I0[1] = A0
+model.I0[2] = float(B0)
+model.I0[3] = float(C0) * model.IF_RL # rwd
+model.I0[4] = -A0
+
+BD_pair = model.init_ff_input()
+
+ff_input = torch.cat((AC_pair, BD_pair, AD_pair, BC_pair))
+print('ff_input', ff_input.shape)
+#+end_src
+
+#+RESULTS:
+: ff_input torch.Size([4, 505, 1000])
+
+#+begin_src ipython
+model.N_BATCH = 16
+
+ff_input = []
+l=0
+for j in [0, 1, -1]:
+    for i in [-1, 1]:
+        for k in [-1, 1]:
+
+            model.I0[0] = i # sample
+            model.I0[1] = j # distractor
+            model.I0[4] = k # test
+
+            if j==1: # Go
+                model.I0[2] = float(B0) # cue
+                model.I0[3] = float(C0) * model.IF_RL # rwd
+            elif j==-1: # NoGo
+                model.I0[2] = float(B0) # cue
+                model.I0[3] = 0.0 # rwd
+            else: # DPA
+                model.I0[2] = 0 # cue
+                model.I0[3] = 0 # rwd
+
+            l+=1
+
+            ff_input.append(model.init_ff_input())
+
+ff_input = torch.vstack(ff_input)
+print('ff_input', ff_input.shape, 'labels')
+#+end_src
+
+#+RESULTS:
+: ff_input torch.Size([192, 505, 1000]) labels
+
+#+begin_src ipython
+rates = model.forward(ff_input=ff_input).detach()
+rates = rates.cpu().detach().numpy()
+print(rates.shape)
+#+end_src
+
+#+RESULTS:
+: (192, 81, 750)
+
+#+begin_src ipython
+readout = model.readout.cpu().detach().numpy().reshape(3, -1, 81, 2) / 2
+print(readout.shape)
+
+N_BATCH=32
+
+time = np.linspace(0, 8, readout.shape[-2])
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+color = ['r', 'b', 'g']
+label = ['DPA', 'DualGo', 'DualNoGo']
+
+for i in range(3):
+    sample = (-readout[i, :N_BATCH, :, 0].T  + readout[i, N_BATCH:, :, 0].T)
+    dist = (readout[i, :N_BATCH, :, 1].T  + readout[i, N_BATCH:, :, 1].T)
+
+    ax[0].plot(time, sample.mean(1), color=color[i])
+    ax[1].plot(time, dist.mean(1), color=color[i], label=label[i])
+
+add_vlines(ax[0])
+add_vlines(ax[1])
+ax[0].set_ylabel('Sample Overlap (Hz)')
+ax[1].set_ylabel('Go/NoGo Overlap (Hz)')
+ax[1].legend(frameon=False, fontsize=10)
+ax[0].set_xlabel('Time (s)')
+ax[1].set_xlabel('Time (s)')
+plt.savefig('./figures/dual/dual_train_%d_over.svg' % seed, dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (3, 64, 81, 2)
+[[./.ob-jupyter/c246513d90132d8b1f116e1a9dda59b87258ea16.png]]
+:END:
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:

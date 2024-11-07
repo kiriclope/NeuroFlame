@@ -49,6 +49,8 @@ class Network(nn.Module):
                 device=self.device,
             )
 
+            self.odors[2] = self.odors[1]
+
             self.low_rank = LowRankWeights(
                 self.Na[0], # N_NEURON
                 self.Na,
@@ -200,7 +202,7 @@ class Network(nn.Module):
         # update stp variables
         if self.IF_STP:
             Aux = self.stp(rates[:, self.slices[0]])  # Aux is now u * x * rates
-            hidden_stp = self.J_STP * Aux @ W_stp_T  # / torch.sqrt(self.Ka[0])
+            hidden_stp = self.J_STP * Aux @ W_stp_T
             hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
 
         # update batched EtoE
@@ -300,13 +302,16 @@ class Network(nn.Module):
 
                 if self.ODR_TRAIN:
                     W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]] / self.Na[0]
-                    # W_stp_T = self.dropout(W_stp_T) / torch.sqrt(self.Ka[0])
+                    # W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
+                    # W_stp_T = self.GAIN * (self.W_stp_T / torch.sqrt(self.Ka[0]) + self.Wab_train[self.slices[0], self.slices[0]])
+                    # W_stp_T = W_stp_T / torch.sqrt(self.Ka[0])
 
                 if self.LR_TRAIN:
                     # W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]] / self.Na[0]
                     W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
-                    # W_stp_T = self.GAIN * (self.W_stp_T + self.Wab_train[self.slices[0], self.slices[0]] / self.Na[0])
-                    # W_stp_T = self.GAIN * self.W_stp_T * (1.0 + self.Wab_train[self.slices[0], self.slices[0]])
+                    # W_stp_T = self.GAIN * (self.W_stp_T + self.Wab_train[self.slices[0], self.slices[0]]) / torch.sqrt(self.Ka[0])
+                    # W_stp_T = self.GAIN * self.W_stp_T * (1.0 / torch.sqrt(self.Ka[0])
+                    #                                       + self.Wab_train[self.slices[0], self.slices[0]] / self.Ka[0])
 
             if self.TRAIN_EI:
                 self.Wab_train = normalize_tensor(self.Wab_train, 0, self.slices, self.Na)
