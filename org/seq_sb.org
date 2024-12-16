@@ -1,0 +1,1065 @@
+* Sequential Serial Bias
+:PROPERTIES:
+:CUSTOM_ID: sequential-serial-bias
+:END:
+** Notebook Settings
+:PROPERTIES:
+:CUSTOM_ID: notebook-settings
+:END:
+#+begin_src python
+%load_ext autoreload
+%autoreload 2
+%reload_ext autoreload
+
+%run ../notebooks/setup.py
+%matplotlib inline
+#%config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+begin_example
+Python exe
+/home/aiswarya/miniconda3/envs/Ntorchmodel/bin/python
+#+end_example
+
+** Imports
+:PROPERTIES:
+:CUSTOM_ID: imports
+:END:
+#+begin_src python
+import sys
+sys.path.insert(0, '../')
+
+import torch
+import gc
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from time import perf_counter
+from scipy.stats import binned_statistic
+
+
+from src.network import Network
+from src.decode import decode_bump_torch
+from src.utils import clear_cache
+#+end_src
+
+#+begin_src python
+import gc 
+gc.collect()
+#+end_src
+
+#+begin_example
+270182
+#+end_example
+
+#+begin_src python
+clear_cache()
+#+end_src
+
+** Helpers
+:PROPERTIES:
+:CUSTOM_ID: helpers
+:END:
+#+begin_src python
+def convert_seconds(seconds):
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return h, m, s
+
+#### The function "convert_seconds" is designed to convert a given number of seconds into hours, minutes, and seconds. 
+#+end_src
+
+** Configuration
+:PROPERTIES:
+:CUSTOM_ID: configuration
+:END:
+#+begin_src python
+REPO_ROOT = '/home/aiswarya/Model2/NF2/NeuroFlame/'
+conf_name = 'config_SB.yml'
+DEVICE = 'cuda'
+#+end_src
+
+** Aim
+:PROPERTIES:
+:CUSTOM_ID: aim
+:END:
+Our aim in this project is to study how History Biases, with a focus on
+Serial Bias(SB)and even Ref bias(RB) evolve over time,and over multiple
+sessions.
+
+To do this, we build a model which is capable of running several
+iterations or sessions. As this can be an incredibly overwhelming task
+requiring a high computational power, we resought to find efficient
+ways.
+
+** NeuroFlame
+:PROPERTIES:
+:CUSTOM_ID: neuroflame
+:END:
+NeuroFlame is njskadnjkasdnjasdasbd
+
+#+begin_src python
+
+
+###Declaring variables
+N_TRIALS = 100
+#+end_src
+
+#+begin_src python
+
+# A trial consist of =>  stimulation -> Delay -> shut off -> ITI
+# First, we define a sequence of stimuli intensities and its corresponding footprints
+
+# Stimuli strength
+I0 = [1.75, -5] * N_TRIALS
+print('I0', I0)
+
+# Stimuli footprint
+SIGMA0 =  [1, 0] * N_TRIALS
+print('SIGMA0', SIGMA0)
+#+end_src
+
+#+begin_example
+I0 [1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5, 1.75, -5]
+SIGMA0 [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+#+end_example
+
+#+begin_src python
+# Defining the time stamps of trials 
+
+def generate_lists(ITI, DELAY, ON_period, OFF_period, N_TRIALS):
+    T_STIM_ON = [1]
+    T_STIM_OFF = [1 + ON_period]
+
+    for i in range(N_TRIALS):
+        T_STIM_ON.append(T_STIM_OFF[-1] + DELAY)
+        T_STIM_OFF.append(T_STIM_ON[-1] + OFF_period)
+        T_STIM_ON.append(T_STIM_OFF[-1] + ITI)
+        T_STIM_OFF.append(T_STIM_ON[-1] + ON_period)
+
+    return T_STIM_ON[:2*N_TRIALS], T_STIM_OFF[:2*N_TRIALS] 
+
+#+end_src
+
+#+begin_src python
+ITI = 4
+DELAY = 3
+ON_period = 1
+OFF_period = 0.5
+
+T_STIM_ON, T_STIM_OFF = generate_lists(ITI, DELAY, ON_period, OFF_period, N_TRIALS)
+print("T_STIM_ON:", T_STIM_ON)
+len(T_STIM_ON)
+print("T_STIM_OFF:", T_STIM_OFF)
+len(T_STIM_OFF)
+#+end_src
+
+#+begin_example
+T_STIM_ON: [1, 5, 9.5, 13.5, 18.0, 22.0, 26.5, 30.5, 35.0, 39.0, 43.5, 47.5, 52.0, 56.0, 60.5, 64.5, 69.0, 73.0, 77.5, 81.5, 86.0, 90.0, 94.5, 98.5, 103.0, 107.0, 111.5, 115.5, 120.0, 124.0, 128.5, 132.5, 137.0, 141.0, 145.5, 149.5, 154.0, 158.0, 162.5, 166.5, 171.0, 175.0, 179.5, 183.5, 188.0, 192.0, 196.5, 200.5, 205.0, 209.0, 213.5, 217.5, 222.0, 226.0, 230.5, 234.5, 239.0, 243.0, 247.5, 251.5, 256.0, 260.0, 264.5, 268.5, 273.0, 277.0, 281.5, 285.5, 290.0, 294.0, 298.5, 302.5, 307.0, 311.0, 315.5, 319.5, 324.0, 328.0, 332.5, 336.5, 341.0, 345.0, 349.5, 353.5, 358.0, 362.0, 366.5, 370.5, 375.0, 379.0, 383.5, 387.5, 392.0, 396.0, 400.5, 404.5, 409.0, 413.0, 417.5, 421.5, 426.0, 430.0, 434.5, 438.5, 443.0, 447.0, 451.5, 455.5, 460.0, 464.0, 468.5, 472.5, 477.0, 481.0, 485.5, 489.5, 494.0, 498.0, 502.5, 506.5, 511.0, 515.0, 519.5, 523.5, 528.0, 532.0, 536.5, 540.5, 545.0, 549.0, 553.5, 557.5, 562.0, 566.0, 570.5, 574.5, 579.0, 583.0, 587.5, 591.5, 596.0, 600.0, 604.5, 608.5, 613.0, 617.0, 621.5, 625.5, 630.0, 634.0, 638.5, 642.5, 647.0, 651.0, 655.5, 659.5, 664.0, 668.0, 672.5, 676.5, 681.0, 685.0, 689.5, 693.5, 698.0, 702.0, 706.5, 710.5, 715.0, 719.0, 723.5, 727.5, 732.0, 736.0, 740.5, 744.5, 749.0, 753.0, 757.5, 761.5, 766.0, 770.0, 774.5, 778.5, 783.0, 787.0, 791.5, 795.5, 800.0, 804.0, 808.5, 812.5, 817.0, 821.0, 825.5, 829.5, 834.0, 838.0, 842.5, 846.5]
+T_STIM_OFF: [2, 5.5, 10.5, 14.0, 19.0, 22.5, 27.5, 31.0, 36.0, 39.5, 44.5, 48.0, 53.0, 56.5, 61.5, 65.0, 70.0, 73.5, 78.5, 82.0, 87.0, 90.5, 95.5, 99.0, 104.0, 107.5, 112.5, 116.0, 121.0, 124.5, 129.5, 133.0, 138.0, 141.5, 146.5, 150.0, 155.0, 158.5, 163.5, 167.0, 172.0, 175.5, 180.5, 184.0, 189.0, 192.5, 197.5, 201.0, 206.0, 209.5, 214.5, 218.0, 223.0, 226.5, 231.5, 235.0, 240.0, 243.5, 248.5, 252.0, 257.0, 260.5, 265.5, 269.0, 274.0, 277.5, 282.5, 286.0, 291.0, 294.5, 299.5, 303.0, 308.0, 311.5, 316.5, 320.0, 325.0, 328.5, 333.5, 337.0, 342.0, 345.5, 350.5, 354.0, 359.0, 362.5, 367.5, 371.0, 376.0, 379.5, 384.5, 388.0, 393.0, 396.5, 401.5, 405.0, 410.0, 413.5, 418.5, 422.0, 427.0, 430.5, 435.5, 439.0, 444.0, 447.5, 452.5, 456.0, 461.0, 464.5, 469.5, 473.0, 478.0, 481.5, 486.5, 490.0, 495.0, 498.5, 503.5, 507.0, 512.0, 515.5, 520.5, 524.0, 529.0, 532.5, 537.5, 541.0, 546.0, 549.5, 554.5, 558.0, 563.0, 566.5, 571.5, 575.0, 580.0, 583.5, 588.5, 592.0, 597.0, 600.5, 605.5, 609.0, 614.0, 617.5, 622.5, 626.0, 631.0, 634.5, 639.5, 643.0, 648.0, 651.5, 656.5, 660.0, 665.0, 668.5, 673.5, 677.0, 682.0, 685.5, 690.5, 694.0, 699.0, 702.5, 707.5, 711.0, 716.0, 719.5, 724.5, 728.0, 733.0, 736.5, 741.5, 745.0, 750.0, 753.5, 758.5, 762.0, 767.0, 770.5, 775.5, 779.0, 784.0, 787.5, 792.5, 796.0, 801.0, 804.5, 809.5, 813.0, 818.0, 821.5, 826.5, 830.0, 835.0, 838.5, 843.5, 847.0]
+
+
+
+
+
+200
+#+end_example
+
+#+begin_src python
+DURATION = T_STIM_OFF[-1] + 1
+print(DURATION)
+#+end_src
+
+#+begin_example
+848.0
+#+end_example
+
+*** Defining Batches
+:PROPERTIES:
+:CUSTOM_ID: defining-batches
+:END:
+To take advantage of parallel processing? It is possible to run several
+sessions in a short and efficient manner. We do this by creating the
+desired number of initializations called bathes here, and feeding it to
+the network paralllely instead of sequentially.
+
+For our problem, we will therefore create a the desired number of
+bathces or sessions. We implement this with the help of the parameter
+PHI0, which is set to change with every sessions and trials.
+
+#+begin_src python
+N_BATCH = 150
+
+PHI0 = torch.ones((1, 2 * N_TRIALS), device=DEVICE) 
+PHI0 = PHI0.unsqueeze(-1).repeat((N_BATCH, 1, 1))  
+## unsqueeze(-1) adds a new dimension at the end, changing the shape to (1, 2 * N_TRIALS, 1)
+## repeat((N_BATCH, 1, 1)) then repeats this tensor along the batch dimension N_BATCH times, resulting in a tensor of shape (N_BATCH, 2 * N_TRIALS, 1).
+
+
+# for each trial we generate a set of random locations in degrees
+for i in range(PHI0.shape[1]):
+    PHI0[:, i] = torch.randint(0, 360, (N_BATCH,), device=DEVICE).unsqueeze(1)  #For each index i, it generates N_BATCH random integers between 0 and 359 (inclusive) using torch.randint.
+
+print('PHI0', PHI0.shape)
+# PHI0 should be of size (N_BATCH, N_TRIALS, 1) the last dimension is there for safety reasons
+#+end_src
+
+#+begin_example
+PHI0 torch.Size([150, 200, 1])
+#+end_example
+
+#+begin_src python
+plt.hist(PHI0[:, 0, 0].cpu().numpy()) #extracting the first trial's values from each batch, resulting in a 1D tensor of shape (N_BATCH,).
+plt.xlabel('Phase (°)')
+plt.ylabel('Count')
+plt.title(' Distribution of phase values amongst the first trial across all batches', fontsize = 13)
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_24_0.png]]
+
+*** Model
+:PROPERTIES:
+:CUSTOM_ID: model
+:END:
+#+begin_src python
+model = Network(conf_name, REPO_ROOT, IF_STP=1, VERBOSE=0, LIVE_FF_UPDATE=1,
+                N_BATCH=N_BATCH, DURATION=DURATION,
+                I0=I0, SIGMA0=SIGMA0, PHI0=PHI0,
+                T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,
+                TAU_FAC= 0.95,
+                J_STP=7.5)
+#+end_src
+
+*** Simulations
+:PROPERTIES:
+:CUSTOM_ID: simulations
+:END:
+Let's run the simulation!
+
+#+begin_src python
+rates = model()
+#+end_src
+
+*** SB analysis
+:PROPERTIES:
+:CUSTOM_ID: sb-analysis
+:END:
+Let's decode the bumps !
+
+#+begin_src python
+m0, m1, phi = decode_bump_torch(rates)
+print(m0.shape)
+
+##The decoder function, using Discrete Fourier Transform (DFT) , calculates and gives us the (mean, magnitude, and phase) of the forier transform along the specified axis (Default is -1)
+#+end_src
+
+#+begin_example
+---------------------------------------------------------------------------
+
+OutOfMemoryError                          Traceback (most recent call last)
+
+Cell In[26], line 1
+----> 1 m0, m1, phi = decode_bump_torch(rates)
+      2 print(m0.shape)
+
+
+File ~/Model2/NF2/NeuroFlame/notebooks/../src/decode.py:20, in decode_bump_torch(signal, axis)
+      5 """
+      6 Decode a signal to a phase and magnitude representation using PyTorch.
+      7 
+   (...)
+     16          phi is the phase of the Fourier transform of the signal.
+     17 """
+     19 # Ensuring the input is a Tensor
+---> 20 signal_copy = signal.clone().to(torch.cfloat)
+     22 # Swapping axes if necessary
+     23 if axis != -1 and signal_copy.ndim != 1:
+
+
+OutOfMemoryError: CUDA out of memory. Tried to allocate 4.74 GiB. GPU 0 has a total capacity of 23.50 GiB of which 1.14 GiB is free. Including non-PyTorch memory, this process has 5.04 GiB memory in use. Process 4063780 has 17.28 GiB memory in use. Of the allocated memory 4.75 GiB is allocated by PyTorch, and 18.25 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+#+end_example
+
+#+begin_src python
+targets = PHI0[:,::2,0].cpu().numpy() * np.pi / 180 ## Selecting every second value
+#+end_src
+
+#+begin_src python
+idx = np.array(model.T_STIM_ON[1::2])/model.T_WINDOW - 1
+idx = idx.astype(int)
+
+phi_off = phi[:, idx].cpu().numpy()
+print('delay phase', phi_off.shape)
+
+print(targets[0, 0] * 180 / np.pi, phi_off[0,0] *180/np.pi)
+#+end_src
+
+#+begin_example
+delay phase (150, 100)
+156.1521946161817 336.7101304576797
+#+end_example
+
+#+begin_src python
+errors =  targets - phi_off
+print(errors[0, 0])
+errors = (errors + np.pi) % (2.0*np.pi) - np.pi
+
+print('errors', errors.shape)
+#+end_src
+
+#+begin_example
+-3.1513305
+errors (150, 100)
+#+end_example
+
+#+begin_src python
+fig, ax = plt.subplots(1, 2, figsize=(5*width, height))
+r_max = 30
+
+ax[0].imshow(rates[0].T.cpu().numpy(), aspect='auto',
+             cmap='jet', vmin=0, vmax=r_max,
+             origin='lower', extent=[0, model.DURATION, 0, model.N_NEURON* model.frac[0]])
+
+ax[0].set_xlabel('Time (s)')
+ax[0].set_ylabel('Pref. Location (°)')
+ax[0].set_yticks(np.linspace(0, model.Na[0].cpu(), 5), np.linspace(0, 360, 5).astype(int))
+
+cbar = plt.colorbar(ax[0].images[0], ax=ax[0], fraction=0.046, pad=0.04)
+cbar.set_label('Firing Rate (Hz)')
+
+ax[1].plot(phi[0].T.cpu().numpy() * 180 / np.pi, alpha=1)
+
+# for i in range(targets.shape[1]):
+#    ax[1].axhline(targets[0, i] * 180.0 / np.pi, 0, model.DURATION, color='k', ls='--')
+
+for i in range(targets.shape[1]):
+   ax[1].axvline(idx[i], 0, 360, color='r', ls='--')
+
+ax[1].set_ylabel('Phase (°)')
+ax[1].set_xlabel('Step')
+ax[1].set_ylim([0, 360])
+ax[1].set_yticks(np.linspace(0, 360, 5).astype(int))
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_36_0.png]]
+
+#+begin_src python
+np.shape(errors)
+#+end_src
+
+#+begin_example
+(150, 100)
+#+end_example
+
+#+begin_src python
+plt.hist(errors[:,1], bins=50)
+plt.xlabel('Errors (rad)')
+plt.ylabel('Count')
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_38_0.png]]
+
+#+begin_src python
+rel_loc = np.diff(targets, axis=1)
+rel_loc = (rel_loc + np.pi ) % (2*np.pi) - np.pi
+print(rel_loc.shape)
+#+end_src
+
+#+begin_example
+(150, 99)
+#+end_example
+
+#+begin_src python
+pal = sns.color_palette("rocket_r", n_colors= N_TRIALS)
+
+for i in range(1, errors.shape[1]):
+    stt = binned_statistic(rel_loc[:, i-1] * 180 / np.pi,
+                           errors[:, i] * 180 / np.pi,
+                           statistic='mean',
+                           bins=5, range=[-180, 180])
+
+    dstt = np.mean(np.diff(stt.bin_edges))
+    # plt.plot(rel_loc[:, i]* 180 / np.pi, errors[:, i+1] * 180 / np.pi , 'o', alpha=.25, color=pal[i])
+    plt.plot(stt.bin_edges[:-1]+dstt/2,stt.statistic, color=pal[i], label='trial %d' % i, alpha=1)
+
+plt.axhline(color='k', linestyle=":")
+plt.xlabel('Rel. Loc. (°)')
+plt.ylabel('Error (°)')
+#plt.ylim([-5, 5])
+#plt.legend(frameon=False, loc='best', fontsize=10)
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_40_0.png]]
+
+Varying stimulus angle location.
+
+#+begin_src python
+PHI0.shape
+#+end_src
+
+#+begin_example
+torch.Size([150, 200, 1])
+#+end_example
+
+#+begin_src python
+import torch
+import torch.distributions as dist
+import random
+#+end_src
+
+#+begin_src python
+print('N_BATCH', N_BATCH)
+print('N_TRIALS', N_TRIALS)
+#+end_src
+
+#+begin_example
+N_BATCH 150
+N_TRIALS 100
+#+end_example
+
+#+begin_src python
+std_dev = 45.0
+PHI0 = torch.zeros((N_BATCH, 2 * N_TRIALS, 1), device=DEVICE)
+mode1_list = []
+
+for i in range(N_BATCH):
+    mode1 = random.uniform(0, 180)
+    mode1_list.append(mode1)
+
+    mode2 = (mode1 + 180) % 360
+    
+    mode1_dist = dist.Normal(mode1, std_dev)
+    mode2_dist = dist.Normal(mode2, std_dev)
+    concatenated_dist = dist.Categorical(torch.tensor([0.5, 0.5]))
+    
+    for j in range(2 * N_TRIALS):
+        mode_index = concatenated_dist.sample().item()
+        if mode_index == 0:
+            PHI0[i, j, 0] = mode1_dist.sample()
+        else:
+            PHI0[i, j, 0] = mode2_dist.sample()
+
+
+phi0_flattened = PHI0.cpu().numpy().flatten()
+
+print('PHI0 shape:', PHI0.shape)
+print('Flattened PHI0 shape:', phi0_flattened.shape)
+print('Generated mode1s:', mode1_list)
+#+end_src
+
+#+begin_example
+PHI0 shape: torch.Size([150, 200, 1])
+Flattened PHI0 shape: (30000,)
+Generated mode1s: [108.41999363092182, 123.14811428971076, 77.16577971981734, 164.32012236784732, 85.84600651386607, 151.35181094325063, 45.664196746573865, 41.01683756257501, 156.0074460857971, 1.576028217679546, 13.077972607851835, 90.37409602526789, 122.075424805959, 148.6416012311728, 156.11987736231458, 170.3653485127029, 31.753990540154586, 58.847326772366635, 79.61622147852842, 149.1772015230052, 5.2523608458054305, 175.8791236560535, 96.92775031870634, 155.67545734680456, 137.4880887912281, 60.42008479656293, 143.25577294346812, 126.83254886657484, 60.749910297176555, 119.01588270286467, 114.19117286863023, 131.33468322668003, 119.51556761200567, 151.53000073296982, 111.31148332379045, 20.41563023695879, 154.58121865148902, 71.42986423695923, 5.624450964093921, 15.85355827397175, 147.40591005383124, 91.05516197893033, 115.65322966869036, 168.74196210110472, 15.675418925600981, 69.69271436977877, 68.742110521086, 15.619377969136995, 16.691240274984022, 77.731274648635, 29.514626271067833, 63.949037094330926, 60.70018758976504, 34.68379951821649, 14.392430831274456, 109.58900748209662, 88.26428760646994, 123.39655533575724, 138.7824898463655, 69.76992737163532, 140.7638542304781, 165.10662303586918, 89.17621225267526, 79.5489517471471, 30.420890187478857, 174.70492044585052, 145.18932779921357, 5.834296862351112, 61.705098493682236, 15.922139269917789, 159.88522925482815, 175.9558309837906, 75.55939872872104, 47.71271913276615, 142.35975820925498, 6.724760468948938, 166.16883596348103, 41.00697984049263, 75.4088589095091, 148.38136554409797, 150.82085169902666, 170.46489544778143, 59.298357397991204, 30.819431898737676, 159.807524376425, 42.91570712346551, 76.5822440454674, 111.14389112440588, 42.13526520955599, 51.936609253966814, 66.51536365679924, 119.3249370014198, 156.7475632656514, 96.68074135749819, 86.83056884542329, 39.75623271421258, 9.125200414460595, 26.315303504486934, 101.11666484438557, 135.03659587083968, 160.41801141963342, 28.63730877243324, 35.481523999554, 57.53345404772611, 67.95329167170713, 22.90605378698093, 79.2839119694878, 110.11208176607342, 63.074987255787164, 97.53792224256449, 131.87768640555757, 37.11352068043336, 151.85105845722097, 117.08062567045081, 157.51479141948693, 126.44959785259431, 96.75781964404328, 111.60461993393331, 111.22410428543948, 109.54299091709356, 135.74529409328653, 93.76860634721594, 88.74942989229801, 164.58117240248802, 151.15479659992113, 61.40496445220719, 102.2051371774372, 74.34381395897402, 40.159010933514715, 161.3636831611049, 140.40886730032972, 75.56857938119558, 66.1561703540409, 109.01058275633056, 160.73732407343866, 0.03904707530810736, 142.8663230322082, 101.30415056866553, 28.132978720943797, 52.80455778201186, 143.1615435450049, 52.16156178727839, 179.11418417588553, 144.5879721513864, 45.159467030188026, 147.2049169704809, 116.82062138500923, 56.41643241152741, 6.610680489585539, 63.92026976353278]
+#+end_example
+
+#+begin_src python
+
+plt.hist(PHI0[i, :, :].cpu().numpy(),bins=50, density=True, alpha=0.5, color='b')
+plt.xlabel('Value')
+plt.ylabel('Probability Density')
+
+
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_46_0.png]]
+
+#+begin_src python
+wrapped_phi0 = np.mod(phi0_flattened, 360)
+plt.hist(wrapped_phi0, bins=50, density=True, alpha=0.7, color='b')
+plt.xlabel('Value')
+plt.ylabel('Probability Density')
+plt.title('phi0_flattened')
+
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_47_0.png]]
+
+#+begin_src python
+model = Network(conf_name, REPO_ROOT, IF_STP=1, VERBOSE=0, LIVE_FF_UPDATE=1,
+                N_BATCH=N_BATCH, DURATION=DURATION,
+                I0=I0, SIGMA0=SIGMA0, PHI0=PHI0,
+                T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,
+                TAU_FAC= 0.95,
+                J_STP=7.5)
+#+end_src
+
+#+begin_src python
+rates = model()
+#+end_src
+
+#+begin_src python
+print(rates.shape)
+#+end_src
+
+#+begin_example
+torch.Size([150, 8481, 500])
+#+end_example
+
+#+begin_src python
+m0, m1, phi = decode_bump_torch(rates)
+print(m0.shape)
+print(m1.shape)
+print(phi.shape)
+#+end_src
+
+#+begin_example
+torch.Size([150, 8481])
+torch.Size([150, 8481])
+torch.Size([150, 8481])
+#+end_example
+
+#+begin_src python
+###extracts every second value and reshapes
+targets = PHI0[:,::2,0].cpu().numpy() * np.pi / 180 
+#+end_src
+
+#+begin_src python
+targets.shape
+#+end_src
+
+#+begin_example
+(150, 100)
+#+end_example
+
+#+begin_src python
+idx = np.array(model.T_STIM_ON[1::2])/model.T_WINDOW - 1
+idx = idx.astype(int)
+
+phi_off = phi[:, idx].cpu().numpy()
+print('delay phase', phi_off.shape)
+
+print(targets[0, 0] * 180 / np.pi, phi_off[0,0] *180/np.pi)
+#+end_src
+
+#+begin_example
+delay phase (150, 100)
+268.0000120112389 275.07983093503725
+#+end_example
+
+#+begin_src python
+errors =  phi_off - targets
+print(errors[0, 0])
+errors = (errors + np.pi) % (2.0*np.pi) - np.pi
+
+print('errors', errors.shape)
+#+end_src
+
+#+begin_example
+0.12356615
+errors (150, 100)
+#+end_example
+
+#+begin_src python
+fig, ax = plt.subplots(1, 2, figsize=(5*width, height))
+r_max = 30
+
+ax[0].imshow(rates[0].T.cpu().numpy(), aspect='auto',
+             cmap='jet', vmin=0, vmax=r_max,
+             origin='lower', extent=[0, model.DURATION, 0, model.N_NEURON* model.frac[0]])
+
+ax[0].set_xlabel('Time (s)')
+ax[0].set_ylabel('Pref. Location (°)')
+ax[0].set_yticks(np.linspace(0, model.Na[0].cpu(), 5), np.linspace(0, 360, 5).astype(int))
+
+cbar = plt.colorbar(ax[0].images[0], ax=ax[0], fraction=0.046, pad=0.04)
+cbar.set_label('Firing Rate (Hz)')
+
+ax[1].plot(phi[0].T.cpu().numpy() * 180 / np.pi, alpha=1)
+
+# for i in range(targets.shape[1]):
+#    ax[1].axhline(targets[0, i] * 180.0 / np.pi, 0, model.DURATION, color='k', ls='--')
+
+for i in range(targets.shape[1]):
+   ax[1].axvline(idx[i], 0, 360, color='r', ls='--')
+
+ax[1].set_ylabel('Phase (°)')
+ax[1].set_xlabel('Step')
+ax[1].set_ylim([0, 360])
+ax[1].set_yticks(np.linspace(0, 360, 5).astype(int))
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_56_0.png]]
+
+#+begin_src python
+print(errors.shape)
+print(type(errors))
+#+end_src
+
+#+begin_example
+(150, 100)
+<class 'numpy.ndarray'>
+#+end_example
+
+#+begin_src python
+
+import seaborn as sns
+pal = sns.color_palette("rocket_r", n_colors= N_TRIALS)
+
+
+for i in range(errors.shape[1]):
+    sns.histplot(errors[:, i], bins=50, kde=True, stat='count', alpha=0.5)
+
+plt.xlabel('Error(rad)')
+plt.ylabel('Frequency')
+plt.title('Errors for all Trials',fontsize= 10)
+
+# Add legend for trials
+#plt.legend(labels=[f'Trial_{i+1}' for i in range(errors.shape[1])], loc='best', fontsize= 10)
+
+
+#plt.grid(True)
+plt.show()
+
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_58_0.png]]
+
+#+begin_src python
+plt.hist(errors[:,1], bins=50)
+plt.xlabel('Errors (rad)')
+plt.ylabel('Count')
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_59_0.png]]
+
+Serial Bias
+
+#+begin_src python
+print(targets)
+#+end_src
+
+#+begin_example
+[[ 3.7822163   5.4428844   1.1158099  ...  5.717504    5.0388227
+   5.1132    ]
+ [ 1.3790666   2.8922327   6.3057203  ...  5.977814    4.9818788
+   2.8616672 ]
+ [ 4.9011555   0.19759656  3.6975498  ...  0.07720185  1.3801064
+   4.2681503 ]
+ ...
+ [ 3.848444    3.1598206   1.8577507  ...  4.6461763   1.4487305
+   0.20183086]
+ [ 2.7661135   0.7144078  -0.4199801  ...  4.000425   -1.1742836
+  -1.1263099 ]
+ [ 0.84572196  1.5420729   0.7821079  ...  3.7326322   4.0495267
+   2.1575875 ]]
+#+end_example
+
+#+begin_src python
+rel_loc = np.diff(targets, axis=1)
+rel_loc = (rel_loc + np.pi ) % (2*np.pi) - np.pi
+print(rel_loc.shape)
+#+end_src
+
+#+begin_example
+(150, 99)
+#+end_example
+
+#+begin_src python
+pal = sns.color_palette("rocket_r", n_colors= N_TRIALS)
+
+
+for i in range(1, errors.shape[1]):
+    stt = binned_statistic(rel_loc[:, i-1] * 180 / np.pi,
+                           errors[:, i] * 180 / np.pi,
+                           statistic='mean',
+                           bins=5, range=[-180, 180])
+
+    dstt = np.mean(np.diff(stt.bin_edges))
+    # plt.plot(rel_loc[:, i]* 180 / np.pi, errors[:, i+1] * 180 / np.pi , 'o', alpha=.25, color=pal[i])
+    plt.plot(stt.bin_edges[:-1]+dstt/2,stt.statistic, color=pal[i], label='trial %d' % i, alpha=1)
+
+plt.axhline(color='k', linestyle=":")
+plt.xlabel('Rel. Loc. (°)')
+plt.ylabel('Error (°)')
+plt.xlim([-180, 180])
+#plt.legend(frameon=False, loc='best', fontsize=10)
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_63_0.png]]
+
+Reference Bias
+
+Ref loc= Mode1 - target
+
+#+begin_src python
+print(mode1_list)
+#+end_src
+
+#+begin_example
+[108.41999363092182, 123.14811428971076, 77.16577971981734, 164.32012236784732, 85.84600651386607, 151.35181094325063, 45.664196746573865, 41.01683756257501, 156.0074460857971, 1.576028217679546, 13.077972607851835, 90.37409602526789, 122.075424805959, 148.6416012311728, 156.11987736231458, 170.3653485127029, 31.753990540154586, 58.847326772366635, 79.61622147852842, 149.1772015230052, 5.2523608458054305, 175.8791236560535, 96.92775031870634, 155.67545734680456, 137.4880887912281, 60.42008479656293, 143.25577294346812, 126.83254886657484, 60.749910297176555, 119.01588270286467, 114.19117286863023, 131.33468322668003, 119.51556761200567, 151.53000073296982, 111.31148332379045, 20.41563023695879, 154.58121865148902, 71.42986423695923, 5.624450964093921, 15.85355827397175, 147.40591005383124, 91.05516197893033, 115.65322966869036, 168.74196210110472, 15.675418925600981, 69.69271436977877, 68.742110521086, 15.619377969136995, 16.691240274984022, 77.731274648635, 29.514626271067833, 63.949037094330926, 60.70018758976504, 34.68379951821649, 14.392430831274456, 109.58900748209662, 88.26428760646994, 123.39655533575724, 138.7824898463655, 69.76992737163532, 140.7638542304781, 165.10662303586918, 89.17621225267526, 79.5489517471471, 30.420890187478857, 174.70492044585052, 145.18932779921357, 5.834296862351112, 61.705098493682236, 15.922139269917789, 159.88522925482815, 175.9558309837906, 75.55939872872104, 47.71271913276615, 142.35975820925498, 6.724760468948938, 166.16883596348103, 41.00697984049263, 75.4088589095091, 148.38136554409797, 150.82085169902666, 170.46489544778143, 59.298357397991204, 30.819431898737676, 159.807524376425, 42.91570712346551, 76.5822440454674, 111.14389112440588, 42.13526520955599, 51.936609253966814, 66.51536365679924, 119.3249370014198, 156.7475632656514, 96.68074135749819, 86.83056884542329, 39.75623271421258, 9.125200414460595, 26.315303504486934, 101.11666484438557, 135.03659587083968, 160.41801141963342, 28.63730877243324, 35.481523999554, 57.53345404772611, 67.95329167170713, 22.90605378698093, 79.2839119694878, 110.11208176607342, 63.074987255787164, 97.53792224256449, 131.87768640555757, 37.11352068043336, 151.85105845722097, 117.08062567045081, 157.51479141948693, 126.44959785259431, 96.75781964404328, 111.60461993393331, 111.22410428543948, 109.54299091709356, 135.74529409328653, 93.76860634721594, 88.74942989229801, 164.58117240248802, 151.15479659992113, 61.40496445220719, 102.2051371774372, 74.34381395897402, 40.159010933514715, 161.3636831611049, 140.40886730032972, 75.56857938119558, 66.1561703540409, 109.01058275633056, 160.73732407343866, 0.03904707530810736, 142.8663230322082, 101.30415056866553, 28.132978720943797, 52.80455778201186, 143.1615435450049, 52.16156178727839, 179.11418417588553, 144.5879721513864, 45.159467030188026, 147.2049169704809, 116.82062138500923, 56.41643241152741, 6.610680489585539, 63.92026976353278]
+#+end_example
+
+#+begin_src python
+FIRST_REFERENCE = mode1_list[0]
+#+end_src
+
+#+begin_src python
+mode1_array = np.array(mode1_list)
+mode1_array = mode1_array[:, np.newaxis]
+ref_loc =  targets - mode1_array/ 180.0*np.pi 
+ref_loc = (ref_loc + np.pi ) % (2*np.pi) - np.pi
+#+end_src
+
+#+begin_src python
+
+print(ref_loc.shape)
+#+end_src
+
+#+begin_example
+(150, 100)
+#+end_example
+
+#+begin_src python
+print(errors.shape)
+#+end_src
+
+#+begin_example
+(150, 100)
+#+end_example
+
+#+begin_src python
+pal = sns.color_palette( n_colors= N_BATCH)
+
+bins = np.linspace(-180, 180, 11)
+
+refbias = []
+
+for i in range(1, errors.shape[0]):
+#for i in range(1, 5):
+    stt = binned_statistic(ref_loc[i, :]* 180 / np.pi,
+                           errors[i, :] * 180 / np.pi,
+                           statistic='mean',
+                           bins=bins, range=[-180, 180])
+
+    refbias.append(list(stt.statistic))
+    dstt = np.mean(np.diff(stt.bin_edges))
+    #plt.plot(ref_loc[:, i]* 180 / np.pi, errors[:, i] * 180 / np.pi , 'o', alpha=.25)
+    plt.plot(stt.bin_edges[:-1]+dstt/2,stt.statistic, color=pal[i], label='trial %d' % i, alpha=1)
+
+plt.axhline(color='k', linestyle=":")
+plt.xlabel('Ref Pos (°)')
+plt.ylabel('Error (°)')
+
+#plt.legend(frameon=False, loc='best', fontsize=10)
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_71_0.png]]
+
+#+begin_src python
+refbias = np.array(refbias)
+plt.plot(bins[:-1],np.nanmean(refbias, axis=0))
+plt.fill_between(bins[:-1],np.nanmean(refbias, axis=0), color="b", alpha=0.2)
+
+##axis labels , errorbar, legend
+#+end_src
+
+#+begin_example
+<matplotlib.collections.PolyCollection at 0x7f3b72ea2010>
+#+end_example
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_72_1.png]]
+
+#+begin_src python
+import scipy.stats as sps
+
+mean_refbias = np.nanmean(refbias, axis=0)
+std_refbias = sps.sem(refbias, axis=0)  
+
+plt.figure()
+plt.plot(bins[:-1], mean_refbias, color='b', label='Mean refbias with error bar')
+plt.fill_between(bins[:-1], mean_refbias - std_refbias, mean_refbias + std_refbias, color='b', alpha=0.2)
+
+plt.axhline(0, color='gray', linestyle='-', linewidth=1)
+
+plt.xlabel('Bins')
+plt.ylabel('Refbias')
+plt.title('Refbias')
+#plt.legend()
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_73_0.png]]
+
+Checking for adaptation current
+
+#+begin_src python
+print(rates.shape)
+#+end_src
+
+#+begin_example
+torch.Size([150, 8481, 500])
+#+end_example
+
+#+begin_src python
+
+batch_index = 0
+rates_single_batch = rates[batch_index].cpu().numpy()  
+#+end_src
+
+#+begin_src python
+import matplotlib.pyplot as plt
+
+plt.figure()
+plt.imshow(rates_single_batch.T, aspect='auto', cmap='viridis')
+plt.colorbar(label='Rate')
+plt.xlabel('Time Steps')
+plt.ylabel('Neurons')
+plt.title(f'Neuron Activity Over Time for Batch {batch_index}')
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_77_0.png]]
+
+#+begin_src python
+FIRST_MODE = mode1_list[0]
+print(FIRST_MODE)
+#+end_src
+
+#+begin_example
+108.41999363092182
+#+end_example
+
+#+begin_src python
+
+
+# Map radians to the range [0, 499]
+FM_Neuorn_index = int(((np.deg2rad(FIRST_MODE) % (2 * np.pi))/ (2 * np.pi)) * 500)
+
+print("First mode Neuron index:", FM_Neuorn_index)
+#+end_src
+
+#+begin_example
+First mode Neuron index: 150
+#+end_example
+
+#+begin_src python
+
+neuron_indices = [58]
+
+plt.figure()
+for idx in neuron_indices:
+    plt.plot((rates_single_batch[:, idx]), label=f'Neuron {idx}')
+
+plt.xlabel('Time Steps')
+plt.ylabel('Rate')
+plt.title(f'Activity at first 10 time steps')
+#plt.legend()
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_80_0.png]]
+
+#+begin_src python
+neuron_indices = [58]
+
+plt.figure()
+for idx in neuron_indices:
+    plt.plot(rates_single_batch[:, idx], label=f'First')
+    plt.plot(rates_single_batch[:, idx], label=f' Last')
+
+plt.xlabel('Time Steps')
+plt.ylabel('Rate')
+plt.title('Activity at first and last 12 time steps')
+plt.legend()
+plt.show()
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_82_0.png]]
+
+#+begin_src python
+model = Network('config_SB.yml', REPO_ROOT, IF_STP=1, DT=0.001, DURATION=10, VERBOSE=0, N_BATCH=10, I0=[0,0,0])
+#+end_src
+
+#+begin_src python
+rates = model(RET_THRESH=1).cpu().detach().numpy()
+print(rates.shape)
+#+end_src
+
+#+begin_example
+(10, 101, 500)
+#+end_example
+
+#+begin_src python
+plt.plot(rates[0,:, :10]);
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_85_0.png]]
+
+#+begin_src python
+thresh = torch.stack(model.thresh_list)
+print(thresh.shape)
+#+end_src
+
+#+begin_example
+torch.Size([61, 10, 1000])
+#+end_example
+
+#+begin_src python
+thresh_sign = (thresh>0)*1.0
+print(thresh_sign.mean())
+#+end_src
+
+#+begin_example
+tensor(1., device='cuda:0')
+#+end_example
+
+#+begin_src python
+plt.plot(thresh.cpu().numpy()[:, 0, :10]);
+plt.xlabel("Step")
+plt.ylabel("$\\theta$");
+#+end_src
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_88_0.png]]
+
+#+begin_src python
+Je0_list = np.linspace(0, 100, 50)
+
+ff_inputs = []
+for i in Je0_list:
+      model.Ja0[:, 0] = i  # here we set the ff input to E to value i in 0 .. 10
+      model.VAR_FF[:, 0] = np.sqrt(i)
+      ff_inputs.append(model.init_ff_input())
+
+ff_inputs = torch.vstack(ff_inputs)
+#+end_src
+
+#+begin_src python
+rates = model(ff_input=ff_inputs, RET_STP=0).cpu().detach().numpy()
+print(rates.shape)
+#+end_src
+
+#+begin_example
+(50, 301, 5)
+#+end_example
+
+#+begin_src python
+plt.plot(rates[-1])
+#+end_src
+
+#+begin_example
+[<matplotlib.lines.Line2D at 0x7f6c1f6b0990>,
+ <matplotlib.lines.Line2D at 0x7f6cf6178110>,
+ <matplotlib.lines.Line2D at 0x7f6c1eb4bb50>,
+ <matplotlib.lines.Line2D at 0x7f6c1eb4a450>,
+ <matplotlib.lines.Line2D at 0x7f6c1eb4b050>]
+#+end_example
+
+#+caption: png
+[[file:seq_serial_bias_files/seq_serial_bias_91_1.png]]
+
+#+begin_src python
+model = Network(conf_name, REPO_ROOT, IF_STP=1, VERBOSE=0, LIVE_FF_UPDATE=1,
+                N_BATCH=N_BATCH, DURATION=DURATION,
+                I0=I0, SIGMA0=SIGMA0, PHI0=PHI0,
+                T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,
+                TAU_FAC= 0.95,
+                J_STP=7.5)
+#+end_src
+
+#+begin_src python
+rates = model()
+m0, m1, phi = decode_bump_torch(rates)
+print(m0.shape)
+#+end_src
+
+#+begin_example
+---------------------------------------------------------------------------
+
+KeyboardInterrupt                         Traceback (most recent call last)
+
+Cell In[139], line 1
+----> 1 rates = model()
+      2 m0, m1, phi = decode_bump_torch(rates)
+      3 print(m0.shape)
+
+
+File ~/miniconda3/envs/Ntorchmodel/lib/python3.11/site-packages/torch/nn/modules/module.py:1511, in Module._wrapped_call_impl(self, *args, **kwargs)
+   1509     return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]
+   1510 else:
+-> 1511     return self._call_impl(*args, **kwargs)
+
+
+File ~/miniconda3/envs/Ntorchmodel/lib/python3.11/site-packages/torch/nn/modules/module.py:1520, in Module._call_impl(self, *args, **kwargs)
+   1515 # If we don't have any hooks, we want to skip the rest of the logic in
+   1516 # this function, and just call forward.
+   1517 if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
+   1518         or _global_backward_pre_hooks or _global_backward_hooks
+   1519         or _global_forward_hooks or _global_forward_pre_hooks):
+-> 1520     return forward_call(*args, **kwargs)
+   1522 try:
+   1523     result = None
+
+
+File ~/Model2/NF2/NeuroFlame/notebooks/../src/network.py:319, in Network.forward(self, ff_input, REC_LAST_ONLY, RET_FF, RET_STP, RET_THRESH)
+    317 ff_input, noise = live_ff_input(self, step, ff_input)
+    318 if self.RATE_NOISE:
+--> 319     rates, rec_input = self.update_dynamics(
+    320         rates, ff_input, rec_input, Wab_T, W_stp_T
+    321     )
+    322     rates = rates + noise
+    323 else:
+
+
+File ~/Model2/NF2/NeuroFlame/notebooks/../src/network.py:230, in Network.update_dynamics(self, rates, ff_input, rec_input, Wab_T, W_stp_T)
+    227     net_input = net_input + rec_input[1]
+    229 # compute non linearity
+--> 230 non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.thresh)
+    232 # update rates
+    233 if self.RATE_DYN:
+
+
+File ~/Model2/NF2/NeuroFlame/notebooks/../src/activation.py:6, in Activation.__init__(self)
+      5 class Activation(nn.Module):
+----> 6     def __init__(self):
+      7         super().__init__()
+      9     def forward(self, x, func_name="relu", thresh=15):
+
+
+KeyboardInterrupt: 
+#+end_example
+
+#+begin_src python
+
+batch_index = 0
+rates_single_batch = rates[batch_index].cpu().numpy()  
+neuron_indices = [58]
+
+plt.figure()
+for idx in neuron_indices:
+    plt.plot((rates_single_batch[:10, idx]), label=f'Neuron {idx}')
+
+plt.xlabel('Time Steps')
+plt.ylabel('Rate')
+plt.title(f'Activity at first 10 time steps')
+#plt.legend()
+plt.show()
+#+end_src

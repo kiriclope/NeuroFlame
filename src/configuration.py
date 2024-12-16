@@ -177,7 +177,7 @@ def init_const(model):
     model.Ja0 = model.Ja0.unsqueeze(-1)  # add neural dim
 
     model.VAR_FF = torch.sqrt(torch.tensor(model.VAR_FF, device=model.device))
-    model.VAR_RATE = torch.sqrt(torch.tensor(model.VAR_RATE, device=model.device))
+    model.VAR_RATE = torch.sqrt(torch.tensor(model.VAR_RATE, device=model.device)) / torch.sqrt(model.Ka[0])
     # scaling ff variance as O(1) because we multiply by sqrtK in seq input
     # model.VAR_FF.mul_(1.0 / torch.sqrt(model.Ka[0]))
 
@@ -203,6 +203,10 @@ def init_const(model):
 
     # model.PHI0 = model.PHI0 * torch.pi / 180.0
     # model.PHI1 = torch.tensor(model.PHI1,  device=model.device).unsqueeze(0) * torch.pi / 180.0
+
+    model.IS_TRAIN = torch.tensor(model.IS_TRAIN, device=model.device).view(
+        model.N_POP, model.N_POP
+    )
 
     if "dual" in model.TASK:
         # if 'lr' in model.PROBA_TYPE[0, 0]:

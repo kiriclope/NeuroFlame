@@ -92,11 +92,14 @@ class Network(nn.Module):
                                                           device=self.device)* 0.001)
             else:
                 self.Wab_train = nn.Parameter(torch.randn((self.N_NEURON, self.N_NEURON),
-                                                          device=self.device)* 0.01)
+                                                          device=self.device)* 0.001)
 
-        # self.train_mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
-        # self.train_mask[self.slices[0], self.slices[0]] = 1.0
-        # self.train_mask[self.slices[0], self.slices[0]] = 0.0
+
+                self.train_mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
+
+                for i_pop in range(self.N_POP):
+                    for j_pop in range(self.N_POP):
+                        self.train_mask[self.slices[i_pop], self.slices[j_pop]] = self.IS_TRAIN[i_pop][j_pop]
 
         self.register_buffer('Wab_T', torch.zeros((self.N_NEURON, self.N_NEURON),
                                                   device=self.device))
@@ -150,12 +153,10 @@ class Network(nn.Module):
             self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
         )
 
-        if self.TRAIN_EI:
-            self.stp_mask = torch.ones((self.N_NEURON, self.N_NEURON), device=self.device)
-            self.stp_mask[self.slices[0], self.slices[0]] = 0.0
+        self.Wab_T.data[self.slices[0], self.slices[0]] = 0.0
 
-        # self.stp_mask = self.W_stp_T.clone()
-        self.Wab_T.data[self.slices[0], self.slices[0]] = 0
+        if self.TRAIN_EI:
+            self.train_mask[self.slices[0], self.slices[0]] = 0.0
 
     def init_ff_input(self):
         return init_ff_input(self)
@@ -301,22 +302,25 @@ class Network(nn.Module):
             if self.IF_STP:
 
                 if self.ODR_TRAIN:
-                    W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]] / self.Na[0]
+                    # W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]] / self.Na[0]
                     # W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
-                    # W_stp_T = self.GAIN * (self.W_stp_T / torch.sqrt(self.Ka[0]) + self.Wab_train[self.slices[0], self.slices[0]])
-                    # W_stp_T = W_stp_T / torch.sqrt(self.Ka[0])
+                    W_stp_T = self.GAIN * (self.W_stp_T + self.Wab_train[self.slices[0], self.slices[0]])
+                    W_stp_T = W_stp_T / torch.sqrt(self.Ka[0])
 
                 if self.LR_TRAIN:
                     # W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]] / self.Na[0]
                     W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
-                    # W_stp_T = self.GAIN * (self.W_stp_T + self.Wab_train[self.slices[0], self.slices[0]]) / torch.sqrt(self.Ka[0])
+
+                    # W_stp_T = self.GAIN * (self.W_stp_T
+                    # + self.Wab_train[self.slices[0], self.slices[0]]) / torch.sqrt(self.Ka[0])
+
                     # W_stp_T = self.GAIN * self.W_stp_T * (1.0 / torch.sqrt(self.Ka[0])
-                    #                                       + self.Wab_train[self.slices[0], self.slices[0]] / self.Ka[0])
+                    #                                       + self.Wab_train[self.slices[0], self.slices[0]])
 
             if self.TRAIN_EI:
-                self.Wab_train = normalize_tensor(self.Wab_train, 0, self.slices, self.Na)
-                self.Wab_train = normalize_tensor(self.Wab_train, 1, self.slices, self.Na)
-                Wab_T = self.GAIN * (self.Wab_T + self.stp_mask * self.Wab_train)
+                Wab_train = normalize_tensor(self.Wab_train, 0, self.slices, self.Na)
+                Wab_train = normalize_tensor(Wab_train, 1, self.slices, self.Na)
+                Wab_T = self.GAIN * (self.Wab_T + self.train_mask * Wab_train)
 
             if self.CLAMP:
                 if self.IF_STP:
@@ -334,7 +338,7 @@ class Network(nn.Module):
         for step in range(self.N_STEPS):
             if self.RATE_NOISE:
                 rate_noise = torch.randn((self.N_BATCH, self.N_NEURON), device=self.device)
-                rates = rates + rate_noise * self.VAR_RATE / torch.sqrt(self.Ka[0])
+                rates = rates + rate_noise * self.VAR_RATE
             # update dynamics
             if self.LIVE_FF_UPDATE:
                 ff_input = live_ff_input(self, step, ff_input)
