@@ -140,7 +140,6 @@ class LowRankWeights(nn.Module):
             self.lr = self.lr_kappa * (self.U @ self.U.T)
 
         # self.lr = self.lr_mask * self.lr
-
         self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
 
         if LR_CLAMP:

@@ -290,47 +290,64 @@ def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs
 
 #+begin_src ipython
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
-class AngularErrorLoss(nn.Module):
-    def __init__(self, rwd_idx=-1, thresh=1):
-        super(AngularErrorLoss, self).__init__()
-        self.loss = nn.SmoothL1Loss(reduction='none')
-        # self.loss = nn.MSELoss(reduction='none')
-        self.rwd_idx = rwd_idx
-        self.thresh = thresh
+def skewed_gaussian_loss(theta_batch, y_pred, theta_bias, sigma=30, alpha=1.0):
+    """
+    Asymmetric likelihood loss with skew controlled by alpha.
+    - theta_batch: True stimulus angles (batch_size)
+    - y_pred: Network predictions (batch_size)
+    - sigma: Base noise level (degrees)
+    - alpha: Skew magnitude/direction (alpha > 0: skew away from theta_bias)
+    """
+    # Compute angular difference (handling circularity)
+    # delta = torch.remainder(theta_batch - theta_bias + torch.pi, 2.0 * torch.pi) - torch.pi
+    delta = theta_batch - theta_bias
+    delta = (delta + torch.pi) % (2 * torch.pi) - torch.pi
 
-    def forward(self, readout, targets):
-        m0, m1, phi = decode_bump_torch(readout, axis=-1)
+    # Determine skew direction: alpha should be positive if stimulus > theta_bias
+    sign = torch.where(delta > 0, 1.0, -1.0)  # 1 if stimulus is clockwise from bias
+    alpha_scaled = alpha * sign  # Skew direction depends on stimulus location
 
-        total_loss = 0
-        for i in range(targets.shape[0]):
-            self.rwd_idx = torch.where(targets[i]!=-999)[0]
-            self.zero_idx = torch.where(targets[i]==-999)[0]
+    # Skewed Gaussian likelihood
+    delta = theta_batch - y_pred
+    delta = (delta + torch.pi) % (2 * torch.pi) - torch.pi
+    z = delta / sigma
+    likelihood = torch.exp(-0.5 * z**2) * (1 + torch.erf(alpha_scaled * z / torch.sqrt(torch.tensor(2.0).to(y_pred.device))))
 
-            ones = torch.ones_like(m0[i, self.rwd_idx])
-            zeros = torch.zeros_like(m0[i, self.zero_idx])
+    # Negative log-likelihood loss
+    loss = -torch.log(likelihood + 1e-6)
+    return loss
+#+end_src
 
-            predicted_sin = torch.sin(phi[i, self.rwd_idx])
-            predicted_cos = torch.cos(phi[i, self.rwd_idx])
+#+RESULTS:
 
-            target_sin = torch.sin(targets[i, self.rwd_idx])
-            target_cos = torch.cos(targets[i, self.rwd_idx])
+#+begin_src ipython
+    def gaussian_loss(theta_batch, y_pred, sigma=30):
+        # Likelihood term (stimulus fidelity)
+        delta = y_pred - theta_batch
+        delta = (delta + torch.pi) % (2 * torch.pi) - torch.pi
+        likelihood = torch.exp(-0.5 * (delta / sigma)**2)
 
-            loss_sin = self.loss(predicted_sin, target_sin)
-            loss_cos = self.loss(predicted_cos, target_cos)
-            loss_angular = (loss_sin + loss_cos).mean()
-            total_loss += loss_angular
+        return -torch.log(likelihood + 1e-6)
+#+end_src
 
-            # Regularization losses
-            loss_zero = self.loss(m1[i, self.zero_idx], zeros).mean()
-            total_loss += loss_zero * .1
+#+RESULTS:
 
-            regularization = F.relu(self.thresh * ones * m0[i, self.rwd_idx]- m1[i, self.rwd_idx]).mean()
-            total_loss += regularization * .1
+#+begin_src ipython
+def polar_loss(theta_batch, y_pred):
+        loss = nn.MSELoss(reduction='none')
+        predicted_sin = torch.sin(y_pred)
+        predicted_cos = torch.cos(y_pred)
 
-        return total_loss / targets.shape[0]
+        target_sin = torch.sin(theta_batch)
+        target_cos = torch.cos(theta_batch)
+
+        loss_sin = loss(predicted_sin, target_sin)
+        loss_cos = loss(predicted_cos, target_cos)
+
+        loss_angular = (loss_sin + loss_cos)
+
+        return loss_angular
 #+end_src
 
 #+RESULTS:
@@ -341,41 +358,65 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class AngularErrorLoss(nn.Module):
-    def __init__(self, thresh=1, reg_weight=0.1):
+    def __init__(self, thresh=1, reg_tuning=0.1, class_weight='balanced', sigma_stimulus=30, alpha=0.1, prior=0, sigma_prior=60, reg_weight=1.0, reg_prior=0.5):
         super(AngularErrorLoss, self).__init__()
-        self.loss = nn.SmoothL1Loss(reduction='none')
+        self.loss = nn.MSELoss(reduction='none')
+        # self.loss = nn.SmoothL1Loss(reduction='none')
+
         self.thresh = thresh
+        self.reg_tuning = reg_tuning
         self.reg_weight = reg_weight
+        self.class_weight = class_weight
 
-    def forward(self, readout, targets):
-        m0, m1, phi = decode_bump_torch(readout, axis=-1)
+        self.theta_bias = torch.tensor(prior * torch.pi / 180.0)
+        self.sigma_prior = sigma * torch.pi / 180.0
+        self.reg_prior = reg_prior
 
-        valid_mask = targets != -999
+        self.alpha = alpha
+        self.sigma_stimulus = sigma_stimulus * torch.pi / 180.0
+
+    def forward(self, readout, theta_batch):
+        m0, m1, y_pred = decode_bump_torch(readout, axis=-1)
+
+        valid_mask = theta_batch != -999
         invalid_mask = ~valid_mask
 
-        ones = torch.ones_like(m0)
-        zeros = torch.zeros_like(m0)
+        # angular loss (Dcos, Dsin)
+        loss_polar = polar_loss(theta_batch, y_pred) * valid_mask
 
-        # Calculate angular loss
-        predicted_sin = torch.sin(phi)
-        predicted_cos = torch.cos(phi)
+        # # adding weights to each target location
+        # if self.class_weight=='balanced':
+        #     # weights = self.compute_histogram_weights(theta_batch)
+        #     weights = self.gaussian_weights(theta_batch)
+        #     loss_polar *= self.reg_weight * weights
+        loss_angular = loss_polar.sum()
 
-        target_sin = torch.sin(targets)
-        target_cos = torch.cos(targets)
+        # bayesian inference
+        # Treat θ_bias as a prior and force the network to integrate it with the stimulus.
+        # theta_bias = self.theta_bias.to(y_pred.device)
+        # loss_likelihood = skewed_gaussian_loss(theta_batch, y_pred, theta_bias,
+        #                                        sigma=self.sigma_stimulus, alpha=self.alpha) * valid_mask
 
-        loss_sin = self.loss(predicted_sin, target_sin)
-        loss_cos = self.loss(predicted_cos, target_cos)
-        loss_angular = (loss_sin + loss_cos) * valid_mask
+        # loss_prior = gaussian_loss(theta_bias, y_pred, sigma=self.sigma_prior) * valid_mask
+        # loss_angular = loss_likelihood.sum() + self.reg_prior * loss_prior.sum()
 
-        total_loss = loss_angular.sum() / valid_mask.sum()
+        total_loss = loss_angular
 
-        # Regularization for invalid targets to be zero
-        loss_zero = self.loss(m1, zeros) * invalid_mask
-        total_loss += self.reg_weight * (loss_zero.sum() / invalid_mask.sum())
+        # adding bias towards/away from the reference
+        # theta_bias = torch.tensor(self.reference + torch.pi).to(theta_batch.device)
+        # loss_bias = self.polar_loss(theta_bias, y_pred) * valid_mask
+        # total_loss += self.reg_bias * loss_bias.sum()
 
-        # Regularization to keep m1 constrained relative to m0
+        # imposing tuning strength
         regularization = F.relu(self.thresh * m0 - m1) * valid_mask
-        total_loss += self.reg_weight * (regularization.sum() / valid_mask.sum())
+        total_loss += self.reg_tuning * regularization.sum()
+
+        # normalize over batch and time points
+        total_loss /= valid_mask.sum()
+
+        # imposing zero tuning in invalid mask
+        loss_zero = self.loss(m1, 0.0 * m1) * invalid_mask
+        total_loss += self.reg_tuning * (loss_zero.sum() / invalid_mask.sum())
 
         return total_loss
 #+end_src
@@ -430,7 +471,6 @@ def continuous_biased_phases(N_BATCH, preferred_angle, sigma):
     phase_samples = phase_samples % 360
 
     return phase_samples
-
 #+end_src
 
 #+RESULTS:
@@ -492,29 +532,33 @@ REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "train_odr_EI.yml"
 DEVICE = 'cuda:0'
 
-IF_BIASED_PHASES =1
-IF_BIAS = 1
+IF_BIASED_PHASES = 0
+IF_BIAS = 0
 
 IF_RAND_REF = 0
-reference = 0
+reference = 90
+sigma = 60
 
-sigma = 45
-print('reference', reference)
+print('reference', reference, 'sigma', sigma)
 
+if IF_BIASED_PHASES:
+    class_weight = 'balanced'
+else:
+    class_weight = None
 
-batch_size = 64
-N_BATCH = int(batch_size * 14)
+batch_size = 128
+N_BATCH = int(batch_size * 7)
 print('N_BATCH', N_BATCH, 'batch_size', batch_size)
 
 seed = np.random.randint(0, 1e6)
-seed = 2
+seed = 1
 print('seed', seed)
 #+end_src
 
 #+RESULTS:
-: reference 0
-: N_BATCH 896 batch_size 64
-: seed 2
+: reference 90 sigma 60
+: N_BATCH 896 batch_size 128
+: seed 1
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=N_BATCH)
@@ -531,7 +575,6 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-: fixed ref
 
 #+begin_src ipython
 print(model.random_shifts.shape)
@@ -544,7 +587,7 @@ plt.show()
 #+RESULTS:
 :RESULTS:
 : torch.Size([896])
-[[./figures/odr/figure_19.png]]
+[[./figures/odr/figure_21.png]]
 :END:
 
 * Training
@@ -570,6 +613,7 @@ if IF_RAND_REF:
 
 #+RESULTS:
 : Wab_train torch.Size([750, 750])
+: J_STP torch.Size([])
 
 #+begin_src ipython
 model.N_BATCH = N_BATCH
@@ -594,8 +638,8 @@ print(torch.where(rwd_mask[idx]==1)[0])
 #+RESULTS:
 : rwd_mask torch.Size([896, 81])
 : tensor([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
-:         28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-:         46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58], device='cuda:0')
+:         28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41],
+:        device='cuda:0')
 
 *** Inputs and Labels
 
@@ -608,8 +652,8 @@ labels = []
 for _ in range(total_batches):
     # Generate biased data for each batch
     if IF_BIASED_PHASES:
-        # batch_labels = continuous_biased_phases(batch_size, reference, sigma)
-        batch_labels = continuous_bimodal_phases(batch_size, reference, sigma)
+        batch_labels = continuous_biased_phases(batch_size, reference, sigma)
+        # batch_labels = continuous_bimodal_phases(batch_size, reference, sigma)
     else:
         batch_labels = torch.randint(0, 360, (batch_size, 1)).to(DEVICE)
     labels.append(batch_labels)
@@ -620,7 +664,7 @@ print(labels.shape)
 #+end_src
 
 #+RESULTS:
-: total_batches 14
+: total_batches 7
 : torch.Size([896, 1])
 
 #+begin_src ipython
@@ -687,8 +731,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: torch.Size([40373])
-[[./figures/odr/figure_27.png]]
+: torch.Size([40146])
+[[./figures/odr/figure_29.png]]
 :END:
 
 *** Run
@@ -699,21 +743,31 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-[[./figures/odr/figure_28.png]]
+[[./figures/odr/figure_30.png]]
 : torch.Size([716, 505, 1000]) torch.Size([180, 505, 1000])
 : torch.Size([716, 81]) torch.Size([180, 81])
 :END:
 
 #+begin_src ipython
-  criterion = AngularErrorLoss(thresh=0.75)
-  learning_rate = 0.1
-  optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+if IF_BIAS:
+    criterion = AngularErrorLoss(thresh=0.75, class_weight=None, prior=reference, sigma_prior=60, sigma_stimulus=30, alpha=0.0, reg_prior=0.0)
+else:
+    criterion = AngularErrorLoss(thresh=0.75, class_weight=None, prior=reference, sigma_prior=30, sigma_stimulus=15, alpha=0.0, reg_prior=0.0)
+
+learning_rate = 0.1
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
 #+RESULTS:
 
         #+begin_src ipython
-  num_epochs = 10
+  num_epochs = 15
   start = perf_counter()
   loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs, thresh=.005)
   end = perf_counter()
@@ -721,19 +775,41 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: Epoch 1/10, Training Loss: 0.0225, Validation Loss: 0.0131
-: Epoch 2/10, Training Loss: 0.0098, Validation Loss: 0.0062
-: Epoch 3/10, Training Loss: 0.0066, Validation Loss: 0.0049
-: Epoch 4/10, Training Loss: 0.0044, Validation Loss: 0.0037
-: Stopping training as loss has fallen below the threshold: 0.004386718287908782, 0.0037107328677343
-: Elapsed (with compilation) = 0h 0m 37s
+#+begin_example
+Epoch 1/15, Training Loss: 1.4675, Validation Loss: 1.4143
+Epoch 2/15, Training Loss: 1.2684, Validation Loss: 1.1846
+Epoch 3/15, Training Loss: 0.9505, Validation Loss: 0.5019
+Epoch 4/15, Training Loss: 0.1870, Validation Loss: 0.1096
+Epoch 5/15, Training Loss: 0.0813, Validation Loss: 0.0957
+Epoch 6/15, Training Loss: 0.0770, Validation Loss: 0.0797
+Epoch 7/15, Training Loss: 0.0627, Validation Loss: 0.0662
+Epoch 8/15, Training Loss: 0.0492, Validation Loss: 0.0518
+Epoch 9/15, Training Loss: 0.0391, Validation Loss: 0.0425
+Epoch 10/15, Training Loss: 0.0316, Validation Loss: 0.0350
+Epoch 11/15, Training Loss: 0.0277, Validation Loss: 0.0310
+Epoch 12/15, Training Loss: 0.0246, Validation Loss: 0.0269
+Epoch 13/15, Training Loss: 0.0213, Validation Loss: 0.0243
+Epoch 14/15, Training Loss: 0.0194, Validation Loss: 0.0221
+Epoch 15/15, Training Loss: 0.0174, Validation Loss: 0.0208
+Elapsed (with compilation) = 0h 1m 20s
+#+end_example
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 #+begin_src ipython
 if IF_BIASED_PHASES:
     if IF_RAND_REF:
         torch.save(model.state_dict(), 'models/odr/odr_bias_rand_ref_%d.pth' % seed)
     else:
-        torch.save(model.state_dict(), 'models/odr/odr_bias_%d_ref_%d.pth' % (reference, seed) )
+        if class_weight == 'balanced':
+            torch.save(model.state_dict(), 'models/odr/odr_bias_%d_ref_%d_bal_loss.pth' % (reference, seed) )
+        else:
+            torch.save(model.state_dict(), 'models/odr/odr_bias_%d_ref_%d.pth' % (reference, seed) )
+
 else:
     torch.save(model.state_dict(), 'models/odr/odr_%d.pth' % seed)
 #+end_src
@@ -748,7 +824,10 @@ if IF_BIASED_PHASES:
     if IF_RAND_REF:
         model_state_dict = torch.load('models/odr/odr_bias_rand_ref_%d.pth' % seed )
     else:
-        model_state_dict = torch.load('models/odr/odr_bias_%d_ref_%d.pth' % (reference, seed) )
+        if class_weight == 'balanced':
+            model_state_dict = torch.load('models/odr/odr_bias_%d_ref_%d_bal_loss.pth' % (reference, seed) )
+        else:
+            model_state_dict = torch.load('models/odr/odr_bias_%d_ref_%d.pth' % (reference, seed) )
 else:
     model_state_dict = torch.load('models/odr/odr_%d.pth' % seed)
 
@@ -757,19 +836,16 @@ model.eval()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: Biased ODR
 : Network(
 :   (dropout): Dropout(p=0.0, inplace=False)
 : )
-:END:
 
 #+begin_src ipython
     model.N_BATCH = N_BATCH
     if IF_BIAS:
         model.PHI0 = torch.zeros(size=(N_BATCH, 3, 1), device=DEVICE, dtype=torch.float)
-        # labels = continuous_biased_phases(N_BATCH, reference, sigma) * torch.pi / 180.0
-        labels = continuous_bimodal_phases(N_BATCH, reference, sigma) * torch.pi / 180.0
+        labels = continuous_biased_phases(N_BATCH, reference, sigma) * torch.pi / 180.0
+        # labels = continuous_bimodal_phases(N_BATCH, reference, sigma) * torch.pi / 180.0
         model.PHI0[:, 0] = labels
     else:
         labels = torch.randint(0, 360, (N_BATCH, 1)).to(DEVICE) * torch.pi / 180.0
@@ -783,7 +859,7 @@ model.eval()
 #+RESULTS:
 : torch.Size([1, 750]) torch.Size([896, 1])
 : torch.Size([1, 750]) torch.Size([896, 1])
-: torch.Size([896, 3, 1]) torch.Size([896, 505, 1000]) torch.Size([896, 1])
+: torch.Size([896, 2, 1]) torch.Size([896, 505, 1000]) torch.Size([896, 1])
 
 #+begin_src ipython
 #     model.N_BATCH = N_BATCH
@@ -807,30 +883,34 @@ model.eval()
 #+RESULTS:
 
 #+begin_src ipython
-plt.hist(labels[:, 0].cpu() * 180 / np.pi, bins=15)
+plt.hist(labels[:, 0].cpu() * 180 / np.pi, bins='auto', density=True)
 plt.xlabel('Target Loc. (°)')
+plt.ylabel('Density')
+plt.xticks(np.linspace(0, 360, 5))
+plt.savefig('./figs/memhist/targets.svg', dpi=300)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_35.png]]
+[[./figures/odr/figure_39.png]]
+
 
 #+begin_src ipython
 rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
 print('ff_input', ff_input.shape)
 print('rates', rates.shape)
 #+end_src
-
 #+RESULTS:
 : ff_input torch.Size([896, 505, 1000])
 : rates (896, 81, 750)
+
 
  #+begin_src ipython
 plot_rates_selec(rates=ff_input.cpu().detach().numpy(), idx=20, thresh=.5)
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_37.png]]
+[[./figures/odr/figure_41.png]]
 
 #+begin_src ipython
 plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
@@ -838,8 +918,8 @@ plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
 
 #+RESULTS:
 :RESULTS:
-: [767  90   6 346 589 257 256 119 717 552 693 723  83  80   6  73]
-[[./figures/odr/figure_38.png]]
+: [535 146  38 243 417 374 737 448 344 716 201 212 657 156  36 561]
+[[./figures/odr/figure_42.png]]
 :END:
 
 #+begin_src ipython
@@ -847,7 +927,7 @@ plot_rates_selec(rates, idx=20, thresh=.1)
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_39.png]]
+[[./figures/odr/figure_43.png]]
 
         #+begin_src ipython
 plot_m0_m1_phi(model, rates, 4)
@@ -855,8 +935,8 @@ plot_m0_m1_phi(model, rates, 4)
 
 #+RESULTS:
 :RESULTS:
-: [234 517 583 446 575 442 307 566 400 157 438 657  94 102 671 611]
-[[./figures/odr/figure_40.png]]
+: [743  60 394 490 493 392 238 316 582 552 100 303 478 362 551   3]
+[[./figures/odr/figure_44.png]]
 :END:
 
 #+begin_src ipython
@@ -889,6 +969,16 @@ errors = np.array(error_list)
 : (896, 81) torch.Size([896, 1])
 
 #+begin_src ipython
+theta = torch.linspace(0, 2.0 * torch.pi, 1000)
+loss = skewed_gaussian_loss(theta, torch.tensor(0), 0, sigma=60*torch.pi / 180, alpha=1.0)
+# loss = gaussian_loss(theta, torch.tensor(0), sigma=60*torch.pi / 180)
+plt.plot(np.exp(-loss.cpu().detach().numpy()));
+#+end_src
+
+#+RESULTS:
+[[./figures/odr/figure_46.png]]
+
+#+begin_src ipython
 if IF_BIAS:
     print('bias')
     pkl_save(phi, 'phase_bias', path="/home/leon/")
@@ -897,11 +987,13 @@ else:
 #+end_src
 
 #+RESULTS:
-: bias
 
 #+begin_src ipython
+targets = (target_loc + np.pi) % (2 * np.pi) - np.pi
+
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-ax[0].hist(errors2, bins=32)
+# ax[0].hist(targets[:, 0] * 180 / np.pi , bins=32 , histtype='step')
+ax[0].hist(errors2, bins=32, histtype='step')
 ax[0].set_xlabel('Encoding Errors (°)')
 
 ax[1].hist(errors, bins=32)
@@ -911,7 +1003,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_43.png]]
+[[./figures/odr/figure_48.png]]
 
 * Connectivity
 
@@ -920,6 +1012,8 @@ if IF_BIASED_PHASES:
     print('Biased ODR')
     if IF_RAND_REF:
         model_state_dict = torch.load('models/odr/odr_bias_rand_ref_%d.pth' % seed )
+    elif class_weight == 'balanced':
+        model_state_dict = torch.load('models/odr/odr_bias_%d_ref_%d_bal_loss.pth' % (reference, seed) )
     else:
         model_state_dict = torch.load('models/odr/odr_bias_%d_ref_%d.pth' % (reference, seed) )
 else:
@@ -932,7 +1026,7 @@ model.eval()
 
 #+RESULTS:
 :RESULTS:
-: Biased ODR
+: 1
 : Network(
 :   (dropout): Dropout(p=0.0, inplace=False)
 : )
@@ -993,15 +1087,42 @@ else:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_46.png]]
+[[./figures/odr/figure_51.png]]
 
 #+begin_src ipython
 if IF_BIAS==0:
     pkl_save(Kj, 'Kj', path=".")
     pkl_save(Ki, 'Ki', path=".")
-
 #+end_src
+
 #+RESULTS:
+
+#+begin_src ipython
+  fig, ax = plt.subplots(1, 2, figsize=[2*width, height], sharey=1)
+
+  Dij = Cij.flatten()
+  np.random.shuffle(Dij)
+  Dij = Dij.reshape(Cij.shape)
+
+  im = ax[0].imshow(Dij, cmap='jet', aspect=1, vmin=0)
+  ax[0].set_xlabel("Presynaptic")
+  ax[0].set_ylabel("Postsynaptic")
+  ax[0].set_title('Naive')
+  ax[0].set_xticks(np.linspace(0, 750, 4))
+  ax[0].set_yticks(np.linspace(0, 750, 4))
+
+  im = ax[1].imshow(Cij, cmap='jet', aspect=1, vmin=0)
+  ax[1].set_xlabel("Presynaptic")
+  ax[1].set_ylabel("Postsynaptic")
+  ax[1].set_title('Trained')
+  ax[1].set_xticks(np.linspace(0, 750, 4))
+  ax[1].set_yticks(np.linspace(0, 750, 4))
+
+  plt.savefig('./figs/memhist/connectivity.svg', dpi=300)
+#+end_src
+
+#+RESULTS:
+[[./figures/odr/figure_53.png]]
 
 #+begin_src ipython
 

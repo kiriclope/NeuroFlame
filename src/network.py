@@ -308,11 +308,11 @@ class Network(nn.Module):
                     W_stp_T = W_stp_T / torch.sqrt(self.Ka[0])
 
                 if self.LR_TRAIN:
-                    # W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]] / self.Na[0]
-                    W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
+                    W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]]
+                    # W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
 
                     # W_stp_T = self.GAIN * (self.W_stp_T
-                    # + self.Wab_train[self.slices[0], self.slices[0]]) / torch.sqrt(self.Ka[0])
+                    #                        + self.Wab_train[self.slices[0], self.slices[0]]) / torch.sqrt(self.Ka[0])
 
                     # W_stp_T = self.GAIN * self.W_stp_T * (1.0 / torch.sqrt(self.Ka[0])
                     #                                       + self.Wab_train[self.slices[0], self.slices[0]])
@@ -400,7 +400,7 @@ class Network(nn.Module):
                 self.x_list = torch.stack(self.x_list, dim=1)
 
         if self.LR_TRAIN:
-            self.readout = rates @ self.low_rank.U[self.slices[0]] / self.Na[0]
+            self.readout = rates @ self.low_rank.V[self.slices[0]] / self.Na[0]
             if self.LR_READOUT==1:
                 linear = self.low_rank.linear(self.dropout(rates)) / self.Na[0]
                 self.readout = torch.cat((self.readout, linear), dim=-1)

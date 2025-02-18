@@ -183,29 +183,33 @@ conf_name = "test_odr_EI.yml"
 DEVICE = 'cuda:1'
 seed = np.random.randint(0, 1e6)
 
-seed = 2
+seed = 1
 print('seed', seed)
 
-IF_BIASED_PHASES = 1
-IF_BIAS = 1
+IF_BIASED_PHASES = 0
+IF_BIAS = 0
 
 IF_RAND_REF = 0
-reference = 180
+reference = 90
+sigma = 60
 
-print('reference', reference)
+print('reference', reference, 'sigma', sigma)
 
 if IF_RAND_REF:
     reference = np.random.randint(0, 360)
 
-sigma = 45
+if IF_BIASED_PHASES:
+    class_weight = 'balanced'
+else:
+    class_weight = None
 #+end_src
 
 #+RESULTS:
-: seed 2
-: reference 180
+: seed 1
+: reference 90 sigma 60
 
 #+begin_src ipython
-N_BATCH = 800
+N_BATCH = 512
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1)
 #+end_src
 
@@ -232,6 +236,23 @@ def periodic_gaussian(x, mean, std, period):
 #+RESULTS:
 
 #+begin_src ipython
+def gaussian_weights(targets, reference, sigma):
+      delta = targets - reference
+      delta = torch.remainder(delta + torch.pi, 2.0 * torch.pi) - torch.pi
+      # delta = (delta + torch.pi) % (2 * torch.pi) - torch.pi
+      weights = torch.exp(-0.5 * torch.abs(delta / sigma)**2) # / sigma / torch.sqrt(torch.tensor(2.0 * torch.pi))
+      weights = weights / weights.mean(dim=0)
+      return weights
+
+theta = torch.linspace(0, 2.0 * torch.pi, model.Na[0]+1)[:-1].to(DEVICE)
+weights = gaussian_weights(theta, reference * torch.pi / 180.0, sigma * torch.pi / 180.0)
+plt.plot(theta.cpu().numpy() * 180 / np.pi, weights.cpu().numpy()) ;
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_11.png]]
+
+#+begin_src ipython
 theta = torch.linspace(0, 2.0 * torch.pi, model.Na[0]+1)[:-1].to(DEVICE)
 
 theta_0 = reference * torch.pi / 180.0
@@ -246,15 +267,19 @@ plt.show()
 #+end_src
 
 #+RESULTS:
+[[./figures/odr_sb/figure_12.png]]
 
 #+begin_src ipython
-if IF_BIAS:
+if IF_BIASED_PHASES:
     print('Biased ODR')
     if IF_RAND_REF:
         print('models/odr/odr_bias_rand_ref_%d.pth' % seed)
         model_state_dict = torch.load('models/odr/odr_bias_rand_ref_%d.pth' % seed)
     else:
-        model_state_dict = torch.load('models/odr/odr_bias_%d_ref_%d.pth' % (reference, seed) )
+        if class_weight=='balanced':
+            model_state_dict = torch.load('models/odr/odr_bias_%d_ref_%d_bal_loss.pth' % (reference, seed) )
+        else:
+            model_state_dict = torch.load('models/odr/odr_bias_%d_ref_%d.pth' % (reference, seed) )
 else:
     model_state_dict = torch.load('models/odr/odr_%d.pth' % seed)
 
@@ -263,25 +288,23 @@ model.eval()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: Biased ODR
 : Network(
 :   (dropout): Dropout(p=0.0, inplace=False)
 : )
-:END:
 
 * Batching Inputs
 
 #+begin_src ipython
+
 model.N_BATCH = N_BATCH
 
 if IF_BIASED_PHASES:
     model.PHI0 = torch.zeros(size=(N_BATCH, 3, 1), device=DEVICE, dtype=torch.float)
-    # model.PHI0[:, 0] = continuous_biased_phases(N_BATCH, reference, sigma)
-    # model.PHI0[:, -1] = continuous_biased_phases(N_BATCH, reference, sigma)
+    model.PHI0[:, 0] = continuous_biased_phases(N_BATCH, reference, sigma)
+    model.PHI0[:, -1] = continuous_biased_phases(N_BATCH, reference, sigma)
 
-    model.PHI0[:, 0] = continuous_bimodal_phases(N_BATCH, reference, sigma)
-    model.PHI0[:, -1] = continuous_bimodal_phases(N_BATCH, reference, sigma)
+    # model.PHI0[:, 0] = continuous_bimodal_phases(N_BATCH, reference, sigma)
+    # model.PHI0[:, -1] = continuous_bimodal_phases(N_BATCH, reference, sigma)
 else:
     model.PHI0 = torch.randint(low=0, high=360, size=(N_BATCH, 3, 1), device=DEVICE, dtype=torch.float)
 
@@ -291,9 +314,9 @@ m0, m1, phase = decode_bump_torch(ff_input[..., model.slices[0]], axis=-1)
 #+end_src
 
 #+RESULTS:
-: torch.Size([1, 750]) torch.Size([800, 1])
-: torch.Size([1, 750]) torch.Size([800, 1])
-: torch.Size([1, 750]) torch.Size([800, 1])
+: torch.Size([1, 750]) torch.Size([512, 1])
+: torch.Size([1, 750]) torch.Size([512, 1])
+: torch.Size([1, 750]) torch.Size([512, 1])
 
 #+begin_src ipython
 print(reference, model.PHI0[1, 0, 0].item() * 180 / torch.pi, phase[1, model.N_STIM_ON[0]].item() * 180 / torch.pi)
@@ -303,8 +326,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: 180 185.44725845695993 183.97524340779546
-[[./figures/odr_sb/figure_14.png]]
+: 90 42.00000116875648 39.383314716589574
+[[./figures/odr_sb/figure_15.png]]
 :END:
 
 #+begin_src ipython
@@ -320,8 +343,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: tensor(150.9117)
-[[./figures/odr_sb/figure_15.png]]
+: tensor(134.0000)
+[[./figures/odr_sb/figure_16.png]]
 :END:
 
 #+begin_src ipython
@@ -356,11 +379,12 @@ plt.show()
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 ax[0].hist(model.PHI0[:, 0, 0].cpu(), bins=15)
 ax[1].hist(model.PHI0[:,-1, 0].cpu(), bins=15)
+ax[0].set_xlabel('Angles')
 plt.show()
  #+end_src
 
  #+RESULTS:
- [[./figures/odr_sb/figure_17.png]]
+ [[./figures/odr_sb/figure_18.png]]
 
 #+begin_src ipython
 rates_tensor = model.forward(ff_input=ff_input)# [..., ::3]
@@ -369,7 +393,7 @@ print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rates (800, 226, 750)
+: rates (512, 226, 750)
 
 #+begin_src ipython
 m0, m1, phi = decode_bump(rates, axis=-1)
@@ -390,8 +414,7 @@ else:
 #+end_src
 
 #+RESULTS:
-: bias
-: saving to /home/leon//phase_bias.pkl
+: saving to /home/leon//phase.pkl
 
 #+begin_src ipython
 idx = np.random.randint(32)
@@ -406,8 +429,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: tensor(211.8148)
-[[./figures/odr_sb/figure_21.png]]
+: tensor(297.0000)
+[[./figures/odr_sb/figure_22.png]]
 :END:
 
 * Results
@@ -438,7 +461,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_22.png]]
+[[./figures/odr_sb/figure_23.png]]
 
 #+begin_src ipython
 PHI0 = model.PHI0.cpu().detach().numpy() * 180.0 / np.pi
@@ -451,18 +474,25 @@ print(phi[idx, window_size] * 180 / np.pi)
 #+end_src
 
 #+RESULTS:
-: (800, 3, 1)
-: 143.54198
-: 130.92098312978348
+: (512, 3, 1)
+: 99.0
+: 98.1910550511595
 
 ** Pref loc
 
 #+begin_src ipython
-start_idx = int((model.N_STIM_ON[2] - model.N_STEADY) / model.N_WINDOW)
-end_idx = int((model.N_STIM_OFF[2] -model.N_STEADY) / model.N_WINDOW)
+model.N_STIM_ON
+#+end_src
+
+#+RESULTS:
+: tensor([150, 300, 400], device='cuda:1')
+
+#+begin_src ipython
+start_idx = int((model.N_STIM_ON[0] - model.N_STEADY) / model.N_WINDOW)
+end_idx = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW)
 
 mean_rates = rates_tensor[:, start_idx:end_idx].mean(dim=1).cpu().detach().numpy()
-angles = model.PHI0[:, 2, 0].cpu().numpy()
+angles = model.PHI0[:, 0, 0].cpu().numpy()
 #+end_src
 
 #+RESULTS:
@@ -470,7 +500,7 @@ angles = model.PHI0[:, 2, 0].cpu().numpy()
 #+begin_src ipython
 import numpy as np
 
-nbins = 96
+nbins = 16
 
 # Create linearly spaced bin edges from 0 to 360
 bins = np.linspace(0, 2*np.pi, nbins + 1)
@@ -483,7 +513,7 @@ bin_indices = np.digitize(angles, bins) - 1
 #+end_src
 
 #+RESULTS:
-: 96
+: 16
 
 #+begin_src ipython
 from astropy.stats.circstats import circmean
@@ -522,49 +552,36 @@ pref_locs = []
 for i in range(mean_rates.shape[1]):
         pref_locs.append(circmean(angles, weights=normalized_rates[:, i], axis=0))
 
-pref_locs = np.array(pref_locs)
+pref_locs = (np.array(pref_locs) + 2.0 * np.pi) % (2.0 * np.pi)
 print(pref_locs.shape, normalized_rates.shape)
 #+end_src
 
 #+RESULTS:
-: (750,) (800, 750)
+: (750,) (512, 750)
 
 #+begin_src ipython
-print(normalized_rates.shape)
-#+end_src
-
-#+RESULTS:
-: (800, 750)
-
-#+begin_src ipython
-pref_locs[pref_locs<0] += 2* np.pi
-# pref_locs[pref_locs<0] += 360
-plt.hist(pref_locs, bins='auto')
+# pref_locs[pref_locs<0] += 2* np.pi
+plt.hist(pref_locs * 180 / np.pi, bins=16)
 plt.xlabel('Pref Loc (°)')
+plt.ylabel('Count')
+plt.savefig('figs/christos/selectivity_hist_from_tc.svg', dpi=300)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_30.png]]
+[[./figures/odr_sb/figure_31.png]]
 
  #+begin_src ipython
-theta = torch.linspace(
-    0,
-    2.0 * torch.pi,
-    pref_locs.shape[-1] + 1,
-    device=DEVICE,
-)[:-1].cpu().numpy()
-
-plt.scatter(theta * 180 / np.pi, pref_locs * 180 / np.pi)
+theta = np.linspace(0, 360, pref_locs.shape[-1])
+plt.scatter(theta, pref_locs * 180 / np.pi)
 plt.xlabel('Ground Truth (°)')
 plt.ylabel('Pref Loc (°)')
+plt.savefig('figs/christos/selectivity_from_tc.svg', dpi=300)
+plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: Text(0, 0.5, 'Pref Loc (°)')
-[[./figures/odr_sb/figure_31.png]]
-:END:
+[[./figures/odr_sb/figure_32.png]]
 
 #+begin_src ipython
 idx_pref = np.argsort(pref_locs)
@@ -576,440 +593,673 @@ m0, m1, phi = decode_bump(rates[..., idx_pref], axis=-1)
 ** Decoder
 
 #+begin_src ipython
-from sklearn.model_selection import cross_val_predict, LeaveOneOut
+start_idx = int((model.N_STIM_OFF[0] + 50 - model.N_STEADY) / model.N_WINDOW)
+end_idx = int((model.N_STIM_ON[1] - model.N_STEADY) / model.N_WINDOW)
+
+print(start_idx)
+mean_rates = rates_tensor[:, -10:].mean(dim=1).cpu().detach().numpy()
+angles = model.PHI0[:, 2, 0].cpu().numpy()
+#+end_src
+
+#+RESULTS:
+: 75
+
+#+begin_src ipython
+from sklearn.neighbors import KernelDensity
+
+def weights_from_pdf(angles_rad, bandwidth=0.5, beta=0.5):
+    angles_rad_2d = angles_rad.reshape(-1, 1)
+    kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(angles_rad_2d)
+    log_dens = kde.score_samples(angles_rad_2d)
+    densities = np.exp(log_dens)
+
+    if beta == 0:
+        weights = 1 / (np.exp(log_dens) + 1e-8)
+        weights /= weights.mean()
+    else:
+        # Softmax-normalized inverse density (avoids extreme weights)
+        # Temperature parameter: lower beta → more uniform weighting
+        weights = np.exp(-beta * densities)
+        weights = weights / weights.mean()  # Normalize
+
+    return weights
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def weights_from_hist(angles_rad, n_bins=32):
+     hist, bin_edges = np.histogram(angles_rad, bins=n_bins)
+     bin_indices = np.digitize(angles_rad, bins=bin_edges[:-1], right=True)
+
+     weights = 1.0 / (np.sqrt(hist[bin_indices - 1]) + 1e-6)
+     weights /= np.mean(weights)
+
+     return weights
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
 from sklearn.base import BaseEstimator, RegressorMixin
-from sklearn.linear_model import LinearRegression, Ridge, RidgeCV, LassoCV
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LinearRegression, RidgeCV, MultiTaskLassoCV
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.svm import SVR, LinearSVR
+from sklearn.ensemble import BaggingRegressor
+from sklearn.preprocessing import StandardScaler
+import numpy as np
 
 class AngleDecoder(BaseEstimator, RegressorMixin):
-    def __init__(self, penalty=None, weights=None):
-        if penalty is None:
-            self.reg_ = LinearRegression()
-        if penalty == 'l2':
-            self.reg_ = RidgeCV()
-        if penalty == 'l1':
-            self.reg_ = LassoCV()
+    def __init__(self, penalty=None, scaler=True, class_weight=None):
+        self.penalty = penalty
+        self.scaler = scaler
+        self.class_weight = class_weight
+        self.reg_ = None
+        self.pipe_ = None
+        self._initialize_regressor()
 
-    self.weights = weights
+    def _initialize_regressor(self):
+        if self.penalty is None:
+            self.reg_ = LinearRegression()
+        elif self.penalty == 'l2':
+            self.reg_ = RidgeCV()
+        elif self.penalty == 'l1':
+            self.reg_ = MultiTaskLassoCV()
+        elif self.penalty == 'multi':
+            self.reg_ = MultiOutputRegressor(LinearSVR())
+        elif self.penalty == 'rbf':
+            self.reg_ = MultiOutputRegressor(SVR(kernel='rbf', C=1e3, gamma=0.1))
+
+        pipe = []
+        if self.scaler:
+            pipe.append(('scaler', StandardScaler()))
+
+        pipe.append(('reg', self.reg_))
+
+        self.pipe_ = Pipeline(pipe)
 
     def fit(self, X, y):
         Y = np.column_stack((np.cos(y), np.sin(y)))
-        self.reg_.fit(X, Y, sample_weight=self.weights)
 
-        pred_cos = self.reg_.coef_[0]
-        pred_sin = self.reg_.coef_[1]
-        pref_locs = np.arctan2(pred_sin, pred_cos)
+        weights = None
+        if class_weight=='balanced' or class_weight:
+            # weights = weights_from_hist(angles, n_bins=32)
+            weights = weights_from_pdf(y, bandwidth=1.0, beta=0.1)
 
-        self.pref_locs_ = np.degrees(pref_locs) % 360
+        self.pipe_.fit(X, Y, reg__sample_weight=weights)
+
+        if self.penalty == 'rbf':
+            pref_locs = np.nan
+        else:
+            pred_cos = self.pipe_.named_steps['reg'].coef_[0]
+            pred_sin = self.pipe_.named_steps['reg'].coef_[1]
+            pref_locs = np.arctan2(pred_sin, pred_cos)
+
+        self.pref_locs_ = (pref_locs + 2.0 * np.pi) % (2.0 * np.pi)
 
         return self
 
     def predict(self, X):
-        preds = self.reg_.predict(X)
+        preds = self.pipe_.predict(X)
         pred_cos, pred_sin = preds[:, 0], preds[:, 1]
-        angles_rad = np.arctan2(pred_sin, pred_cos)
-        return np.degrees(angles_rad) % 360
+        pred_loc = np.arctan2(pred_sin, pred_cos)
+        return (pred_loc + 2.0 * np.pi) % (2.0 * np.pi)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+plt.hist(angles * 180 / np.pi)
+theta = (angles - np.pi) % (2*np.pi) - np.pi
+plt.hist(theta * 180 / np.pi);
+theta2 = (theta + 2*np.pi) % (2*np.pi)
+plt.hist(theta2 * 180 / np.pi, histtype='step')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_38.png]]
+
+#+begin_src ipython
+regressor = AngleDecoder(penalty=None, scaler=True, class_weight='balanced')
+regressor.fit(mean_rates, angles);
+#+end_src
+
+#+RESULTS:
+
+ #+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+ax[0].hist(pref_locs * 180 / np.pi, histtype='step', bins=16)
+ax[0].hist(regressor.pref_locs_ * 180 / np.pi, histtype='step', bins=16)
+ax[0].set_ylabel('Count')
+ax[0].set_xlabel('Pref Loc (°)')
+
+ax[1].scatter(pref_locs * 180 / np.pi, regressor.pref_locs_ * 180 / np.pi)
+ax[1].set_xlabel('Ground Truth (°)')
+ax[1].set_ylabel('Pref Loc (°)')
+
+plt.savefig('figs/christos/selectivity_from_dec.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_40.png]]
+
+#+begin_src ipython
+from sklearn.model_selection import cross_val_predict, LeaveOneOut
+pred_locs = cross_val_predict(regressor, mean_rates, angles, cv=LeaveOneOut(), n_jobs=-1)
+#+end_src
+
+#+RESULTS:
+
+ #+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+ax[0].hist(angles * 180 / np.pi, histtype='step')
+ax[0].hist(pred_locs * 180 / np.pi, histtype='step')
+ax[0].set_ylabel('Count')
+ax[0].set_xlabel('Pref Loc (°)')
+
+ax[1].scatter(angles * 180 / np.pi, pred_locs * 180 / np.pi)
+ax[1].set_xlabel('Ground Truth (°)')
+ax[1].set_ylabel('Pref Loc (°)')
+
+plt.savefig('figs/christos/selectivity_from_dec.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_42.png]]
+
+#+begin_src ipython
+print(pred_locs.shape)
+#+end_src
+
+#+RESULTS:
+: (512,)
+
+#+begin_src ipython
+from mne.decoding import SlidingEstimator
+mne_estimator = SlidingEstimator(regressor, n_jobs=1, verbose=False)
+# pred_locs = cross_val_predict(mne_estimator, rates.swapaxes(1,2), angles, cv=LeaveOneOut(), n_jobs=-1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import numpy as np
+from sklearn.metrics import make_scorer
+
+def mean_angular_error(y_true, y_pred):
+    # Ensure angles are between 0 and 2*pi
+    angular_diff = np.angle(np.exp(1j * (y_true - y_pred)))
+    return np.mean(np.abs(angular_diff))
+
+# Create a scikit-learn scorer
+angular_error_scorer = make_scorer(mean_angular_error, greater_is_better=False)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+from mne.decoding import SlidingEstimator, cross_val_multiscore
+# mne_estimator = SlidingEstimator(regressor, n_jobs=None, scoring=angular_error_scorer, verbose=False)
+# scores = cross_val_multiscore(mne_estimator, rates.swapaxes(1,2), angles, cv=5, n_jobs=None)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+# plt.plot(scores.mean(0));
+#+end_src
+
+#+RESULTS:
+
+ #+begin_src ipython
+# idx = np.argsort(regressor.pref_locs_)
+# mean_rates = mean_rates[:, idx]
+# m0, m1, phi = decode_bump(rates[..., idx], axis=-1)
+ #+end_src
+
+#+RESULTS:
+
+** errors
+
+#+begin_src ipython
+# phi = pred_locs[:, np.newaxis]
+target_loc = PHI0[:, -1]
+
+rel_loc = (PHI0[:, 0] - target_loc) * np.pi / 180.0
+rel_loc = (rel_loc + np.pi) % (2 * np.pi) - np.pi
+rel_loc *= 180 / np.pi
+
+ref_loc = (reference - PHI0[:, -1]) * np.pi / 180.0
+ref_loc = (ref_loc + np.pi) % (2 * np.pi) - np.pi
+ref_loc *= 180 / np.pi
+
+rel_loc = (PHI0[:, 0] - target_loc) * np.pi / 180.0
+rel_loc = (rel_loc + np.pi) % (2 * np.pi) - np.pi
+rel_loc *= 180 / np.pi
+
+anti_ref_loc = (180.0 - reference - PHI0[:, -1]) * np.pi / 180.0
+anti_ref_loc = (anti_ref_loc + np.pi) % (2 * np.pi) - np.pi
+anti_ref_loc *= 180 / np.pi
+
+window_size = int((model.N_STIM_OFF[-1]-model.N_STEADY) / model.N_WINDOW)
+# errors = phi - phi[:, window_size][:, np.newaxis]
+errors = (phi - target_loc * np.pi / 180.0)
+errors = (errors + np.pi) % (2 * np.pi) - np.pi
+errors *= 180 / np.pi
+
+window_size = int((model.N_STIM_OFF[0]-model.N_STEADY) / model.N_WINDOW)
+errors2 = ((phi - PHI0[:, 0] * np.pi / 180.0))
+# errors2 = phi - phi[:, window_size][:, np.newaxis]
+errors2 = (errors2 + np.pi) % (2 * np.pi) - np.pi
+errors2 *= 180 / np.pi
+
+print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
+#+end_src
+
+#+RESULTS:
+: (512, 226) (512, 1) (512, 1) (512, 1)
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+ax[0].plot(np.linspace(0, model.DURATION, errors.shape[-1]), errors2[:32].T)
+add_vlines(model, ax[0])
+# ax[0].set_xlim([2.5, 4.5])
+ax[0].set_xlabel('t')
+ax[0].set_ylabel('prev. error (°)')
+
+ax[1].plot(np.linspace(0, model.DURATION, errors.shape[-1]), errors[:32].T)
+add_vlines(model, ax[1])
+ax[1].set_xlabel('t')
+ax[1].set_ylabel('curr. error (°)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_50.png]]
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
+ax[0].hist(rel_loc[:, 0], bins='auto')
+ax[0].set_xlabel('Rel. Location (°)')
+
+# ax[1].hist(errors2[:, int((model.N_STIM_ON[1]-model.N_STEADY)/model.N_WINDOW)], bins='auto')
+# ax[1].set_xlabel('Prev. Errors (°)')
+
+ax[2].hist(errors[:, -1], bins=64)
+ax[2].set_xlabel('Curr. Errors (°)')
+# ax[1].set_xlim([-45, 45])
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_51.png]]
+
+#+begin_src ipython
+mask = np.abs(errors) <= 25
+print(mask.shape)
+
+errors = np.where(mask, errors, np.nan)[:, -1]
+print(errors.shape)
+rel_loc = rel_loc[~np.isnan(errors)]
+ref_loc = ref_loc[~np.isnan(errors)]
+anti_ref_loc = anti_ref_loc[~np.isnan(errors)]
+target_loc = target_loc[:, -1][~np.isnan(errors), np.newaxis]
+errors = errors[~np.isnan(errors), np.newaxis]
+# errors = errors[mask]
+print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
+#+end_src
+
+#+RESULTS:
+: (512, 226)
+: (512,)
+: (512, 1) (512, 1) (512, 1) (512, 1)
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
+ax[0].hist(rel_loc[:, 0], bins='auto')
+ax[0].set_xlabel('Rel. Location (°)')
+
+ax[1].hist(errors2[:, int((model.N_STIM_ON[1]-model.N_STEADY)/model.N_WINDOW)], bins='auto')
+ax[1].set_xlabel('Prev. Errors (°)')
+
+ax[2].hist(errors[:, -1], bins='auto')
+ax[2].set_xlabel('Curr. Errors (°)')
+# ax[1].set_xlim([-45, 45])
+plt.show()
 #+end_src
 
 #+RESULTS:
 :RESULTS:
+[[./figures/odr_sb/figure_53.png]]
 # [goto error]
-#+begin_example
----------------------------------------------------------------------------
-NameError                                 Traceback (most recent call last)
-Cell In[34], line 5
-      2 from sklearn.base import BaseEstimator, RegressorMixin
-      3 from sklearn.linear_model import LinearRegression, Ridge, RidgeCV, LassoCV
-----> 5 class AngleDecoder(BaseEstimator, RegressorMixin):
-      6     def __init__(self, penalty=None, weights=None):
-      7         if penalty is None:
-
-Cell In[34], line 14, in AngleDecoder()
-     11     if penalty == 'l1':
-     12         self.reg_ = LassoCV()
----> 14 self.weights = weights
-     16 def fit(self, X, y):
-     17     Y = np.column_stack((np.cos(y), np.sin(y)))
-
-NameError: name 'weights' is not defined
-#+end_example
+: ---------------------------------------------------------------------------
+: IndexError                                Traceback (most recent call last)
+: Cell In[106], line 5
+:       2 ax[0].hist(rel_loc[:, 0], bins='auto')
+:       3 ax[0].set_xlabel('Rel. Location (°)')
+: ----> 5 ax[1].hist(errors2[:, int((model.N_STIM_ON[1]-model.N_STEADY)/model.N_WINDOW)], bins='auto')
+:       6 ax[1].set_xlabel('Prev. Errors (°)')
+:       8 ax[2].hist(errors[:, -1], bins='auto')
+:
+: IndexError: index 100 is out of bounds for axis 1 with size 1
+[[./figures/odr_sb/figure_53.png]]
+[[./figures/odr_sb/figure_53.png]]
 :END:
 
- #+begin_src ipython
-import numpy as np
-from sklearn.ensemble import BaggingRegressor
-from sklearn.linear_model import LinearRegression, Ridge, RidgeCV, LassoCV
-from sklearn.preprocessing import StandardScaler
+** biases
 
-def decode_angles_with_multivariate_regression(firing_rates, angles_rad, class_weights=True, num_bins=96):
-    """
-    Decode angles from neural firing rates using a single linear regression model
-    to predict both cosine and sine components simultaneously.
+#+begin_src ipython
+data = pd.DataFrame({'target_loc': target_loc[:, -1], 'rel_loc': rel_loc[:, -1], 'errors': errors[:, -1], 'ref_loc': ref_loc[:, -1]})
 
-    Parameters:
-    - firing_rates: A 2D array of shape (num_trials, num_neurons)
-    - angles: A 1D array of shape (num_trials,) representing angles in degrees
+if IF_BIAS:
+    df_naive = pkl_load('df_naive_%d' % seed, path="./figures/odr")
+else:
+    df_naive = data
+#+end_src
 
-    Returns:
-    - predicted_angles: A 1D array of predicted angles in degrees
-    """
-    # Convert angles to radians
+#+RESULTS:
 
-    # Prepare target values for cosine and sine components
-    X = firing_rates
-    Y = np.column_stack((np.cos(angles_rad), np.sin(angles_rad)))
+#+begin_src ipython
+fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
 
-    sample_weights = None
-    if class_weights:
-       hist, bin_edges = np.histogram(angles_rad, bins=num_bins)
-       bin_indices = np.digitize(angles_rad, bins=bin_edges[:-1], right=True)
-       sample_weights = 1.0 / (hist[bin_indices - 1] + 1e-6)  # Add a small value to avoid division by zero
+n_bins=16
+ax[0].plot(df_naive['target_loc'], df_naive['errors'], 'o', alpha=.1)
+ax[0].set_xlabel('Target Loc. (°)')
+ax[0].set_ylabel('Error (°)')
 
-       # Normalize weights
-        # sample_weights /= np.mean(sample_weights)
+stt = binned_statistic(df_naive['target_loc'], df_naive['errors'], statistic='mean', bins=n_bins, range=[0, 360])
+dstt = np.mean(np.diff(stt.bin_edges))
+ax[0].plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
 
-       # angle_counts = np.bincount((angles_rad * (180/np.pi)).astype(int))
-       # sample_weights = 1.0 / (angle_counts[(angles_rad * (180/np.pi)).astype(int)] + 1e-6)
+ax[0].axhline(color='k', linestyle=":")
 
-    # Fit a linear regression model to predict cos and sin components
-    reg = RidgeCV(fit_intercept=True)
-    reg.fit(X, Y, sample_weight=sample_weights)
+ax[1].plot(rel_loc[:, 0], errors[:,-1], 'bo', alpha=.1)
+ax[1].set_xlabel('Rel. Loc. (°)')
+ax[1].set_ylabel('Error (°)')
 
-    print(reg.coef_.shape)
-    pred_cos = reg.coef_[0]
-    pred_sin = reg.coef_[1]
+stt = binned_statistic(rel_loc[:, 0], errors[:, -1], statistic='mean', bins=n_bins, range=[-180, 180])
+dstt = np.mean(np.diff(stt.bin_edges))
+ax[1].plot(stt.bin_edges[:-1]+dstt/2, stt.statistic, 'b')
 
-    predicted_angles_rad = np.arctan2(pred_sin, pred_cos)
-    predicted_angles_deg = np.degrees(predicted_angles_rad) % 360
+ax[2].plot(ref_loc[:, 0], errors[:,-1], 'bo', alpha=.1)
+ax[2].set_xlabel('Ref. Loc. (°)')
+ax[2].set_ylabel('Error (°)')
 
-    return predicted_angles_deg
- #+end_src
+stt = binned_statistic(ref_loc[:, 0], errors[:, -1], statistic='mean', bins=n_bins, range=[-180, 180])
+dstt = np.mean(np.diff(stt.bin_edges))
+ax[2].plot(stt.bin_edges[:-1]+dstt/2, stt.statistic, 'b')
+
+plt.savefig('./figs/christos/uncorr_biases.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_55.png]]
+
+#+begin_src ipython
+n_bins = 16
+angle_min = 0
+angle_max = 360
+
+bin_edges = np.linspace(angle_min, angle_max, n_bins + 1)
+data['bin_target'] = pd.cut(data['target_loc'], bins=bin_edges, include_lowest=True)
+
+mean_errors_per_bin = data.groupby('bin_target')['errors'].mean()
+data['adjusted_errors'] = data.apply(
+    lambda row: row['errors'] - mean_errors_per_bin.loc[row['bin_target']],
+    axis=1
+)
+
+if IF_BIAS:
+   df_naive['bin_target'] = pd.cut(df_naive['target_loc'], bins=bin_edges, include_lowest=True)
+   mean_errors_per_bin = df_naive.groupby('bin_target')['errors'].mean()
+
+   data['errors_naive'] = data.apply(
+      lambda row: row['errors'] - mean_errors_per_bin.loc[row['bin_target']],
+      axis=1
+   )
+
+
+bin_target = data.groupby('bin_target')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
+edges = bin_target['bin_target'].cat.categories
+target_centers = (edges.left + edges.right) / 2
+
+data['bin_rel'] = pd.cut(data['rel_loc'], bins=n_bins)
+bin_rel = data.groupby('bin_rel')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
+
+edges = bin_rel['bin_rel'].cat.categories
+centers = (edges.left + edges.right) / 2
+
+data['bin_ref'] = pd.cut(data['ref_loc'], bins=n_bins)
+
+if IF_BIAS:
+   bin_ref = data.groupby('bin_ref')['errors_naive'].agg(['mean', 'sem']).reset_index()
+else:
+   bin_ref = data.groupby('bin_ref')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
+
+ref_edges = bin_ref['bin_ref'].cat.categories
+ref_centers = (ref_edges.left + ref_edges.right) / 2
+#+end_src
 
 #+RESULTS:
 
  #+begin_src ipython
+fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
+ax[0].plot(centers, bin_target['mean'], 'b')
+ax[0].fill_between(centers,
+                   bin_target['mean'] - bin_target['sem'],
+                   bin_target['mean'] + bin_target['sem'],
+                   color='b', alpha=0.2)
+
+ax[0].axhline(color='k', linestyle=":")
+ax[0].set_xlabel('Target Loc. (°)')
+ax[0].set_ylabel('Corrected Error (°)')
+
+ax[1].plot(centers, bin_rel['mean'], 'b')
+ax[1].fill_between(centers,
+                bin_rel['mean'] - bin_rel['sem'],
+                bin_rel['mean'] + bin_rel['sem'],
+                color='b', alpha=0.2)
+
+ax[1].axhline(color='k', linestyle=":")
+ax[1].set_xlabel('Rel. Loc. (°)')
+ax[1].set_ylabel('Corrected Error (°)')
+
+ax[2].plot(ref_centers, bin_ref['mean'], 'b')
+ax[2].fill_between(ref_centers,
+                bin_ref['mean'] - bin_ref['sem'],
+                bin_ref['mean'] + bin_ref['sem'],
+                color='b', alpha=0.2)
+
+ax[2].axhline(color='k', linestyle=":")
+ax[2].set_xlabel('Ref. Loc. (°)')
+ax[2].set_ylabel('Corrected Error (°)')
+
+if IF_BIAS:
+    plt.savefig('./figures/odr/odr_biases_train.svg', dpi=300)
+else:
+    plt.savefig('./figures/odr/odr_biases_naive.svg', dpi=300)
+
+plt.savefig('./figs/christos/corr_biases.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_57.png]]
+
+#+begin_src ipython
+if IF_BIAS==0:
+   pkl_save(data, 'df_naive_%d' %seed, path="./figures/odr")
+#+end_src
+
+#+RESULTS:
+: saving to ./figures/odr/df_naive_1.pkl
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
 import numpy as np
-from sklearn.ensemble import BaggingRegressor
-from sklearn.linear_model import LinearRegression, Ridge, RidgeCV, LassoCV
-from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+
+# Parameters
+n_neurons = 100  # Number of neurons
+n_time_points = 250  # Number of time points
+first_bump_start = 50
+first_bump_end = 100
+second_bump_start = 150
+second_bump_end = 200
+
+# Setup activity matrix
+activity = np.zeros((n_neurons, n_time_points))
+
+# Centers of the bumps
+centers = np.zeros(n_time_points)
+
+# Generate a diffused first bump
+for t in range(first_bump_start, first_bump_end):
+    center = n_neurons // 2 # + (t - first_bump_start)  # diffusing to the right
+    deviation = 5
+    spread = np.random.normal(loc=center, scale=deviation, size=n_neurons)
+    activity[:, t] = np.exp(-np.square(np.arange(n_neurons) - spread) / (2 * deviation**2))
+    centers[t] = spread.mean()
+
+# Retrieve the end center of the first bump
+first_bump_end_center = centers[first_bump_end - 1]
+
+# Generate a second bump that moves towards the first bump's end
+for t in range(second_bump_start, second_bump_end):
+    center = 10 + first_bump_end_center - (t - second_bump_start) / 4  # moving left towards first bump's end
+    deviation = 3
+    spread = np.random.normal(loc=center, scale=deviation, size=n_neurons)
+    activity[:, t] = np.exp(-np.square(np.arange(n_neurons) - spread) / (2 * deviation**2))
+    centers[t] = spread.mean()
+
+# Normalize activity for binary visualization
+activity = activity > 0.6
+
+# Plot
+plt.figure(figsize=(10, 5))
+plt.imshow(activity, aspect='auto', cmap='binary', extent=[0, n_time_points, 0, n_neurons], origin='lower')
+plt.plot(range(first_bump_start, first_bump_end), centers[first_bump_start:first_bump_end], color='red', label='Center of 1st Bump')
+plt.plot(range(second_bump_start, second_bump_end), centers[second_bump_start:second_bump_end], color='blue', label='Center of 2nd Bump')
+plt.xlabel('Time')
+plt.ylabel('Neuron Index')
+# plt.title('Raster Plot with Two Bumps of Activity and Centers')
+# plt.colorbar(label='Activity')
+# plt.legend()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_60.png]]
+
+** Landscape
+
+#+begin_src ipython
+sys.path.insert(0, '/home/leon/dual_task/dual_data/')
+from src.attractor.landscape import EnergyLandscape
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+energy = EnergyLandscape()
+print(phi.shape)
+#+end_src
+
+#+RESULTS:
+: (512, 226)
+
+#+begin_src ipython
+num_bins = 96
+bins = np.linspace(0, 2 * np.pi, num_bins, endpoint=False)
+landscape = energy.fit(phi, bins)
+landscape[0] = landscape[-1]
+print(landscape.shape)
+#+end_src
+
+#+RESULTS:
+: (96,)
+
+#+begin_src ipython
+if IF_BIAS:
+        pkl_save(landscape, 'landscape_bias', path="/home/leon/")
+        landscape_ = pkl_load('landscape', path="/home/leon/")
+else:
+        pkl_save(landscape, 'landscape', path="/home/leon/")
+#+end_src
+
+#+RESULTS:
+: saving to /home/leon//landscape.pkl
+
+#+begin_src ipython
+plt.plot(np.linspace(0, 360, landscape.shape[0]), landscape)
+if IF_BIAS:
+    landscape_[0] = landscape_[-1]
+    plt.plot(np.linspace(0, 360, landscape.shape[0]), landscape_)
+
+plt.axvline(reference, 0, 1, ls='--')
+plt.xlabel('Pref Loc (°)')
+plt.ylabel('Energy')
+plt.show()
+#+end_src
 
-def decode_angles_with_bagged_regression(firing_rates, angles_rad, class_weights=False):
-    """
-    Decode angles from neural firing rates using a single linear regression model
-    to predict both cosine and sine components simultaneously.
-
-    Parameters:
-    - firing_rates: A 2D array of shape (num_trials, num_neurons)
-    - angles: A 1D array of shape (num_trials,) representing angles in degrees
-
-    Returns:
-    - predicted_angles: A 1D array of predicted angles in degrees
-    """
-    # Convert angles to radians
-
-    # Prepare target values for cosine and sine components
-    X = firing_rates
-    Y = np.column_stack((np.cos(angles_rad), np.sin(angles_rad)))
-
-    if class_weights:
-       num_bins = 30  # You can adjust the number of bins
-       hist, bin_edges = np.histogram(angles_rad, bins=num_bins)
-       bin_indices = np.digitize(angles_rad, bins=bin_edges[:-1], right=True)
-       sample_weights = 1.0 / (hist[bin_indices - 1] + 1e-6)  # Add a small value to avoid division by zero
-
-       # Normalize weights
-       sample_weights /= np.mean(sample_weights)
-
-    reg = BaggingRegressor(base_estimator=Ridge(), n_estimators=1000, random_state=None, bootstrap=False, max_samples=0.8)
-    reg.fit(X, Y)
-
-    coefs = []
-    for i, estimator in enumerate(reg.estimators_):
-        coefs.append(estimator.coef_)
-
-    coefs = np.array(coefs).mean(0)
-    print('coefs', coefs.shape)
-    angles = np.arctan2(coefs[1], coefs[0])
-    predicted_angles_deg = np.degrees(angles) % 360
-
-    return predicted_angles_deg
- #+end_src
-
- #+RESULTS:
-
- #+begin_src ipython
-# import numpy as np
-# from sklearn.linear_model import LassoCV
-# from sklearn.model_selection import train_test_split
-
-# def average_neuron_selectivity(firing_rates, angles_rad, num_subsamples=100, sample_size=0.5):
-#     coeffs_cos = []
-#     coeffs_sin = []
+#+RESULTS:
+[[./figures/odr_sb/figure_65.png]]
 
-#     for _ in range(num_subsamples):
-#         # Subsample data
-#         X_sub, _, y_sub, _ = train_test_split(firing_rates, angles_rad,
-#                                               train_size=sample_size, stratify=angles_rad)
-
-#         # Prepare targets for cosine and sine components
-#         Y_sub = np.column_stack((np.cos(y_sub), np.sin(y_sub)))
+#+begin_src ipython
+plt.figure(figsize=(7, 7))
+plt.imshow(energy.transition_matrix.T, cmap='jet')
+plt.colorbar()
+plt.show()
+#+end_src
 
-#         # Train Ridge regression model
-#         reg = RidgeCV()
-#         reg.fit(X_sub, Y_sub)
+#+RESULTS:
+[[./figures/odr_sb/figure_66.png]]
 
-#         # Store coefficients
-#         coeffs_cos.append(reg.coef_[:, 0])  # Coefficients for cosine component
-#         coeffs_sin.append(reg.coef_[:, 1])  # Coefficients for sine component
+#+begin_src ipython
+plt.hist(energy.steady_state, bins='auto')
+plt.show()
+#+end_src
 
-#     # Average coefficients
-#     avg_coeffs_cos = np.mean(coeffs_cos, axis=0)
-#     avg_coeffs_sin = np.mean(coeffs_sin, axis=0)
+#+RESULTS:
+[[./figures/odr_sb/figure_67.png]]
 
-#     predicted_angles_rad = np.arctan2(avg_coeffs_sin, avg_coeffs_cos)
-#     return np.degrees(predicted_angles_rad) % 360
- #+end_src
+#+begin_src ipython
+X_discrete = np.digitize(phi,  bins, right=False)-1
+plt.plot(X_discrete.T[:,:10])
+plt.show()
+#+end_src
 
- #+RESULTS:
+#+RESULTS:
+[[./figures/odr_sb/figure_68.png]]
 
- #+begin_src ipython
-# import numpy as np
-# import matplotlib.pyplot as plt
+#+begin_src ipython
+np.mean(X_discrete==1)
+#+end_src
 
-# # Original Gaussian-distributed data
-# mean_angle = 180
-# stddev_angle = 30
-# num_samples = 1000
+#+RESULTS:
+: 0.009852046460176992
 
-# # Simulate Gaussian data (replace with your actual data)
-# gaussian_data = np.random.normal(loc=mean_angle, scale=stddev_angle, size=num_samples)
+#+begin_src ipython
 
-# # Number of bins and subsamples per bin
-# num_bins = 10
-# samples_per_bin = 10
+#+end_src
 
-# # Create histogram bins
-# counts, bin_edges = np.histogram(gaussian_data, bins=num_bins)
-
-# # Collect uniform samples from each bin
-# subsample = []
-# for i in range(num_bins):
-#     bin_mask = (gaussian_data >= bin_edges[i]) & (gaussian_data < bin_edges[i+1])
-#     bin_data = gaussian_data[bin_mask]
-#     if len(bin_data) >= samples_per_bin:
-#         chosen_samples = np.random.choice(bin_data, samples_per_bin, replace=False)
-#     else:
-#         chosen_samples = bin_data  # take whatever is available for smaller bins
-#     subsample.extend(chosen_samples)
-
-# plt.hist(subsample, bins=num_bins)
-# plt.title("Uniform Subsampled Data")
-# print(len(subsample))
-# plt.show()
- #+end_src
-
- #+RESULTS:
-
-
- #+begin_src ipython
-# import numpy as np
-# from scipy.interpolate import interp1d
-
-# def generate_uniform_sample(angles):
-#     # Let's assume `angles` is your array of angles (in degrees) from the peaked distribution.
-#     # Replace it with your actual data.
-
-#     # Sort angles and get original indices
-#     sorted_indices = np.argsort(angles)
-#     sorted_angles = angles[sorted_indices]
-
-#     # Step 1: Calculate the histogram and CDF of the sorted distribution
-#     hist, bin_edges = np.histogram(sorted_angles, bins=360, range=(0, 360), density=True)
-#     cdf = np.cumsum(hist) / np.sum(hist)
-
-#     # Step 2: Generate uniform random numbers between 0 and 1
-#     uniform_randoms = np.random.rand(len(angles))
-
-#     # Step 3: Use the CDF to select indices
-#     # Create an inverse CDF (for index selection) function using interpolation
-#     inverse_cdf = interp1d(cdf, bin_edges[1:], kind='linear', bounds_error=False, fill_value=(0, 360))
-
-#     # Map uniform randoms to indices
-#     selected_bins = np.digitize(inverse_cdf(uniform_randoms), bin_edges) - 1
-#     selected_bins = np.clip(selected_bins, 0, len(hist) - 1)  # Ensure valid bin indices
-#     selected_indices = np.unique(sorted_indices[selected_bins])  # Unique indices
-
-#     # `selected_indices` now contains indices that would help create a uniform distribution
-#     return selected_indices
- #+end_src
-
- #+RESULTS:
-
- #+begin_src ipython
-# import numpy as np
-# from scipy.stats import norm
-
-# # Original Gaussian parameters
-# mean_angle = 180
-# stddev_angle = 30
-
-# # Generate Gaussian-distributed data
-# num_samples = 1000
-# gaussian_data = np.random.normal(loc=mean_angle, scale=stddev_angle, size=num_samples)
-
-# # Convert Gaussian data to uniform distribution using its CDF
-# uniform_data_01 = norm.cdf(gaussian_data, loc=mean_angle, scale=stddev_angle)
-
-# # Map the uniform distribution [0,1] to [0, 360]
-# uniform_data_scaled = uniform_data_01 * 360
-
-# plt.hist(uniform_data_scaled)
-# plt.show()
- #+end_src
-
- #+RESULTS:
-
- #+begin_src ipython
-# def generate_uniform_sample(gaussian_data, mean_angle, stddev_angle):
-#     # Sort the data to properly map their CDF values
-#     sorted_indices = np.argsort(gaussian_data)
-#     sorted_data = gaussian_data[sorted_indices]
-
-#     # Compute the CDF values for the sorted data
-#     cdf_values = norm.cdf(sorted_data, loc=mean_angle, scale=stddev_angle)
-
-#     # Map CDF values to [0, 360] to get uniform distribution
-#     uniform_mapped = cdf_values * 360
-
-#     # Reorder the uniform distribution to match original indices
-#     uniform_data_with_original_indices = np.empty_like(uniform_mapped)
-#     uniform_data_with_original_indices[sorted_indices] = uniform_mapped
-
-#     return uniform_data_with_original_indices
- #+end_src
-
- #+RESULTS:
-
- #+begin_src ipython
-# import numpy as np
-# from scipy.stats import norm
-
-# # Original Gaussian-distributed data (angles)
-# mean_angle = 180
-# stddev_angle = 30
-# num_samples = 1000
-
-# # Simulate Gaussian data (for demonstration; replace with your actual data)
-# gaussian_data = np.random.normal(loc=mean_angle, scale=stddev_angle, size=num_samples)
-
-# # Sort the data and compute CDF values
-# sorted_indices = np.argsort(gaussian_data)
-# sorted_data = gaussian_data[sorted_indices]
-# cdf_values = norm.cdf(sorted_data, loc=mean_angle, scale=stddev_angle)
-
-# # Generate uniformly spaced CDF values corresponding to the number of samples you want to extract
-# sample_size = 500  # Number of uniformly distributed samples needed
-# uniform_cdf_values = np.linspace(0, 1, sample_size, endpoint=False)[1:]  # Avoid exact 0 and 1 for CDF
-
-# # Find the indices where these uniform CDF values would fit into the sorted CDF
-# subsampled_indices = np.searchsorted(cdf_values, uniform_cdf_values)
-
-# # Get the corresponding samples from the original data
-# uniformly_distributed_samples = sorted_data[subsampled_indices]
-
-# # Optionally restore to original positions
-# original_indices_subsampled = sorted_indices[subsampled_indices]
-
-# # Output the subsampled angles and their indices in the original dataset
-
-# plt.hist(uniformly_distributed_samples)
-# plt.show()
-
- #+end_src
-
- #+RESULTS:
-
-  #+begin_src ipython
-# import numpy as np
-# from sklearn.linear_model import RidgeCV, MultiTaskLassoCV
-
-# def generate_balanced_subsample(firing_rates, angles_rad, num_bins=96, sample_size=0.5):
-#     # Discretize the angles into bins
-#     bins = np.linspace(0, 2 * np.pi, num_bins + 1)
-#     digitized = np.digitize(angles_rad, bins, right=True)
-
-#     # List to store subsampled indices
-#     subsample_indices = []
-
-#     # Sample equally from each bin
-#     for b in range(1, len(bins)):
-#         bin_indices = np.where(digitized == b)[0]
-#         # Sample a balanced number from each bin (floor of the sample_size proportion)
-#         num_to_sample = int(sample_size * len(bin_indices))
-#         if num_to_sample > 0 and len(bin_indices) > 0:
-#             subsample_indices.extend(np.random.choice(bin_indices, size=num_to_sample, replace=False))
-
-#     # Convert to numpy array
-#     subsample_indices = np.asarray(subsample_indices)
-#     # print(subsample_indices.shape)
-
-#     # Create subsample
-#     X_sub = firing_rates[subsample_indices]
-#     y_sub = angles_rad[subsample_indices]
-
-#     return X_sub, y_sub
-
-# def average_neuron_selectivity_uniform(firing_rates, angles_rad, num_subsamples=1000, num_bins=96, sample_size=0.5):
-#     coeffs_cos = []
-#     coeffs_sin = []
-
-#     for _ in range(num_subsamples):
-#         # Generate a balanced subsample
-#         X_sub, y_sub = generate_balanced_subsample(firing_rates, angles_rad, num_bins, sample_size)
-
-#         # Prepare targets for cosine and sine components
-#         Y_sub = np.column_stack((np.cos(y_sub), np.sin(y_sub)))
-#         # Train Ridge regression
-#         reg = RidgeCV()
-#         reg.fit(X_sub, Y_sub)
-
-#         # print(X_sub.shape, y_sub.shape, reg.coef_.shape)
-
-#         # Store coefficients
-#         coeffs_cos.append(reg.coef_[0])  # Cosine coefficients
-#         coeffs_sin.append(reg.coef_[1])  # Sine coefficients
-
-#     # Average coefficients
-#     avg_coeffs_cos = np.mean(coeffs_cos, axis=0)
-#     avg_coeffs_sin = np.mean(coeffs_sin, axis=0)
-
-#     predicted_angles_rad = np.arctan2(avg_coeffs_sin, avg_coeffs_cos)
-#     return np.degrees(predicted_angles_rad) % 360
- #+end_src
-
-     #+RESULTS:
-
- #+begin_src ipython
-# predicted_angles = decode_angles_with_multivariate_regression(mean_rates.cpu().detach().numpy(), angles.cpu().detach().numpy(), num_bins=96, class_weights=True)
-# print("Predicted angles (degrees):", predicted_angles.shape)
-
-# plt.hist(predicted_angles)
-# plt.show()
- #+end_src
-
- #+RESULTS:
-
- #+begin_src ipython
-# idx = np.argsort(predicted_angles)
-# # mean_rates = mean_rates[:, idx]
-# # m0, m1, phi = decode_bump(rates[..., idx], axis=-1)
- #+end_src
-
- #+RESULTS:
+#+RESULTS:
 
 ** Tuning
+
 #+begin_src ipython
 mean_rates = rates_tensor[:, start_idx:end_idx, idx_pref].mean(dim=1)
-angles = model.PHI0[:, 2, 0]
+angles = model.PHI0[:, 0, 0]
 #+end_src
 
 #+RESULTS:
@@ -1063,12 +1313,9 @@ else:
 #+end_src
 
 #+RESULTS:
-: saving to /home/leon//osi_bias.pkl
-: saving to /home/leon//circvar_bias.pkl
-: saving to /home/leon//pref_bias.pkl
-: loading from /home/leon//osi.pkl
-: loading from /home/leon//circvar.pkl
-: loading from /home/leon//pref.pkl
+: saving to /home/leon//osi.pkl
+: saving to /home/leon//circvar.pkl
+: saving to /home/leon//pref.pkl
 
 #+begin_src ipython
 theta = torch.linspace(
@@ -1085,7 +1332,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_48.png]]
+[[./figures/odr_sb/figure_74.png]]
 
 #+begin_src ipython
 pref, indices = torch.sort(pref, descending=False)
@@ -1101,7 +1348,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_49.png]]
+[[./figures/odr_sb/figure_75.png]]
 
 #+begin_src ipython
 if IF_BIAS:
@@ -1110,7 +1357,6 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_50.png]]
 
 #+begin_src ipython
 if IF_BIAS:
@@ -1119,7 +1365,6 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_51.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -1137,11 +1382,12 @@ if IF_BIAS:
     ax[1].hist(circvar_.cpu().detach(), bins='auto', density=True, histtype='step', label='unbiased')
 
 plt.legend()
+plt.savefig('figs/christos/osi_circvar.svg', dpi=300)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_52.png]]
+[[./figures/odr_sb/figure_78.png]]
 
  #+begin_src ipython
 if IF_BIAS:
@@ -1155,11 +1401,11 @@ if IF_BIAS:
     ax[1].set_xlabel('Unbiased circvar')
     ax[1].set_ylabel('Biased circvar')
 
+    plt.savefig('figs/christos/osi_circvar_scatter.svg', dpi=300)
     plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_53.png]]
 
 #+begin_src ipython
 def plot_neuron_tuning_curves(mean_rates, angles, neuron_indices, device='cpu'):
@@ -1208,8 +1454,8 @@ aligned_angles, population_tuning_curve  = plot_neuron_tuning_curves(mean_rates,
 #+end_src
 
 #+RESULTS:
-: tensor([-3.1381, -3.1348, -3.1329, -3.1315, -3.1223, -3.1216, -3.1208, -3.1055,
-:         -3.0983, -3.0974], device='cuda:1')
+: tensor([-3.1416, -3.1067, -3.0892, -3.0718, -3.0543, -3.0369, -2.9845, -2.9671,
+:         -2.9496, -2.9322], device='cuda:1')
 
 #+begin_src ipython
 plt.plot(normalized_rates[:, 5])
@@ -1217,8 +1463,8 @@ plt.plot(normalized_rates[:, 5])
 
 #+RESULTS:
 :RESULTS:
-| <matplotlib.lines.Line2D | at | 0x7fc25f1ea170> |
-[[./figures/odr_sb/figure_55.png]]
+| <matplotlib.lines.Line2D | at | 0x7ff11867b790> |
+[[./figures/odr_sb/figure_81.png]]
 :END:
 
 #+begin_src ipython
@@ -1234,10 +1480,8 @@ else:
 #+end_src
 
 #+RESULTS:
-: saving to /home/leon//aligned_angles_bias.pkl
-: saving to /home/leon//population_tuning_curve_bias.pkl
-: loading from /home/leon//aligned_angles.pkl
-: loading from /home/leon//population_tuning_curve.pkl
+: saving to /home/leon//aligned_angles.pkl
+: saving to /home/leon//population_tuning_curve.pkl
 
  #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -1253,11 +1497,12 @@ ax[0].set_ylabel('Rate (Hz)')
 ax[1].set_xlabel('Preferred Location (°)')
 ax[1].set_ylabel('Rate (Hz)')
 
+plt.savefig('figs/christos/tuning_curves.svg', dpi=300)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_57.png]]
+[[./figures/odr_sb/figure_83.png]]
 
 #+begin_src ipython
     plt.plot(aligned_angles.cpu().numpy() * 180 / np.pi, population_tuning_curve.mean(dim=1).cpu().detach().numpy(), '-', label='Biased')
@@ -1266,12 +1511,13 @@ plt.show()
 
     plt.xlabel('Preferred Location (°)')
     plt.ylabel('Rate (Hz)')
-    plt.legend()
+    plt.legend(fontsize=10)
+    plt.savefig('figs/christos/pop_tuning.svg', dpi=300)
     plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_58.png]]
+[[./figures/odr_sb/figure_84.png]]
 
 #+begin_src ipython
 import torch
@@ -1449,10 +1695,8 @@ else:
 #+end_src
 
 #+RESULTS:
-: saving to /home/leon//tuning_width_bias.pkl
-: saving to /home/leon//skewness_bias.pkl
-: loading from /home/leon//tuning_width.pkl
-: loading from /home/leon//skewness.pkl
+: saving to /home/leon//tuning_width.pkl
+: saving to /home/leon//skewness.pkl
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -1470,22 +1714,23 @@ if IF_BIAS:
     ax[1].hist(skewness_, bins='auto', density=True, histtype='step', label='unbiased')
 
 plt.legend()
+plt.savefig('figs/christos/skewness.svg', dpi=300)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_65.png]]
+[[./figures/odr_sb/figure_91.png]]
 
 #+begin_src ipython
 pref, indices = torch.sort(pref, descending=False)
 plt.plot(pref.cpu().detach() * 180 / np.pi, skewness[indices.cpu().numpy()])
-# plt.plot(pref.cpu().detach()* 180 / np.pi, circcvl(skewness[indices.cpu().numpy()], windowSize=10))
+plt.plot(pref.cpu().detach()* 180 / np.pi, circcvl(skewness[indices.cpu().numpy()], windowSize=10))
 
 
 if IF_BIAS:
     pref_, indices_ = torch.sort(pref_, descending=False)
     plt.plot(pref_.cpu().detach() * 180 / np.pi, skewness_[indices.cpu().numpy()])
-    # plt.plot(pref_.cpu().detach()* 180 / np.pi, circcvl(skewness_[indices_.cpu().numpy()], windowSize=10))
+    plt.plot(pref_.cpu().detach()* 180 / np.pi, circcvl(skewness_[indices_.cpu().numpy()], windowSize=10))
 
 plt.xlabel('Pref Loc (°)')
 plt.ylabel('Skewness')
@@ -1493,17 +1738,17 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_66.png]]
+[[./figures/odr_sb/figure_92.png]]
 
  #+begin_src ipython
 if IF_BIAS:
     fig, ax = plt.subplots(1, 2, figsize=[2*height, height])
 
-    ax[0].scatter(tuning_width_, tuning_width)
+    # ax[0].scatter(tuning_width_, tuning_width)
     ax[0].set_xlabel('Unbiased Tuning Width')
     ax[0].set_ylabel('Biased Tuning Width')
 
-    ax[1].scatter(skewness_, skewness)
+    # ax[1].scatter(skewness_, skewness)
     ax[1].set_xlabel('Unbiased Skew')
     ax[1].set_ylabel('Biased Skew')
 
@@ -1511,7 +1756,6 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_67.png]]
 
 #+begin_src ipython
 
@@ -1532,349 +1776,5 @@ else:
 #+end_src
 
 #+RESULTS:
-: saving to /home/leon//aligned_angles_bias.pkl
-: saving to /home/leon//population_tuning_curve_bias.pkl
-: loading from /home/leon//aligned_angles.pkl
-: loading from /home/leon//population_tuning_curve.pkl
-
-** errors
-
-#+begin_src ipython
-# reference = 180 - reference
-target_loc = PHI0[:, -1]
-
-rel_loc = (PHI0[:, 0] - target_loc) * np.pi / 180.0
-rel_loc = (rel_loc + np.pi) % (2 * np.pi) - np.pi
-rel_loc *= 180 / np.pi
-
-ref_loc = (reference - PHI0[:, -1]) * np.pi / 180.0
-ref_loc = (ref_loc + np.pi) % (2 * np.pi) - np.pi
-ref_loc *= 180 / np.pi
-
-window_size = int((model.N_STIM_OFF[-1]-model.N_STEADY) / model.N_WINDOW)
-# errors = phi - phi[:, window_size][:, np.newaxis]
-errors = (phi - target_loc * np.pi / 180.0)
-errors = (errors + np.pi) % (2 * np.pi) - np.pi
-errors *= 180 / np.pi
-
-window_size = int((model.N_STIM_OFF[0]-model.N_STEADY) / model.N_WINDOW)
-errors2 = ((phi - PHI0[:, 0] * np.pi / 180.0))
-# errors2 = phi - phi[:, window_size][:, np.newaxis]
-errors2 = (errors2 + np.pi) % (2 * np.pi) - np.pi
-errors2 *= 180 / np.pi
-
-print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
-#+end_src
-
-#+RESULTS:
-: (800, 226) (800, 1) (800, 1) (800, 1)
-
-#+begin_src ipython
-fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-ax[0].plot(np.linspace(0, model.DURATION, errors.shape[-1]), errors2[:32].T)
-add_vlines(model, ax[0])
-# ax[0].set_xlim([2.5, 4.5])
-ax[0].set_xlabel('t')
-ax[0].set_ylabel('prev. error (°)')
-
-ax[1].plot(np.linspace(0, model.DURATION, errors.shape[-1]), errors[:32].T)
-add_vlines(model, ax[1])
-ax[1].set_xlabel('t')
-ax[1].set_ylabel('curr. error (°)')
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_71.png]]
-
-#+begin_src ipython
-fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
-ax[0].hist(rel_loc[:, 0], bins='auto')
-ax[0].set_xlabel('Rel. Location (°)')
-
-ax[1].hist(errors2[:, int((model.N_STIM_ON[1]-model.N_STEADY)/model.N_WINDOW)], bins='auto')
-ax[1].set_xlabel('Prev. Errors (°)')
-
-ax[2].hist(errors[:, -1], bins=64)
-ax[2].set_xlabel('Curr. Errors (°)')
-# ax[1].set_xlim([-45, 45])
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_72.png]]
-
-#+begin_src ipython
-mask = np.abs(errors) <= 25
-print(mask.shape)
-
-errors = np.where(mask, errors, np.nan)[:, -1]
-print(errors.shape)
-rel_loc = rel_loc[~np.isnan(errors)]
-ref_loc = ref_loc[~np.isnan(errors)]
-target_loc = target_loc[:, -1][~np.isnan(errors), np.newaxis]
-errors = errors[~np.isnan(errors), np.newaxis]
-# errors = errors[mask]
-print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
-#+end_src
-
-#+RESULTS:
-: (800, 226)
-: (800,)
-: (800, 1) (800, 1) (800, 1) (800, 1)
-
-#+begin_src ipython
-fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
-ax[0].hist(rel_loc[:, 0], bins='auto')
-ax[0].set_xlabel('Rel. Location (°)')
-
-ax[1].hist(errors2[:, int((model.N_STIM_ON[1]-model.N_STEADY)/model.N_WINDOW)], bins='auto')
-ax[1].set_xlabel('Prev. Errors (°)')
-
-ax[2].hist(errors[:, -1], bins='auto')
-ax[2].set_xlabel('Curr. Errors (°)')
-# ax[1].set_xlim([-45, 45])
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_74.png]]
-
-** biases
-
-#+begin_src ipython
-data = pd.DataFrame({'target_loc': target_loc[:, -1], 'rel_loc': rel_loc[:, -1], 'errors': errors[:, -1], 'ref_loc': ref_loc[:, -1]})
-
-if IF_BIAS:
-    df_naive = pkl_load('df_naive_%d' % seed, path="./figures/odr")
-else:
-    df_naive = data
-#+end_src
-
-#+RESULTS:
-: loading from ./figures/odr/df_naive_2.pkl
-
-#+begin_src ipython
-fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
-
-n_bins=16
-ax[0].plot(df_naive['target_loc'], df_naive['errors'], 'o', alpha=.1)
-ax[0].set_xlabel('Target Loc. (°)')
-ax[0].set_ylabel('Error (°)')
-
-stt = binned_statistic(df_naive['target_loc'], df_naive['errors'], statistic='mean', bins=n_bins, range=[0, 360])
-dstt = np.mean(np.diff(stt.bin_edges))
-ax[0].plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
-
-ax[0].axhline(color='k', linestyle=":")
-
-ax[1].plot(rel_loc[:, 0], errors[:,-1], 'bo', alpha=.1)
-ax[1].set_xlabel('Rel. Loc. (°)')
-ax[1].set_ylabel('Error (°)')
-
-stt = binned_statistic(rel_loc[:, 0], errors[:, -1], statistic='mean', bins=n_bins, range=[-180, 180])
-dstt = np.mean(np.diff(stt.bin_edges))
-ax[1].plot(stt.bin_edges[:-1]+dstt/2, stt.statistic, 'b')
-
-ax[2].plot(ref_loc[:, 0], errors[:,-1], 'bo', alpha=.1)
-ax[2].set_xlabel('Ref. Loc. (°)')
-ax[2].set_ylabel('Error (°)')
-
-stt = binned_statistic(ref_loc[:, 0], errors[:, -1], statistic='mean', bins=n_bins, range=[-180, 180])
-dstt = np.mean(np.diff(stt.bin_edges))
-ax[2].plot(stt.bin_edges[:-1]+dstt/2, stt.statistic, 'b')
-
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_76.png]]
-
-#+begin_src ipython
-n_bins = 16
-angle_min = 0
-angle_max = 360
-
-bin_edges = np.linspace(angle_min, angle_max, n_bins + 1)
-data['bin_target'] = pd.cut(data['target_loc'], bins=bin_edges, include_lowest=True)
-
-mean_errors_per_bin = data.groupby('bin_target')['errors'].mean()
-data['adjusted_errors'] = data.apply(
-    lambda row: row['errors'] - mean_errors_per_bin.loc[row['bin_target']],
-    axis=1
-)
-
-if IF_BIAS:
-   df_naive['bin_target'] = pd.cut(df_naive['target_loc'], bins=bin_edges, include_lowest=True)
-   mean_errors_per_bin = df_naive.groupby('bin_target')['errors'].mean()
-
-   data['errors_naive'] = data.apply(
-      lambda row: row['errors'] - mean_errors_per_bin.loc[row['bin_target']],
-      axis=1
-   )
-
-
-bin_target = data.groupby('bin_target')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
-edges = bin_target['bin_target'].cat.categories
-target_centers = (edges.left + edges.right) / 2
-
-data['bin_rel'] = pd.cut(data['rel_loc'], bins=n_bins)
-bin_rel = data.groupby('bin_rel')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
-
-edges = bin_rel['bin_rel'].cat.categories
-centers = (edges.left + edges.right) / 2
-
-data['bin_ref'] = pd.cut(data['ref_loc'], bins=n_bins)
-
-if IF_BIAS:
-   bin_ref = data.groupby('bin_ref')['errors_naive'].agg(['mean', 'sem']).reset_index()
-else:
-   bin_ref = data.groupby('bin_ref')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
-
-ref_edges = bin_ref['bin_ref'].cat.categories
-ref_centers = (ref_edges.left + ref_edges.right) / 2
-#+end_src
-
-#+RESULTS:
-
- #+begin_src ipython
-fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
-ax[0].plot(centers, bin_target['mean'], 'b')
-ax[0].fill_between(centers,
-                   bin_target['mean'] - bin_target['sem'],
-                   bin_target['mean'] + bin_target['sem'],
-                   color='b', alpha=0.2)
-
-ax[0].axhline(color='k', linestyle=":")
-ax[0].set_xlabel('Target Loc. (°)')
-ax[0].set_ylabel('Corrected Error (°)')
-
-ax[1].plot(centers, bin_rel['mean'], 'b')
-ax[1].fill_between(centers,
-                bin_rel['mean'] - bin_rel['sem'],
-                bin_rel['mean'] + bin_rel['sem'],
-                color='b', alpha=0.2)
-
-ax[1].axhline(color='k', linestyle=":")
-ax[1].set_xlabel('Rel. Loc. (°)')
-ax[1].set_ylabel('Corrected Error (°)')
-
-ax[2].plot(ref_centers, bin_ref['mean'], 'b')
-ax[2].fill_between(ref_centers,
-                bin_ref['mean'] - bin_ref['sem'],
-                bin_ref['mean'] + bin_ref['sem'],
-                color='b', alpha=0.2)
-
-ax[2].axhline(color='k', linestyle=":")
-ax[2].set_xlabel('Ref. Loc. (°)')
-ax[2].set_ylabel('Corrected Error (°)')
-
-if IF_BIAS:
-    plt.savefig('./figures/odr/odr_biases_train.svg', dpi=300)
-else:
-    plt.savefig('./figures/odr/odr_biases_naive.svg', dpi=300)
-
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_78.png]]
-
-#+begin_src ipython
-if IF_BIAS==0:
-   pkl_save(data, 'df_naive_%d' %seed, path="./figures/odr")
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
-
-** Landscape
-
-#+begin_src ipython
-sys.path.insert(0, '/home/leon/dual_task/dual_data/')
-from src.attractor.landscape import EnergyLandscape
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-energy = EnergyLandscape()
-print(phi.shape)
-#+end_src
-
-#+RESULTS:
-: (800, 226)
-
-#+begin_src ipython
-num_bins = 96
-bins = np.linspace(0, 2 * np.pi, num_bins, endpoint=False)
-landscape = energy.fit(phi, bins)
-print(landscape.shape)
-#+end_src
-
-#+RESULTS:
-: (96,)
-
-#+begin_src ipython
-if IF_BIAS:
-        pkl_save(landscape, 'landscape_bias', path="/home/leon/")
-        landscape_ = pkl_load('landscape', path="/home/leon/")
-else:
-        pkl_save(landscape, 'landscape', path="/home/leon/")
-#+end_src
-
-#+RESULTS:
-: saving to /home/leon//landscape_bias.pkl
-: loading from /home/leon//landscape.pkl
-
-#+begin_src ipython
-plt.plot(np.linspace(0, 360, landscape.shape[0]), landscape)
-if IF_BIAS:
-    plt.plot(np.linspace(0, 360, landscape.shape[0]), landscape_)
-
-plt.xlabel('Pref Loc (°)')
-plt.ylabel('Energy')
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_85.png]]
-
-#+begin_src ipython
-plt.figure(figsize=(7, 7))
-plt.imshow(energy.transition_matrix.T, cmap='jet')
-plt.colorbar()
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_86.png]]
-
-#+begin_src ipython
-plt.hist(energy.steady_state, bins='auto')
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_87.png]]
-
-#+begin_src ipython
-X_discrete = np.digitize(phi,  bins, right=False)-1
-plt.plot(X_discrete.T[:,:10])
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_88.png]]
-
-#+begin_src ipython
-np.mean(X_discrete==1)
-#+end_src
-
-#+RESULTS:
-: 0.010824115044247788
+: saving to /home/leon//aligned_angles.pkl
+: saving to /home/leon//population_tuning_curve.pkl
