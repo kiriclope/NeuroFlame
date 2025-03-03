@@ -99,6 +99,7 @@ class LowRankWeights(nn.Module):
         else:
             self.lr_kappa = torch.tensor(1.0, device=self.device)
 
+
         # Mask to train excitatory neurons only
         # self.lr_mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
 

@@ -49,6 +49,7 @@ class Network(nn.Module):
                 device=self.device,
             )
 
+            # the cue is the same as go
             self.odors[2] = self.odors[1]
 
             self.low_rank = LowRankWeights(
@@ -308,11 +309,11 @@ class Network(nn.Module):
                     W_stp_T = W_stp_T / torch.sqrt(self.Ka[0])
 
                 if self.LR_TRAIN:
-                    W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]]
+                    # W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]]
                     # W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
 
-                    # W_stp_T = self.GAIN * (self.W_stp_T
-                    #                        + self.Wab_train[self.slices[0], self.slices[0]]) / torch.sqrt(self.Ka[0])
+                    W_stp_T = self.GAIN * (self.W_stp_T
+                                           + self.Wab_train[self.slices[0], self.slices[0]]) / torch.sqrt(self.Ka[0])
 
                     # W_stp_T = self.GAIN * self.W_stp_T * (1.0 / torch.sqrt(self.Ka[0])
                     #                                       + self.Wab_train[self.slices[0], self.slices[0]])
