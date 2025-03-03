@@ -1,6 +1,6 @@
 #+STARTUP: fold
-#+TITLE: Balance Test
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session bal :kernel torch
+#+TITLE: Balanced Networks
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session bal :kernel torch :exports results :output-dir ./figures/balance :file (lc/org-babel-tangle-figure-filename)
 
 * Notebook Settings
 
@@ -9,7 +9,7 @@
   %autoreload 2
   %reload_ext autoreload
 
-  %run ../notebooks/setup.py
+  %run ../../notebooks/setup.py
   %matplotlib inline
   %config InlineBackend.figure_format = 'png'
 #+end_src
@@ -24,7 +24,7 @@
 
 #+begin_src ipython
   import sys
-  sys.path.insert(0, '../')
+  sys.path.insert(0, '../../')
 
   import torch
   import pandas as pd
@@ -56,7 +56,7 @@
       plt.ylabel('Imaginary Part')
       plt.axhline(y=0, color='k', linestyle='--')
       plt.axvline(x=0, color='k', linestyle='--')
-      
+
       # plt.grid(True, which='both')
       plt.show()
 #+end_src
@@ -163,12 +163,12 @@
 ** Dynamics
 
 #+begin_src ipython
-  rates = model().cpu().detach().numpy()[0]
+  rates = model(RET_FF=1).cpu().detach().numpy()[0]
   print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (51, 8000)
+: (101, 2000)
 
 #+begin_src ipython
   ff_input = model.ff_input.cpu().numpy()
@@ -176,7 +176,7 @@
 #+end_src
 
 #+RESULTS:
-: (1, 51, 8000)
+: (1, 101, 2000)
 
 #+begin_src ipython
   print(np.max(ff_input))
@@ -184,7 +184,7 @@
 #+end_src
 
 #+RESULTS:
-: 3655.667
+: 1377.0
 : 0.0
 
 #+begin_src ipython
@@ -201,7 +201,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/2bcc2a4021bcc141b6edc76d0790ca6696e83869.png]]
+[[./figures/balance/figure_12.png]]
 
 #+begin_src ipython
   import matplotlib.colors
@@ -225,7 +225,7 @@
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/bab4ce7e62d8f4e915223c038c56ffebff514e80.png]]
+[[./figures/balance/figure_13.png]]
 
 #+RESULTS:
 
@@ -272,8 +272,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (10000, 10000)
-[[file:./.ob-jupyter/17165e4bcc9a52b24637125363f1562c9ede43c7.png]]
+: (2500, 2500)
+[[./figures/balance/figure_14.png]]
 :END:
 
 ** FF Inputs
@@ -298,8 +298,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (1, 51, 8000)
-[[file:./.ob-jupyter/bb1a77e0bf9212fbd726195f11f62016548bcc60.png]]
+: (1, 101, 2000)
+[[./figures/balance/figure_15.png]]
 :END:
 
 * Balance
@@ -310,7 +310,7 @@
   rates_list = []
 
   for K in K_list:
-      model = LIFNetwork('config_2pop.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', K=K)
+      model = Network('config_2pop.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', K=K)
       rates = model.forward()
       rates_list.append(rates[0].cpu().detach().numpy())
 
@@ -322,7 +322,7 @@
   rates = np.array(rates_list)
   print(rates.shape)
 
-  plt.plot(np.sqrt(K_list), np.mean(rates[..., 8000]) * np.sqrt(K_list), '-o')
+  plt.plot(np.sqrt(K_list), np.mean(rates[..., model.slices[0]]) * np.sqrt(K_list), '-o')
   plt.xlabel('$\sqrt{K}$')
   plt.ylabel('$\sqrt{K}$ Rates')
   plt.show()
@@ -330,8 +330,8 @@
 
 #+RESULTS:
 :RESULTS:
-: (6, 41, 10000)
-[[file:./.ob-jupyter/d3f09a8c678cca33a2797e5df9664a637068a3dc.png]]
+: (6, 101, 5000)
+[[./figures/balance/figure_17.png]]
 :END:
 
 #+begin_src ipython
