@@ -251,7 +251,7 @@ class Network(nn.Module):
 
         return rates, rec_input
 
-    def forward(self, ff_input=None, REC_LAST_ONLY=0, RET_FF=0, RET_STP=0):
+    def forward(self, ff_input=None, REC_LAST_ONLY=0, RET_FF=0, RET_STP=0, RET_REC=0):
         """
         Main method of Network class, runs networks dynamics over set of timesteps
         and returns rates at each time point or just the last time point.
@@ -309,14 +309,16 @@ class Network(nn.Module):
                     W_stp_T = W_stp_T / torch.sqrt(self.Ka[0])
 
                 if self.LR_TRAIN:
-                    # W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]]
-                    # W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
-
-                    W_stp_T = self.GAIN * (self.W_stp_T
-                                           + self.Wab_train[self.slices[0], self.slices[0]]) / torch.sqrt(self.Ka[0])
-
-                    # W_stp_T = self.GAIN * self.W_stp_T * (1.0 / torch.sqrt(self.Ka[0])
-                    #                                       + self.Wab_train[self.slices[0], self.slices[0]])
+                    if self.LR_TYPE == 'full':
+                        W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]]
+                    elif self.LR_TYPE == 'sparse':
+                        W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
+                    elif self.LR_TYPE == 'rand_full':
+                        W_stp_T = self.GAIN * (self.W_stp_T / torch.sqrt(self.Ka[0])
+                                               + self.Wab_train[self.slices[0], self.slices[0]])
+                    elif self.LR_TYPE == 'rand_sparse':
+                        W_stp_T = self.GAIN * self.W_stp_T * (1.0 / torch.sqrt(self.Ka[0])
+                                                              + self.Wab_train[self.slices[0], self.slices[0]])
 
             if self.TRAIN_EI:
                 Wab_train = normalize_tensor(self.Wab_train, 0, self.slices, self.Na)
@@ -332,8 +334,8 @@ class Network(nn.Module):
                     Wab_T = clamp_tensor(Wab_T.T, 1, self.slices).T
 
         # Moving average
-        mv_rates, mv_ff = 0, 0
-        rates_list, ff_list = [], []
+        mv_rates, mv_ff, mv_rec = 0, 0, 0
+        rates_list, ff_list, rec_list = [], [], []
 
         # Temporal loop
         for step in range(self.N_STEPS):
@@ -360,10 +362,14 @@ class Network(nn.Module):
             if self.LIVE_FF_UPDATE and RET_FF:
                 mv_ff += ff_input
 
+            if RET_REC:
+                mv_rec += rec_input
+
             # Reset moving average to start at 0
             if step == self.N_STEADY - self.N_WINDOW - 1:
                 mv_rates = 0.0
                 mv_ff = 0.0
+                mv_rec = 0.0
 
             # update output every N_WINDOW steps
             if step >= self.N_STEADY:
@@ -375,6 +381,8 @@ class Network(nn.Module):
                         rates_list.append(mv_rates[..., self.slices[0]] / self.N_WINDOW)
                         if self.LIVE_FF_UPDATE and RET_FF:
                             ff_list.append(mv_ff[..., self.slices[0]] / self.N_WINDOW)
+                        if RET_REC:
+                            rec_list.append(mv_rec[..., self.slices[0]] / self.N_WINDOW)
                         if self.IF_STP and RET_STP:
                             self.x_list.append(self.stp.x_stp)
                             self.u_list.append(self.stp.u_stp)
@@ -382,6 +390,7 @@ class Network(nn.Module):
                     # Reset moving average
                     mv_rates = 0
                     mv_ff = 0
+                    mv_rec = 0
 
         # returns last step
         rates = rates[..., self.slices[0]]
@@ -391,6 +400,9 @@ class Network(nn.Module):
             # Stack list on 1st dim so that output is (N_BATCH, N_STEPS, N_NEURON)
             rates = torch.stack(rates_list, dim=1)
             # del rates_list
+
+            if RET_REC:
+                self.rec_input = torch.stack(rec_list, dim=2)
 
             if self.LIVE_FF_UPDATE and RET_FF:  # returns ff input
                 self.ff_input = torch.stack(ff_list, dim=1)

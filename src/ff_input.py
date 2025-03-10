@@ -79,6 +79,33 @@ def init_ff_live(model):
 
     return ff_input
 
+def get_grid_inputs(model):
+    grid_size = model.GRID_SIZE
+    n_range = model.GRID_RANGE
+
+    # Create a grid in the n1-n2 plane
+    x = torch.linspace(-n_range, n_range, grid_size)
+    y = torch.linspace(-n_range, n_range, grid_size)
+    X, Y = torch.meshgrid(x, y, indexing='ij')
+
+    vec1 = model.low_rank.U.T[0]
+    vec2 = model.low_rank.U.T[1]
+
+    # vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
+
+    vec1 = vec1 / torch.linalg.norm(vec1)
+    vec2 = vec2 / torch.linalg.norm(vec2)
+
+    # Prepare grid inputs
+    grid_inputs = []
+    for i in range(grid_size):
+        for j in range(grid_size):
+            point = model.I0[model.GRID_INPUT] * (X[i, j] * vec1 + Y[i, j] * vec2)
+            # point = (X[i, j] * vec1 + Y[i, j] * vec2)
+            grid_inputs.append(point)
+
+    return grid_inputs
+
 
 def init_ff_seq(model):
     """
@@ -88,10 +115,7 @@ def init_ff_seq(model):
     ff_input: tensorfloat of size (N_BATCH, N_STEPS, N_NEURON)
     """
 
-    ff_input = torch.randn(
-        (model.N_BATCH, model.N_STEPS, model.N_NEURON),
-        device=model.device,
-    )
+    ff_input = torch.randn((model.N_BATCH, model.N_STEPS, model.N_NEURON), device=model.device)
 
     for i_pop in range(model.N_POP):
         ff_input[..., model.slices[i_pop]].mul_(model.VAR_FF[:, i_pop])
@@ -112,27 +136,9 @@ def init_ff_seq(model):
     if model.TASK != "None":
         size = (model.N_BATCH, model.Na[0])
         Stimulus = Stimuli(model.TASK, size, device=model.device)
+
         if "flow" in model.TASK:
-            # Grid parameters
-            grid_size = model.GRID_SIZE # int(np.sqrt(torch.tensor(model.N_BATCH)))     # Define resolution of the grid
-            n_range = model.GRID_RANGE      # Define range (from -2 to 2, adjust as necessary)
-
-            # Create a grid in the n1-n2 plane
-            x = torch.linspace(-n_range, n_range, grid_size)
-            y = torch.linspace(-n_range, n_range, grid_size)
-            X, Y = torch.meshgrid(x, y, indexing='ij')
-
-            vec1 = model.low_rank.V.T[0]
-            vec2 = model.low_rank.V.T[1]
-
-            vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
-
-            # Prepare grid inputs
-            grid_inputs = []
-            for i in range(grid_size):
-                for j in range(grid_size):
-                    point = X[i, j] * vec1 + Y[i, j] * vec2
-                    grid_inputs.append(point)
+            grid_inputs = get_grid_inputs(model)
 
         elif "rand" in model.TASK:
             model.phase = torch.rand((size[0], 1), device=model.device) * 2.0 * torch.pi
@@ -143,32 +149,28 @@ def init_ff_seq(model):
                     theta = get_theta(model.PHI0[0], model.PHI0[2]).unsqueeze(0)
 
         for i, _ in enumerate(model.N_STIM_ON):
-            if "flow" in model.TASK:
-                if i==0:
-                    stimulus = torch.stack(grid_inputs) # .requires_grad_(True)
-
-                else:
-                    stimulus = torch.stack(grid_inputs) * 0 # .requires_grad_(True)
-
+            if ("flow" in model.TASK) and (i==model.GRID_INPUT):
+                print('grid input')
+                stimulus = torch.stack(grid_inputs)
                 stimulus = stimulus.unsqueeze(1)
+                # stimulus += Stimulus(model.I0[0], model.SIGMA0[0], model.odors[0])
+                # else:
+                #     stimulus = 0
 
             elif "rand" in model.TASK:
                 Stimulus.task = "odr"
-                stimulus = Stimulus(
-                    model.I0[i], model.SIGMA0[i], model.phase, theta=theta
-                )
+                stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.phase, theta=theta)
+
             elif "dual" in model.TASK:
                 if model.LR_TRAIN and model.RANDOM_DELAY==0:
-                    # if 0==0:
                     if (i!=model.RWD) or (model.IF_RL==0): # or (model.IF_RL==0 and i!=model.RWD-1):
-                        # stimulus = Stimulus(
-                        #     model.I0[i], model.SIGMA0[i], model.odors[i])
                         if model.I0[i] > 0:
                             stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.odors[i])
                         else:
                             stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.odors[5+i])
                     else:
                         stimulus = 0
+
                 elif model.RANDOM_DELAY==0:
                     stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[2*i+1])
             else:
@@ -182,7 +184,6 @@ def init_ff_seq(model):
             # print(stimulus.shape)
 
             if model.N_STIM_ON[i] < model.N_STEPS:
-
                 if model.RANDOM_DELAY:
                     for j in range(model.N_BATCH):
                         mask = slice(model.start_indices[i, j], model.end_indices[i, j])
@@ -198,24 +199,9 @@ def init_ff_seq(model):
                         else:
                             ff_input[j, mask, model.slices[0]].add_(stimulus[j])
                 else:
-                    ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[0]].add_(
-                        stimulus
-                    )
+                    ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[0]].add_(stimulus)
 
             del stimulus
-
-        if model.GRID_TEST==-1:
-            print('test C')
-            ff_input[:, :, model.slices[0]].add_(Stimulus(1, model.SIGMA0[4], model.odors[9]))
-        elif model.GRID_TEST==1:
-            print('test D')
-            ff_input[:, :, model.slices[0]].add_(Stimulus(1, model.SIGMA0[4], model.odors[4]))
-        elif model.GRID_TEST==2:
-            print('go')
-            ff_input[:, :, model.slices[0]].add_(Stimulus(1, model.SIGMA0[4], model.odors[1]))
-        elif model.GRID_TEST==-2:
-            print('nogo')
-            ff_input[:, :, model.slices[0]].add_(Stimulus(1, model.SIGMA0[4], model.odors[6]))
 
     return ff_input * torch.sqrt(model.Ka[0]) * model.M0
 
@@ -223,9 +209,6 @@ def init_ff_seq(model):
 def rl_ff_udpdate(model, ff_input, rates, step, rwd):
     if step == model.N_STIM_ON[rwd]:
         size = (model.N_BATCH, model.Na[0])
-
-        # overlap = 1.0 * ( (rates[:, model.slices[0]] @ model.low_rank.linear.weight[0]) > 0).unsqueeze(-1).unsqueeze(-1)
-        # overlap = 1.0 * ( (rates[:, model.slices[0]] @ model.low_rank.U[model.slices[0], 1]) > 0).unsqueeze(-1).unsqueeze(-1)
 
         if model.VERBOSE:
             print('overlap', overlap)
@@ -238,19 +221,7 @@ def rl_ff_udpdate(model, ff_input, rates, step, rwd):
         if model.low_rank.LR_FIX_READ == 0:
             stimulus = Stimulus(model.I0[rwd], model.SIGMA0[rwd], model.low_rank.linear.weight[0])
 
-        # print(rates.shape, overlap.shape, stimulus.shape, (overlap * stimulus).shape)
 
-        # ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]] = (
-        #     ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]]
-        #     + overlap * stimulus * torch.sqrt(model.Ka[0]) * model.M0
-        # )
-
-        # if rwd == model.RWD:
-        #     ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]] = (
-        #         ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]]
-        #         + overlap * stimulus * torch.sqrt(model.Ka[0]) * model.M0
-        #     )
-        # else:
         ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]] = (
             ff_input[:, model.N_STIM_ON[rwd] : model.N_STIM_OFF[rwd], model.slices[0]]
             + stimulus * torch.sqrt(model.Ka[0]) * model.M0

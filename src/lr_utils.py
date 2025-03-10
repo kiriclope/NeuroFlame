@@ -81,16 +81,19 @@ class LowRankWeights(nn.Module):
         self.Na = Na
         self.device = DEVICE
 
-        self.U = nn.Parameter(
+        self.V = nn.Parameter(
             torch.randn((self.N_NEURON, int(self.RANK)), device=self.device)
         )
 
         if self.LR_MN:
-            self.V = nn.Parameter(
+            self.U = nn.Parameter(
                 torch.randn((self.N_NEURON, int(self.RANK)), device=self.device)
             )
+
+            with torch.no_grad():
+                self.U.copy_(self.V)
         else:
-            self.V = (
+            self.U = (
                 torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * 0.001
             )
 
@@ -138,10 +141,11 @@ class LowRankWeights(nn.Module):
         if self.LR_MN:
             self.lr = self.lr_kappa * (self.U @ self.V.T)
         else:
-            self.lr = self.lr_kappa * (self.U @ self.U.T)
+            self.lr = self.lr_kappa * (self.V @ self.V.T)
 
         # self.lr = self.lr_mask * self.lr
-        self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
+        if LR_NORM:
+            self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
 
         if LR_CLAMP:
             self.lr = clamp_tensor(self.lr, 'lr', self.slices)
