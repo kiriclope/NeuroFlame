@@ -222,7 +222,7 @@ seed = np.random.randint(0, 1e6)
 seed = 1
 print('seed', seed)
 
-IF_BIASED_PHASES = 0
+IF_BIASED_PHASES = 1
 IF_BIAS = 1
 
 IF_RAND_REF = 0
@@ -286,7 +286,7 @@ plt.plot(theta.cpu().numpy() * 180 / np.pi, weights.cpu().numpy()) ;
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_11.png]]
+[[./figures/odr_sb/figure_14.png]]
 
 #+begin_src ipython
 theta = torch.linspace(0, 2.0 * torch.pi, model.Na[0]+1)[:-1].to(DEVICE)
@@ -303,7 +303,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_12.png]]
+[[./figures/odr_sb/figure_15.png]]
 
 #+begin_src ipython
 if IF_BIASED_PHASES:
@@ -324,9 +324,12 @@ model.eval()
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+: Biased ODR
 : Network(
 :   (dropout): Dropout(p=0.0, inplace=False)
 : )
+:END:
 
 * Batching Inputs
 
@@ -362,8 +365,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: 90 174.99999234780518 172.69606025773317
-[[./figures/odr_sb/figure_15.png]]
+: 90 345.79127677056186 350.8856143441509
+[[./figures/odr_sb/figure_18.png]]
 :END:
 
 #+begin_src ipython
@@ -379,8 +382,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: tensor(205.)
-[[./figures/odr_sb/figure_16.png]]
+: tensor(83.4360)
+[[./figures/odr_sb/figure_19.png]]
 :END:
 
 #+begin_src ipython
@@ -420,7 +423,7 @@ plt.show()
  #+end_src
 
  #+RESULTS:
- [[./figures/odr_sb/figure_18.png]]
+ [[./figures/odr_sb/figure_21.png]]
 
 #+begin_src ipython
 rates_tensor = model.forward(ff_input=ff_input)# [..., ::3]
@@ -466,8 +469,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: tensor(135.)
-[[./figures/odr_sb/figure_22.png]]
+: tensor(121.9070)
+[[./figures/odr_sb/figure_25.png]]
 :END:
 
 * Results
@@ -498,7 +501,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_23.png]]
+[[./figures/odr_sb/figure_26.png]]
 
 #+begin_src ipython
 PHI0 = model.PHI0.cpu().detach().numpy() * 180.0 / np.pi
@@ -512,8 +515,8 @@ print(phi[idx, window_size] * 180 / np.pi)
 
 #+RESULTS:
 : (512, 3, 1)
-: 188.99998
-: 185.17576553164287
+: 75.78986
+: 75.40746808244523
 
 ** Pref loc
 
@@ -606,7 +609,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_31.png]]
+[[./figures/odr_sb/figure_34.png]]
 
  #+begin_src ipython
 theta = np.linspace(0, 360, pref_locs.shape[-1])
@@ -618,7 +621,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_32.png]]
+[[./figures/odr_sb/figure_35.png]]
 
 #+begin_src ipython
 idx_pref = np.argsort(pref_locs)
@@ -756,7 +759,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_38.png]]
+[[./figures/odr_sb/figure_41.png]]
 
 #+begin_src ipython
 regressor = AngleDecoder(penalty=None, scaler=True, class_weight='balanced')
@@ -781,7 +784,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_40.png]]
+[[./figures/odr_sb/figure_43.png]]
 
 #+begin_src ipython
 from sklearn.model_selection import cross_val_predict, LeaveOneOut
@@ -806,7 +809,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_42.png]]
+[[./figures/odr_sb/figure_45.png]]
 
 #+begin_src ipython
 print(pred_locs.shape)
@@ -916,7 +919,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_50.png]]
+[[./figures/odr_sb/figure_53.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
@@ -933,7 +936,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_51.png]]
+[[./figures/odr_sb/figure_54.png]]
 
 #+begin_src ipython
 mask = np.abs(errors) <= 25
@@ -953,7 +956,7 @@ print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
 #+RESULTS:
 : (512, 226)
 : (512,)
-: (512, 1) (512, 1) (512, 1) (512, 1)
+: (507, 1) (507, 1) (507, 1) (507, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
@@ -970,7 +973,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_53.png]]
+[[./figures/odr_sb/figure_56.png]]
 
 ** biases
 
@@ -1021,7 +1024,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_55.png]]
+[[./figures/odr_sb/figure_58.png]]
 
 #+begin_src ipython
 n_bins = 16
@@ -1112,7 +1115,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_57.png]]
+[[./figures/odr_sb/figure_60.png]]
 
 #+begin_src ipython
 if IF_BIAS==0:
@@ -1180,7 +1183,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_64.png]]
+[[./figures/odr_sb/figure_67.png]]
 
 #+begin_src ipython
 plt.figure(figsize=(7, 7))
@@ -1190,7 +1193,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_65.png]]
+[[./figures/odr_sb/figure_68.png]]
 
 #+begin_src ipython
 plt.hist(energy.steady_state, bins='auto')
@@ -1198,7 +1201,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_66.png]]
+[[./figures/odr_sb/figure_69.png]]
 
 #+begin_src ipython
 X_discrete = np.digitize(phi,  bins, right=False)-1
@@ -1207,14 +1210,14 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_67.png]]
+[[./figures/odr_sb/figure_70.png]]
 
 #+begin_src ipython
 np.mean(X_discrete==1)
 #+end_src
 
 #+RESULTS:
-: 0.012349626659292035
+: 0.00956685564159292
 
 #+begin_src ipython
 
@@ -1224,34 +1227,151 @@ np.mean(X_discrete==1)
 
 ** Tuning
 
-#+begin_src ipython
-dist2targ = pref_locs * 180/np.pi - reference
+*** Tuning curves
 
-if IF_BIAS:
-        pkl_save(dist2targ, 'dist2targ_bias', path="/home/leon/")
-        dist2targ_ = pkl_load('dist2targ', path="/home/leon/")
-else:
-        pkl_save(dist2targ, 'dist2targ', path="/home/leon/")
+#+begin_src ipython
+def get_tuning_curves(rates, angles):
+
+    center_angles = maptens2center(angles)
+    sort_angles, sort_idx = torch.sort(center_angles, descending=False)
+
+    # Reorder the mean_rates tensor using the sorted indices
+    sort_rates = rates[sort_idx]
+
+    # Get unique angles and their inverse indices
+    unique_angles, inverse_idx = torch.unique(sort_angles, return_inverse=True)
+    n_neurons = sort_rates.size(1)
+
+    # Calculate average responses per angle
+    sum_rates = torch.zeros(len(unique_angles), n_neurons, device=rates.device)
+
+    for i, angle_idx in enumerate(inverse_idx):
+        sum_rates[angle_idx] += sort_rates[i]
+
+    angle_counts = torch.bincount(inverse_idx, minlength=len(unique_angles))
+    tuning_curve = sum_rates / (angle_counts.unsqueeze(1).float() + 1e-5)
+
+    # get pref locations
+    angles_ = unique_angles.unsqueeze(1).repeat(1, tuning_curve.shape[1]).cpu().numpy()
+    weights = tuning_curve.cpu().detach().numpy()
+
+    pref_locs = circmean(angles_, weights=weights, axis=0)
+
+    return tuning_curve, pref_locs, unique_angles
 #+end_src
 
 #+RESULTS:
-: saving to /home/leon//dist2targ_bias.pkl
-: loading from /home/leon//dist2targ.pkl
 
 #+begin_src ipython
-if IF_BIAS:
-    plt.scatter(dist2targ_, dist2targ)
+def get_center_tuning_curve(tuning_curve, pref_locs):
+    size = tuning_curve.shape[0]
+    pref_idx = np.round(pref_locs / (2 * np.pi) * size) % size
+    pref_idx[np.isnan(pref_idx)] = 0
+
+    shifts_ =  - pref_idx.astype(int)
+
+    center_tuning_curve = []
+    for i in range(pref_idx.shape[0]):
+        center_tuning_curve.append(torch.roll(tuning_curve.T[i], shifts=shifts_[i], dims=0))
+
+    return torch.stack(center_tuning_curve)
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_71.png]]
 
 #+begin_src ipython
 mean_rates = rates_tensor[:, start_idx:end_idx, idx_pref].mean(dim=1)
 angles = model.PHI0[:, 0, 0]
+
+tuning_curve, pref_locs, unique_angles = get_tuning_curves(mean_rates, angles)
+center_tuning_curve = get_center_tuning_curve(tuning_curve, pref_locs)
 #+end_src
 
 #+RESULTS:
+
+#+begin_src ipython
+tuning_curve = tuning_curve.cpu().detach().numpy()
+unique_angles = unique_angles.cpu().detach().numpy()
+center_tuning_curve = center_tuning_curve.cpu().detach().numpy()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+for i in range(10):
+    plt.plot(unique_angles * 180 / np.pi, center_tuning_curve[i], alpha=.5)
+
+plt.plot(unique_angles * 180 / np.pi, center_tuning_curve.mean(0), color='k')
+plt.axvline(0, ls='--', color='k')
+plt.xlabel('Pref. Loc. (°)')
+plt.ylabel('Rate (Hz)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_77.png]]
+
+#+begin_src ipython
+if IF_BIAS:
+        pkl_save(unique_angles, 'unique_angles_bias', path="/home/leon/")
+        pkl_save(center_tuning_curve, 'center_tuning_curve_bias', path="/home/leon/")
+
+        unique_angles_ = pkl_load('unique_angles', path="/home/leon/")
+        center_tuning_curve_ = pkl_load('center_tuning_curve', path="/home/leon/")
+else:
+        pkl_save(unique_angles, 'unique_angles', path="/home/leon/")
+        pkl_save(center_tuning_curve, 'center_tuning_curve', path="/home/leon/")
+#+end_src
+
+#+RESULTS:
+: saving to /home/leon//unique_angles_bias.pkl
+: saving to /home/leon//center_tuning_curve_bias.pkl
+: loading from /home/leon//unique_angles.pkl
+: loading from /home/leon//center_tuning_curve.pkl
+
+ #+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+for i in range(10):
+    i = np.random.randint(750)
+    ax[0].plot(unique_angles * 180 / np.pi, center_tuning_curve[i], '-')
+    if IF_BIAS:
+        ax[1].plot(unique_angles_ * 180 / np.pi, center_tuning_curve_[i], '-')
+
+ax[0].set_xlabel('Preferred Location (°)')
+ax[0].set_ylabel('Rate (Hz)')
+
+ax[1].set_xlabel('Preferred Location (°)')
+ax[1].set_ylabel('Rate (Hz)')
+
+plt.savefig('../figures/figs/christos/tuning_curves.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_79.png]]
+
+#+begin_src ipython
+plt.plot(unique_angles * 180 / np.pi, center_tuning_curve.mean(axis=0), '-', label='Biased')
+if IF_BIAS:
+     plt.plot(unique_angles_ * 180 / np.pi, center_tuning_curve_.mean(axis=0), '-', label='Unbiased')
+
+plt.xlabel('Preferred Location (°)')
+plt.ylabel('Rate (Hz)')
+plt.legend(fontsize=10)
+plt.savefig('../figures/figs/christos/pop_tuning.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_80.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+*** OSI
 
 #+begin_src ipython
 import torch
@@ -1324,7 +1444,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_75.png]]
+[[./figures/odr_sb/figure_83.png]]
 
 #+begin_src ipython
 pref, indices = torch.sort(pref, descending=False)
@@ -1340,7 +1460,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_76.png]]
+[[./figures/odr_sb/figure_84.png]]
 
 #+begin_src ipython
 if IF_BIAS:
@@ -1349,7 +1469,7 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_77.png]]
+[[./figures/odr_sb/figure_85.png]]
 
 #+begin_src ipython
 if IF_BIAS:
@@ -1358,7 +1478,7 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_78.png]]
+[[./figures/odr_sb/figure_86.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -1381,7 +1501,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_79.png]]
+[[./figures/odr_sb/figure_87.png]]
 
  #+begin_src ipython
 if IF_BIAS:
@@ -1400,246 +1520,9 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_80.png]]
+[[./figures/odr_sb/figure_88.png]]
 
-
-#+begin_src ipython
-def plot_neuron_tuning_curves(mean_rates, angles, neuron_indices, device='cpu'):
-    # Normalize angles to [-pi, pi)
-    # angles = (angles ) % (2 * torch.pi) - torch.pi
-    angles = maptens2center(angles)
-    angles, indices = torch.sort(angles, descending=False)
-
-    # Reorder the mean_rates tensor using the sorted indices
-    mean_rates = mean_rates[indices]
-
-    # Get unique angles and their inverse indices
-    unique_angles, inverse_indices = torch.unique(angles, return_inverse=True)
-    n_neurons = mean_rates.size(1)
-
-    # Calculate responses per angle
-    summed_responses = torch.zeros(len(unique_angles), n_neurons, device=device)
-    print(summed_responses.shape)
-
-    for i, angle_idx in enumerate(inverse_indices):
-        summed_responses[angle_idx] += mean_rates[i]
-
-    # Average the responses
-    angle_counts = torch.bincount(inverse_indices, minlength=len(unique_angles))
-    averaged_responses = summed_responses / angle_counts.unsqueeze(1).float()
-
-    # Align responses to each neuron's preferred location
-    aligned_responses = torch.empty_like(averaged_responses)
-
-    for neuron_idx in range(n_neurons):
-        responses = averaged_responses[:, neuron_idx]
-        preferred_idx = responses.argmax()
-        aligned_responses[:, neuron_idx] = torch.roll(responses, shifts=-preferred_idx.item(), dims=0)
-
-    mean_aligned_responses = aligned_responses
-
-    # Adjust unique angle values for consistent plotting
-    unique_angles[unique_angles < 0] += 2 * torch.pi
-    mean_aligned_responses[0] = mean_aligned_responses[-1]
-
-    unique_angles, indices = torch.sort(unique_angles, descending=False)
-    mean_aligned_responses = mean_aligned_responses[indices]
-
-    return unique_angles, mean_aligned_responses
-
-neuron_indices = np.arange(0, 10)  # example indices, not needed for average
-aligned_angles, population_tuning_curve  = plot_neuron_tuning_curves(mean_rates, angles, neuron_indices, device='cuda:1')
-#+end_src
-
-#+RESULTS:
-: torch.Size([274, 750])
-
-#+begin_src ipython
-angles_ = map2center(angles)
-angles_, indices = torch.sort(angles_, descending=False)
-
-# Reorder the mean_rates tensor using the sorted indices
-mean_rates = mean_rates[indices]
-
-# Get unique angles and their inverse indices
-unique_angles, inverse_indices = torch.unique(angles_, return_inverse=True)
-n_neurons = mean_rates.size(1)
-
-# Calculate responses per angle
-summed_responses = torch.zeros(len(unique_angles), n_neurons, device='cuda:1')
-print(summed_responses.shape)
-
-for i, angle_idx in enumerate(inverse_indices):
-        summed_responses[angle_idx] += mean_rates[i]
-
-angle_counts = torch.bincount(inverse_indices, minlength=len(unique_angles))
-averaged_responses = summed_responses / angle_counts.unsqueeze(1).float()
-
-#+end_src
-
-#+RESULTS:
-: torch.Size([274, 750])
-
-#+begin_src ipython
-print(angles_.shape)
-print(unique_angles.shape)
-#+end_src
-
-#+RESULTS:
-: torch.Size([512])
-: torch.Size([274])
-
-#+begin_src ipython
-print(unique_angles.shape, averaged_responses.shape)
-#+end_src
-
-#+RESULTS:
-: torch.Size([274]) torch.Size([274, 750])
-
-#+begin_src ipython
-ang = maptens2center(unique_angles.unsqueeze(1).repeat(1, averaged_responses.shape[1]))
-pref_locs = circmean(ang.cpu().numpy(), weights=averaged_responses.cpu().detach().numpy(), axis=0)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-plt.hist(map2pos(pref_locs))
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_89.png]]
-
-#+begin_src ipython
-print(averaged_responses.shape)
-j=22
-for i in range(j, j+1):
-    plt.plot(unique_angles.cpu() * 180 / np.pi, averaged_responses[:, i].cpu().detach())
-    print(map2pos(pref_locs[i]) * 180/ np.pi)
-    plt.axvline(pref_locs[i] * 180 / np.pi, ls='--', color='k')
-plt.show()
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-: torch.Size([274, 750])
-: 18.770894924211
-[[./figures/odr_sb/figure_90.png]]
-:END:
-
-#+begin_src ipython
-torch.where(unique_angles)
-#+end_src
-
-#+begin_src ipython
-aligned_responses = torch.roll(responses, shifts=-preferred_idx.item(), dims=0)
-#+end_src
-
-#+begin_src ipython
-print(angles[:10] * 180 / torch.pi)
-angles_ = map2center(angles)
-plt.hist(angles_.cpu() * 180 / np.pi)
-plt.show()
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-: tensor([0., 1., 2., 2., 2., 2., 2., 3., 3., 4.], device='cuda:1')
-[[./figures/odr_sb/figure_83.png]]
-:END:
-
-#+begin_src ipython
-angles, indices = torch.sort(angles, descending=False)
-plt.hist(angles.cpu() * 180 / np.pi)
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_83.png]]
-
-#+begin_src ipython
-plt.plot(normalized_rates[:, 5])
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-| <matplotlib.lines.Line2D | at | 0x7f4c3e274670> |
-[[./figures/odr_sb/figure_82.png]]
-:END:
-
-#+begin_src ipython
-if IF_BIAS:
-        pkl_save(aligned_angles, 'aligned_angles_bias', path="/home/leon/")
-        pkl_save(population_tuning_curve, 'population_tuning_curve_bias', path="/home/leon/")
-
-        aligned_angles_ = pkl_load('aligned_angles', path="/home/leon/")
-        population_tuning_curve_ = pkl_load('population_tuning_curve', path="/home/leon/")
-else:
-        pkl_save(aligned_angles, 'aligned_angles', path="/home/leon/")
-        pkl_save(population_tuning_curve, 'population_tuning_curve', path="/home/leon/")
-#+end_src
-
-#+RESULTS:
-: saving to /home/leon//aligned_angles_bias.pkl
-: saving to /home/leon//population_tuning_curve_bias.pkl
-: loading from /home/leon//aligned_angles.pkl
-: loading from /home/leon//population_tuning_curve.pkl
-
- #+begin_src ipython
-fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-for i in range(10):
-    i = np.random.randint(750)
-    ax[0].plot(aligned_angles.cpu().numpy() * 180 / np.pi, population_tuning_curve[:, i].cpu().detach().numpy(), '-')
-    if IF_BIAS:
-        ax[1].plot(aligned_angles_.cpu().numpy() * 180 / np.pi, population_tuning_curve_[:, i].cpu().detach().numpy(), '-')
-
-ax[0].set_xlabel('Preferred Location (°)')
-ax[0].set_ylabel('Rate (Hz)')
-
-ax[1].set_xlabel('Preferred Location (°)')
-ax[1].set_ylabel('Rate (Hz)')
-
-plt.savefig('../figures/figs/christos/tuning_curves.svg', dpi=300)
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_84.png]]
-
-#+begin_src ipython
-print(pop)
-#+end_src
-
-#+begin_src ipython
-plt.plot(population_tuning_curve[:, 14].cpu().detach())
-plt.plot(population_tuning_curve_[:, 14].cpu().detach())
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-| <matplotlib.lines.Line2D | at | 0x7f45c39b4c40> |
-[[./figures/odr_sb/figure_86.png]]
-:END:
-
-#+begin_src ipython
-pref_locs.append(circmean(angles, weights=normalized_rates, axis=0))
-#+end_src
-
-#+begin_src ipython
-    plt.plot(aligned_angles.cpu().numpy() * 180 / np.pi, population_tuning_curve.mean(dim=1).cpu().detach().numpy(), '-', label='Biased')
-    if IF_BIAS:
-        plt.plot(aligned_angles_.cpu().numpy() * 180 / np.pi, population_tuning_curve_.mean(dim=1).cpu().detach().numpy(), '-', label='Unbiased')
-
-    plt.xlabel('Preferred Location (°)')
-    plt.ylabel('Rate (Hz)')
-    plt.legend(fontsize=10)
-    plt.savefig('../figures/figs/christos/pop_tuning.svg', dpi=300)
-    plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_85.png]]
+*** skewness
 
 #+begin_src ipython
 import torch
@@ -1845,7 +1728,7 @@ plt.show()
 #+RESULTS:
 :RESULTS:
 : No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
-[[./figures/odr_sb/figure_92.png]]
+[[./figures/odr_sb/figure_95.png]]
 :END:
 
 #+begin_src ipython
@@ -1865,7 +1748,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_93.png]]
+[[./figures/odr_sb/figure_96.png]]
 
  #+begin_src ipython
 if IF_BIAS:
@@ -1883,7 +1766,7 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_94.png]]
+[[./figures/odr_sb/figure_97.png]]
 
 #+begin_src ipython
 
@@ -1904,7 +1787,15 @@ else:
 #+end_src
 
 #+RESULTS:
-: saving to /home/leon//aligned_angles_bias.pkl
-: saving to /home/leon//population_tuning_curve_bias.pkl
-: loading from /home/leon//aligned_angles.pkl
-: loading from /home/leon//population_tuning_curve.pkl
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[96], line 2
+:       1 if IF_BIAS:
+: ----> 2         pkl_save(aligned_angles, 'aligned_angles_bias', path="/home/leon/")
+:       3         pkl_save(population_tuning_curve, 'population_tuning_curve_bias', path="/home/leon/")
+:       5         aligned_angles_ = pkl_load('aligned_angles', path="/home/leon/")
+:
+: NameError: name 'aligned_angles' is not defined
+:END:
