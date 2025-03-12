@@ -88,8 +88,10 @@ def init_const(model):
 
     for i_pop in range(model.N_POP):
         model.Na.append(int(model.N_NEURON * model.frac[i_pop]))
-        # model.Ka.append(model.K * const.frac[i_pop])
-        model.Ka.append(model.K)
+        if model.FRAC_K:
+            model.Ka.append(model.K * model.frac[i_pop])
+        else:
+            model.Ka.append(model.K)
 
     model.Na = torch.tensor(model.Na, dtype=torch.int, device=model.device)
     model.Ka = torch.tensor(model.Ka, device=model.device)

@@ -106,18 +106,6 @@ def maptens2pos(angles):
 #+RESULTS:
 
 #+begin_src ipython
-def map2center(angles):
-    """Map angles from [0, 2π] to [-π, π] using PyTorch tensors."""
-    return torch.where(angles > torch.pi, angles - 2 * torch.pi, angles)
-
-def map2pos(angles):
-    """Map angles from [-π, π] to [0, 2π] using PyTorch tensors."""
-    return torch.where(angles < 0, angles + 2 * torch.pi, angles)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
 def add_vlines(model, ax=None):
 
     if ax is None:
@@ -227,7 +215,7 @@ IF_BIAS = 1
 
 IF_RAND_REF = 0
 reference = 90
-sigma = 60
+sigma = 90
 
 print('reference', reference, 'sigma', sigma)
 
@@ -242,10 +230,10 @@ else:
 
 #+RESULTS:
 : seed 1
-: reference 90 sigma 60
+: reference 90 sigma 90
 
 #+begin_src ipython
-N_BATCH = 512
+N_BATCH = 128*6
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1)
 #+end_src
 
@@ -286,7 +274,7 @@ plt.plot(theta.cpu().numpy() * 180 / np.pi, weights.cpu().numpy()) ;
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_14.png]]
+[[./figures/odr_sb/figure_13.png]]
 
 #+begin_src ipython
 theta = torch.linspace(0, 2.0 * torch.pi, model.Na[0]+1)[:-1].to(DEVICE)
@@ -303,7 +291,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_15.png]]
+[[./figures/odr_sb/figure_14.png]]
 
 #+begin_src ipython
 if IF_BIASED_PHASES:
@@ -353,9 +341,9 @@ m0, m1, phase = decode_bump_torch(ff_input[..., model.slices[0]], axis=-1)
 #+end_src
 
 #+RESULTS:
-: torch.Size([1, 750]) torch.Size([512, 1])
-: torch.Size([1, 750]) torch.Size([512, 1])
-: torch.Size([1, 750]) torch.Size([512, 1])
+: torch.Size([1, 750]) torch.Size([768, 1])
+: torch.Size([1, 750]) torch.Size([768, 1])
+: torch.Size([1, 750]) torch.Size([768, 1])
 
 #+begin_src ipython
 print(reference, model.PHI0[1, 0, 0].item() * 180 / torch.pi, phase[1, model.N_STIM_ON[0]].item() * 180 / torch.pi)
@@ -365,8 +353,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: 90 345.79127677056186 350.8856143441509
-[[./figures/odr_sb/figure_18.png]]
+: 90 115.40727485836094 119.69931109128358
+[[./figures/odr_sb/figure_17.png]]
 :END:
 
 #+begin_src ipython
@@ -382,8 +370,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: tensor(83.4360)
-[[./figures/odr_sb/figure_19.png]]
+: tensor(115.4073)
+[[./figures/odr_sb/figure_18.png]]
 :END:
 
 #+begin_src ipython
@@ -423,7 +411,7 @@ plt.show()
  #+end_src
 
  #+RESULTS:
- [[./figures/odr_sb/figure_21.png]]
+ [[./figures/odr_sb/figure_20.png]]
 
 #+begin_src ipython
 rates_tensor = model.forward(ff_input=ff_input)# [..., ::3]
@@ -432,7 +420,7 @@ print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rates (512, 226, 750)
+: rates (768, 91, 750)
 
 #+begin_src ipython
 m0, m1, phi = decode_bump(rates, axis=-1)
@@ -469,8 +457,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: tensor(121.9070)
-[[./figures/odr_sb/figure_25.png]]
+: tensor(25.5495)
+[[./figures/odr_sb/figure_24.png]]
 :END:
 
 * Results
@@ -501,7 +489,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_26.png]]
+[[./figures/odr_sb/figure_25.png]]
 
 #+begin_src ipython
 PHI0 = model.PHI0.cpu().detach().numpy() * 180.0 / np.pi
@@ -514,18 +502,11 @@ print(phi[idx, window_size] * 180 / np.pi)
 #+end_src
 
 #+RESULTS:
-: (512, 3, 1)
-: 75.78986
-: 75.40746808244523
+: (768, 3, 1)
+: 25.549511
+: 20.88315470325132
 
 ** Pref loc
-
-#+begin_src ipython
-model.N_STIM_ON
-#+end_src
-
-#+RESULTS:
-: tensor([150, 300, 400], device='cuda:1')
 
 #+begin_src ipython
 start_idx = int((model.N_STIM_ON[0] - model.N_STEADY) / model.N_WINDOW)
@@ -597,7 +578,7 @@ print(pref_locs.shape, normalized_rates.shape)
 #+end_src
 
 #+RESULTS:
-: (750,) (512, 750)
+: (750,) (768, 750)
 
 #+begin_src ipython
 # pref_locs[pref_locs<0] += 2* np.pi
@@ -609,7 +590,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_34.png]]
+[[./figures/odr_sb/figure_32.png]]
 
  #+begin_src ipython
 theta = np.linspace(0, 360, pref_locs.shape[-1])
@@ -621,11 +602,11 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_35.png]]
+[[./figures/odr_sb/figure_33.png]]
 
 #+begin_src ipython
 idx_pref = np.argsort(pref_locs)
-# m0, m1, phi = decode_bump(rates[..., idx_pref], axis=-1)
+m0, m1, phi = decode_bump(rates[..., idx_pref], axis=-1)
 #+end_src
 
 #+RESULTS:
@@ -642,7 +623,7 @@ angles = model.PHI0[:, 2, 0].cpu().numpy()
 #+end_src
 
 #+RESULTS:
-: 75
+: 30
 
 #+begin_src ipython
 from sklearn.neighbors import KernelDensity
@@ -759,11 +740,11 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_41.png]]
+[[./figures/odr_sb/figure_39.png]]
 
 #+begin_src ipython
-regressor = AngleDecoder(penalty=None, scaler=True, class_weight='balanced')
-regressor.fit(mean_rates, angles);
+# regressor = AngleDecoder(penalty=None, scaler=True, class_weight='balanced')
+# regressor.fit(mean_rates, angles);
 #+end_src
 
 #+RESULTS:
@@ -771,11 +752,36 @@ regressor.fit(mean_rates, angles);
  #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 ax[0].hist(pref_locs * 180 / np.pi, histtype='step', bins=16)
-ax[0].hist(regressor.pref_locs_ * 180 / np.pi, histtype='step', bins=16)
+# ax[0].hist(regressor.pref_locs_ * 180 / np.pi, histtype='step', bins=16)
 ax[0].set_ylabel('Count')
 ax[0].set_xlabel('Pref Loc (°)')
 
-ax[1].scatter(pref_locs * 180 / np.pi, regressor.pref_locs_ * 180 / np.pi)
+# ax[1].scatter(pref_locs * 180 / np.pi, regressor.pref_locs_ * 180 / np.pi)
+ax[1].set_xlabel('Ground Truth (°)')
+ax[1].set_ylabel('Pref Loc (°)')
+
+plt.savefig('../figures/figs/christos/selectivity_from_dec.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_41.png]]
+
+#+begin_src ipython
+from sklearn.model_selection import cross_val_predict, LeaveOneOut
+# pred_locs = cross_val_predict(regressor, mean_rates, angles, cv=LeaveOneOut(), n_jobs=-1)
+#+end_src
+
+#+RESULTS:
+
+ #+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+# ax[0].hist(angles * 180 / np.pi, histtype='step')
+# ax[0].hist(pred_locs * 180 / np.pi, histtype='step')
+ax[0].set_ylabel('Count')
+ax[0].set_xlabel('Pref Loc (°)')
+
+# ax[1].scatter(angles * 180 / np.pi, pred_locs * 180 / np.pi)
 ax[1].set_xlabel('Ground Truth (°)')
 ax[1].set_ylabel('Pref Loc (°)')
 
@@ -787,40 +793,14 @@ plt.show()
 [[./figures/odr_sb/figure_43.png]]
 
 #+begin_src ipython
-from sklearn.model_selection import cross_val_predict, LeaveOneOut
-pred_locs = cross_val_predict(regressor, mean_rates, angles, cv=LeaveOneOut(), n_jobs=-1)
+# print(pred_locs.shape)
 #+end_src
 
 #+RESULTS:
-
- #+begin_src ipython
-fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-ax[0].hist(angles * 180 / np.pi, histtype='step')
-ax[0].hist(pred_locs * 180 / np.pi, histtype='step')
-ax[0].set_ylabel('Count')
-ax[0].set_xlabel('Pref Loc (°)')
-
-ax[1].scatter(angles * 180 / np.pi, pred_locs * 180 / np.pi)
-ax[1].set_xlabel('Ground Truth (°)')
-ax[1].set_ylabel('Pref Loc (°)')
-
-plt.savefig('../figures/figs/christos/selectivity_from_dec.svg', dpi=300)
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_45.png]]
 
 #+begin_src ipython
-print(pred_locs.shape)
-#+end_src
-
-#+RESULTS:
-: (512,)
-
-#+begin_src ipython
-from mne.decoding import SlidingEstimator
-mne_estimator = SlidingEstimator(regressor, n_jobs=1, verbose=False)
+# from mne.decoding import SlidingEstimator
+# mne_estimator = SlidingEstimator(regressor, n_jobs=1, verbose=False)
 # pred_locs = cross_val_predict(mne_estimator, rates.swapaxes(1,2), angles, cv=LeaveOneOut(), n_jobs=-1)
 #+end_src
 
@@ -901,7 +881,7 @@ print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (512, 226) (512, 1) (512, 1) (512, 1)
+: (768, 91) (768, 1) (768, 1) (768, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -919,7 +899,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_53.png]]
+[[./figures/odr_sb/figure_51.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
@@ -936,7 +916,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_54.png]]
+[[./figures/odr_sb/figure_52.png]]
 
 #+begin_src ipython
 mask = np.abs(errors) <= 25
@@ -954,9 +934,9 @@ print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (512, 226)
-: (512,)
-: (507, 1) (507, 1) (507, 1) (507, 1)
+: (768, 91)
+: (768,)
+: (768, 1) (768, 1) (768, 1) (768, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
@@ -973,14 +953,14 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_56.png]]
+[[./figures/odr_sb/figure_54.png]]
 
 ** biases
 
 #+begin_src ipython
 data = pd.DataFrame({'target_loc': target_loc[:, -1], 'rel_loc': rel_loc[:, -1], 'errors': errors[:, -1], 'ref_loc': ref_loc[:, -1]})
 
-if IF_BIAS:
+if IF_BIASED_PHASES:
     df_naive = pkl_load('df_naive_%d' % seed, path="./figures/odr")
 else:
     df_naive = data
@@ -1024,7 +1004,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_58.png]]
+[[./figures/odr_sb/figure_56.png]]
 
 #+begin_src ipython
 n_bins = 16
@@ -1040,7 +1020,7 @@ data['adjusted_errors'] = data.apply(
     axis=1
 )
 
-if IF_BIAS:
+if IF_BIASED_PHASES:
    df_naive['bin_target'] = pd.cut(df_naive['target_loc'], bins=bin_edges, include_lowest=True)
    mean_errors_per_bin = df_naive.groupby('bin_target')['errors'].mean()
 
@@ -1062,7 +1042,7 @@ centers = (edges.left + edges.right) / 2
 
 data['bin_ref'] = pd.cut(data['ref_loc'], bins=n_bins)
 
-if IF_BIAS:
+if IF_BIASED_PHASES:
    bin_ref = data.groupby('bin_ref')['errors_naive'].agg(['mean', 'sem']).reset_index()
 else:
    bin_ref = data.groupby('bin_ref')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
@@ -1115,10 +1095,10 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_60.png]]
+[[./figures/odr_sb/figure_58.png]]
 
 #+begin_src ipython
-if IF_BIAS==0:
+if IF_BIASED_PHASES==0:
    pkl_save(data, 'df_naive_%d' %seed, path="./figures/odr")
 #+end_src
 
@@ -1145,7 +1125,7 @@ print(phi.shape)
 #+end_src
 
 #+RESULTS:
-: (512, 226)
+: (768, 91)
 
 #+begin_src ipython
 num_bins = 96
@@ -1183,7 +1163,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_67.png]]
+[[./figures/odr_sb/figure_65.png]]
 
 #+begin_src ipython
 plt.figure(figsize=(7, 7))
@@ -1193,7 +1173,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_68.png]]
+[[./figures/odr_sb/figure_66.png]]
 
 #+begin_src ipython
 plt.hist(energy.steady_state, bins='auto')
@@ -1201,7 +1181,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_69.png]]
+[[./figures/odr_sb/figure_67.png]]
 
 #+begin_src ipython
 X_discrete = np.digitize(phi,  bins, right=False)-1
@@ -1210,14 +1190,14 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_70.png]]
+[[./figures/odr_sb/figure_68.png]]
 
 #+begin_src ipython
 np.mean(X_discrete==1)
 #+end_src
 
 #+RESULTS:
-: 0.00956685564159292
+: 0.008413461538461538
 
 #+begin_src ipython
 
@@ -1226,7 +1206,6 @@ np.mean(X_discrete==1)
 #+RESULTS:
 
 ** Tuning
-
 *** Tuning curves
 
 #+begin_src ipython
@@ -1249,7 +1228,7 @@ def get_tuning_curves(rates, angles):
         sum_rates[angle_idx] += sort_rates[i]
 
     angle_counts = torch.bincount(inverse_idx, minlength=len(unique_angles))
-    tuning_curve = sum_rates / (angle_counts.unsqueeze(1).float() + 1e-5)
+    tuning_curve = sum_rates / (angle_counts.unsqueeze(1).float() + 1e-6)
 
     # get pref locations
     angles_ = unique_angles.unsqueeze(1).repeat(1, tuning_curve.shape[1]).cpu().numpy()
@@ -1257,14 +1236,14 @@ def get_tuning_curves(rates, angles):
 
     pref_locs = circmean(angles_, weights=weights, axis=0)
 
-    return tuning_curve, pref_locs, unique_angles
+    return tuning_curve.T, pref_locs, unique_angles
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
 def get_center_tuning_curve(tuning_curve, pref_locs):
-    size = tuning_curve.shape[0]
+    size = tuning_curve.shape[1]
     pref_idx = np.round(pref_locs / (2 * np.pi) * size) % size
     pref_idx[np.isnan(pref_idx)] = 0
 
@@ -1272,9 +1251,92 @@ def get_center_tuning_curve(tuning_curve, pref_locs):
 
     center_tuning_curve = []
     for i in range(pref_idx.shape[0]):
-        center_tuning_curve.append(torch.roll(tuning_curve.T[i], shifts=shifts_[i], dims=0))
+        center_tuning_curve.append(torch.roll(tuning_curve[i], shifts=shifts_[i], dims=0))
 
     return torch.stack(center_tuning_curve)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def get_pref_idx(tuning_curve, pref_locs):
+        size = tuning_curve.shape[1]
+        pref_idx = np.round(pref_locs / (2 * np.pi) * size)
+
+        for i in range(len(pref_idx)):
+                if pref_idx[i] < size // 2:
+                        pref_idx[i] += size // 2
+                else:
+                        pref_idx[i] = size // 2 - pref_idx[i]
+
+        pref_idx[np.isnan(pref_idx)] = 0
+        return pref_idx
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def get_si(tuning_curve, pref_locs):
+    pref_idx = get_pref_idx(tuning_curve, pref_locs)
+    size = tuning_curve.shape[1]
+
+    sel_idx = []
+    for i in range(tuning_curve.shape[0]):
+        R_pref = tuning_curve[i, int(pref_idx[i])]
+        if pref_idx[i] > size // 2:
+            R_ortho = tuning_curve[i, int(size // 2 - pref_idx[i])]
+        else:
+            R_ortho = tuning_curve[i, int(pref_idx[i] - size//2)]
+
+        si = (R_pref - R_ortho) / (R_pref + R_ortho + 1e-6)
+        sel_idx.append(si)
+
+    return np.array(sel_idx)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def get_circvar(tuning_curve, unique_angles):
+    complex_sum = torch.sum(tuning_curve * torch.exp(1j * unique_angles.unsqueeze(1)), dim=0)
+    cv = 1 - torch.abs(complex_sum) / tuning_curve.sum(dim=0).clamp(min=1e-6)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import torch
+import numpy as np
+from astropy.stats.circstats import circmean
+
+
+def get_tuning_curves(rates, angles, num_bins=64):
+
+    # Define the angle bins
+    angle_bins = torch.linspace(-np.pi, np.pi, num_bins + 1).to(rates.device)
+    angle_bins_center = (angle_bins[:-1] + angle_bins[1:]) / 2
+
+    # Map angles to the nearest bin center
+    angles_2d = maptens2center(angles).unsqueeze(1)  # Add a new axis for broadcast
+    bin_indices = torch.argmin(torch.abs(angles_2d - angle_bins_center.unsqueeze(0)), axis=1)
+
+    # Calculate the mean firing rate for each bin
+    n_neurons = rates.size(1)
+    tuning_curve = torch.zeros(num_bins, n_neurons, device=rates.device)
+
+    for i in range(num_bins):
+        bin_mask = bin_indices == i
+        bin_counts = torch.nansum(bin_mask).item()
+
+        if bin_counts > 0:
+            tuning_curve[i] = torch.nanmean(rates[bin_mask], dim=0)
+
+    # Calculate preferred locations using the binned angles
+    angles_ = angle_bins_center.repeat(n_neurons, 1).cpu().numpy().T
+    weights = tuning_curve.cpu().detach().numpy()
+    pref_locs = circmean(angles_, weights=weights, axis=0)
+
+    return tuning_curve.T, pref_locs, angle_bins_center
 #+end_src
 
 #+RESULTS:
@@ -1298,41 +1360,182 @@ center_tuning_curve = center_tuning_curve.cpu().detach().numpy()
 #+RESULTS:
 
 #+begin_src ipython
-for i in range(10):
-    plt.plot(unique_angles * 180 / np.pi, center_tuning_curve[i], alpha=.5)
+if IF_BIAS:
+        pkl_save(unique_angles, 'unique_angles_bias', path="/home/leon/")
+        pkl_save(tuning_curve, 'tuning_curve_bias', path="/home/leon/")
+        pkl_save(center_tuning_curve, 'center_tuning_curve_bias', path="/home/leon/")
+        pkl_save(pref_locs, 'pref_locs_bias', path="/home/leon/")
 
-plt.plot(unique_angles * 180 / np.pi, center_tuning_curve.mean(0), color='k')
-plt.axvline(0, ls='--', color='k')
+        unique_angles_ = pkl_load('unique_angles', path="/home/leon/")
+        tuning_curve_ = pkl_load('tuning_curve', path="/home/leon/")
+        center_tuning_curve_ = pkl_load('center_tuning_curve', path="/home/leon/")
+        pref_locs_ = pkl_load('pref_locs', path="/home/leon/")
+else:
+        pkl_save(unique_angles, 'unique_angles', path="/home/leon/")
+        pkl_save(tuning_curve, 'tuning_curve', path="/home/leon/")
+        pkl_save(center_tuning_curve, 'center_tuning_curve', path="/home/leon/")
+        pkl_save(pref_locs, 'pref_locs', path="/home/leon/")
+#+end_src
+
+#+RESULTS:
+: saving to /home/leon//unique_angles_bias.pkl
+: saving to /home/leon//tuning_curve_bias.pkl
+: saving to /home/leon//center_tuning_curve_bias.pkl
+: saving to /home/leon//pref_locs_bias.pkl
+: loading from /home/leon//unique_angles.pkl
+: loading from /home/leon//tuning_curve.pkl
+: loading from /home/leon//center_tuning_curve.pkl
+: loading from /home/leon//pref_locs.pkl
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height], sharex=True)
+pref_idx = get_pref_idx(tuning_curve, pref_locs)
+
+j = 30
+for i in range(j, j+1):
+    # ax[0].plot(tuning_curve[i], '-')
+    ax[0].plot(unique_angles * 180 / np.pi, tuning_curve[i], '-')
+    ax[0].axvline(reference, ls='--', color='b')
+    ax[0].axvline(pref_locs[i]*180/np.pi, ls='--')
+    ax[0].plot(unique_angles[int(pref_idx[i])] * 180 / np.pi, tuning_curve[i, int(pref_idx[i])], 'o', ms=10)
+
+    # ax[1].plot(center_tuning_curve[i], '-')
+    ax[1].plot(unique_angles * 180 / np.pi, center_tuning_curve[i], '-')
+    ax[1].axvline(0, ls='--')
+
+    print(int(pref_idx[i]), pref_locs[i] * 180 / np.pi, tuning_curve[i, int(pref_idx[i])])
+
+# plt.plot(unique_angles * 180 / np.pi, tuning_curve.mean(0), color='k')
+plt.axvline(reference, ls='--', color='b')
 plt.xlabel('Pref. Loc. (°)')
 plt.ylabel('Rate (Hz)')
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_77.png]]
+:RESULTS:
+: 37 26.969570551043752 3.014791
+[[./figures/odr_sb/figure_80.png]]
+:END:
 
 #+begin_src ipython
-if IF_BIAS:
-        pkl_save(unique_angles, 'unique_angles_bias', path="/home/leon/")
-        pkl_save(center_tuning_curve, 'center_tuning_curve_bias', path="/home/leon/")
-
-        unique_angles_ = pkl_load('unique_angles', path="/home/leon/")
-        center_tuning_curve_ = pkl_load('center_tuning_curve', path="/home/leon/")
-else:
-        pkl_save(unique_angles, 'unique_angles', path="/home/leon/")
-        pkl_save(center_tuning_curve, 'center_tuning_curve', path="/home/leon/")
+plt.hist(pref_locs * 180 / np.pi, bins='auto')
+plt.xlabel('Pref. Loc. (°)')
+plt.show()
 #+end_src
 
 #+RESULTS:
+[[./figures/odr_sb/figure_81.png]]
+
+
+#+begin_src ipython
+# for i in range(30):
+#      plt.plot(unique_angles * 180 / np.pi, tuning_curve[i], alpha=.5)
+
+plt.plot(unique_angles * 180 / np.pi, np.nanmean(tuning_curve, 0))
+if IF_BIAS:
+    plt.plot(unique_angles_ * 180 / np.pi, np.nanmean(tuning_curve_, 0))
+plt.axvline(reference, ls='--', color='b')
+plt.axvline(0, ls='--', color='k')
+plt.axvline(reference, ls='--', color='b')
+plt.xlabel('Pref. Loc. (°)')
+plt.ylabel('Rate (Hz)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_82.png]]
+
+#+begin_src ipython
+for i in range(10):
+    plt.plot(unique_angles * 180 / np.pi, center_tuning_curve[i], alpha=.5)
+
+plt.plot(unique_angles * 180 / np.pi, center_tuning_curve.mean(0), color='k')
+plt.axvline(0, ls='--', color='k')
+
+plt.xlabel('Pref. Loc. (°)')
+plt.ylabel('Rate (Hz)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_83.png]]
+
+
+#+RESULTS:
 : saving to /home/leon//unique_angles_bias.pkl
+: saving to /home/leon//tuning_curve_bias.pkl
 : saving to /home/leon//center_tuning_curve_bias.pkl
+: saving to /home/leon//pref_locs_bias.pkl
 : loading from /home/leon//unique_angles.pkl
+: loading from /home/leon//tuning_curve.pkl
 : loading from /home/leon//center_tuning_curve.pkl
+: loading from /home/leon//pref_locs.pkl
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height], sharex=True)
+pref_idx = get_pref_idx(tuning_curve, pref_locs)
+
+for i in range(10):
+    ax[0].plot(unique_angles * 180 / np.pi, tuning_curve[i], '-')
+    ax[0].axvline(reference, ls='--', color='b')
+
+    if IF_BIAS:
+        ax[1].plot(unique_angles_ * 180 / np.pi, tuning_curve_[i], '-')
+        ax[1].axvline(reference, ls='--', color='b')
+
+ax[0].set_xlabel('Pref. Loc. Bias (°)')
+ax[0].set_ylabel('Rate (Hz)')
+ax[1].set_xlabel('Pref. Loc. Unbias (°)')
+ax[1].set_ylabel('Rate (Hz)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_84.png]]
+
+#+begin_src ipython
+pref_idx = get_pref_idx(tuning_curve, pref_locs)
+if IF_BIAS:
+    pref_idx_ = get_pref_idx(tuning_curve_, pref_locs_)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+R_pref = []
+R_pref_ = []
+for i in range(tuning_curve.shape[0]):
+    R_pref.append(tuning_curve[i, int(pref_idx[i])])
+    if IF_BIAS:
+        R_pref_.append(tuning_curve_[i, int(pref_idx_[i])])
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+plt.hist(R_pref, bins='auto')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_87.png]]
+
+#+begin_src ipython
+if IF_BIAS:
+    plt.scatter(R_pref_, R_pref)
+    plt.xlabel('$R_{pref}$ Unbias (Hz)')
+    plt.ylabel('$R_{pref}$ Bias (Hz)')
+    plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_88.png]]
 
  #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 for i in range(10):
-    i = np.random.randint(750)
+
     ax[0].plot(unique_angles * 180 / np.pi, center_tuning_curve[i], '-')
     if IF_BIAS:
         ax[1].plot(unique_angles_ * 180 / np.pi, center_tuning_curve_[i], '-')
@@ -1348,13 +1551,25 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_79.png]]
+[[./figures/odr_sb/figure_89.png]]
+
+#+begin_src ipython
+if IF_BIAS:
+    plt.scatter(pref_locs_ * 180 / np.pi, pref_locs * 180 / np.pi)
+    plt.xlabel('Pref. Loc. Unbias (°)')
+    plt.ylabel('Pref. Loc. Bias (°)')
+    plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_90.png]]
 
 #+begin_src ipython
 plt.plot(unique_angles * 180 / np.pi, center_tuning_curve.mean(axis=0), '-', label='Biased')
 if IF_BIAS:
      plt.plot(unique_angles_ * 180 / np.pi, center_tuning_curve_.mean(axis=0), '-', label='Unbiased')
 
+plt.axvline(reference, ls='--', color='b')
 plt.xlabel('Preferred Location (°)')
 plt.ylabel('Rate (Hz)')
 plt.legend(fontsize=10)
@@ -1363,13 +1578,385 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_80.png]]
+[[./figures/odr_sb/figure_91.png]]
 
 #+begin_src ipython
+sel_idx = get_si(tuning_curve, pref_locs)
+plt.hist(sel_idx, bins=20)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_92.png]]
+
+#+begin_src ipython
+if IF_BIAS:
+    sel_idx_ = get_si(tuning_curve_, pref_locs_)
+    plt.scatter(sel_idx_, sel_idx)
+    plt.xlabel('SI Unbias')
+    plt.ylabel('SI Bias')
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_93.png]]
+
+#+begin_src ipython
+def circular_distance(angle1, angle2):
+    diff = (angle2 - angle1) % (2 * np.pi)
+    return (diff + np.pi) % (2 * np.pi) - np.pi
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+dist2ref = circular_distance(pref_locs, reference * np.pi/180) * 180 / np.pi
+
+if IF_BIAS:
+        pkl_save(dist2ref, 'dist2ref_bias', path="/home/leon/")
+        dist2ref_ = pkl_load('dist2ref', path="/home/leon/")
+else:
+        pkl_save(dist2ref, 'dist2ref', path="/home/leon/")
+#+end_src
+
+#+RESULTS:
+: saving to /home/leon//dist2ref_bias.pkl
+: loading from /home/leon//dist2ref.pkl
+
+#+begin_src ipython
+plt.hist(dist2ref, bins='auto', density=True)
+if IF_BIAS:
+    plt.hist(dist2ref_, bins='auto', histtype='step', density=True)
+
+plt.xlabel('Dist. to Ref. (°)')
+plt.ylabel('Count')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_96.png]]
+
+#+begin_src ipython
+if IF_BIAS:
+    plt.scatter(dist2ref_, dist2ref)
+    plt.xlabel('Dist. to Ref. Unbias (°)')
+    plt.ylabel('Dist. to Ref. Bias (°)')
+    plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_97.png]]
+
+#+begin_src ipython
+def weight_mean(variable=None, weights=None):
+    """Calculate the mean of `variable` given `weights`.
+
+    Parameters
+    ----------
+    variable : array-like or str
+        Variable on which the mean is estimated.
+    weights : array-like or str
+        Weights of the `x` variable.
+
+    Returns
+    -------
+    mean : array-like or float
+    """
+    # if pass a DataFrame separate variables.
+    variable = variable.copy()
+    weights = utils.not_empty_weights(weights, like=variable)
+    variable, weights = utils._clean_nans_values(variable, weights)
+    return np.average(a=variable, weights=weights, axis=0)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+from ineqpy.statistics import skew, std_moment
+from ineqpy import utils
+
+tuning_width = []
+skewness = []
+
+tuning_width_ = []
+skewness_ = []
+for i in range(tuning_curve.shape[0]):
+
+    try:
+        param = int(weight_mean(unique_angles, tuning_curve[i]))
+        moment2 = std_moment(variable=unique_angles, weights=tuning_curve[i], param=param, order=2, ddof=0)
+        moment3 = std_moment(variable=unique_angles, weights=tuning_curve[i], param=param, order=3, ddof=0)
+        tuning_width.append(moment2)
+        skewness.append(moment3)
+    except:
+        param = 1
+
+    if IF_BIAS:
+        try:
+            param = int(weight_mean(unique_angles_, tuning_curve_[i]))
+            moment2 = std_moment(variable=unique_angles_, weights=tuning_curve_[i], param=param, order=2, ddof=0)
+            moment3 = std_moment(variable=unique_angles_, weights=tuning_curve_[i], param=param, order=3, ddof=0)
+            tuning_width_.append(moment2)
+            skewness_.append(moment3)
+        except:
+            param = 1
 
 #+end_src
 
 #+RESULTS:
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+ax[0].hist(tuning_width, bins='auto', density=True)
+if IF_BIAS:
+    ax[0].hist(tuning_width_, bins='auto', density=True, histtype='step')
+    ax[1].scatter(tuning_width_, tuning_width)
+
+ax[0].set_xlabel('Tuning Width (°)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+Cell In[99], line 3
+      1 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+----> 3 ax[0].hist(tuning_width, bins='auto', density=True)
+      4 if IF_BIAS:
+      5     ax[0].hist(tuning_width_, bins='auto', density=True, histtype='step')
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/__init__.py:1465, in _preprocess_data.<locals>.inner(ax, data, *args, **kwargs)
+   1462 @functools.wraps(func)
+   1463 def inner(ax, *args, data=None, **kwargs):
+   1464     if data is None:
+-> 1465         return func(ax, *map(sanitize_sequence, args), **kwargs)
+   1467     bound = new_sig.bind(ax, *args, **kwargs)
+   1468     auto_label = (bound.arguments.get(label_namer)
+   1469                   or bound.kwargs.get(label_namer))
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_axes.py:6854, in Axes.hist(self, x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, **kwargs)
+   6850 # Loop through datasets
+   6851 for i in range(nx):
+   6852     # this will automatically overwrite bins,
+   6853     # so that each histogram uses the same bins
+-> 6854     m, bins = np.histogram(x[i], bins, weights=w[i], **hist_kwargs)
+   6855     tops.append(m)
+   6856 tops = np.array(tops, float)  # causes problems later if it's an int
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:780, in histogram(a, bins, range, density, weights)
+    680 r"""
+    681 Compute the histogram of a dataset.
+    682
+   (...)
+    776
+    777 """
+    778 a, weights = _ravel_and_check_weights(a, weights)
+--> 780 bin_edges, uniform_bins = _get_bin_edges(a, bins, range, weights)
+    782 # Histogram is an integer or a float array depending on the weights.
+    783 if weights is None:
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:396, in _get_bin_edges(a, bins, range, weights)
+    392 if weights is not None:
+    393     raise TypeError("Automated estimation of the number of "
+    394                     "bins is not supported for weighted data")
+--> 396 first_edge, last_edge = _get_outer_edges(a, range)
+    398 # truncate the range if needed
+    399 if range is not None:
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:315, in _get_outer_edges(a, range)
+    312         raise ValueError(
+    313             'max must be larger than min in range parameter.')
+    314     if not (np.isfinite(first_edge) and np.isfinite(last_edge)):
+--> 315         raise ValueError(
+    316             "supplied range of [{}, {}] is not finite".format(first_edge, last_edge))
+    317 elif a.size == 0:
+    318     # handle empty arrays. Can't determine range, so use 0-1.
+    319     first_edge, last_edge = 0, 1
+
+ValueError: supplied range of [1.000000120784967, inf] is not finite
+#+end_example
+[[./figures/odr_sb/figure_100.png]]
+:END:
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+ax[0].hist(skewness, bins='auto', density=True)
+if IF_BIAS:
+    ax[0].hist(skewness_, bins='auto', density=True, histtype='step')
+    ax[1].scatter(skewness_, skewness)
+
+ax[0].set_xlabel('Tuning Skewness (°)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+Cell In[100], line 3
+      1 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+----> 3 ax[0].hist(skewness, bins='auto', density=True)
+      4 if IF_BIAS:
+      5     ax[0].hist(skewness_, bins='auto', density=True, histtype='step')
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/__init__.py:1465, in _preprocess_data.<locals>.inner(ax, data, *args, **kwargs)
+   1462 @functools.wraps(func)
+   1463 def inner(ax, *args, data=None, **kwargs):
+   1464     if data is None:
+-> 1465         return func(ax, *map(sanitize_sequence, args), **kwargs)
+   1467     bound = new_sig.bind(ax, *args, **kwargs)
+   1468     auto_label = (bound.arguments.get(label_namer)
+   1469                   or bound.kwargs.get(label_namer))
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_axes.py:6854, in Axes.hist(self, x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, **kwargs)
+   6850 # Loop through datasets
+   6851 for i in range(nx):
+   6852     # this will automatically overwrite bins,
+   6853     # so that each histogram uses the same bins
+-> 6854     m, bins = np.histogram(x[i], bins, weights=w[i], **hist_kwargs)
+   6855     tops.append(m)
+   6856 tops = np.array(tops, float)  # causes problems later if it's an int
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:780, in histogram(a, bins, range, density, weights)
+    680 r"""
+    681 Compute the histogram of a dataset.
+    682
+   (...)
+    776
+    777 """
+    778 a, weights = _ravel_and_check_weights(a, weights)
+--> 780 bin_edges, uniform_bins = _get_bin_edges(a, bins, range, weights)
+    782 # Histogram is an integer or a float array depending on the weights.
+    783 if weights is None:
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:396, in _get_bin_edges(a, bins, range, weights)
+    392 if weights is not None:
+    393     raise TypeError("Automated estimation of the number of "
+    394                     "bins is not supported for weighted data")
+--> 396 first_edge, last_edge = _get_outer_edges(a, range)
+    398 # truncate the range if needed
+    399 if range is not None:
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:315, in _get_outer_edges(a, range)
+    312         raise ValueError(
+    313             'max must be larger than min in range parameter.')
+    314     if not (np.isfinite(first_edge) and np.isfinite(last_edge)):
+--> 315         raise ValueError(
+    316             "supplied range of [{}, {}] is not finite".format(first_edge, last_edge))
+    317 elif a.size == 0:
+    318     # handle empty arrays. Can't determine range, so use 0-1.
+    319     first_edge, last_edge = 0, 1
+
+ValueError: supplied range of [-inf, inf] is not finite
+#+end_example
+[[./figures/odr_sb/figure_101.png]]
+:END:
+
+#+begin_src ipython
+plt.hist(skewness, bins='auto', density=True)
+if IF_BIAS:
+    plt.hist(skewness_, bins='auto', density=True, histtype='step')
+
+plt.xlabel('Skewness')
+plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+Cell In[101], line 1
+----> 1 plt.hist(skewness, bins='auto', density=True)
+      2 if IF_BIAS:
+      3     plt.hist(skewness_, bins='auto', density=True, histtype='step')
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/pyplot.py:3224, in hist(x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, data, **kwargs)
+   3199 @_copy_docstring_and_deprecators(Axes.hist)
+   3200 def hist(
+   3201     x: ArrayLike | Sequence[ArrayLike],
+   (...)
+   3222     BarContainer | Polygon | list[BarContainer | Polygon],
+   3223 ]:
+-> 3224     return gca().hist(
+   3225         x,
+   3226         bins=bins,
+   3227         range=range,
+   3228         density=density,
+   3229         weights=weights,
+   3230         cumulative=cumulative,
+   3231         bottom=bottom,
+   3232         histtype=histtype,
+   3233         align=align,
+   3234         orientation=orientation,
+   3235         rwidth=rwidth,
+   3236         log=log,
+   3237         color=color,
+   3238         label=label,
+   3239         stacked=stacked,
+   3240         **({"data": data} if data is not None else {}),
+   3241         **kwargs,
+   3242     )
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/__init__.py:1465, in _preprocess_data.<locals>.inner(ax, data, *args, **kwargs)
+   1462 @functools.wraps(func)
+   1463 def inner(ax, *args, data=None, **kwargs):
+   1464     if data is None:
+-> 1465         return func(ax, *map(sanitize_sequence, args), **kwargs)
+   1467     bound = new_sig.bind(ax, *args, **kwargs)
+   1468     auto_label = (bound.arguments.get(label_namer)
+   1469                   or bound.kwargs.get(label_namer))
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_axes.py:6854, in Axes.hist(self, x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, **kwargs)
+   6850 # Loop through datasets
+   6851 for i in range(nx):
+   6852     # this will automatically overwrite bins,
+   6853     # so that each histogram uses the same bins
+-> 6854     m, bins = np.histogram(x[i], bins, weights=w[i], **hist_kwargs)
+   6855     tops.append(m)
+   6856 tops = np.array(tops, float)  # causes problems later if it's an int
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:780, in histogram(a, bins, range, density, weights)
+    680 r"""
+    681 Compute the histogram of a dataset.
+    682
+   (...)
+    776
+    777 """
+    778 a, weights = _ravel_and_check_weights(a, weights)
+--> 780 bin_edges, uniform_bins = _get_bin_edges(a, bins, range, weights)
+    782 # Histogram is an integer or a float array depending on the weights.
+    783 if weights is None:
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:396, in _get_bin_edges(a, bins, range, weights)
+    392 if weights is not None:
+    393     raise TypeError("Automated estimation of the number of "
+    394                     "bins is not supported for weighted data")
+--> 396 first_edge, last_edge = _get_outer_edges(a, range)
+    398 # truncate the range if needed
+    399 if range is not None:
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:315, in _get_outer_edges(a, range)
+    312         raise ValueError(
+    313             'max must be larger than min in range parameter.')
+    314     if not (np.isfinite(first_edge) and np.isfinite(last_edge)):
+--> 315         raise ValueError(
+    316             "supplied range of [{}, {}] is not finite".format(first_edge, last_edge))
+    317 elif a.size == 0:
+    318     # handle empty arrays. Can't determine range, so use 0-1.
+    319     first_edge, last_edge = 0, 1
+
+ValueError: supplied range of [-inf, inf] is not finite
+#+end_example
+[[./figures/odr_sb/figure_102.png]]
+:END:
 
 *** OSI
 
@@ -1444,7 +2031,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_83.png]]
+[[./figures/odr_sb/figure_105.png]]
 
 #+begin_src ipython
 pref, indices = torch.sort(pref, descending=False)
@@ -1460,7 +2047,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_84.png]]
+[[./figures/odr_sb/figure_106.png]]
 
 #+begin_src ipython
 if IF_BIAS:
@@ -1469,16 +2056,8 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_85.png]]
+[[./figures/odr_sb/figure_107.png]]
 
-#+begin_src ipython
-if IF_BIAS:
-    plt.scatter(pref_.cpu().numpy(), pref.cpu().numpy())
-    plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_sb/figure_86.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -1501,7 +2080,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_87.png]]
+[[./figures/odr_sb/figure_108.png]]
 
  #+begin_src ipython
 if IF_BIAS:
@@ -1520,7 +2099,13 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_88.png]]
+[[./figures/odr_sb/figure_109.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 *** skewness
 
@@ -1682,12 +2267,6 @@ tuning_width, skewness = fit_gaussian_and_estimate_params(normalized_rates, angl
 #+RESULTS:
 
 #+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
 if IF_BIAS:
         pkl_save(tuning_width, 'tuning_width_bias', path="/home/leon/")
         pkl_save(skewness, 'skewness_bias', path="/home/leon/")
@@ -1716,9 +2295,9 @@ ax[0].set_ylabel('Density')
 ax[1].set_xlabel('Skewness')
 ax[1].set_ylabel('Density')
 
-# if IF_BIAS:
-    # ax[0].hist(tuning_width_, bins='auto', density=True, histtype='step')
-    # ax[1].hist(skewness_, bins='auto', density=True, histtype='step', label='unbiased')
+if IF_BIAS:
+     # ax[0].hist(tuning_width_, bins='auto', density=True, histtype='step')
+     # ax[1].hist(skewness_, bins='auto', density=True, histtype='step', label='unbiased')
 
 plt.legend()
 plt.savefig('../figures/figs/christos/skewness.svg', dpi=300)
@@ -1727,14 +2306,17 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
-[[./figures/odr_sb/figure_95.png]]
+# [goto error]
+: [0;36m  Cell [0;32mIn[114], line 15[0;36m[0m
+: [0;31m    plt.legend()[0m
+: [0m    ^[0m
+: [0;31mIndentationError[0m[0;31m:[0m expected an indented block after 'if' statement on line 11
 :END:
 
 #+begin_src ipython
-pref, indices = torch.sort(pref, descending=False)
-plt.plot(pref.cpu().detach() * 180 / np.pi, skewness[indices.cpu().numpy()])
-plt.plot(pref.cpu().detach()* 180 / np.pi, circcvl(skewness[indices.cpu().numpy()], windowSize=10))
+# pref, indices = torch.sort(pref, descending=False)
+# plt.plot(pref.cpu().detach() * 180 / np.pi, skewness[indices.cpu().numpy()])
+# plt.plot(pref.cpu().detach()* 180 / np.pi, circcvl(skewness[indices.cpu().numpy()], windowSize=10))
 
 
 if IF_BIAS:
@@ -1748,7 +2330,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_96.png]]
+[[./figures/odr_sb/figure_117.png]]
 
  #+begin_src ipython
 if IF_BIAS:
@@ -1766,7 +2348,7 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_97.png]]
+[[./figures/odr_sb/figure_118.png]]
 
 #+begin_src ipython
 
@@ -1774,28 +2356,4 @@ if IF_BIAS:
 
 #+RESULTS:
 
-#+begin_src ipython
-if IF_BIAS:
-        pkl_save(aligned_angles, 'aligned_angles_bias', path="/home/leon/")
-        pkl_save(population_tuning_curve, 'population_tuning_curve_bias', path="/home/leon/")
-
-        aligned_angles_ = pkl_load('aligned_angles', path="/home/leon/")
-        population_tuning_curve_ = pkl_load('population_tuning_curve', path="/home/leon/")
-else:
-        pkl_save(aligned_angles, 'aligned_angles', path="/home/leon/")
-        pkl_save(population_tuning_curve, 'population_tuning_curve', path="/home/leon/")
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-# [goto error]
-: ---------------------------------------------------------------------------
-: NameError                                 Traceback (most recent call last)
-: Cell In[96], line 2
-:       1 if IF_BIAS:
-: ----> 2         pkl_save(aligned_angles, 'aligned_angles_bias', path="/home/leon/")
-:       3         pkl_save(population_tuning_curve, 'population_tuning_curve_bias', path="/home/leon/")
-:       5         aligned_angles_ = pkl_load('aligned_angles', path="/home/leon/")
-:
-: NameError: name 'aligned_angles' is not defined
-:END:
+***

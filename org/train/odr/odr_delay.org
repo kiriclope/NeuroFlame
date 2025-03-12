@@ -18,10 +18,13 @@ pal = sns.color_palette("tab10")
 #+end_src
 
 #+RESULTS:
+:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
+: <Figure size 700x432.624 with 0 Axes>
+:END:
 
 * Imports
 
@@ -380,7 +383,8 @@ class AngularErrorLoss(nn.Module):
         invalid_mask = ~valid_mask
 
         # angular loss (Dcos, Dsin)
-        loss_polar = polar_loss(theta_batch, y_pred) * valid_mask
+        # loss_polar = polar_loss(theta_batch, y_pred) * valid_mask
+        # loss_angular = loss_polar.sum()
 
         # # adding weights to each target location
         # if self.class_weight=='balanced':
@@ -389,17 +393,17 @@ class AngularErrorLoss(nn.Module):
         #     loss_polar *= self.reg_weight * weights
         # loss_angular = loss_polar.sum()
 
-        loss_gaussian = gaussian_loss(theta_batch, y_pred, sigma=self.sigma_stimulus) * valid_mask
-        loss_angular = loss_gaussian.sum()
+        # loss_gaussian = gaussian_loss(theta_batch, y_pred, sigma=self.sigma_stimulus) * valid_mask
+        # loss_angular = loss_gaussian.sum()
 
         # bayesian inference
         # Treat θ_bias as a prior and force the network to integrate it with the stimulus.
-        # theta_bias = self.theta_bias.to(y_pred.device)
-        # loss_likelihood = skewed_gaussian_loss(theta_batch, y_pred, theta_bias,
-        #                                        sigma=self.sigma_stimulus, alpha=self.alpha) * valid_mask
+        theta_bias = self.theta_bias.to(y_pred.device)
+        loss_likelihood = skewed_gaussian_loss(theta_batch, y_pred, theta_bias,
+                                               sigma=self.sigma_stimulus, alpha=self.alpha) * valid_mask
 
-        # loss_prior = gaussian_loss(theta_bias, y_pred, sigma=self.sigma_prior) * valid_mask
-        # loss_angular = loss_likelihood.sum() + self.reg_prior * loss_prior.sum()
+        loss_prior = gaussian_loss(theta_bias, y_pred, sigma=self.sigma_prior) * valid_mask
+        loss_angular = loss_likelihood.sum() + self.reg_prior * loss_prior.sum()
 
         total_loss = loss_angular
 
@@ -538,7 +542,7 @@ IF_BIAS = 1
 
 IF_RAND_REF = 0
 reference = 90
-sigma = 60
+sigma = 90
 
 print('reference', reference, 'sigma', sigma)
 
@@ -547,8 +551,10 @@ if IF_BIASED_PHASES:
 else:
     class_weight = None
 
-batch_size = 128
-N_BATCH = int(batch_size * 7)
+total_batches = 768
+batch_size = 32
+ratio = total_batches // batch_size
+N_BATCH = int(batch_size * ratio)
 print('N_BATCH', N_BATCH, 'batch_size', batch_size)
 
 seed = np.random.randint(0, 1e6)
@@ -557,8 +563,8 @@ print('seed', seed)
 #+end_src
 
 #+RESULTS:
-: reference 90 sigma 60
-: N_BATCH 896 batch_size 128
+: reference 90 sigma 90
+: N_BATCH 768 batch_size 32
 : seed 1
 
 #+begin_src ipython
@@ -588,7 +594,7 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: torch.Size([896])
+: torch.Size([768])
 [[./figures/odr/figure_21.png]]
 :END:
 
@@ -638,11 +644,11 @@ print(torch.where(rwd_mask[idx]==1)[0])
 #+end_src
 
 #+RESULTS:
-: rwd_mask torch.Size([896, 81])
+: rwd_mask torch.Size([768, 81])
 : tensor([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
 :         28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
 :         46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
-:         64, 65], device='cuda:0')
+:         64], device='cuda:0')
 
 *** Inputs and Labels
 
@@ -667,8 +673,8 @@ print(labels.shape)
 #+end_src
 
 #+RESULTS:
-: total_batches 7
-: torch.Size([896, 1])
+: total_batches 24
+: torch.Size([768, 1])
 
 #+begin_src ipython
 # if IF_BIASED_PHASES:
@@ -692,9 +698,9 @@ ff_input = model.init_ff_input()
 print(model.PHI0.shape, ff_input.shape, labels.shape)
 #+end_src
 #+RESULTS:
-: torch.Size([1, 750]) torch.Size([896, 1])
-: torch.Size([1, 750]) torch.Size([896, 1])
-: torch.Size([896, 2, 1]) torch.Size([896, 505, 1000]) torch.Size([896, 81])
+: torch.Size([1, 750]) torch.Size([768, 1])
+: torch.Size([1, 750]) torch.Size([768, 1])
+: torch.Size([768, 2, 1]) torch.Size([768, 505, 1000]) torch.Size([768, 81])
 
 #+begin_src ipython
 # N_BATCH = 32
@@ -734,7 +740,7 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: torch.Size([40146])
+: torch.Size([34372])
 [[./figures/odr/figure_29.png]]
 :END:
 
@@ -747,8 +753,8 @@ train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_si
 #+RESULTS:
 :RESULTS:
 [[./figures/odr/figure_30.png]]
-: torch.Size([716, 505, 1000]) torch.Size([180, 505, 1000])
-: torch.Size([716, 81]) torch.Size([180, 81])
+: torch.Size([614, 505, 1000]) torch.Size([154, 505, 1000])
+: torch.Size([614, 81]) torch.Size([154, 81])
 :END:
 
 #+begin_src ipython
@@ -763,7 +769,7 @@ if IF_BIAS:
 else:
     criterion = AngularErrorLoss(thresh=0.75, class_weight=None, prior=reference, sigma_prior=30, sigma_stimulus=30, alpha=0.0, reg_prior=0.0)
 
-learning_rate = 0.1
+learning_rate = 0.05
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
@@ -779,22 +785,22 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 #+RESULTS:
 #+begin_example
-Epoch 1/15, Training Loss: 0.2046, Validation Loss: 0.1539
-Epoch 2/15, Training Loss: 0.1117, Validation Loss: 0.1018
-Epoch 3/15, Training Loss: 0.0898, Validation Loss: 0.0864
-Epoch 4/15, Training Loss: 0.0637, Validation Loss: 0.0527
-Epoch 5/15, Training Loss: 0.0525, Validation Loss: 0.0483
-Epoch 6/15, Training Loss: 0.0403, Validation Loss: 0.0382
-Epoch 7/15, Training Loss: 0.0353, Validation Loss: 0.0365
-Epoch 8/15, Training Loss: 0.0316, Validation Loss: 0.0336
-Epoch 9/15, Training Loss: 0.0297, Validation Loss: 0.0308
-Epoch 10/15, Training Loss: 0.0275, Validation Loss: 0.0298
-Epoch 11/15, Training Loss: 0.0277, Validation Loss: 0.0288
-Epoch 12/15, Training Loss: 0.0259, Validation Loss: 0.0280
-Epoch 13/15, Training Loss: 0.0243, Validation Loss: 0.0269
-Epoch 14/15, Training Loss: 0.0240, Validation Loss: 0.0262
-Epoch 15/15, Training Loss: 0.0233, Validation Loss: 0.0256
-Elapsed (with compilation) = 0h 2m 1s
+Epoch 1/15, Training Loss: 0.0580, Validation Loss: 0.0446
+Epoch 2/15, Training Loss: 0.0285, Validation Loss: 0.0468
+Epoch 3/15, Training Loss: 0.0250, Validation Loss: 0.0250
+Epoch 4/15, Training Loss: 0.0217, Validation Loss: 0.0241
+Epoch 5/15, Training Loss: 0.0191, Validation Loss: 0.0239
+Epoch 6/15, Training Loss: 0.0183, Validation Loss: 0.0219
+Epoch 7/15, Training Loss: 0.0177, Validation Loss: 0.0197
+Epoch 8/15, Training Loss: 0.0168, Validation Loss: 0.0186
+Epoch 9/15, Training Loss: 0.0156, Validation Loss: 0.0182
+Epoch 10/15, Training Loss: 0.0144, Validation Loss: 0.0184
+Epoch 11/15, Training Loss: 0.0136, Validation Loss: 0.0182
+Epoch 12/15, Training Loss: 0.0133, Validation Loss: 0.0176
+Epoch 13/15, Training Loss: 0.0132, Validation Loss: 0.0173
+Epoch 14/15, Training Loss: 0.0130, Validation Loss: 0.0170
+Epoch 15/15, Training Loss: 0.0127, Validation Loss: 0.0169
+Elapsed (with compilation) = 0h 5m 11s
 #+end_example
 
 #+begin_src ipython
@@ -863,9 +869,9 @@ model.eval()
 #+end_src
 
 #+RESULTS:
-: torch.Size([1, 750]) torch.Size([896, 1])
-: torch.Size([1, 750]) torch.Size([896, 1])
-: torch.Size([896, 3, 1]) torch.Size([896, 505, 1000]) torch.Size([896, 1])
+: torch.Size([1, 750]) torch.Size([768, 1])
+: torch.Size([1, 750]) torch.Size([768, 1])
+: torch.Size([768, 3, 1]) torch.Size([768, 505, 1000]) torch.Size([768, 1])
 
 #+begin_src ipython
 #     model.N_BATCH = N_BATCH
@@ -907,8 +913,8 @@ print('ff_input', ff_input.shape)
 print('rates', rates.shape)
 #+end_src
 #+RESULTS:
-: ff_input torch.Size([896, 505, 1000])
-: rates (896, 81, 750)
+: ff_input torch.Size([768, 505, 1000])
+: rates (768, 81, 750)
 
 
  #+begin_src ipython
@@ -924,7 +930,7 @@ plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
 
 #+RESULTS:
 :RESULTS:
-: [241 618 732 738 543 254 519 695 150 740 293  56  74 744 345 151]
+: [570 245  16 111 627 457 275 292 378 731 253 158 283 242 213  49]
 [[./figures/odr/figure_42.png]]
 :END:
 
@@ -941,7 +947,7 @@ plot_m0_m1_phi(model, rates, 4)
 
 #+RESULTS:
 :RESULTS:
-: [565 476 225 549 176 608  22 705  79 101  84 761  46 484 150 714]
+: [106 402 332 100  92 592 597 617 388  79 586 631 351 425  39  29]
 [[./figures/odr/figure_44.png]]
 :END:
 
@@ -972,7 +978,7 @@ errors = np.array(error_list)
 #+end_src
 
 #+RESULTS:
-: (896, 81) torch.Size([896, 1])
+: (768, 81) torch.Size([768, 1])
 
 #+begin_src ipython
 theta = torch.linspace(0, 2.0 * torch.pi, 1000)
