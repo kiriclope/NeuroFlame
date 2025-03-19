@@ -117,7 +117,32 @@ def torch_angle_AB(U, V):
 #+RESULTS:
 
 #+begin_src ipython
-def training_step(dataloader, model, loss_fn, optimizer, penalty=None, lbd=1, clip_grad=0, zero_grad=None):
+def skewness(tensor, dim=0):
+    mean = torch.mean(tensor, dim)
+    std_dev = torch.std(tensor, dim) + 1e-6
+    skew = torch.mean(((tensor - mean) / std_dev) ** 3, dim)
+    return skew
+
+def kurtosis(tensor, dim=0):
+    mean = torch.mean(tensor, dim)
+    std_dev = torch.std(tensor, dim) + 1e-6
+    kurt = torch.mean(((tensor - mean) / std_dev) ** 4, dim) - 3  # Excess kurtosis
+    return kurt
+
+def gaussianity_loss(parameters):
+    loss = 0.0
+    for param in parameters:
+        if param.numel()!=1:
+            skew = skewness(param)
+            kurt = kurtosis(param)
+            loss += (skew ** 2 + kurt ** 2)
+    return loss.mean()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def training_step(dataloader, model, loss_fn, optimizer, penalty=None, lbd=1, clip_grad=0, zero_grad=None, IF_GAUSS=0):
 
       model.train()
       total_loss = 0.0
@@ -130,6 +155,9 @@ def training_step(dataloader, model, loss_fn, optimizer, penalty=None, lbd=1, cl
 
             rates = model(X)
             loss = loss_fn(model.readout, y)
+
+            if IF_GAUSS:
+                  loss += 0.1 * gaussianity_loss(model.parameters())
 
             loss.backward()
 
@@ -202,7 +230,7 @@ def validation_step(dataloader, model, loss_fn):
 #+RESULTS:
 
 #+begin_src ipython
-def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100, penalty=None, lbd=1, thresh=.005, zero_grad=None):
+def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100, penalty=None, lbd=1, thresh=.005, zero_grad=None, IF_GAUSS=0):
       scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
       # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.1, verbose=True)
       # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
@@ -215,7 +243,7 @@ def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs
       angle_list = []
 
       for epoch in range(num_epochs):
-          loss = training_step(train_loader, model, loss_fn, optimizer, penalty, lbd, zero_grad=zero_grad)
+          loss = training_step(train_loader, model, loss_fn, optimizer, penalty, lbd, zero_grad=zero_grad, IF_GAUSS=IF_GAUSS)
           val_loss = validation_step(val_loader, model, loss_fn)
 
           scheduler.step(val_loss)
@@ -807,7 +835,7 @@ seed = 971646 # good
 # seed= 404520
 # seed= 332246 # china
 
-seed = 0
+seed = 3
 print(seed)
 
 A0 = 1.0 # sample/dist
@@ -816,13 +844,27 @@ C0 = 0.0 # DRT rwd
 #+end_src
 
 #+RESULTS:
-: 0
+: 3
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1)
 #+end_src
 
 #+RESULTS:
+
+#+begin_src ipython
+model.Wab_train = model.low_rank(model.LR_NORM, model.LR_CLAMP)
+W_stp_T = torch.round((model.W_stp_T / torch.sqrt(model.Ka[0]) + model.Wab_train[model.slices[0], model.slices[0]] ) * torch.sqrt(model.Ka[0]), decimals=5)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+print((W_stp_T<0).sum() / W_stp_T.shape[0]**2)
+#+end_src
+
+#+RESULTS:
+: tensor(0.1440, device='cuda:0')
 
 #+begin_src ipython
 
@@ -922,7 +964,7 @@ print('labels', labels.shape)
 *** Run
 
 #+begin_src ipython
-batch_size = 32
+batch_size = 16
 train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
 #+end_src
 
@@ -948,13 +990,25 @@ print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 #+end_src
 
 #+RESULTS:
-: Sample Classification
-: Epoch 1/15, Training Loss: 3.9574, Validation Loss: 3.6287, Angle(U, W) : 92.0 °
-: Epoch 2/15, Training Loss: 0.6366, Validation Loss: 0.0354, Angle(U, W) : 91.0 °
-: Epoch 3/15, Training Loss: 0.0085, Validation Loss: 0.0034, Angle(U, W) : 90.0 °
-: Epoch 4/15, Training Loss: 0.0031, Validation Loss: 0.0029, Angle(U, W) : 90.0 °
-: Stopping training as loss has fallen below the threshold: 0.0031373794727887097, 0.0028679547910919275
-: Elapsed (with compilation) = 0h 1m 36s
+#+begin_example
+Sample Classification
+Epoch 1/15, Training Loss: 3.9116, Validation Loss: 3.8288, Angle(U, W) : 89.0 °
+Epoch 2/15, Training Loss: 3.7806, Validation Loss: 3.7595, Angle(U, W) : 89.0 °
+Epoch 3/15, Training Loss: 3.6778, Validation Loss: 3.6150, Angle(U, W) : 89.0 °
+Epoch 4/15, Training Loss: 3.6349, Validation Loss: 3.6698, Angle(U, W) : 90.0 °
+Epoch 5/15, Training Loss: 3.5836, Validation Loss: 3.5304, Angle(U, W) : 90.0 °
+Epoch 6/15, Training Loss: 3.5306, Validation Loss: 3.4942, Angle(U, W) : 90.0 °
+Epoch 7/15, Training Loss: 3.4541, Validation Loss: 3.3771, Angle(U, W) : 90.0 °
+Epoch 8/15, Training Loss: 3.4073, Validation Loss: 3.3477, Angle(U, W) : 89.0 °
+Epoch 9/15, Training Loss: 3.3432, Validation Loss: 3.2704, Angle(U, W) : 89.0 °
+Epoch 10/15, Training Loss: 3.2388, Validation Loss: 3.2190, Angle(U, W) : 89.0 °
+Epoch 11/15, Training Loss: 3.2199, Validation Loss: 3.1867, Angle(U, W) : 89.0 °
+Epoch 12/15, Training Loss: 3.1715, Validation Loss: 3.1140, Angle(U, W) : 89.0 °
+Epoch 13/15, Training Loss: 3.1004, Validation Loss: 3.1256, Angle(U, W) : 89.0 °
+Epoch 14/15, Training Loss: 3.0140, Validation Loss: 3.1860, Angle(U, W) : 89.0 °
+Epoch 15/15, Training Loss: 2.9524, Validation Loss: 2.9750, Angle(U, W) : 89.0 °
+Elapsed (with compilation) = 0h 11m 58s
+#+end_example
 
  #+begin_src ipython
 torch.save(model.state_dict(), '../models/dual/dpa_naive_%d.pth' % seed)
@@ -1016,7 +1070,7 @@ plot_overlap(readout, labels=['A', 'B'])
 #+RESULTS:
 :RESULTS:
 : readout (20, 91, 2)
-[[./.ob-jupyter/9cbf134f882f3f0dbfa64045384d47ba9c455c00.png]]
+[[./.ob-jupyter/d22f64fff0aaf86857943f699e0150879fbca920.png]]
 :END:
 
 #+begin_src ipython
@@ -1027,7 +1081,7 @@ plot_rates_selec(rates, idx)
 #+RESULTS:
 :RESULTS:
 : ksi torch.Size([4, 750])
-[[./.ob-jupyter/8e90146caced81980d127a9e090b83aed618ba88.png]]
+[[./.ob-jupyter/56a0c3a72f8102a7bbe03b413bb7b96df4c8e12b.png]]
 :END:
 
 #+begin_src ipython
@@ -1038,16 +1092,106 @@ plot_m0_m1_phi(rates, idx)
 #+RESULTS:
 :RESULTS:
 : ksi torch.Size([4, 750])
-[[./.ob-jupyter/fe7cd1bae316947ca468a34ff975bfc35a8ea024.png]]
+[[./.ob-jupyter/d54bb95328b383817d329df77f5279b7d6fed49a.png]]
 :END:
-* DPA Task
 
 #+begin_src ipython
-print(seed)
+U = model.low_rank.U.cpu().detach().numpy()
+V = model.low_rank.V.cpu().detach().numpy()
+
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+# ax[0].hist(U[:, 0], histtype='step', bins='auto')
+# ax[0].hist(U[:, 1], histtype='step', bins='auto')
+ax[0].hist(V[:, 0], histtype='step', bins='auto')
+ax[1].hist(V[:, 1], histtype='step', bins='auto')
+ax[0].set_xlabel('$ n_{AB} $')
+ax[1].set_xlabel('$ n_{GNG} $')
+
+ax[0].set_ylabel('Count')
+ax[1].set_ylabel('Count')
+plt.show()
 #+end_src
 
 #+RESULTS:
-: 0
+[[./.ob-jupyter/9a718c524ae650e20e9190fab484f95ea514e596.png]]
+
+#+begin_src ipython
+plt.scatter(V[:, 0], V[:, 1])
+plt.xlabel('$ n_{AB} $')
+plt.ylabel('$ n_{GNG} $')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/d56bde48e575da034bc36ad03445c100bc29a415.png]]
+
+#+begin_src ipython
+model.Wab_train = model.low_rank(model.LR_NORM, model.LR_CLAMP)
+W_stp_T = torch.round((model.W_stp_T / torch.sqrt(model.Ka[0]) + model.Wab_train[model.slices[0], model.slices[0]] ) * torch.sqrt(model.Ka[0]), decimals=3)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+print((W_stp_T<0).sum() / W_stp_T.shape[0]**2)
+#+end_src
+
+#+RESULTS:
+: tensor(0.4102, device='cuda:0')
+
+#+begin_src ipython
+plt.hist(W_stp_T[2, :].cpu().detach(), bins=100)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/67656a88e6c6b10b0f93af644b404130f4d6266d.png]]
+
+#+begin_src ipython
+Cij = -W_stp_T.cpu().detach().numpy()
+plt.figure(figsize=(2.5*width, 1.5*height))  # Set the figure size (width, height) in inches
+
+ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+im = ax1.imshow(Cij, cmap='jet', aspect=1, vmin=0, vmax=.1)
+ax1.set_xlabel("Presynaptic")
+ax1.set_ylabel("Postsynaptic")
+
+# Second column, first row
+ax2 = plt.subplot2grid((2, 3), (0, 1))
+Kj = np.sum(Cij, axis=0)  # sum over pres
+ax2.plot(Kj)
+# ax2.set_xticklabels([])
+ax2.set_ylabel("$K_j$")
+
+# # Second column, second row
+ax3 = plt.subplot2grid((2, 3), (1, 1))
+Ki = np.sum(Cij, axis=1)  # sum over pres
+ax3.plot(Ki)
+ax3.set_ylabel("$K_i$")
+
+ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+diags = []
+for i in range(int(Cij.shape[0] / 2)):
+   diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+diags = np.array(diags)
+ax4.plot(diags)
+ax4.set_xlabel("Neuron #")
+ax4.set_ylabel("$P_{ij}$")
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/8322c804cbcfd433fb9448597ef5a8756913ca85.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+* DPA Task
 
 #+begin_src ipython
 model_state_dict = torch.load('../models/dual/dpa_naive_%d.pth' % seed)
@@ -1169,7 +1313,7 @@ print('labels', labels.shape)
 *** Run
 
 #+begin_src ipython
-batch_size = 32
+batch_size = 16
 train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
 #+end_src
 
@@ -1177,10 +1321,9 @@ train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_si
 : torch.Size([819, 555, 1000]) torch.Size([205, 555, 1000])
 : torch.Size([819, 21]) torch.Size([205, 21])
 
-
   #+begin_src ipython
 if len(cue_idx) == 0:
-    criterion = DualLoss(alpha=1.0, thresh=4.0, rwd_idx=rwd_idx, zero_idx=zero_idx, imbalance=1, read_idx=[-1])
+    criterion = DualLoss(alpha=1.0, thresh=4.0, rwd_idx=rwd_idx, zero_idx=zero_idx, imbalance=1, read_idx=[1])
 else:
     criterion = DualLoss(alpha=1.0, thresh=4.0, rwd_idx=rwd_idx, zero_idx=zero_idx, cue_idx=cue_idx, imbalance=[0.0, 1.0], read_idx=[1, 0])
 
@@ -1204,15 +1347,25 @@ torch.save(model.state_dict(), '../models/dual/dpa_%d.pth' % seed)
 #+end_src
 
 #+RESULTS:
-: training DPA
-: Epoch 1/15, Training Loss: 3.2526, Validation Loss: 1.4450, Angle(U, W) : 88.0 °
-: Epoch 2/15, Training Loss: 0.6937, Validation Loss: 0.4840, Angle(U, W) : 90.0 °
-: Epoch 3/15, Training Loss: 0.2584, Validation Loss: 0.0150, Angle(U, W) : 91.0 °
-: Epoch 4/15, Training Loss: 0.0165, Validation Loss: 0.0109, Angle(U, W) : 90.0 °
-: Epoch 5/15, Training Loss: 0.0067, Validation Loss: 0.0050, Angle(U, W) : 90.0 °
-: Epoch 6/15, Training Loss: 0.0047, Validation Loss: 0.0041, Angle(U, W) : 90.0 °
-: Stopping training as loss has fallen below the threshold: 0.004694642185663374, 0.004144921937457672
-: Elapsed (with compilation) = 0h 2m 20s
+#+begin_example
+training DPA
+Epoch 1/15, Training Loss: 3.3587, Validation Loss: 2.3844, Angle(U, W) : 88.0 °
+Epoch 2/15, Training Loss: 0.8165, Validation Loss: 0.0343, Angle(U, W) : 89.0 °
+Epoch 3/15, Training Loss: 0.0254, Validation Loss: 0.0191, Angle(U, W) : 89.0 °
+Epoch 4/15, Training Loss: 0.0212, Validation Loss: 0.0229, Angle(U, W) : 89.0 °
+Epoch 5/15, Training Loss: 0.0174, Validation Loss: 0.0179, Angle(U, W) : 90.0 °
+Epoch 6/15, Training Loss: 0.0157, Validation Loss: 0.0138, Angle(U, W) : 89.0 °
+Epoch 7/15, Training Loss: 0.0135, Validation Loss: 0.0127, Angle(U, W) : 90.0 °
+Epoch 8/15, Training Loss: 0.0124, Validation Loss: 0.0138, Angle(U, W) : 90.0 °
+Epoch 9/15, Training Loss: 0.0115, Validation Loss: 0.0115, Angle(U, W) : 90.0 °
+Epoch 10/15, Training Loss: 0.0115, Validation Loss: 0.0109, Angle(U, W) : 90.0 °
+Epoch 11/15, Training Loss: 0.0112, Validation Loss: 0.0247, Angle(U, W) : 90.0 °
+Epoch 12/15, Training Loss: 0.0111, Validation Loss: 0.0090, Angle(U, W) : 90.0 °
+Epoch 13/15, Training Loss: 0.0103, Validation Loss: 0.0080, Angle(U, W) : 90.0 °
+Epoch 14/15, Training Loss: 0.0101, Validation Loss: 0.0079, Angle(U, W) : 90.0 °
+Epoch 15/15, Training Loss: 0.0094, Validation Loss: 0.0134, Angle(U, W) : 90.0 °
+Elapsed (with compilation) = 0h 13m 12s
+#+end_example
 
 #+begin_src ipython
 
@@ -1232,13 +1385,6 @@ model.load_state_dict(model_state_dict)
 
 #+RESULTS:
 : <All keys matched successfully>
-
-#+begin_src ipython
-model.DURATION = 9
-model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
-#+end_src
-
-#+RESULTS:
 
 #+begin_src ipython
 model.eval()
@@ -1317,7 +1463,7 @@ plot_overlap(model.readout.cpu().detach().numpy(), labels=['pair', 'unpair'], fi
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/5ff13c70237d575cc845950438415e7b3da56d95.png]]
+[[./.ob-jupyter/90ce4ca5d91ed0b061fdfb09a990aa0ec199e1dd.png]]
 
 
 #+begin_src ipython
@@ -1328,8 +1474,81 @@ plot_m0_m1_phi(rates, idx)
 #+RESULTS:
 :RESULTS:
 : ksi torch.Size([4, 750])
-[[./.ob-jupyter/680a717fe559a7958cb161a2d2d8cace4f518728.png]]
+[[./.ob-jupyter/65c371ec2838f52731b358ef16bff7ab06b60fad.png]]
 :END:
+
+#+begin_src ipython
+U = model.low_rank.U.cpu().detach().numpy()
+V = model.low_rank.V.cpu().detach().numpy()
+
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+# ax[0].hist(U[:, 0], histtype='step', bins='auto')
+# ax[0].hist(U[:, 1], histtype='step', bins='auto')
+ax[0].hist(V[:, 0], histtype='step', bins='auto')
+ax[1].hist(V[:, 1], histtype='step', bins='auto')
+ax[0].set_xlabel('$ n_{AB} $')
+ax[1].set_xlabel('$ n_{GNG} $')
+
+ax[0].set_ylabel('Count')
+ax[1].set_ylabel('Count')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/d2f647ea1bbe45a03aba0d9d5cc51d6832ccd012.png]]
+
+#+begin_src ipython
+U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
+V = model.low_rank.V.cpu().detach().numpy()[model.slices[0], 0]
+
+odors = model.odors.cpu().numpy()
+
+m = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 1]
+n = model.low_rank.V.cpu().detach().numpy()[model.slices[0], 1]
+
+vectors = [U, V, m, n]
+labels = ['$m_\\text{AB}$', '$n_\\text{AB}$', '$m_\\text{GnG}$', '$n_\\text{GnG}$']
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Calculate the covariance matrix
+num_vectors = len(vectors)
+cov_matrix = np.zeros((num_vectors, num_vectors))
+
+for i in range(num_vectors):
+    for j in range(num_vectors):
+        cov_matrix[i][j] = angle_AB(vectors[i], vectors[j])
+
+# Mask the upper triangle
+mask = np.triu(np.ones_like(cov_matrix, dtype=bool))
+masked_cov_matrix = np.ma.masked_array(cov_matrix, mask=mask)
+
+plt.figure(figsize=(8, 6))
+
+# Plot the masked covariance matrix
+img = plt.imshow(masked_cov_matrix, cmap=custom_cmap, interpolation='nearest', vmin=30, vmax=150)
+cbar = plt.colorbar(label='Angle (°)')
+cbar.set_ticks([30, 90, 120])
+
+# Set axis labels on top and left
+# plt.gca().xaxis.tick_top()
+plt.xticks(ticks=np.arange(num_vectors), labels=labels)
+plt.yticks(ticks=np.arange(num_vectors), labels=labels)
+
+# Invert y-axis
+plt.gca().invert_yaxis()
+
+for i in range(num_vectors):
+    for j in range(i + 1):
+        plt.text(j, i, f'{cov_matrix[i, j]:.0f}', ha='center', va='center', color='black')
+
+plt.savefig('../figures/dual/cov_dpa_%d.svg' % seed, dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/5b025556bcf087ed6ba21e0c3b8c67c9e53cda3c.png]]
 
 #+begin_src ipython
 
@@ -1441,7 +1660,7 @@ print('labels', labels.shape)
 *** Run
 
 #+begin_src ipython
-batch_size = 32
+batch_size = 16
 train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
 #+end_src
 
@@ -1469,22 +1688,22 @@ print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 #+RESULTS:
 #+begin_example
 training DRT
-Epoch 1/15, Training Loss: 1.2986, Validation Loss: 0.0208, Angle(U, W) : 90.0 °
-Epoch 2/15, Training Loss: 0.0204, Validation Loss: 0.0135, Angle(U, W) : 90.0 °
-Epoch 3/15, Training Loss: 0.0128, Validation Loss: 0.0112, Angle(U, W) : 90.0 °
-Epoch 4/15, Training Loss: 0.0117, Validation Loss: 0.0107, Angle(U, W) : 90.0 °
-Epoch 5/15, Training Loss: 0.0109, Validation Loss: 0.0102, Angle(U, W) : 90.0 °
-Epoch 6/15, Training Loss: 0.0102, Validation Loss: 0.0098, Angle(U, W) : 90.0 °
-Epoch 7/15, Training Loss: 0.0098, Validation Loss: 0.0094, Angle(U, W) : 90.0 °
-Epoch 8/15, Training Loss: 0.0093, Validation Loss: 0.0089, Angle(U, W) : 90.0 °
-Epoch 9/15, Training Loss: 0.0089, Validation Loss: 0.0083, Angle(U, W) : 90.0 °
-Epoch 10/15, Training Loss: 0.0085, Validation Loss: 0.0082, Angle(U, W) : 90.0 °
-Epoch 11/15, Training Loss: 0.0082, Validation Loss: 0.0078, Angle(U, W) : 90.0 °
-Epoch 12/15, Training Loss: 0.0079, Validation Loss: 0.0076, Angle(U, W) : 90.0 °
-Epoch 13/15, Training Loss: 0.0077, Validation Loss: 0.0074, Angle(U, W) : 90.0 °
-Epoch 14/15, Training Loss: 0.0075, Validation Loss: 0.0072, Angle(U, W) : 90.0 °
-Epoch 15/15, Training Loss: 0.0075, Validation Loss: 0.0071, Angle(U, W) : 90.0 °
-Elapsed (with compilation) = 0h 6m 1s
+Epoch 1/15, Training Loss: 1.9879, Validation Loss: 0.0535, Angle(U, W) : 91.0 °
+Epoch 2/15, Training Loss: 0.0608, Validation Loss: 0.0492, Angle(U, W) : 91.0 °
+Epoch 3/15, Training Loss: 0.0492, Validation Loss: 0.0440, Angle(U, W) : 91.0 °
+Epoch 4/15, Training Loss: 0.0454, Validation Loss: 0.0401, Angle(U, W) : 91.0 °
+Epoch 5/15, Training Loss: 0.0425, Validation Loss: 0.0374, Angle(U, W) : 91.0 °
+Epoch 6/15, Training Loss: 0.0401, Validation Loss: 0.0352, Angle(U, W) : 91.0 °
+Epoch 7/15, Training Loss: 0.0366, Validation Loss: 0.0326, Angle(U, W) : 91.0 °
+Epoch 8/15, Training Loss: 0.0346, Validation Loss: 0.0306, Angle(U, W) : 91.0 °
+Epoch 9/15, Training Loss: 0.0323, Validation Loss: 0.0305, Angle(U, W) : 91.0 °
+Epoch 10/15, Training Loss: 0.0308, Validation Loss: 0.0272, Angle(U, W) : 91.0 °
+Epoch 11/15, Training Loss: 0.0300, Validation Loss: 0.0266, Angle(U, W) : 91.0 °
+Epoch 12/15, Training Loss: 0.0253, Validation Loss: 0.0238, Angle(U, W) : 91.0 °
+Epoch 13/15, Training Loss: 0.0252, Validation Loss: 0.0229, Angle(U, W) : 91.0 °
+Epoch 14/15, Training Loss: 0.0247, Validation Loss: 0.0305, Angle(U, W) : 91.0 °
+Epoch 15/15, Training Loss: 0.0238, Validation Loss: 0.0242, Angle(U, W) : 91.0 °
+Elapsed (with compilation) = 0h 11m 56s
 #+end_example
 
  #+begin_src ipython
@@ -1555,7 +1774,80 @@ plot_overlap(model.readout.cpu().detach().numpy(), labels=['Go', 'NoGo'], fignam
  #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/2b404b458b23a4129b7550599abfb6b089f9ee85.png]]
+[[./.ob-jupyter/a62522bd5b319e38006946a8692332a6d57526b2.png]]
+
+#+begin_src ipython
+U = model.low_rank.U.cpu().detach().numpy()
+V = model.low_rank.V.cpu().detach().numpy()
+
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+# ax[0].hist(U[:, 0], histtype='step', bins='auto')
+# ax[0].hist(U[:, 1], histtype='step', bins='auto')
+ax[0].hist(V[:, 0], histtype='step', bins='auto')
+ax[1].hist(V[:, 1], histtype='step', bins='auto')
+ax[0].set_xlabel('$ n_{AB} $')
+ax[1].set_xlabel('$ n_{GNG} $')
+
+ax[0].set_ylabel('Count')
+ax[1].set_ylabel('Count')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/029e687eea3fc70ead4a5ac0517955593824143b.png]]
+
+#+begin_src ipython
+U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
+V = model.low_rank.V.cpu().detach().numpy()[model.slices[0], 0]
+
+odors = model.odors.cpu().numpy()
+
+m = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 1]
+n = model.low_rank.V.cpu().detach().numpy()[model.slices[0], 1]
+
+vectors = [U, V, m, n]
+labels = ['$m_\\text{AB}$', '$n_\\text{AB}$', '$m_\\text{GnG}$', '$n_\\text{GnG}$']
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Calculate the covariance matrix
+num_vectors = len(vectors)
+cov_matrix = np.zeros((num_vectors, num_vectors))
+
+for i in range(num_vectors):
+    for j in range(num_vectors):
+        cov_matrix[i][j] = angle_AB(vectors[i], vectors[j])
+
+# Mask the upper triangle
+mask = np.triu(np.ones_like(cov_matrix, dtype=bool))
+masked_cov_matrix = np.ma.masked_array(cov_matrix, mask=mask)
+
+plt.figure(figsize=(8, 6))
+
+# Plot the masked covariance matrix
+img = plt.imshow(masked_cov_matrix, cmap=custom_cmap, interpolation='nearest', vmin=30, vmax=150)
+cbar = plt.colorbar(label='Angle (°)')
+cbar.set_ticks([30, 90, 120])
+
+# Set axis labels on top and left
+# plt.gca().xaxis.tick_top()
+plt.xticks(ticks=np.arange(num_vectors), labels=labels)
+plt.yticks(ticks=np.arange(num_vectors), labels=labels)
+
+# Invert y-axis
+plt.gca().invert_yaxis()
+
+for i in range(num_vectors):
+    for j in range(i + 1):
+        plt.text(j, i, f'{cov_matrix[i, j]:.0f}', ha='center', va='center', color='black')
+
+plt.savefig('../figures/dual/cov_drt_%d.svg' % seed, dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/c3d1ff7d2343fc4ed8488a4f2e95d2e22a2f41cc.png]]
 
 #+begin_src ipython
 
@@ -1575,7 +1867,7 @@ model.load_state_dict(model_state_dict)
 #+end_src
 
 #+RESULTS:
-: <All keys matched successfully>
+: ae66d664-1a44-49bb-9bc9-0349f868e327
 
 #+begin_src ipython
 steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
@@ -1600,10 +1892,7 @@ print('zero', zero_idx)
 #+end_src
 
 #+RESULTS:
-: rwd [70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90]
-: cue [50 51 52 53 54 55 56 57 58 59 60]
-: GnG [40 41 42 43 44 45 46 47 48 49 50]
-: zero [0 1 2 3 4 5 6 7 8 9]
+: 6a33572b-6037-4cb5-8ae0-a7c416bf6dc3
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
@@ -1656,17 +1945,14 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/dde04e6ce8b6d19bdc5121903096dcc81ea3a4a1.png]]
+: 9a811593-0434-471f-b73b-fb997973a49f
 
 #+begin_src ipython
 model.eval()
 #+end_src
 
 #+RESULTS:
-: Network(
-:   (low_rank): LowRankWeights()
-:   (dropout): Dropout(p=0.0, inplace=False)
-: )
+: cac2805d-b61e-48aa-a876-bb28f6ff5ffe
 
  #+begin_src ipython
 N_BATCH = 32
@@ -1714,7 +2000,7 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([384, 555, 1000]) labels torch.Size([384, 3, 21])
+: b170c961-a637-41ef-aa6b-8167a970aa85
 
 #+begin_src ipython
 rates = model.forward(ff_input=ff_input).detach()
@@ -1723,7 +2009,7 @@ print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (384, 91, 750)
+: f9510e59-ff11-45b6-aae4-216b8db8c6d7
 
 #+begin_src ipython
 def calculate_mean_accuracy_and_sem(accuracies):
@@ -1734,6 +2020,7 @@ def calculate_mean_accuracy_and_sem(accuracies):
 #+end_src
 
 #+RESULTS:
+: 9d4c05f0-78d0-414e-9a0c-4b9634512e3a
 
 #+begin_src ipython
 readout = model.readout.cpu().detach().numpy()
@@ -1741,7 +2028,7 @@ print(readout.shape)
 #+end_src
 
 #+RESULTS:
-: (384, 91, 2)
+: 6d387fc8-1678-428e-a460-68b6918b7aa5
 
 #+begin_src ipython
 y = labels[..., -1].T.cpu().numpy().copy()
@@ -1749,7 +2036,7 @@ plot_overlap_label(model.readout.cpu().detach().numpy(), y=y, axis=0, figname='s
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/6060b8efb2312f013faebc8f9fb4af7723f31803.png]]
+: ac0daf9d-04de-4aa7-9abc-24c880331302
 
 #+begin_src ipython
 y = labels[..., -1].T.cpu().numpy().copy()
@@ -1757,7 +2044,7 @@ plot_overlap_label(model.readout.cpu().detach().numpy(), y=y, axis=1, figname='g
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/d0296af85e29b66d50b4b51cba6953acdfbc80d9.png]]
+: 575130b6-da92-45ea-8013-34785cf25d37
 
 #+begin_src ipython
 y = labels[..., -1].T.cpu().numpy().copy()
@@ -1765,7 +2052,7 @@ plot_overlap_label(model.readout.cpu().detach().numpy(), y=y, axis=-1)
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/5fd8e070ef52b11456bb0b639583a81fc65809a7.png]]
+: a3704d10-1506-4ba6-8c32-138ca63c1977
 
 #+begin_src ipython
 criterion = DualPerf(alpha=1.0, thresh=1.0, cue_idx=cue_idx, rwd_idx=rwd_idx, zero_idx=zero_idx, imbalance=[0.0, 0.0], read_idx=[-1, 1])
@@ -1777,7 +2064,7 @@ print('perf', dpa_mean, drt_mean)
 #+end_src
 
 #+RESULTS:
-: perf tensor(0.8464, device='cuda:0') tensor(1., device='cuda:0')
+: fbde9e95-fbf5-4e91-9c2d-53c56471afd1
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[1.5*width, height], sharex=True)
@@ -1812,7 +2099,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/e6d9cf3e6daf86a0c926d0ab625554417b54bf95.png]]
+: 3eeddd39-ebb4-4874-a820-61aa5b064991
 
 
 #+begin_src ipython
@@ -1820,6 +2107,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
+: 4294a106-f602-41d2-b482-61d27d77f9c8
 
 ** Training
 
@@ -1829,6 +2117,7 @@ model.low_rank.lr_kappa.requires_grad = False
 #+end_src
 
   #+RESULTS:
+  : 42148fe0-85bb-4b7a-a1d0-b1d777068fd5
 
 #+begin_src ipython
 model.N_BATCH = 64
@@ -1874,16 +2163,15 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([768, 555, 1000]) labels torch.Size([768, 2, 21])
+: 388eaf31-ffe1-4837-a2c6-5905a89ead2c
 
 #+begin_src ipython
-batch_size = 32
+batch_size = 16
 train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
 #+end_src
 
 #+RESULTS:
-: torch.Size([614, 555, 1000]) torch.Size([154, 555, 1000])
-: torch.Size([614, 2, 21]) torch.Size([154, 2, 21])
+: e7652eee-1c27-4c89-8faa-04d5b2098c51
 
 #+begin_src ipython
 criterion = DualLoss(alpha=1.0, thresh=4.0, cue_idx=cue_idx, rwd_idx=rwd_idx, zero_idx=zero_idx, imbalance=[1.0, 0.0], read_idx=[-1, 1])
@@ -1892,6 +2180,7 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
 #+RESULTS:
+: e7fd9a0e-45aa-487e-9b4a-dcb1541466f6
 
 #+begin_src ipython
 print('training Dual')
@@ -1904,37 +2193,21 @@ print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 #+end_src
 
 #+RESULTS:
-#+begin_example
-training Dual
-Epoch 1/15, Training Loss: 2.3155, Validation Loss: 0.4363, Angle(U, W) : 86.0 °
-Epoch 2/15, Training Loss: 0.2287, Validation Loss: 0.0534, Angle(U, W) : 89.0 °
-Epoch 3/15, Training Loss: 0.0178, Validation Loss: 0.0120, Angle(U, W) : 89.0 °
-Epoch 4/15, Training Loss: 0.0123, Validation Loss: 0.0116, Angle(U, W) : 89.0 °
-Epoch 5/15, Training Loss: 0.0111, Validation Loss: 0.0108, Angle(U, W) : 89.0 °
-Epoch 6/15, Training Loss: 0.0105, Validation Loss: 0.0106, Angle(U, W) : 89.0 °
-Epoch 7/15, Training Loss: 0.0103, Validation Loss: 0.0103, Angle(U, W) : 89.0 °
-Epoch 8/15, Training Loss: 0.0099, Validation Loss: 0.0102, Angle(U, W) : 89.0 °
-Epoch 9/15, Training Loss: 0.0096, Validation Loss: 0.0099, Angle(U, W) : 89.0 °
-Epoch 10/15, Training Loss: 0.0096, Validation Loss: 0.0097, Angle(U, W) : 89.0 °
-Epoch 11/15, Training Loss: 0.0093, Validation Loss: 0.0094, Angle(U, W) : 89.0 °
-Epoch 12/15, Training Loss: 0.0091, Validation Loss: 0.0093, Angle(U, W) : 89.0 °
-Epoch 13/15, Training Loss: 0.0090, Validation Loss: 0.0090, Angle(U, W) : 89.0 °
-Epoch 14/15, Training Loss: 0.0088, Validation Loss: 0.0090, Angle(U, W) : 89.0 °
-Epoch 15/15, Training Loss: 0.0086, Validation Loss: 0.0090, Angle(U, W) : 89.0 °
-Elapsed (with compilation) = 0h 4m 39s
-#+end_example
+: 299adc27-b0b7-440c-b91e-49e970a6dafd
 
 #+begin_src ipython
 torch.save(model.state_dict(), '../models/dual/dual_train_%d.pth' % seed)
 #+end_src
 
 #+RESULTS:
+: 3708b2ea-9e9c-4e50-bd0c-b862ec3cde52
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
+: a14a26ca-2188-4467-8147-51b551eea090
 
 ** Re-Testing
 :PROPERTIES:
@@ -1947,7 +2220,7 @@ model.load_state_dict(model_state_dict)
 #+end_src
 
 #+RESULTS:
-: <All keys matched successfully>
+: 99c9ff70-8a3d-4671-84ca-f7937a497cba
 
 #+begin_src ipython
 steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
@@ -1972,10 +2245,7 @@ print('zero', zero_idx)
 #+end_src
 
 #+RESULTS:
-: rwd [70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90]
-: cue [50 51 52 53 54 55 56 57 58 59 60]
-: GnG [40 41 42 43 44 45 46 47 48 49 50]
-: zero [0 1 2 3 4 5 6 7 8 9]
+: d4dc6a59-52bd-433b-be1a-32b12041d13e
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
@@ -2027,17 +2297,14 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/3d4f6adaf22322fa6d6608b47ecb751ca5e01e26.png]]
+: 03eaa6b6-7134-4659-b12e-91748fe3c9f6
 
 #+begin_src ipython
 model.eval()
 #+end_src
 
 #+RESULTS:
-: Network(
-:   (low_rank): LowRankWeights()
-:   (dropout): Dropout(p=0.0, inplace=False)
-: )
+: 828524d0-605e-4b3d-af4e-10c818be2eb0
 
 #+begin_src ipython
 N_BATCH = 32
@@ -2086,7 +2353,7 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([384, 555, 1000]) labels torch.Size([384, 3, 21])
+: 13c2f8ee-9992-4d7c-8d68-339c47446d3b
 
 #+begin_src ipython
 rates = model.forward(ff_input=ff_input).detach()
@@ -2095,14 +2362,14 @@ print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (384, 91, 750)
+: 5ff9701c-5e10-4cf9-a283-82a2551502f2
 
 #+begin_src ipython
 print(labels.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([384, 3, 21])
+: 9753aa7b-770c-4a25-975a-083407f9192c
 
 #+begin_src ipython
 criterion = DualPerf(alpha=1.0, thresh=1.0, cue_idx=cue_idx, rwd_idx=rwd_idx, zero_idx=zero_idx, imbalance=[0.0, 0.0], read_idx=[-1, -1])
@@ -2113,7 +2380,7 @@ print('perf', dpa_mean2, drt_mean2)
 #+end_src
 
 #+RESULTS:
-: perf tensor(1., device='cuda:0') tensor(1., device='cuda:0')
+: 733e4774-d08b-4a76-b105-21bf5fe208d8
 
 #+RESULTS:
 :RESULTS:
@@ -2139,7 +2406,7 @@ plot_overlap_label(model.readout.cpu().detach().numpy(), y=y, axis=0, figname='s
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/5e3f3f143f072f7596d1a72844d9fd6cfa13f423.png]]
+: 96456167-e565-4adf-8bd8-3479675428d8
 
 #+begin_src ipython
 y = labels[..., -1].T.cpu().numpy().copy()
@@ -2147,7 +2414,7 @@ plot_overlap_label(model.readout.cpu().detach().numpy(), y=y, axis=1, figname='g
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/f0f4fb2c5395002b31ed663a805c1feac8239c43.png]]
+: 45d1ab2b-a0b6-4857-beb1-c8452611488c
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[1.5*width, height], sharex=True)
@@ -2182,7 +2449,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/5dac51d863013071c3ae2ba57cfe0b72be543f41.png]]
+: 063ae2bd-680f-4033-8c78-952189edc0d1
 
 
 #+begin_src ipython
@@ -2203,7 +2470,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/28fb524497f91303c301d882dfb7b1deaef602e9.png]]
+: e25c5421-d5e0-4ca9-a2e5-4f5780f655cb
 
 #+begin_src ipython
 plt.scatter(V[:, 0], V[:, 1])
@@ -2213,20 +2480,14 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/68e15c5573308a5ea968f5beaf67b59382df2112.png]]
-
-#+begin_src ipython
-model.readout.shape
-#+end_src
-
-#+RESULTS:
-: torch.Size([384, 91, 2])
+: 9e9bd8a2-4659-41e6-b181-919de00a947d
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
+: aaf926c6-7ce4-4d02-8396-e86883ca7d24
 
 * Fix
 
@@ -2243,6 +2504,7 @@ def get_fix_points(model, task, seed, test=0):
 #+end_src
 
 #+RESULTS:
+: 962f7360-39bc-49e5-8fb5-441ba1b18bbb
 
 #+begin_src ipython
 def get_input(model, test=0):
@@ -2270,6 +2532,7 @@ def get_input(model, test=0):
 #+end_src
 
 #+RESULTS:
+: 18f21450-e25d-42d6-b30d-546929dcc1c0
 
 #+begin_src ipython
 dpa = get_fix_points(model, 'dpa', seed)
@@ -2278,12 +2541,7 @@ dual_train = get_fix_points(model, 'dual_train', seed)
 #+end_src
 
 #+RESULTS:
-: (20, 91, 750)
-: ksi torch.Size([4, 750])
-: (20, 91, 750)
-: ksi torch.Size([4, 750])
-: (20, 91, 750)
-: ksi torch.Size([4, 750])
+: 418a02a4-6e89-498c-baf5-62a861205324
 
 #+begin_src ipython
 dpa_C = get_fix_points(model, 'dpa', seed, test=1)
@@ -2292,12 +2550,7 @@ dual_train_C = get_fix_points(model, 'dual_train', seed, test=1)
 #+end_src
 
 #+RESULTS:
-: (20, 91, 750)
-: ksi torch.Size([4, 750])
-: (20, 91, 750)
-: ksi torch.Size([4, 750])
-: (20, 91, 750)
-: ksi torch.Size([4, 750])
+: 52ec12a7-b214-4a3f-93e4-7e54b9ce60cd
 
 #+begin_src ipython
 dpa_D = get_fix_points(model, 'dpa', seed, test=-1)
@@ -2306,12 +2559,7 @@ dual_train_D = get_fix_points(model, 'dual_train', seed, test=-1)
 #+end_src
 
 #+RESULTS:
-: (20, 91, 750)
-: ksi torch.Size([4, 750])
-: (20, 91, 750)
-: ksi torch.Size([4, 750])
-: (20, 91, 750)
-: ksi torch.Size([4, 750])
+: 46f52b8e-ae6e-4d30-b386-4b8344f678c1
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[3*height, height])
@@ -2331,7 +2579,7 @@ plt.savefig('../figures/dual/fixed_points_%d.svg' % seed, dpi=300)
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/27c68795c34e3635f6845a52079539f35e663539.png]]
+: daf13004-f572-4883-bcd9-8ce54837b92a
 
 #+begin_src ipython
 rates = np.stack((dpa, dual_naive, dual_train))
@@ -2339,34 +2587,7 @@ pkl_save(rates, './models/dual/rates_%d' % seed)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: saving to ././models/dual/rates_0.pkl
-# [goto error]
-#+begin_example
----------------------------------------------------------------------------
-FileNotFoundError                         Traceback (most recent call last)
-Cell In[125], line 3
-      1 B0="1.0"
-      2 rates = np.stack((dpa, dual_naive, dual_train))
-----> 3 pkl_save(rates, './models/dual/rates_%d' % seed)
-
-Cell In[21], line 8, in pkl_save(obj, name, path)
-      6 destination = path + "/" + name + ".pkl"
-      7 print("saving to", destination)
-----> 8 pkl.dump(obj, open(destination, "wb"))
-
-File ~/mambaforge/envs/torch/lib/python3.10/site-packages/IPython/core/interactiveshell.py:286, in _modified_open(file, *args, **kwargs)
-    279 if file in {0, 1, 2}:
-    280     raise ValueError(
-    281         f"IPython won't let you open fd={file} by default "
-    282         "as it is likely to crash IPython. If you know what you are doing, "
-    283         "you can use builtins' open."
-    284     )
---> 286 return io_open(file, *args, **kwargs)
-
-FileNotFoundError: [Errno 2] No such file or directory: '././models/dual/rates_0.pkl'
-#+end_example
-:END:
+: 40e5c24b-3436-4b03-82b5-6dd118a02657
 
 #+begin_src ipython
 model.DURATION = 8
@@ -2374,12 +2595,11 @@ model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
 #+end_src
 
 #+RESULTS:
-
-
-
+: 568ba56c-6e8f-4b19-a79a-b89943124aee
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
+: 433d04b1-3c32-4d41-9db0-8f966fe42df3

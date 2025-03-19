@@ -91,6 +91,9 @@ def get_grid_inputs(model):
     vec1 = model.low_rank.U.T[0]
     vec2 = model.low_rank.U.T[1]
 
+    # vec1 = model.odors[0]
+    # vec2 = model.odors[1]
+
     # vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
 
     vec1 = vec1 / torch.linalg.norm(vec1)
@@ -101,7 +104,6 @@ def get_grid_inputs(model):
     for i in range(grid_size):
         for j in range(grid_size):
             point = model.I0[model.GRID_INPUT] * (X[i, j] * vec1 + Y[i, j] * vec2)
-            # point = (X[i, j] * vec1 + Y[i, j] * vec2)
             grid_inputs.append(point)
 
     return grid_inputs
@@ -149,13 +151,15 @@ def init_ff_seq(model):
                     theta = get_theta(model.PHI0[0], model.PHI0[2]).unsqueeze(0)
 
         for i, _ in enumerate(model.N_STIM_ON):
-            if ("flow" in model.TASK) and (i==model.GRID_INPUT):
-                print('grid input')
-                stimulus = torch.stack(grid_inputs)
-                stimulus = stimulus.unsqueeze(1)
-                # stimulus += Stimulus(model.I0[0], model.SIGMA0[0], model.odors[0])
-                # else:
-                #     stimulus = 0
+            if ("flow" in model.TASK):
+                if (i==model.GRID_INPUT):
+                    print('grid input')
+                    stimulus = torch.stack(grid_inputs)
+                    stimulus = stimulus.unsqueeze(1)
+                elif model.GRID_TEST is not None:
+                    stimulus = Stimulus((-1)**(model.GRID_TEST) * model.I0[i], model.SIGMA0[0], model.odors[model.GRID_TEST])
+                else:
+                    stimulus = 0
 
             elif "rand" in model.TASK:
                 Stimulus.task = "odr"

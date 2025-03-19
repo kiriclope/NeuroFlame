@@ -64,6 +64,7 @@ class Network(nn.Module):
                 self.LR_FIX_READ,
                 self.LR_MASK,
                 self.LR_CLASS,
+                self.LR_GAUSS,
                 self.device,
             )
 
@@ -310,15 +311,22 @@ class Network(nn.Module):
 
                 if self.LR_TRAIN:
                     if self.LR_TYPE == 'full':
-                        W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]]
+                        W_stp_T = self.GAIN * (1.0 / self.Na[0] + self.Wab_train[self.slices[0], self.slices[0]])
                     elif self.LR_TYPE == 'sparse':
                         W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
                     elif self.LR_TYPE == 'rand_full':
                         W_stp_T = self.GAIN * (self.W_stp_T / torch.sqrt(self.Ka[0])
                                                + self.Wab_train[self.slices[0], self.slices[0]])
                     elif self.LR_TYPE == 'rand_sparse':
-                        W_stp_T = self.GAIN * self.W_stp_T * (1.0 / torch.sqrt(self.Ka[0])
-                                                              + self.Wab_train[self.slices[0], self.slices[0]])
+                        Wij = 1.0 + self.Wab_train[self.slices[0], self.slices[0]] / torch.sqrt(self.Ka[0])
+
+                        # Wij_p = clamp_tensor(Wij, 0, self.slices)
+                        # W_stp_T = self.GAIN * (self.W_stp_T * Wij_p) / torch.sqrt(self.Ka[0])
+
+                        # W_stp_T = self.GAIN * (self.W_stp_T * Wij_p + (1.0 - self.W_stp_T) * Wij_p) / torch.sqrt(self.Ka[0])
+
+                        Wij_p = torch.rand(self.Na[0], self.Na[0], device=self.device) <= ((self.Ka[0] / self.Na[0]) * Wij).clamp_(min=0, max=1)
+                        W_stp_T = self.GAIN * Wij_p / torch.sqrt(self.Ka[0])
 
             if self.TRAIN_EI:
                 Wab_train = normalize_tensor(self.Wab_train, 0, self.slices, self.Na)
@@ -326,7 +334,7 @@ class Network(nn.Module):
                 Wab_T = self.GAIN * (self.Wab_T + self.train_mask * Wab_train)
 
             if self.CLAMP:
-                if self.IF_STP:
+                if self.IF_STP and (self.LR_TYPE!='rand_sparse'):
                     W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
                 if self.TRAIN_EI:
                     # Check indices Think need some transpose

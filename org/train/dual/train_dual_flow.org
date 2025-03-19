@@ -61,6 +61,34 @@ from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
 
+#+begin_src ipython :tangle ../src/torch/utils.py
+import pickle as pkl
+
+def pkl_save(obj, name, path="."):
+      pkl.dump(obj, open(path + "/" + name + ".pkl", "wb"))
+
+
+def pkl_load(name, path="."):
+      return pkl.load(open(path + "/" + name + '.pkl', "rb"))
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def add_vlines(model, ax=None):
+
+    if ax is None:
+        for i in range(len(model.T_STIM_ON)):
+            plt.axvspan(model.T_STIM_ON[i], model.T_STIM_OFF[i], alpha=0.25)
+    else:
+        for i in range(len(model.T_STIM_ON)):
+            ax.axvspan(model.T_STIM_ON[i], model.T_STIM_OFF[i], alpha=0.25)
+
+#+end_src
+
+#+RESULTS:
+
 * Model
 
 #+begin_src ipython
@@ -72,12 +100,12 @@ seed = np.random.randint(0, 1e6)
 # seed = 971646 # full lr
 # seed = 295741 # not bad
 seed= 332246 # china
-seed = 0
+seed = 3
 print(seed)
 #+end_src
 
 #+RESULTS:
-: 0
+: 3
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1)
@@ -102,18 +130,18 @@ print(model.DURATION)
 #+end_src
 
 #+RESULTS:
-: 10.0
+: 30.0
 
 #+begin_src ipython
-model.LR_TYPE = 'full'
+model.LR_TYPE = 'rand_sparse'
 
 model.GRID_SIZE = 15
 model.GRID_RANGE = 20.0
-model.GRID_TEST = 0
+model.GRID_TEST = None
 model.GRID_INPUT = 0
 
 model.N_BATCH = int(model.GRID_SIZE * model.GRID_SIZE)
-window = int((model.N_STIM_OFF[model.GRID_INPUT] - model.N_STEADY) / model.N_WINDOW) + 1
+window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) +1
 
 ff_input = model.init_ff_input()
 print(ff_input.shape, model.N_BATCH)
@@ -121,7 +149,7 @@ print(ff_input.shape, model.N_BATCH)
 
 #+RESULTS:
 : grid input
-: torch.Size([225, 605, 1000]) 225
+: torch.Size([225, 1605, 1000]) 225
 
 #+begin_src ipython
 vec1 = model.low_rank.U.T[0]
@@ -151,62 +179,38 @@ overlaps = model.rec_input[0, :, :] @ vec.T
 ff_overlaps = ff_input[..., model.N_STEADY: , model.slices[0]] @ vec.T
 ff_overlaps = ff_overlaps[:, ::10]
 
-# overlaps = rates[:, window:] @ vec.T / model.Na[0]
+# overlaps = rates @ vec.T / model.Na[0]
+
 print(overlaps.shape, ff_overlaps.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([225, 101, 2]) torch.Size([225, 51, 2])
+: torch.Size([225, 301, 2]) torch.Size([225, 151, 2])
 
 #+begin_src ipython
+palette = sns.color_palette('husl', model.GRID_SIZE**2)
+
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
-for i in range(model.GRID_SIZE**2):
-        ax[0].plot(ff_overlaps[i, :, 0].cpu().detach().numpy())
-        ax[1].plot(overlaps[i, :, 0].cpu().detach().numpy())
-
-ax[0].set_ylabel('$\\eta_{AB}$')
-ax[1].set_ylabel('$\kappa_{AB}$')
-
-ax[0].set_xlabel('Step')
-ax[1].set_xlabel('Step')
-
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./.ob-jupyter/fa45d591b72333fb418aa86c56f7e629c90934cc.png]]
-
-#+begin_src ipython
-fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+xtime = np.linspace(0, model.DURATION, overlaps.shape[1])
 
 for i in range(model.GRID_SIZE**2):
-        ax[0].plot(ff_overlaps[i, :, 1].cpu().detach().numpy())
-        ax[1].plot(overlaps[i, :, 1].cpu().detach().numpy())
+        ax[0].plot(xtime, overlaps[i, :, 0].cpu().detach().numpy(), color=palette[i])
+        ax[1].plot(xtime, overlaps[i, :, 1].cpu().detach().numpy(), color=palette[i])
 
-ax[0].set_ylabel('$\\eta_{GnG}$')
+ax[0].set_ylabel('$\\kappa_{AB}$')
 ax[1].set_ylabel('$\kappa_{GnG}$')
 
-ax[0].set_xlabel('Step')
-ax[1].set_xlabel('Step')
+ax[0].set_xlabel('Time (s)')
+ax[1].set_xlabel('Time (s)')
+# add_vlines(model, ax[0])
+# add_vlines(model, ax[1])
 
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/13ff03114ce993fef8c22bd8338fae3512f7919c.png]]
-
-#+begin_src ipython
-for i in range(model.GRID_SIZE**2):
-    plt.plot(overlaps[i, window:, 0].cpu().detach().numpy(), overlaps[i, window: , 1].cpu().detach().numpy())
-
-plt.xlabel('$\\kappa_{AB}$')
-plt.ylabel('$\\kappa_{GNG}$')
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./.ob-jupyter/454f5ac5c5abec0a7c43282ab3b392aad3b3f28b.png]]
+[[./.ob-jupyter/657b9b587b5428c8067669f941dcd0f74bc21576.png]]
 
 #+begin_src ipython
 x = overlaps[:, window:, 0].cpu().detach().numpy()
@@ -216,18 +220,71 @@ dx = np.gradient(x, axis=1)
 dy = np.gradient(y, axis=1)
 
 flow_magnitude = np.sqrt(dx**2 + dy**2)
-print(flow_magnitude.shape)
 #+end_src
 
 #+RESULTS:
-: (225, 80)
 
 #+begin_src ipython
-fig, ax = plt.subplots(figsize=[1.5*width, 1.5*height])
+from sklearn.cluster import KMeans
+kmeans = KMeans(n_clusters=10, random_state=42)
+
+x_fp = x[:, -1]
+y_fp = y[:, -1]
+fp = np.stack((x_fp, y_fp)).T
+
+print(fp.shape)
+kmeans.fit(fp)
+center = np.array(kmeans.cluster_centers_)
+
+if model.GRID_TEST is None:
+    pkl_save(center, 'center_%s' % task, path="/home/leon/")
+else:
+    center_ = pkl_load('center_%s' % task, path="/home/leon/")
+#+end_src
+
+#+RESULTS:
+: (225, 2)
+
+#+begin_src ipython
+fig, ax = plt.subplots(figsize=[width, width])
+
+for i in range(model.GRID_SIZE**2):
+    ax.plot(overlaps[i, window:, 0].cpu().detach().numpy(), overlaps[i, window: , 1].cpu().detach().numpy(), color=palette[i])
+
+for i in range(center.shape[0]):
+    ax.plot(center[i][0], center[i][1], 'o', color='k', ms=10)
+    if model.GRID_TEST is not None:
+        ax.plot(center_[i][0], center_[i][1], 'o', color='b', ms=10)
+
+# ax.set_aspect('equal')
+# plt.plot(x_fp, y_fp, 'ko')
+ax.set_xlabel('$\\kappa_{AB}$')
+ax.set_ylabel('$\\kappa_{GNG}$')
+
+if model.GRID_TEST==4:
+    plt.savefig('../figures/flow/traject_%s_test_C_%d.png' % (task, seed), dpi=300)
+elif model.GRID_TEST==9:
+    plt.savefig('../figures/flow/traject_%s_test_D_%d.png' % (task, seed), dpi=300)
+elif model.GRID_TEST==2:
+    plt.savefig('../figures/flow/traject_%s_go_%d.png' % (task, seed), dpi=300)
+elif model.GRID_TEST==-2:
+    plt.savefig('../figures/flow/traject_%s_nogo_%d.png' % (task, seed), dpi=300)
+else:
+    plt.savefig('../figures/flow/traject_%s_%d.png' % (task, seed), dpi=300)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/84cbe08f1ec302f435434630ba2e85fbe738fb3b.png]]
+
+#+begin_src ipython
+fig, ax = plt.subplots(figsize=[width, width])
 
 # plt.scatter(x, y, c=flow_magnitude, cmap='jet', label='Flow Magnitude')
-plt.quiver(x[::2, ::2], y[::2, ::2], dx[::2, ::2], dy[::2, ::2], color='k', angles='xy', scale_units='xy', scale=1, label='Flow field')
-# ax.quiver(x, y, dx, dy, color='k', angles='xy', scale_units='xy', scale=1, pivot='tip')
+plt.quiver(x[::2, ::2], y[::2, ::2], dx[::2, ::2], dy[::2, ::2], angles='xy', scale_units='xy', scale=1, color=palette)
+# ax.quiver(x, y, dx, dy, angles='xy', scale_units='xy', scale=1)
+# ax.set_aspect('equal')
 
 # plt.colorbar()
 # plt.clim([0, 1.5])
@@ -235,9 +292,9 @@ plt.quiver(x[::2, ::2], y[::2, ::2], dx[::2, ::2], dy[::2, ::2], color='k', angl
 plt.xlabel('$\\kappa_{AB}$')
 plt.ylabel('$\\kappa_{GNG}$')
 
-if model.GRID_TEST==1:
+if model.GRID_TEST==4:
     plt.savefig('../figures/flow/flow_%s_test_C_%d.png' % (task, seed), dpi=300)
-elif model.GRID_TEST==-1:
+elif model.GRID_TEST==9:
     plt.savefig('../figures/flow/flow_%s_test_D_%d.png' % (task, seed), dpi=300)
 elif model.GRID_TEST==2:
     plt.savefig('../figures/flow/flow_%s_go_%d.png' % (task, seed), dpi=300)
@@ -250,7 +307,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/64439e0ec9c46c8fbea664b67c01a94d4a0bc1d7.png]]
+[[./.ob-jupyter/13acf0cbc5de0735fc89f6902430c7c64cc8e6e3.png]]
 
    #+begin_src ipython
 # Assuming `x` and `y` are the positions of trajectories
@@ -282,17 +339,30 @@ vi = griddata(points, dy_flat, (xi, yi), method='cubic', fill_value=0)
 
    #+begin_src ipython
 import matplotlib as mpl
-fig, ax = plt.subplots(figsize=[1.5*width, 1.5*height])
+fig, ax = plt.subplots(figsize=[1.2*width, width])
 
 speed = np.sqrt(ui**2+vi**2)
 print(speed.shape)
 # speed /= speed.max()
-norm = mpl.colors.Normalize(vmin=0, vmax=0.5, clip=False)
+
+norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=False)
 
 strm = ax.streamplot(xi, yi, ui, vi, density=1.5, arrowsize=1.5, color=speed, cmap='jet', norm=norm)
 fig.colorbar(strm.lines)
+# ax.set_aspect('equal')
 plt.xlabel('$\\kappa_{AB}$')
 plt.ylabel('$\\kappa_{GNG}$')
+
+if model.GRID_TEST==4:
+    plt.savefig('../figures/flow/field_%s_test_C_%d.png' % (task, seed), dpi=300)
+elif model.GRID_TEST==9:
+    plt.savefig('../figures/flow/field_%s_test_D_%d.png' % (task, seed), dpi=300)
+elif model.GRID_TEST==2:
+    plt.savefig('../figures/flow/field_%s_go_%d.png' % (task, seed), dpi=300)
+elif model.GRID_TEST==-2:
+    plt.savefig('../figures/flow/field_%s_nogo_%d.png' % (task, seed), dpi=300)
+else:
+    plt.savefig('../figures/flow/field_%s_%d.png' % (task, seed), dpi=300)
 
 plt.show()
    #+end_src
@@ -300,7 +370,7 @@ plt.show()
 #+RESULTS:
 :RESULTS:
 : (200, 200)
-[[./.ob-jupyter/0801fa46855ddd98141071470bf664653562a4ba.png]]
+[[./.ob-jupyter/8f97d49b8a1e412a01708f1824a1f3754d671dc5.png]]
 :END:
 
 #+begin_src ipython

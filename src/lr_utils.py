@@ -62,6 +62,7 @@ class LowRankWeights(nn.Module):
         LR_FIX_READ=0,
         LR_MASK=0,
         LR_CLASS=1,
+        LR_GAUSS=0,
         DEVICE="cuda",
     ):
         super().__init__()
@@ -77,30 +78,33 @@ class LowRankWeights(nn.Module):
         self.LR_CLASS = LR_CLASS
 
         self.LR_MASK = LR_MASK
+        self.LR_GAUSS = LR_GAUSS
 
         self.Na = Na
         self.device = DEVICE
 
-        self.V = nn.Parameter(
-            torch.randn((self.N_NEURON, int(self.RANK)), device=self.device)
-        )
+        if self.LR_GAUSS==0:
 
-        if self.LR_MN:
-            self.U = nn.Parameter(
-                torch.randn((self.N_NEURON, int(self.RANK)), device=self.device)
+            self.V = nn.Parameter(
+                torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * .001
             )
 
-            with torch.no_grad():
-                self.U.copy_(self.V)
-        else:
-            self.U = (
-                torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * 0.001
-            )
+            if self.LR_MN:
+                self.U = nn.Parameter(
+                    torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * .001
+                )
+
+                with torch.no_grad():
+                    self.U.copy_(self.V)
+            else:
+                self.U = (
+                    torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * .001
+                )
 
         if self.LR_KAPPA == 1:
             self.lr_kappa = nn.Parameter(torch.rand(1, device=self.device))
         else:
-            self.lr_kappa = torch.tensor(1.0, device=self.device)
+            self.lr_kappa = torch.tensor(5.0, device=self.device)
 
 
         # Mask to train excitatory neurons only
@@ -131,6 +135,12 @@ class LowRankWeights(nn.Module):
                 if self.LR_BIAS:
                     init.normal_(self.linear.bias, mean=0.0, std=1.0)
 
+        if self.LR_GAUSS:
+            self.mu_M = nn.Parameter(torch.randn(1, self.RANK, device=self.device) * 0.01)
+            self.log_sigma_M = nn.Parameter(torch.randn(1, self.RANK, device=self.device) * 0.1 - 1.0)
+            self.mu_N = nn.Parameter(torch.randn(1, self.RANK, device=self.device) * 0.01)
+            self.log_sigma_N = nn.Parameter(torch.randn(1, self.RANK, device=self.device) * 0.1 - 1.0)
+
 
     def forward(self, LR_NORM=0, LR_CLAMP=0):
         # if LR_NORM:
@@ -138,13 +148,21 @@ class LowRankWeights(nn.Module):
         #         masked_normalize(self.U) @ masked_normalize(self.V).T
         #     )
 
+        if self.LR_GAUSS:
+            epsilon_M = torch.randn((self.Na[0], self.RANK), device=self.device)
+            epsilon_N = torch.randn((self.Na[0], self.RANK), device=self.device)
+
+            # Reparameterize to get M and N
+            self.U = self.mu_M + torch.exp(self.log_sigma_M) * epsilon_M
+            self.V = self.mu_N + torch.exp(self.log_sigma_N) * epsilon_N
+
         if self.LR_MN:
             self.lr = self.lr_kappa * (self.U @ self.V.T)
         else:
             self.lr = self.lr_kappa * (self.V @ self.V.T)
 
         # self.lr = self.lr_mask * self.lr
-        if LR_NORM:
+        if LR_NORM==1:
             self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
 
         if LR_CLAMP:
