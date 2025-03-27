@@ -311,7 +311,8 @@ class Network(nn.Module):
 
                 if self.LR_TRAIN:
                     if self.LR_TYPE == 'full':
-                        W_stp_T = self.GAIN * (1.0 / self.Na[0] + self.Wab_train[self.slices[0], self.slices[0]])
+                        # W_stp_T = self.GAIN * (self.Wab_train[self.slices[0], self.slices[0]])
+                        W_stp_T = self.GAIN * (torch.sqrt(self.Ka[0]) / self.Na[0] + self.Wab_train[self.slices[0], self.slices[0]])
                     elif self.LR_TYPE == 'sparse':
                         W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
                     elif self.LR_TYPE == 'rand_full':
@@ -319,13 +320,10 @@ class Network(nn.Module):
                                                + self.Wab_train[self.slices[0], self.slices[0]])
                     elif self.LR_TYPE == 'rand_sparse':
                         Wij = 1.0 + self.Wab_train[self.slices[0], self.slices[0]] / torch.sqrt(self.Ka[0])
-
-                        # Wij_p = clamp_tensor(Wij, 0, self.slices)
+                        Wij_p = clamp_tensor(Wij, 0, self.slices)
                         # W_stp_T = self.GAIN * (self.W_stp_T * Wij_p) / torch.sqrt(self.Ka[0])
-
                         # W_stp_T = self.GAIN * (self.W_stp_T * Wij_p + (1.0 - self.W_stp_T) * Wij_p) / torch.sqrt(self.Ka[0])
-
-                        Wij_p = torch.rand(self.Na[0], self.Na[0], device=self.device) <= ((self.Ka[0] / self.Na[0]) * Wij).clamp_(min=0, max=1)
+                        # Wij_p = torch.rand(self.Na[0], self.Na[0], device=self.device) <= ((self.Ka[0] / self.Na[0]) * Wij).clamp_(min=0, max=1)
                         W_stp_T = self.GAIN * Wij_p / torch.sqrt(self.Ka[0])
 
             if self.TRAIN_EI:

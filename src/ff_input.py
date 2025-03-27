@@ -88,16 +88,13 @@ def get_grid_inputs(model):
     y = torch.linspace(-n_range, n_range, grid_size)
     X, Y = torch.meshgrid(x, y, indexing='ij')
 
-    vec1 = model.low_rank.U.T[0]
-    vec2 = model.low_rank.U.T[1]
+    vec1 = model.low_rank.V.T[0]
+    vec2 = model.low_rank.V.T[1]
 
-    # vec1 = model.odors[0]
-    # vec2 = model.odors[1]
+    vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
 
-    # vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
-
-    vec1 = vec1 / torch.linalg.norm(vec1)
-    vec2 = vec2 / torch.linalg.norm(vec2)
+    # vec1 = vec1 / torch.linalg.norm(vec1)
+    # vec2 = vec2 / torch.linalg.norm(vec2)
 
     # Prepare grid inputs
     grid_inputs = []
@@ -157,7 +154,10 @@ def init_ff_seq(model):
                     stimulus = torch.stack(grid_inputs)
                     stimulus = stimulus.unsqueeze(1)
                 elif model.GRID_TEST is not None:
-                    stimulus = Stimulus((-1)**(model.GRID_TEST) * model.I0[i], model.SIGMA0[0], model.odors[model.GRID_TEST])
+                    if model.GRID_TEST in (1, 6):
+                        stimulus = Stimulus((-1)**(model.GRID_TEST+1) * model.I0[i], model.SIGMA0[0], model.odors[model.GRID_TEST])
+                    else:
+                        stimulus = Stimulus((-1)**(model.GRID_TEST) * model.I0[i], model.SIGMA0[0], model.odors[model.GRID_TEST])
                 else:
                     stimulus = 0
 

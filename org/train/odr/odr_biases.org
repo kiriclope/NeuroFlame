@@ -8,6 +8,8 @@
 #+TITLE: Biased ODR
 #+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_sb :kernel torch :exports results :output-dir ./figures/odr_sb :file (lc/org-babel-tangle-figure-filename)
 
+Run tuning dist to ref with thresholds to get repuslion. Check delay.
+
 * Notebook Settings
 
 #+begin_src ipython
@@ -204,7 +206,7 @@ def continuous_bimodal_phases(N_BATCH, preferred_angle, sigma):
 #+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "test_odr_EI.yml"
-DEVICE = 'cuda:1'
+DEVICE = 'cuda:0'
 seed = np.random.randint(0, 1e6)
 
 seed = 1
@@ -233,7 +235,7 @@ else:
 : reference 90 sigma 90
 
 #+begin_src ipython
-N_BATCH = 128*6
+N_BATCH = 128*5
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1)
 #+end_src
 
@@ -283,13 +285,14 @@ sigma_0 = 1.0 #  sigma * torch.pi / 180.0
 period = 2.0 * torch.pi
 
 thresh = 2.0 * periodic_gaussian(theta, theta_0, sigma_0, period)
-# plt.plot(thresh.cpu())
-# plt.show()
+plt.plot(thresh.cpu())
+plt.show()
 
-# model.thresh[0, model.slices[0]] = thresh
+model.thresh[0, model.slices[0]] = thresh
 #+end_src
 
 #+RESULTS:
+[[./figures/odr_sb/figure_14.png]]
 
 #+begin_src ipython
 if IF_BIASED_PHASES:
@@ -338,9 +341,9 @@ m0, m1, phase = decode_bump_torch(ff_input[..., model.slices[0]], axis=-1)
 #+end_src
 
 #+RESULTS:
-: torch.Size([1, 750]) torch.Size([768, 1])
-: torch.Size([1, 750]) torch.Size([768, 1])
-: torch.Size([1, 750]) torch.Size([768, 1])
+: torch.Size([1, 750]) torch.Size([640, 1])
+: torch.Size([1, 750]) torch.Size([640, 1])
+: torch.Size([1, 750]) torch.Size([640, 1])
 
 #+begin_src ipython
 print(reference, model.PHI0[1, 0, 0].item() * 180 / torch.pi, phase[1, model.N_STIM_ON[0]].item() * 180 / torch.pi)
@@ -350,7 +353,7 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: 90 5.351495049613657 5.19818590416402
+: 90 129.17046120577345 128.6073121087059
 [[./figures/odr_sb/figure_17.png]]
 :END:
 
@@ -367,7 +370,7 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: tensor(147.2113)
+: tensor(15.0925)
 [[./figures/odr_sb/figure_18.png]]
 :END:
 
@@ -417,7 +420,7 @@ print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rates (768, 91, 750)
+: rates (640, 91, 750)
 
 #+begin_src ipython
 m0, m1, phi = decode_bump(rates, axis=-1)
@@ -454,7 +457,7 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: tensor(116.7579)
+: tensor(256.2404)
 [[./figures/odr_sb/figure_24.png]]
 :END:
 
@@ -499,15 +502,15 @@ print(phi[idx, window_size] * 180 / np.pi)
 #+end_src
 
 #+RESULTS:
-: (768, 3, 1)
-: 246.54652
-: 247.9719466970856
+: (640, 3, 1)
+: 92.55003
+: 93.29966678171897
 
 ** Pref loc
 
 #+begin_src ipython
-start_idx = int((model.N_STIM_ON[0] - model.N_STEADY) / model.N_WINDOW)
-end_idx = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW)
+start_idx = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW)
+end_idx = int((model.N_STIM_ON[1] - model.N_STEADY) / model.N_WINDOW)
 
 mean_rates = rates_tensor[:, start_idx:end_idx].mean(dim=1).cpu().detach().numpy()
 angles = model.PHI0[:, 0, 0].cpu().numpy()
@@ -575,7 +578,7 @@ print(pref_locs.shape, normalized_rates.shape)
 #+end_src
 
 #+RESULTS:
-: (750,) (768, 750)
+: (750,) (640, 750)
 
 #+begin_src ipython
 # pref_locs[pref_locs<0] += 2* np.pi
@@ -872,7 +875,7 @@ print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (768, 91) (768, 1) (768, 1) (768, 1)
+: (640, 91) (640, 1) (640, 1) (640, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -925,9 +928,9 @@ print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (768, 91)
-: (768,)
-: (768, 1) (768, 1) (768, 1) (768, 1)
+: (640, 91)
+: (640,)
+: (640, 1) (640, 1) (640, 1) (640, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
@@ -1111,6 +1114,24 @@ from src.attractor.landscape import EnergyLandscape
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+ModuleNotFoundError                       Traceback (most recent call last)
+Cell In[60], line 2
+      1 sys.path.insert(0, '/home/leon/dual_task/dual_data/')
+----> 2 from src.attractor.landscape import EnergyLandscape
+
+File ~/dual_task/dual_data/src/attractor/landscape.py:2
+      1 import numpy as np
+----> 2 from src.decode.bump import circcvl
+      3 from hmmlearn import hmm
+      4 from sklearn.preprocessing import StandardScaler
+
+ModuleNotFoundError: No module named 'src.decode.bump'; 'src.decode' is not a package
+#+end_example
+:END:
 
 #+begin_src ipython
 energy = EnergyLandscape()
@@ -1118,7 +1139,16 @@ print(phi.shape)
 #+end_src
 
 #+RESULTS:
-: (768, 91)
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[61], line 1
+: ----> 1 energy = EnergyLandscape()
+:       2 print(phi.shape)
+:
+: NameError: name 'EnergyLandscape' is not defined
+:END:
 
 #+begin_src ipython
 num_bins = 96
@@ -1129,7 +1159,19 @@ print(landscape.shape)
 #+end_src
 
 #+RESULTS:
-: (96,)
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[62], line 3
+:       1 num_bins = 96
+:       2 bins = np.linspace(0, 2 * np.pi, num_bins, endpoint=False)
+: ----> 3 landscape = energy.fit(phi, bins)
+:       4 landscape[0] = landscape[-1]
+:       5 print(landscape.shape)
+:
+: NameError: name 'energy' is not defined
+:END:
 
 #+begin_src ipython
 if IF_BIAS:
@@ -1140,8 +1182,18 @@ else:
 #+end_src
 
 #+RESULTS:
-: saving to /home/leon//landscape_bias.pkl
-: loading from /home/leon//landscape.pkl
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[63], line 2
+:       1 if IF_BIAS:
+: ----> 2         pkl_save(landscape, 'landscape_bias', path="/home/leon/")
+:       3         landscape_ = pkl_load('landscape', path="/home/leon/")
+:       4 else:
+:
+: NameError: name 'landscape' is not defined
+:END:
 
 #+begin_src ipython
 plt.plot(np.linspace(0, 360, landscape.shape[0]), landscape)
@@ -1156,7 +1208,17 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_64.png]]
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[64], line 1
+: ----> 1 plt.plot(np.linspace(0, 360, landscape.shape[0]), landscape)
+:       2 if IF_BIAS:
+:       3     landscape_[0] = landscape_[-1]
+:
+: NameError: name 'landscape' is not defined
+:END:
 
 #+begin_src ipython
 plt.figure(figsize=(7, 7))
@@ -1166,7 +1228,19 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_65.png]]
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[65], line 2
+:       1 plt.figure(figsize=(7, 7))
+: ----> 2 plt.imshow(energy.transition_matrix.T, cmap='jet')
+:       3 plt.colorbar()
+:       4 plt.show()
+:
+: NameError: name 'energy' is not defined
+: <Figure size 700x700 with 0 Axes>
+:END:
 
 #+begin_src ipython
 plt.hist(energy.steady_state, bins='auto')
@@ -1174,7 +1248,16 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_66.png]]
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[66], line 1
+: ----> 1 plt.hist(energy.steady_state, bins='auto')
+:       2 plt.show()
+:
+: NameError: name 'energy' is not defined
+:END:
 
 #+begin_src ipython
 X_discrete = np.digitize(phi,  bins, right=False)-1
@@ -1400,7 +1483,7 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: 31 -4.312532776848214 5.585831
+: 32 2.0782013816356812 0.3001411
 [[./figures/odr_sb/figure_78.png]]
 :END:
 
@@ -1462,7 +1545,7 @@ plt.show()
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height], sharex=True)
 pref_idx = get_pref_idx(tuning_curve, pref_locs)
 
-for i in range(10):
+for i in range(100):
     ax[0].plot(unique_angles * 180 / np.pi, tuning_curve[i], '-')
     ax[0].axvline(reference, ls='--', color='b')
 

@@ -1,6 +1,6 @@
 #+STARTUP: fold
 #+TITLE: Training Low Rank RNNs
-#+PROPERTY: header-args:ipython :var B0="1.0" :results both :exports both :async yes :session dual_flow :kernel torch :tangle ./train_dual.py
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual_flow :kernel torch :exports results :output-dir ./figures/flow :file (lc/org-babel-tangle-figure-filename)
 
 * Notebook Settings
 
@@ -12,12 +12,6 @@
 %matplotlib inline
 %config InlineBackend.figure_format = 'png'
 #+end_src
-
-#+RESULTS:
-: The autoreload extension is already loaded. To reload it, use:
-:   %reload_ext autoreload
-: Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
 
 * Imports
 
@@ -97,27 +91,16 @@ conf_name = "train_dual_flow.yml"
 DEVICE = 'cuda:1'
 
 seed = np.random.randint(0, 1e6)
-# seed = 971646 # full lr
-# seed = 295741 # not bad
-seed= 332246 # china
-seed = 3
+seed = 2
 print(seed)
-#+end_src
 
-#+RESULTS:
-: 3
 
-#+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
+: 2
 
 * Flow field
 
@@ -126,22 +109,22 @@ task = 'dpa'
 
 model_state_dict = torch.load('../models/dual/%s_%d.pth' % (task, seed))
 model.load_state_dict(model_state_dict)
-print(model.DURATION)
+print(seed)
 #+end_src
 
 #+RESULTS:
-: 30.0
+: 2
 
 #+begin_src ipython
-model.LR_TYPE = 'rand_sparse'
+model.LR_TYPE ='full'
 
-model.GRID_SIZE = 15
-model.GRID_RANGE = 20.0
-model.GRID_TEST = None
+model.GRID_SIZE = 20
+model.GRID_RANGE = .10
+model.GRID_TEST = 4
 model.GRID_INPUT = 0
 
 model.N_BATCH = int(model.GRID_SIZE * model.GRID_SIZE)
-window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) +1
+window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
 
 ff_input = model.init_ff_input()
 print(ff_input.shape, model.N_BATCH)
@@ -149,23 +132,35 @@ print(ff_input.shape, model.N_BATCH)
 
 #+RESULTS:
 : grid input
-: torch.Size([225, 1605, 1000]) 225
+: torch.Size([400, 1105, 1000]) 400
 
 #+begin_src ipython
-vec1 = model.low_rank.U.T[0]
-vec2 = model.low_rank.U.T[1]
+def get_low_rank(model, IF_REC=0):
+    if IF_REC:
+        vec1 = model.low_rank.V.T[0]
+        vec2 = model.low_rank.V.T[1]
 
-# vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
+        vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
 
-vec1 = vec1 / torch.linalg.norm(vec1)**2
-vec2 = vec2 / torch.linalg.norm(vec2)**2
+        # vec1 = vec1 / torch.linalg.norm(vec1)
+        # vec2 = vec2 / torch.linalg.norm(vec2)
 
-vec = torch.stack((vec1, vec2))
-print(vec.shape)
+        vec = torch.stack((vec1, vec2))
+        overlaps = rates @ vec.T / model.Na[0]
+    else:
+        vec1 = model.low_rank.U.T[0]
+        vec2 = model.low_rank.U.T[1]
+        # vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
+        vec1 = vec1 / torch.linalg.norm(vec1)**2
+        vec2 = vec2 / torch.linalg.norm(vec2)**2
+
+        vec = torch.stack((vec1, vec2))
+        overlaps = model.rec_input[0, :, :] @ vec.T
+
+    return overlaps, vec
 #+end_src
 
 #+RESULTS:
-: torch.Size([2, 750])
 
 #+begin_src ipython
 rates = model(ff_input, RET_REC=1)
@@ -174,18 +169,28 @@ rates = model(ff_input, RET_REC=1)
 #+RESULTS:
 
 #+begin_src ipython
-overlaps = model.rec_input[0, :, :] @ vec.T
+print(rates.shape)
+plt.plot(rates[0].mean(dim=-1).cpu().detach().numpy())
+plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: torch.Size([400, 201, 750])
+[[./figures/flow/figure_10.png]]
+:END:
+
+#+begin_src ipython
+overlaps, vec = get_low_rank(model, IF_REC=1)
 
 ff_overlaps = ff_input[..., model.N_STEADY: , model.slices[0]] @ vec.T
 ff_overlaps = ff_overlaps[:, ::10]
-
-# overlaps = rates @ vec.T / model.Na[0]
 
 print(overlaps.shape, ff_overlaps.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([225, 301, 2]) torch.Size([225, 151, 2])
+: torch.Size([400, 201, 2]) torch.Size([400, 101, 2])
 
 #+begin_src ipython
 palette = sns.color_palette('husl', model.GRID_SIZE**2)
@@ -210,7 +215,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/657b9b587b5428c8067669f941dcd0f74bc21576.png]]
+[[./figures/flow/figure_12.png]]
 
 #+begin_src ipython
 x = overlaps[:, window:, 0].cpu().detach().numpy()
@@ -243,7 +248,7 @@ else:
 #+end_src
 
 #+RESULTS:
-: (225, 2)
+: (400, 2)
 
 #+begin_src ipython
 fig, ax = plt.subplots(figsize=[width, width])
@@ -276,7 +281,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/84cbe08f1ec302f435434630ba2e85fbe738fb3b.png]]
+[[./figures/flow/figure_15.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(figsize=[width, width])
@@ -307,9 +312,9 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./.ob-jupyter/13acf0cbc5de0735fc89f6902430c7c64cc8e6e3.png]]
+[[./figures/flow/figure_16.png]]
 
-   #+begin_src ipython
+#+begin_src ipython
 # Assuming `x` and `y` are the positions of trajectories
 # Flatten the arrays and find min/max for grid creation
 x_min, x_max = np.min(x), np.max(x)
@@ -322,7 +327,7 @@ xi, yi = np.meshgrid(np.linspace(x_min, x_max, 200),
 
 #+RESULTS:
 
-   #+begin_src ipython
+#+begin_src ipython
 from scipy.interpolate import griddata
 
 # Flatten your dx and dy along with x and y for interpolation
@@ -337,7 +342,7 @@ vi = griddata(points, dy_flat, (xi, yi), method='cubic', fill_value=0)
 
 #+RESULTS:
 
-   #+begin_src ipython
+#+begin_src ipython
 import matplotlib as mpl
 fig, ax = plt.subplots(figsize=[1.2*width, width])
 
@@ -370,7 +375,7 @@ plt.show()
 #+RESULTS:
 :RESULTS:
 : (200, 200)
-[[./.ob-jupyter/8f97d49b8a1e412a01708f1824a1f3754d671dc5.png]]
+[[./figures/flow/figure_19.png]]
 :END:
 
 #+begin_src ipython
