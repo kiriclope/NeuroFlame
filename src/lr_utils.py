@@ -63,6 +63,7 @@ class LowRankWeights(nn.Module):
         LR_MASK=0,
         LR_CLASS=1,
         LR_GAUSS=0,
+        LR_INI=.001,
         DEVICE="cuda",
     ):
         super().__init__()
@@ -79,6 +80,7 @@ class LowRankWeights(nn.Module):
 
         self.LR_MASK = LR_MASK
         self.LR_GAUSS = LR_GAUSS
+        self.LR_INI = LR_INI
 
         self.Na = Na
         self.device = DEVICE
@@ -86,19 +88,19 @@ class LowRankWeights(nn.Module):
         if self.LR_GAUSS==0:
 
             self.V = nn.Parameter(
-                torch.randn((self.N_NEURON, int(self.RANK)), device=self.device)
+                torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * self.LR_INI
             )
 
             if self.LR_MN:
                 self.U = nn.Parameter(
-                    torch.randn((self.N_NEURON, int(self.RANK)), device=self.device)
+                    torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * self.LR_INI
                 )
 
                 with torch.no_grad():
                     self.U.copy_(self.V)
             else:
                 self.U = (
-                    torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * .001
+                    torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * self.LR_INI
                 )
 
         if self.LR_KAPPA == 1:
@@ -143,10 +145,16 @@ class LowRankWeights(nn.Module):
 
 
     def forward(self, LR_NORM=0, LR_CLAMP=0):
-        # if LR_NORM:
-        #     self.lr = self.lr_kappa * (
-        #         masked_normalize(self.U) @ masked_normalize(self.V).T
-        #     )
+        if LR_NORM:
+            U_norm = self.U.norm(p='fro') + 1e-6
+            V_norm = self.V.norm(p='fro') + 1e-6
+            #     self.lr = self.lr_kappa * (
+            #         masked_normalize(self.U) @ masked_normalize(self.V).T
+            #     )
+
+        else:
+            U_norm = 1.0
+            V_norm = 1.0
 
         if self.LR_GAUSS:
             epsilon_M = torch.randn((self.Na[0], self.RANK), device=self.device)
@@ -157,13 +165,13 @@ class LowRankWeights(nn.Module):
             self.V = self.mu_N + torch.exp(self.log_sigma_N) * epsilon_N
 
         if self.LR_MN:
-            self.lr = self.lr_kappa * (self.U @ self.V.T)
+            self.lr = self.lr_kappa * ((self.U / U_norm) @ (self.V.T / V_norm))
         else:
             self.lr = self.lr_kappa * (self.V @ self.V.T)
 
         # self.lr = self.lr_mask * self.lr
-        if LR_NORM:
-            self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
+        # if LR_NORM:
+        #     self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
 
         if LR_CLAMP:
             self.lr = clamp_tensor(self.lr, 'lr', self.slices)

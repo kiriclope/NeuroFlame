@@ -656,7 +656,8 @@ print(torch.where(rwd_mask[idx]==1)[0])
 : rwd_mask torch.Size([1024, 81])
 : tensor([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
 :         28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-:         46, 47, 48], device='cuda:0')
+:         46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+:         64, 65, 66, 67], device='cuda:0')
 
 *** Inputs and Labels
 
@@ -794,15 +795,16 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
 #+RESULTS:
-: Epoch 1/30, Training Loss: 0.0147, Validation Loss: 0.0127
-: Epoch 2/30, Training Loss: 0.0100, Validation Loss: 0.0102
+: Epoch 1/30, Training Loss: 0.0183, Validation Loss: 0.0154
+: Epoch 2/30, Training Loss: 0.0131, Validation Loss: 0.0130
+: Epoch 3/30, Training Loss: 0.0103, Validation Loss: 0.0104
 
 #+begin_src ipython
-
+print(model.J_STP)
 #+end_src
 
 #+RESULTS:
-: eefe7bb7-0ea2-4b52-b091-62b003cd72ff
+: 92e6b5a6-04d6-4774-acb2-ccbf0962e64e
 
 #+begin_src ipython
 if IF_BIASED_PHASES:
@@ -819,7 +821,7 @@ else:
 #+end_src
 
 #+RESULTS:
-: 752666f0-73ac-445b-a69e-2eae87862df1
+: f43e2b4a-fd72-4bd8-8468-33e84aecd112
 
 * Testing
 
@@ -841,7 +843,7 @@ model.eval()
 #+end_src
 
 #+RESULTS:
-: 1b11a6bb-5d65-4cd6-849a-9627a5e0ddb8
+: a26f5b8a-ade2-4400-8acf-33661b75fdb9
 
 #+begin_src ipython
     model.N_BATCH = N_BATCH
@@ -863,7 +865,7 @@ model.eval()
 #+end_src
 
 #+RESULTS:
-: b4ff2a35-0544-40bd-853f-0df3783adc72
+: 89deebc0-6f81-46b4-9ea9-1d88c8227d1c
 
 #+begin_src ipython
 #     model.N_BATCH = N_BATCH
@@ -885,7 +887,7 @@ model.eval()
  #+end_src
 
 #+RESULTS:
-: 6458dac2-be6b-4f59-a5fb-dd5bacea0e26
+: 41ffb96e-2644-43f9-ae69-d2e8f7818a27
 
 #+begin_src ipython
 plt.hist(labels[:, 0].cpu() * 180 / np.pi, bins='auto', density=True)
@@ -897,7 +899,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: f8255d58-b627-4076-973e-375b7a6d7172
+: 496785db-d902-4517-9d89-c92bc0a82209
 
 
 #+begin_src ipython
@@ -906,35 +908,35 @@ print('ff_input', ff_input.shape)
 print('rates', rates.shape)
 #+end_src
 #+RESULTS:
-: ab1ae9bf-f4be-4f2a-9de4-c03f004a824e
+: 285f743d-26e2-4a0e-b636-872c608f372f
 
  #+begin_src ipython
 plot_rates_selec(rates=ff_input.cpu().detach().numpy(), idx=20, thresh=.5)
 #+end_src
 
 #+RESULTS:
-: 5ba60f2b-7843-4e00-bf54-04f132ae5eef
+: 665585d5-41d6-487b-ab13-e8828dc0df66
 
  #+begin_src ipython
 plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
 #+end_src
 
 #+RESULTS:
-: 077bc3d3-8b0e-41eb-961e-8251f97fcdb0
+: e7fbc4e6-76f5-4022-8fef-218d541bbc1c
 
 #+begin_src ipython
 plot_rates_selec(rates, idx=20, thresh=.1)
 #+end_src
 
 #+RESULTS:
-: 248e971b-4a16-4844-bb7c-b9e353a09b2b
+: f3ab13a8-a82a-4b21-af19-26f46fa9e768
 
         #+begin_src ipython
 plot_m0_m1_phi(model, rates, 4)
 #+end_src
 
 #+RESULTS:
-: 72722504-584a-4f39-982a-b21932a3b3f9
+: c0a116ec-452d-45b7-b38a-a20779a023d0
 
 #+begin_src ipython
 m0, m1, phi = decode_bump(rates, axis=-1)
@@ -963,7 +965,7 @@ errors = np.array(error_list)
 #+end_src
 
 #+RESULTS:
-: 923be207-9c30-462e-9090-b71d1fe8bea2
+: e005b978-7515-47ae-a739-92daea5431e7
 
 #+begin_src ipython
 theta = torch.linspace(0, 2.0 * torch.pi, 1000)
@@ -973,7 +975,7 @@ plt.plot(np.exp(-loss.cpu().detach().numpy()));
 #+end_src
 
 #+RESULTS:
-: 8b2eaf9e-8cce-496b-9edd-f173ad4ff8f7
+: aee83946-e0c3-4e73-951b-4d9cf51ae86e
 
 #+begin_src ipython
 if IF_BIAS:
@@ -984,7 +986,7 @@ else:
 #+end_src
 
 #+RESULTS:
-: 0915c37c-361f-4111-8c27-aab63d7a56ff
+: 357832cb-b4d2-405d-986a-c2863c2e2b5a
 
 #+begin_src ipython
 targets = (target_loc + np.pi) % (2 * np.pi) - np.pi
@@ -1001,7 +1003,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: f6c176eb-6845-43ef-9d8c-52f9fae0b718
+: b5b800c2-fb79-460b-860a-c811de701d1b
 
 * Connectivity
 
@@ -1023,7 +1025,7 @@ model.eval()
 #+end_src
 
 #+RESULTS:
-: 3245c5b1-9e62-4c69-9048-5d0bdccfae2e
+: 15a91e90-6cda-4535-bdad-d95602eb4821
 
 #+begin_src ipython
 from src.lr_utils import LowRankWeights, clamp_tensor
@@ -1044,7 +1046,7 @@ else:
 #+end_src
 
 #+RESULTS:
-: 941a664b-4fa9-480d-a20e-ba564be08f94
+: 8f0b2837-b5a9-40f1-bea2-90614b016e98
 
 #+begin_src ipython
   plt.figure(figsize=(2.5*width, 1.5*height))  # Set the figure size (width, height) in inches
@@ -1081,7 +1083,7 @@ else:
 #+end_src
 
 #+RESULTS:
-: d60ab4af-388b-4636-a5d3-baf14962ddfd
+: 43c599fb-d570-4337-afa0-743dc4a4b53e
 
 #+begin_src ipython
 if IF_BIAS==0:
@@ -1090,7 +1092,7 @@ if IF_BIAS==0:
 #+end_src
 
 #+RESULTS:
-: 9039fae6-0119-48f2-a194-895e9f0ec453
+: 86b2713b-4c9b-42c1-88cf-69f5c3b57dcb
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height], sharey=1)
@@ -1116,11 +1118,11 @@ if IF_BIAS==0:
 #+end_src
 
 #+RESULTS:
-: e4eaa707-6651-43d4-a0ca-452751771ca0
+: 517df6d6-6a9b-4987-bfa6-87a57ef483a5
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: d4c9d0ee-9973-4efc-a281-0f1f43762942
+: 58238618-c6a4-47b5-b3b1-119956e14773

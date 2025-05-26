@@ -81,11 +81,13 @@ def init_ff_live(model):
 
 def get_grid_inputs(model):
     grid_size = model.GRID_SIZE
-    n_range = model.GRID_RANGE
+    x_range = model.GRID_X_RANGE
+    y_range = model.GRID_Y_RANGE
 
     # Create a grid in the n1-n2 plane
-    x = torch.linspace(-n_range, n_range, grid_size)
-    y = torch.linspace(-n_range, n_range, grid_size)
+    x = torch.linspace(x_range[0], x_range[1], grid_size)
+    y = torch.linspace(y_range[0], y_range[1], grid_size)
+
     X, Y = torch.meshgrid(x, y, indexing='ij')
 
     vec1 = model.low_rank.V.T[0]
@@ -150,7 +152,7 @@ def init_ff_seq(model):
         for i, _ in enumerate(model.N_STIM_ON):
             if ("flow" in model.TASK):
                 if (i==model.GRID_INPUT):
-                    print('grid input')
+                    # print('grid input')
                     stimulus = torch.stack(grid_inputs)
                     stimulus = stimulus.unsqueeze(1)
                 elif model.GRID_TEST is not None:
@@ -206,6 +208,9 @@ def init_ff_seq(model):
                     ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[0]].add_(stimulus)
 
             del stimulus
+
+        if "flow" in model.TASK:
+            del grid_inputs
 
     return ff_input * torch.sqrt(model.Ka[0]) * model.M0
 

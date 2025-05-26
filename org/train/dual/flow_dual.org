@@ -196,24 +196,64 @@ def get_low_rank(rates, model, IF_REC=0):
 #+RESULTS:
 
 #+begin_src ipython
-def plot_spaghetti(overlaps, ax, window, IF_FP=0):
+import numpy as np
+
+def get_bissec(point1, point2, length=100):
+    # Calculate the directional vector of the original line
+    direction = point2 - point1
+    print(direction.shape)
+    # Midpoint of the line segment
+    midpoint = (point1 + point2) / 2
+
+    # Direction of the orthogonal line (perpendicular vector)
+    orthogonal_direction = np.array([-direction[1], direction[0]])
+
+    # Normalize the orthogonal direction
+    orthogonal_direction = orthogonal_direction / np.linalg.norm(orthogonal_direction)
+
+    # Calculate the endpoints of the orthogonal line segment
+    endpoint1 = midpoint - (length / 2) * orthogonal_direction
+    endpoint2 = midpoint + (length / 2) * orthogonal_direction
+
+    return np.array([endpoint1, endpoint2])
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def plot_spaghetti(overlaps, ax, window, IF_FP=0, step=1, color=None):
+
     palette = sns.color_palette('husl', overlaps.shape[0])
+
     for i in range(overlaps.shape[0]):
-        ax.plot(overlaps[i, window:, 0], overlaps[i, window: , 1], color=palette[i])
+        x = overlaps[i, window:, 0]
+        y = overlaps[i, window:, 1]
 
-    center, center_ = get_fp(overlaps, window, task, GRID_TEST=0)
+        ax.plot(x[::step], y[::step], color=palette[i], alpha=.25)
+        # ax.plot(x[::step], y[::step], color='w', alpha=.25)
 
-    for i in range(center.shape[0]):
-        ax.plot(center[i][0], center[i][1], 'o', color='k', ms=10)
-        # if IF_FP:
-        #     ax.plot(center_[i][0], center_[i][1], 'o', color='b', ms=10)
+        # for j in range(0, len(x)-1, 10):
+        #     plt.annotate('', xy=(x[j+1], y[j+1]), xytext=(x[j], y[j]),
+        #                  arrowprops=dict(arrowstyle='->', lw=1.5))
 
-    ax.plot([-10, 10], [-10, 10], '--k', alpha=.5)
-    ax.plot([-10, 10], [10, -10], '--k', alpha=.5)
+    if IF_FP:
+        center, center_ = get_fp(overlaps, window, task, GRID_TEST=0)
+
+        for i in range(center.shape[0]):
+            ax.plot(center[i][0], center[i][1], 'o', color='k', ms=10)
+
+        # bissec = get_bissec(center[0], center[1], length=10)
+        # ax.plot(bissec[:, 0], bissec[:, 1], 'w--')
+
+    # if IF_FP:
+    #     ax.plot(center_[i][0], center_[i][1], 'o', color='b', ms=10)
+
+    # ax.plot([-10, 10], [-10, 10], '--k', alpha=.5)
+    # ax.plot([-10, 10], [10, -10], '--k', alpha=.5)
     # ax.set_aspect('equal')
 
-    ax.set_xlabel('$\\kappa_{AB}$')
-    ax.set_ylabel('$\\kappa_{GNG}$')
+    ax.set_xlabel('A/B Overlap (Hz)')
+    ax.set_ylabel('Choice Overlap (Hz)')
 #+end_src
 
 #+RESULTS:
@@ -235,14 +275,14 @@ def plot_ring(overlaps, ax, window, IF_FP=0):
     ax.plot([-10, 10], [10, -10], '--k', alpha=.5)
     # ax.set_aspect('equal')
 
-    ax.set_xlabel('$\\kappa_{AB}$')
-    ax.set_ylabel('$\\kappa_{GNG}$')
+    ax.set_xlabel('A/B Overlap (Hz)')
+    ax.set_ylabel('Choice Overlap')
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-def plot_quiver(overlaps, ax, window, IF_FP=0):
+def plot_quiver(overlaps, ax, window, step=2, IF_FP=0, scale=1, headwidth=6, headlength=10, headaxislength=9, width=0):
     palette = sns.color_palette('husl', overlaps.shape[0])
     x = overlaps[:, window:, 0]
     y = overlaps[:, window:, 1]
@@ -252,9 +292,12 @@ def plot_quiver(overlaps, ax, window, IF_FP=0):
 
     # flow_magnitude = np.sqrt(dx**2 + dy**2)
 
-    ax.quiver(x[::2, ::2], y[::2, ::2], dx[::2, ::2], dy[::2, ::2], angles='xy', scale_units='xy', scale=1, color=palette)
-    ax.plot([-10, 10], [10, -10], '--k', alpha=.5)
-    ax.plot([-10, 10], [-10, 10], '--k', alpha=.5)
+    # ax.quiver(x[::step, ::step], y[::step, ::step], dx[::step, ::step], dy[::step, ::step], angles='xy', scale_units='xy', scale=scale, color='k',
+    # headwidth, headlength, headaxislength, width)
+    ax.quiver(x[::step, ::step], y[::step, ::step], dx[::step, ::step], dy[::step, ::step], color='k', pivot='mid', units='inches')
+    # ax.plot([-10, 10], [10, -10], '--k', alpha=.5)
+
+    # ax.plot([-10, 10], [-10, 10], '--k', alpha=.5)
 
     # plt.colorbar()
     # plt.clim([0, 1.5])
@@ -268,9 +311,9 @@ def plot_quiver(overlaps, ax, window, IF_FP=0):
 #+begin_src ipython
 from scipy.interpolate import griddata
 
-def create_mesh(x, y, size=200):
-    x_min, x_max = np.min(x), np.max(x)
-    y_min, y_max = np.min(y), np.max(y)
+def create_mesh(x, y, size=100):
+    x_min, x_max = np.min((x, y)) - 1, np.max((x, y)) + 1
+    y_min, y_max = np.min((x, y)) - 1, np.max((x, y)) + 1
 
     dx = np.gradient(x, axis=1)
     dy = np.gradient(y, axis=1)
@@ -296,21 +339,32 @@ def create_mesh(x, y, size=200):
 #+begin_src ipython
 import matplotlib as mpl
 
-def plot_field(overlaps, ax, window, IF_FP=0):
+def plot_field(overlaps, ax, window, IF_FP=0, task=0):
     x = overlaps[:, window:, 0]
     y = overlaps[:, window:, 1]
 
-    xi, yi, ui, vi = create_mesh(x, y, size=100)
+    xi, yi, ui, vi = create_mesh(x, y, size=200)
     speed = np.sqrt(ui**2+vi**2)
-    # speed /= speed.max()
+    # speed = (speed - np.mean(speed)) / (np.std(speed) + 1e-6)
+
+    center, center_ = get_fp(overlaps, window, task, GRID_TEST=0)
+    ax.plot(center.T[0], center.T[1], 'o', color='k', ms=14)
 
     norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=False)
-    strm = ax.streamplot(xi, yi, ui, vi, density=1.5, arrowsize=1.5, color=speed, cmap='jet', norm=norm)
-    # fig.colorbar(strm.lines)
-    # ax.set_aspect('equal')
-    ax.set_xlabel('$\\kappa_{AB}$')
-    ax.set_ylabel('$\\kappa_{GNG}$')
 
+    # strm = ax.streamplot(xi, yi, ui, vi, density=1.5, arrowsize=1.5, color=speed, cmap='jet', norm=norm)
+    heatmap = ax.pcolormesh(xi, yi, speed, cmap='jet', shading='gouraud', norm=norm)
+    # heatmap = ax.imshow(speed, extent=(yi.min(), yi.max(), yi.min(), yi.max()), cmap='jet', norm=norm, origin='lower', aspect='auto')
+
+    ax.set_aspect('equal')
+    # ax.set_xlim([yi.min(), yi.max()])
+    # ax.set_ylim([yi.min(), yi.max()])
+
+    cbar = plt.colorbar(heatmap, ax=ax)
+    cbar.set_label('Speed')
+
+    ax.set_xlabel('A/B Overlap')
+    ax.set_ylabel('Choice Overlap')
 #+end_src
 
 #+RESULTS:
@@ -363,33 +417,15 @@ kwargs = {
 #+RESULTS:
 
 #+begin_src ipython
+tasks = ['dpa']
 tasks = ['dpa', 'dual_naive', 'dual_train']
-seed = 10 # 10
+seed = 31 # 10
 GRID_RANGE = .4
 #+end_src
 
 #+RESULTS:
 
 * Flow
-
-#+begin_src ipython
-# rates_multi = []
-# for seed in range(15):
-#     rates = []
-#     for task in tasks:
-#         rates.append(run_grid(GRID_RANGE, seed, task, **kwargs))
-#     rates_multi.append(rates)
-
-# rates_multi = np.array(rates_multi)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-# pkl_save(rates_multi, 'rates_multi', path="/home/leon/")
-#+end_src
-
-#+RESULTS:
 
 #+begin_src ipython
 rates = []
@@ -414,6 +450,8 @@ model = init_model(task, seed, **kwargs)
 overlaps, vec = get_low_rank(rates_tensor, model, IF_REC=0)
 print(overlaps.shape)
 
+window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 3
+
 # ff_overlaps = ff_input[..., model.N_STEADY: , model.slices[0]] @ vec.T
 # ff_overlaps = ff_overlaps[:, ::10]
 # print(overlaps.shape, ff_overlaps.shape)
@@ -426,14 +464,14 @@ print(overlaps.shape)
 
 #+begin_src ipython
 palette = sns.color_palette('husl', overlaps.shape[1])
+window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 3
 
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
 xtime = np.linspace(0, model.DURATION, overlaps.shape[2])
-
 for i in range(overlaps.shape[1]):
-        ax[0].plot(xtime, overlaps[0, i, :, 0], color=palette[i])
-        ax[1].plot(xtime, overlaps[0, i, :, 1], color=palette[i])
+       ax[0].plot(xtime, overlaps[0, i, :, 0], color=palette[i])
+       ax[1].plot(xtime, overlaps[0, i, :, 1], color=palette[i])
 
 ax[0].set_ylabel('$\\kappa_{AB}$')
 ax[1].set_ylabel('$\kappa_{GnG}$')
@@ -445,15 +483,16 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/flow/figure_23.png]]
+[[./figures/flow/figure_22.png]]
 
 #+begin_src ipython
 from sklearn.cluster import KMeans
-def get_fp(overlaps, window, task, GRID_TEST=0):
+def get_fp(overlaps, window, task, GRID_TEST=0, x=None, y=None):
     kmeans = KMeans(n_clusters=5, random_state=None)
 
-    x = overlaps[:, window:, 0]
-    y = overlaps[:, window:, 1]
+    if x is None:
+        x = overlaps[:, window:, 0]
+        y = overlaps[:, window:, 1]
 
     x_fp = x[:, -1]
     y_fp = y[:, -1]
@@ -474,45 +513,118 @@ def get_fp(overlaps, window, task, GRID_TEST=0):
 
 #+RESULTS:
 
+** traj
+
 #+begin_src ipython
-window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
-fig, ax = plt.subplots(1, 3, figsize=[3*width, width])
-for i in range(overlaps.shape[0]):
-    plot_spaghetti(overlaps[i], ax[i], window, IF_FP=1)
+
+# fig, ax = plt.subplots(1, 3, figsize=[3*width, width])
+# for i in range(overlaps.shape[0]):
+#     plot_spaghetti(overlaps[i], ax[i], window, IF_FP=1)
+# save_fig('traj', GRID_TEST=model.GRID_TEST)
+# plt.show()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 1, figsize=[width, width])
+# for i in range(overlaps.shape[0]):
+plot_spaghetti(overlaps[0], ax, window, IF_FP=1)
 save_fig('traj', GRID_TEST=model.GRID_TEST)
-plt.show()
+# plt.show()
 #+end_src
 
 #+RESULTS:
 [[./figures/flow/figure_25.png]]
 
 #+begin_src ipython
-window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
-fig, ax = plt.subplots(1, 3, figsize=[3*width, width])
-for i in range(overlaps.shape[0]):
-    plot_quiver(overlaps[i], ax[i], window, IF_FP=1)
-save_fig('quiver', GRID_TEST=model.GRID_TEST)
-plt.show()
-
+fig, ax = plt.subplots(1, 1, figsize=[width, width])
+# for i in range(overlaps.shape[0]):
+plot_spaghetti(overlaps[0], ax, window, IF_FP=1)
+save_fig('traj_dpa', GRID_TEST=model.GRID_TEST)
+# plt.show()
 #+end_src
 
 #+RESULTS:
 [[./figures/flow/figure_26.png]]
 
 #+begin_src ipython
-window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
-fig, ax = plt.subplots(1, 3, figsize=[3*width, width])
-for i in range(overlaps.shape[0]):
-    plot_field(overlaps[i], ax[i], window, IF_FP=1)
-save_fig('field', GRID_TEST=model.GRID_TEST)
-plt.show()
+fig, ax = plt.subplots(1, 1, figsize=[width, width])
+# for i in range(overlaps.shape[0]):
+plot_spaghetti(overlaps[1], ax, window, IF_FP=1)
+save_fig('traj_dual_naive', GRID_TEST=model.GRID_TEST)
+# plt.show()
 #+end_src
 
 #+RESULTS:
 [[./figures/flow/figure_27.png]]
 
 #+begin_src ipython
-# add bissectrice line ortho to the line test fp
+fig, ax = plt.subplots(1, 1, figsize=[width, width])
+# for i in range(overlaps.shape[0]):
+plot_spaghetti(overlaps[-1], ax, window, IF_FP=1)
+save_fig('traj_dual_train', GRID_TEST=model.GRID_TEST)
+# plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/flow/figure_28.png]]
+
+** field
+
+#+begin_src ipython
+# fig, ax = plt.subplots(1, 3, figsize=[3*width, width])
+# for i in range(overlaps.shape[0]):
+# plot_quiver(overlaps[i], ax[i], window, IF_FP=1)
+# save_fig('quiver', GRID_TEST=model.GRID_TEST)
+# plt.show()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 1, figsize=[width, width])
+
+plot_field(overlaps[0], ax, window, IF_FP=1, task=0)
+
+save_fig('field_dpa', GRID_TEST=model.GRID_TEST)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/flow/figure_30.png]]
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 1, figsize=[width, width])
+
+plot_field(overlaps[1], ax, window, IF_FP=1, task=1)
+
+save_fig('field_dual_naive', GRID_TEST=model.GRID_TEST)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/flow/figure_31.png]]
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 1, figsize=[width, width])
+
+plot_field(overlaps[-1], ax, window, IF_FP=1, task=2)
+# plot_spaghetti(overlaps[0], ax, window, IF_FP=0, step=100, color=1)
+# plot_quiver(overlaps[0], ax, window, IF_FP=1, step=5, scale=1)
+
+# center, center_ = get_fp(overlaps[2], window, task, GRID_TEST=0)
+# ax.plot(center.T[0], center.T[1], 'o', color='k', ms=14)
+
+save_fig('field_dual_expert', GRID_TEST=model.GRID_TEST)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/flow/figure_32.png]]
+
+#+begin_src ipython
+
 #+end_src
 
 #+RESULTS:

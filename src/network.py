@@ -65,6 +65,7 @@ class Network(nn.Module):
                 self.LR_MASK,
                 self.LR_CLASS,
                 self.LR_GAUSS,
+                self.LR_INI,
                 self.device,
             )
 
@@ -297,7 +298,7 @@ class Network(nn.Module):
 
         # Train Low rank vectors
         if self.LR_TRAIN:
-            self.Wab_train = self.low_rank(self.LR_NORM, self.LR_CLAMP)
+            self.Wab_train = self.low_rank(self.LR_NORM, self.LR_CLAMP) / self.Na[0]
 
         # Training
         if self.ODR_TRAIN or self.LR_TRAIN:
@@ -317,7 +318,7 @@ class Network(nn.Module):
                         W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
                     elif self.LR_TYPE == 'rand_full':
                         W_stp_T = self.GAIN * (self.W_stp_T / torch.sqrt(self.Ka[0])
-                                               + self.Wab_train[self.slices[0], self.slices[0]])
+                                               + self.Wab_train[self.slices[0], self.slices[0]]) # / torch.sqrt(self.Ka[0])
                     elif self.LR_TYPE == 'rand_sparse':
                         Wij = 1.0 + self.Wab_train[self.slices[0], self.slices[0]] / torch.sqrt(self.Ka[0])
                         Wij_p = clamp_tensor(Wij, 0, self.slices)
@@ -427,7 +428,7 @@ class Network(nn.Module):
         if self.LIVE_FF_UPDATE == 0 and RET_FF:
             self.ff_input = ff_input[..., self.slices[0]]
 
-        # del ff_input, rec_input
-        # clear_cache()
+        del ff_input, rec_input
+        clear_cache()
 
         return rates

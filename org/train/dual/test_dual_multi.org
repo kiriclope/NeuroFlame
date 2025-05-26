@@ -1,0 +1,554 @@
+#+Startup: fold
+#+TITLE: Training Low Rank RNNs
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session test_dual_multi :kernel torch :exports results :output-dir ./figures/multi :file (lc/org-babel-tangle-figure-filename)
+
+* Notebook Settings
+
+#+begin_src ipython :tangle no
+%load_ext autoreload
+%autoreload 2
+%reload_ext autoreload
+%run ../../../notebooks/setup.py
+%matplotlib inline
+%config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Imports
+
+#+begin_src ipython
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torchmetrics
+from torch.utils.data import Dataset, TensorDataset, DataLoader
+
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+pal = sns.color_palette("tab10")
+DEVICE = 'cuda:1'
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import sys
+sys.path.insert(0, '../../../')
+
+from notebooks.setup import *
+
+import pandas as pd
+import torch.nn as nn
+from time import perf_counter
+from scipy.stats import circmean
+
+from src.network import Network
+from src.plot_utils import plot_con
+from src.decode import decode_bump, circcvl
+from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
+#+end_src
+
+#+RESULTS:
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Test
+** utils
+
+#+begin_src ipython
+def add_vlines(ax=None, mouse=""):
+    t_BL = [0, 1]
+    t_STIM = [1 , 2]
+    t_ED = [2, 3]
+    t_DIST = [3 , 4]
+    t_MD = [4 , 5]
+    t_CUE = [5 , 5.5]
+    t_RWD = [5.5, 6.0]
+    t_LD = [6.0 , 7.0]
+    t_TEST = [7.0, 8.0]
+    t_RWD2 = [11 , 12]
+
+    # time_periods = [t_STIM, t_DIST, t_TEST, t_CUE, t_RWD, t_RWD2]
+    # colors = ["b", "b", "b", "g", "y", "y"]
+
+    time_periods = [t_STIM, t_DIST, t_TEST, t_CUE]
+    colors = ["b", "b", "b", "g"]
+
+    if ax is None:
+        for period, color in zip(time_periods, colors):
+            plt.axvspan(period[0], period[1], alpha=0.1, color=color)
+    else:
+        for period, color in zip(time_periods, colors):
+            ax.axvspan(period[0], period[1], alpha=0.1, color=color)
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import sem, t
+
+def mean_ci(data):
+  # Calculate mean and SEM
+  mean = np.nanmean(data, axis=0)
+  serr = sem(data, axis=0, nan_policy='omit')
+
+  # Calculate the t critical value for 95% CI
+  n = np.sum(~np.isnan(data), axis=0)
+  t_val = t.ppf(0.975, df=n - 1)  # 0.975 for two-tailed 95% CI
+
+  # Calculate 95% confidence intervals
+  ci = t_val * serr
+
+  return mean, ci
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fig.svg', title='first'):
+    '''
+    y[0] is pairs, y[1] is samples, y[2] is task if not None
+    '''
+
+    size = y.shape[0]
+    if size ==2:
+        ones_slice = np.zeros(y.shape)
+        y_ = np.vstack((y.copy(), ones_slice))
+        task = 0
+    else:
+        y_ = y.copy()
+        tasks = [0, 1, -1]
+
+
+    fig, ax = plt.subplots(1, 3, figsize=[3*width, height], sharey=True)
+
+    time = np.linspace(0, 10, readout.shape[1])
+    colors = ['r', 'b', 'g']
+    ls = ['--', '-', '-.', ':']
+    label = ['AD', 'AC', 'BD', 'BC']
+    mean_overlaps = []
+    for k in range(2): # readout
+        for j in range(2): # sample
+            for i in range(2): # pair
+                data = readout[(y_[0]==i) & (y_[1]==j) & (y_[2]==task), :, k]
+                mean, ci = mean_ci(data)
+                mean_overlaps.append(mean)
+                ax[k].plot(time, mean, ls=ls[i+2*j], label=label[i+2*j], color=colors[task], alpha=1-j/4)
+                ax[k].fill_between(time, mean - ci, mean + ci, color=colors[task], alpha=0.1)
+
+        add_vlines(ax[k])
+        ax[k].set_xlabel('Time (s)')
+
+        if k==0:
+            ax[k].set_ylabel('A/B Overlap (Hz)')
+        elif k==1:
+            ax[k].set_ylabel('GNG Overlap (Hz)')
+        else:
+            ax[k].set_ylabel('Readout (Hz)')
+
+        ax[k].axhline(0, color='k', ls='--')
+
+    mean_overlaps = np.array(mean_overlaps).reshape((2, 2, 2, -1))
+
+    for j in range(2): # sample
+        for i in range(2): # pair
+            ax[-1].plot(mean_overlaps[0, j, i], mean_overlaps[1, j, i], color=colors[task], ls=ls[i+2*j], label=label[i+2*j])
+
+    ax[-1].set_xlabel('A/B Overlap (Hz)')
+    ax[-1].set_ylabel('Choice Overlap (Hz)')
+
+    plt.legend(fontsize=10)
+    plt.savefig('../figures/dual/%s' % figname, dpi=300)
+    plt.show()
+#+end_src
+
+#+RESULTS:
+
+** run
+
+#+begin_src ipython
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+conf_name = "train_dual.yml"
+DEVICE = 'cuda:1'
+
+seed = 1
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+sys.path.insert(0, '../../../src')
+from src.train.dual.train_dual import test_dual
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+accuracies = []
+readouts = []
+covariances = []
+labels = []
+
+for seed in range(1, 30):
+    acc_ = []
+    cov_ = []
+    readout_ = []
+    labels_ = []
+    for state in ['dpa', 'naive', 'train']:
+        readout, y_labels, cov, accuracy = test_dual(REPO_ROOT, conf_name, seed, state, DEVICE)
+        acc_.append(accuracy)
+        cov_.append(cov)
+        readout_.append(readout)
+        labels_.append(y_labels)
+
+    accuracies.append(acc_)
+    readouts.append(readout_)
+    covariances.append(cov_)
+    labels.append(labels_)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+#+begin_example
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+[1. 1. 1.] tensor(0.6667, device='cuda:1')
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+Testing DualElapsed (with compilation) = 0h 0m 1s
+[0.5 1.  0.5] tensor(0.9518, device='cuda:1')
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+[1. 1. 1.] tensor(1., device='cuda:1')
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+[1. 1. 1.] tensor(0.6667, device='cuda:1')
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+[1.   0.5  0.75] tensor(1., device='cuda:1')
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+[1. 1. 1.] tensor(1., device='cuda:1')
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+Testing Dual
+Elapsed (with compilation) = 0h 0m 1s
+[0.5 0.5 0.5] tensor(0.6667, device='cuda:1')
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+[0.55078125 0.5        0.75      ] tensor(0.8451, device='cuda:1')
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+[0.80859375 0.75       0.9140625 ] tensor(1., device='cuda:1')
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+#+end_example
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+Cell In[9], line 12
+     10 labels_ = []
+     11 for state in ['dpa', 'naive', 'train']:
+---> 12     readout, y_labels, cov, accuracy = test_dual(REPO_ROOT, conf_name, seed, state, DEVICE)
+     13     acc_.append(accuracy)
+     14     cov_.append(cov)
+
+File ~/models/NeuroFlame/org/train/dual/../../../src/train/dual/train_dual.py:199, in test_dual(REPO_ROOT, conf_name, seed, state, DEVICE)
+    197 cov_mn = compute_cov(model, order=0)
+    198 cov_sample = compute_cov(model, order=1)
+--> 199 cov_test = compute_cov(model, order=2)
+    200 cov_go = compute_cov(model, order=3)
+    201 cov = np.stack((cov_mn, cov_sample, cov_test, cov_go))
+
+File ~/models/NeuroFlame/org/train/dual/../../../src/train/dual/covariance.py:30, in compute_cov(model, order)
+     28 for i in range(num_vectors):
+     29     for j in range(num_vectors):
+---> 30         cov_matrix[i][j] = angle_AB(vectors[i], vectors[j])
+     32 return cov_matrix
+
+File ~/models/NeuroFlame/org/train/dual/../../../src/train/dual/covariance.py:8, in angle_AB(A, B)
+      5 A_norm = A / (np.linalg.norm(A) + 1e-5)
+      6 B_norm = B / (np.linalg.norm(B) + 1e-5)
+----> 8 return int(np.arccos(A_norm @ B_norm) * 180 / np.pi)
+
+ValueError: cannot convert float NaN to integer
+#+end_example
+:END:
+
+#+begin_src ipython
+print(np.array(accuracies).shape)
+acc = np.moveaxis(np.array(accuracies), 0, -1)
+print(acc.shape)
+#+end_src
+
+#+RESULTS:
+: (3, 3, 2, 4)
+: (3, 2, 4, 3)
+
+** overlaps
+
+#+begin_src ipython
+print(readout.shape, y_labels.shape)
+#+end_src
+
+#+RESULTS:
+: (768, 101, 2) (3, 768)
+
+#+begin_src ipython
+plot_overlap_label(readout, y_labels, task=0, figname='overlaps_naive_dpa.svg')
+#+end_src
+
+#+RESULTS:
+[[./figures/multi/figure_11.png]]
+
+#+begin_src ipython
+plot_overlap_label(readout, y_labels, task=1, figname='overlaps_naive_go.svg')
+#+end_src
+
+#+RESULTS:
+[[./figures/multi/figure_12.png]]
+
+#+begin_src ipython
+plot_overlap_label(readout, y_labels, task=-1, figname='overlaps_naive_nogo.svg')
+#+end_src
+
+#+RESULTS:
+[[./figures/multi/figure_13.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+** Perf
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[1.5*width, height])
+
+rd = np.random.normal(size=(acc.shape[-1])) / 10
+
+pal = ['r', 'b', 'g']
+for j in range(2):
+    for i in range(3):
+        acc_mean = np.mean(acc[j][0][i], -1)
+        acc_sem = np.std(acc[j][0][i], axis=-1, ddof=1) / np.sqrt(len(acc[j][0][i]))
+
+        ax[0].errorbar(i+4*j, acc_mean, yerr=acc_sem, fmt='o', color=pal[i], ecolor=pal[i], elinewidth=3, capsize=5)
+        ax[0].plot(i+rd + 4*j, acc[j][0][i], 'o', alpha=0.25)
+
+# ax[0].set_xlim(-1, 4)
+# ax[0].set_ylim(0.4, 1.1)
+
+ax[0].set_ylabel('DPA Accuracy')
+ax[0].set_xticks([1, 5], ['Naive', 'Expert'])
+ax[0].axhline(y=0.5, color='k', linestyle='--')
+
+# ax[1].errorbar(rd, acc[0][-1], yerr=acc[1][-1], fmt='o', label='Naive',
+#              color='k', ecolor='k', elinewidth=3, capsize=5)
+
+for i in range(2):
+    acc_mean = np.mean(acc[i][0][-1], -1)
+    acc_sem = np.std(acc[i][0][-1], axis=-1, ddof=1) / np.sqrt(len(acc[0][-1]))
+
+    ax[1].errorbar(i, acc_mean, yerr=acc_sem, fmt='o', color='k', ecolor='k', elinewidth=3, capsize=5)
+    ax[1].plot(rd+i, acc[i][0][-1], 'ko', alpha=.25)
+
+ax[1].set_xlim(-1, 2)
+ax[1].set_ylim(0.4, 1.1)
+
+ax[1].set_ylabel('Go/NoGo Accuracy')
+ax[1].set_xticks([0, 1], ['Naive', 'Expert'])
+ax[1].axhline(y=0.5, color='k', linestyle='--')
+
+plt.savefig('../figures/dual/dual_perf_%d.svg' % seed, dpi=300)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/multi/figure_16.png]]
+
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+** covariance
+
+#+begin_src ipython
+def plot_cov(cov_matrix, order=0, ax=None):
+
+    if order==3:
+        labels = ['$n_\\text{AB}$', '$n_\\text{Choice}$', 'Go', 'No Go']
+    elif order==2:
+        labels = ['$m_\\text{AB}$ $m_\\text{Choice}$', '$n_\\text{AB}$ $n_\\text{Choice}$', 'odor C', 'odor D']
+    elif order==1:
+        labels = ['$n_\\text{AB}$', '$n_\\text{Choice}$', 'A', 'B']
+    elif order==0:
+        labels = ['$m_\\text{AB}$', '$n_\\text{AB}$', '$m_\\text{Choice}$', '$n_\\text{Choice}$']
+
+    num_vectors = cov_matrix.shape[0]
+    mask = np.triu(np.ones_like(cov_matrix, dtype=bool))
+    mask = np.ma.masked_array(cov_matrix, mask=mask)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Plot the masked covariance matrix
+    img = ax.imshow(mask, cmap='coolwarm', interpolation=None)
+    # cbar = plt.colorbar(label='Angle (°)')
+    # cbar.set_ticks([30, 90, 120])
+
+    # Set axis labels on top and left
+    ax.set_xticks(ticks=np.arange(num_vectors), labels=labels, fontsize=18)
+    ax.set_yticks(ticks=np.arange(num_vectors), labels=labels, fontsize=18)
+
+    # Invert y-axis
+    ax.xaxis.set_ticks_position('top')
+    ax.xaxis.set_label_position('top')
+
+    # ax.yaxis.set_ticks_position('right')
+    # ax.yaxis.set_label_position('right')
+    ax.invert_yaxis()
+
+    for i in range(num_vectors):
+        for j in range(i + 1):
+            ax.text(j, i, f'{cov_matrix[i, j]:.0f}', ha='center', va='center', color='black')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+cov = np.moveaxis(np.array(covariances), 0, -1)
+print(cov.shape)
+#+end_src
+
+#+RESULTS:
+: (3, 4, 4, 4, 3)
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 4, figsize=(4*8, 6))
+plot_cov(cov[0][0].mean(-1), order=0, ax=ax[3])
+plot_cov(cov[0][3].mean(-1), order=3, ax=ax[1])
+plot_cov(cov[0][1].mean(-1), order=1, ax=ax[0])
+plot_cov(cov[0][2].mean(-1), order=2, ax=ax[2])
+plt.savefig('figures/covariances/cov_dpa.svg')
+#+end_src
+
+#+RESULTS:
+[[./figures/multi/figure_20.png]]
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 4, figsize=(4*8, 6))
+plot_cov(cov[1][0].mean(-1), order=0, ax=ax[3])
+plot_cov(cov[1][3].mean(-1), order=3, ax=ax[1])
+plot_cov(cov[1][1].mean(-1), order=1, ax=ax[0])
+plot_cov(cov[1][2].mean(-1), order=2, ax=ax[2])
+plt.savefig('figures/covariances/cov_dual_naive.svg')
+#+end_src
+
+#+RESULTS:
+[[./figures/multi/figure_21.png]]
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 4, figsize=(4*8, 6))
+plot_cov(cov[2][0].mean(-1), order=0, ax=ax[3])
+plot_cov(cov[2][3].mean(-1), order=3, ax=ax[1])
+plot_cov(cov[2][1].mean(-1), order=1, ax=ax[0])
+plot_cov(cov[2][2].mean(-1), order=2, ax=ax[2])
+plt.savefig('figures/covariances/cov_dual_train.svg')
+#+end_src
+
+#+RESULTS:
+[[./figures/multi/figure_22.png]]
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 3, figsize=(3*8, 6))
+plot_cov(cov[1][3].mean(-1), order=3, ax=ax[0])
+plot_cov(cov[1][1].mean(-1), order=1, ax=ax[1])
+plot_cov(cov[1][2].mean(-1), order=2, ax=ax[2])
+#+end_src
+
+#+RESULTS:
+[[./figures/multi/figure_21.png]]
+
+#+begin_src ipython
+print(cov.shape)
+cov_mean = np.mean(cov, -1)
+cov_sem = np.std(cov, -1, ddof=1) / np.sqrt(cov.shape[-1])
+print(cov_mean.shape)
+#+end_src
+
+#+RESULTS:
+: (3, 4, 4, 4, 3)
+: (3, 4, 4, 4)
+
+#+begin_src ipython
+confidence = 0.95
+alpha = 1 - confidence
+t_score = t.ppf(1 - alpha/2, df=cov.shape[-1]-1)
+
+# Calculate confidence interval margin
+cov_ci = t_score * cov_sem
+#print(cov_mean[0])
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+for i in [2, 3]:
+    plt.errorbar(i, np.mean(cov[0][2][0][i]), yerr=cov_ci[0][2][0][i], color='k', elinewidth=3, capsize=5, fmt='o')
+    plt.errorbar(i+.5, np.mean(cov[0][2][1][i]), yerr=cov_ci[0][2][1][i], color='k', elinewidth=3, capsize=5, fmt='o')
+
+plt.ylabel('Angle (°)')
+labels = ['C vs $m_\\text{AB}$ $m_\\text{Choice}$', 'C vs $n_\\text{AB}$ $n_\\text{Choice}$',
+          'D vs $m_\\text{AB}$ $m_\\text{Choice}$', 'D vs $n_\\text{AB}$ $n_\\text{Choice}$']
+
+plt.plot([2, 2.5], [75, 75], 'k--')
+plt.plot([3, 3.5], [104.5, 104.5], 'k--')
+plt.xticks([2, 2.5, 3, 3.5], labels, fontsize=14, rotation=45)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/multi/figure_24.png]]
+
+#+begin_src ipython
+x = np.linspace(-np.pi, np.pi, 100)
+mc = np.cos(x)
+ms = np.sin(x)
+print(np.cov(ms, ms * ms))
+#+end_src
+
+#+RESULTS:
+: [[5.00000000e-01 3.93283762e-19]
+:  [3.93283762e-19 1.27500000e-01]]

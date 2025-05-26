@@ -1,14 +1,16 @@
 #+Startup: fold
 #+TITLE: Training Low Rank RNNs
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual_flow :kernel torch :exports results :output-dir ./figures/flow :file (lc/org-babel-tangle-figure-filename)
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual_flow_multi :kernel torch :exports results :output-dir ./figures/flow_multi :file (lc/org-babel-tangle-figure-filename)
 
 * TODO Urgent
 ** Model
+
  run multiple models see if there is a push down of the wells or diff strategies
  see how go affects models try to understand how it impairs pairing.
  plot task trajectories (DPA, GO, NOGO)
 
 ** Data
+
  try wells with sample LD and CHOICE if it works (push down that s gold)
  if not try to make dPCA better and get day by day wells
  if not go back to the go no go axis
@@ -55,7 +57,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 pal = sns.color_palette("tab10")
-DEVICE = 'cuda:1'
+DEVICE = 'cuda:0'
 #+end_src
 
 #+RESULTS:
@@ -112,6 +114,27 @@ def add_vlines(model, ax=None):
 * Utils
 
 #+begin_src ipython
+from sklearn.cluster import KMeans
+def get_fp(overlaps, window, task, GRID_TEST=0):
+
+
+    x = overlaps[:, window:, 0]
+    y = overlaps[:, window:, 1]
+
+    x_fp = x[:, -1]
+    y_fp = y[:, -1]
+    fp = np.stack((x_fp, y_fp)).T
+
+    kmeans = KMeans(n_clusters=5, random_state=None)
+    kmeans.fit(fp)
+    center = np.array(kmeans.cluster_centers_).T
+
+    return center
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
 def init_model(task, seed, **kwargs):
     model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
     model_state_dict = torch.load('../models/dual/%s_%d.pth' % (task, seed))
@@ -153,16 +176,19 @@ def run_grid(GRID_RANGE, seed, task, **kwargs):
             model.N_BATCH = int(model.GRID_SIZE * model.GRID_SIZE)
 
             ff_input = model.init_ff_input()
-            # print(ff_input.shape, model.N_BATCH)
-
-            rates = model(ff_input, RET_REC=0).cpu().detach().numpy()
-            # print('rates', rates.shape)
+            rates = model(ff_input, RET_REC=0)
             rates_grid.append(rates)
-
             del_tensor(ff_input)
-            del_tensor(model)
 
-    return np.vstack(rates_grid)
+    rates_grid = torch.vstack(rates_grid)
+    overlaps, vec = get_low_rank(rates_grid, model, IF_REC=0)
+    del_tensor(rates_grid)
+    del_tensor(model)
+
+    window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
+    centers = get_fp(overlaps, window, task, GRID_TEST=0)
+
+    return centers
 #+end_src
 
 #+RESULTS:
@@ -342,7 +368,7 @@ def save_fig(figname, GRID_TEST):
 #+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "train_dual.yml"
-DEVICE = 'cuda:1'
+DEVICE = 'cuda:0'
 #+end_src
 
 #+RESULTS:
@@ -364,7 +390,7 @@ kwargs = {
 
 #+begin_src ipython
 tasks = ['dpa', 'dual_naive', 'dual_train']
-seed = 10 # 10
+seed = 29 # 10
 GRID_RANGE = .4
 #+end_src
 
@@ -373,146 +399,120 @@ GRID_RANGE = .4
 * Flow
 
 #+begin_src ipython
-# rates_multi = []
-# for seed in range(15):
-#     rates = []
-#     for task in tasks:
-#         rates.append(run_grid(GRID_RANGE, seed, task, **kwargs))
-#     rates_multi.append(rates)
-
-# rates_multi = np.array(rates_multi)
+from tqdm import tqdm
+centers = []
+for seed in tqdm(range(30)):
+    fp = []
+    for task in tasks:
+        fp.append(run_grid(GRID_RANGE, seed, task, **kwargs))
+        centers.append(fp)
+centers = np.array(centers)
+print(centers.shape)
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+: 100% 30/30 [09:19<00:00, 18.67s/it](90, 3, 2, 5)
+:
+:
+:END:
+
+#+begin_src ipython
+centers_ = np.moveaxis(centers, 0, -1)
+centers__ = np.moveaxis(centers_, 0, 2)
+# centers = np.swapaxes(centers, 1, 2)
+print(centers__.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 5, 3, 90)
+
+#+begin_src ipython
+centers = centers__
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+x = centers[0, :2, 1].reshape(-1)
+y = centers[1, :2, 1].reshape(-1)
+
+print(x.shape, y.shape)
+
+fp = np.stack((x, y)).T
+print(fp.shape)
+
+kmeans = KMeans(n_clusters=5, random_state=None, init='k-means++')
+kmeans.fit(fp)
+centers_m = np.array(kmeans.cluster_centers_).T
+print(centers_m.shape)
+# radius = np.sqrt(centers_mean[0, -1]**2 + centers_mean[1, -1]**2)
+#print(radius)
+#+end_src
+
+#+RESULTS:
+: (180,) (180,)
+: (180, 2)
+: (2, 5)
+
+#+begin_src ipython
+x = centers[0, :2, -1].reshape(-1)
+y = centers[1, :2, -1].reshape(-1)
+
+print(x.shape, y.shape)
+
+fp = np.stack((x, y)).T
+print(fp.shape)
+
+kmeans = KMeans(n_clusters=3, random_state=None, init='k-means++')
+kmeans.fit(fp)
+centers_mean = np.array(kmeans.cluster_centers_).T
+print(centers_mean.shape)
+radius = np.sqrt(centers_mean[0, -1]**2 + centers_mean[1, -1]**2)
+print(radius)
+#+end_src
+
+#+RESULTS:
+: (180,) (180,)
+: (180, 2)
+: (2, 3)
+: 10.480978601607667
+
+#+begin_src ipython
+import matplotlib.patches as patches
+palette = sns.color_palette('husl', centers.shape[-1])
+
+fig, ax = plt.subplots(1, 2, figsize=(2*width, width), sharex=1, sharey=1)
+for i in range(centers.shape[-1]):
+    ax[0].plot(centers[0, :2, 1, i], centers[1, :2, 1, i], 'o', color=palette[i])
+    ax[1].plot(centers[0, :2, -1, i], centers[1, :2, -1, i], 'o', color=palette[i])
+
+ax[1].plot(centers_mean[0], centers_mean[1], 'ko', ms=12)
+ax[0].plot(centers_m[0], centers_m[1], 'ko', ms=12)
+
+circle = patches.Circle((0, 0), radius, edgecolor='k', facecolor='none')  # Red outline, no fill
+circle2 = patches.Circle((0, 0), radius, edgecolor='k', facecolor='none')  # Red outline, no fill
+ax[0].add_patch(circle)
+ax[1].add_patch(circle2)
+
+for i in range(2):
+    # ax[i].add_patch(circle)
+
+    ax[i].axhline(0, ls='--', color='k')
+    ax[i].set_xlabel('Sample Overlap')
+    ax[i].set_ylabel('Choice Overlap')
+
+ax[0].set_title('Naive')
+ax[1].set_title('Expert')
+plt.savefig('figures/barccsyn25/fp_multi.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/flow_multi/figure_24.png]]
 
 #+begin_src ipython
 # pkl_save(rates_multi, 'rates_multi', path="/home/leon/")
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-rates = []
-for task in tasks:
-        rates.append(run_grid(GRID_RANGE, seed, task, **kwargs))
-rates = np.array(rates)
-#+end_src
-
-
-#+RESULTS:
-
-#+begin_src ipython
-rates_tensor = torch.tensor(rates).to(DEVICE)
-print(rates_tensor.shape)
-#+end_src
-
-#+RESULTS:
-: torch.Size([3, 900, 101, 750])
-
-#+begin_src ipython
-model = init_model(task, seed, **kwargs)
-overlaps, vec = get_low_rank(rates_tensor, model, IF_REC=0)
-print(overlaps.shape)
-
-# ff_overlaps = ff_input[..., model.N_STEADY: , model.slices[0]] @ vec.T
-# ff_overlaps = ff_overlaps[:, ::10]
-# print(overlaps.shape, ff_overlaps.shape)
-#+end_src
-
-#+RESULTS:
-: (3, 900, 101, 2)
-
-* Plots
-
-#+begin_src ipython
-palette = sns.color_palette('husl', overlaps.shape[1])
-
-fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-
-xtime = np.linspace(0, model.DURATION, overlaps.shape[2])
-
-for i in range(overlaps.shape[1]):
-        ax[0].plot(xtime, overlaps[0, i, :, 0], color=palette[i])
-        ax[1].plot(xtime, overlaps[0, i, :, 1], color=palette[i])
-
-ax[0].set_ylabel('$\\kappa_{AB}$')
-ax[1].set_ylabel('$\kappa_{GnG}$')
-
-ax[0].set_xlabel('Time (s)')
-ax[1].set_xlabel('Time (s)')
-
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/flow/figure_23.png]]
-
-#+begin_src ipython
-from sklearn.cluster import KMeans
-def get_fp(overlaps, window, task, GRID_TEST=0):
-    kmeans = KMeans(n_clusters=5, random_state=None)
-
-    x = overlaps[:, window:, 0]
-    y = overlaps[:, window:, 1]
-
-    x_fp = x[:, -1]
-    y_fp = y[:, -1]
-    fp = np.stack((x_fp, y_fp)).T
-
-    # print(fp.shape)
-    kmeans.fit(fp)
-    center = np.array(kmeans.cluster_centers_)
-    center_ = []
-
-    if GRID_TEST==0:
-        pkl_save(center, 'center_%s' % task, path="/home/leon/")
-    else:
-        center_ = pkl_load('center_%s' % task, path="/home/leon/")
-
-    return center, center_
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
-fig, ax = plt.subplots(1, 3, figsize=[3*width, width])
-for i in range(overlaps.shape[0]):
-    plot_spaghetti(overlaps[i], ax[i], window, IF_FP=1)
-save_fig('traj', GRID_TEST=model.GRID_TEST)
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/flow/figure_25.png]]
-
-#+begin_src ipython
-window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
-fig, ax = plt.subplots(1, 3, figsize=[3*width, width])
-for i in range(overlaps.shape[0]):
-    plot_quiver(overlaps[i], ax[i], window, IF_FP=1)
-save_fig('quiver', GRID_TEST=model.GRID_TEST)
-plt.show()
-
-#+end_src
-
-#+RESULTS:
-[[./figures/flow/figure_26.png]]
-
-#+begin_src ipython
-window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
-fig, ax = plt.subplots(1, 3, figsize=[3*width, width])
-for i in range(overlaps.shape[0]):
-    plot_field(overlaps[i], ax[i], window, IF_FP=1)
-save_fig('field', GRID_TEST=model.GRID_TEST)
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/flow/figure_27.png]]
-
-#+begin_src ipython
-# add bissectrice line ortho to the line test fp
 #+end_src
 
 #+RESULTS:

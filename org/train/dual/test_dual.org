@@ -189,8 +189,6 @@ def training_step(dataloader, model, loss_fn, optimizer, zero_grad=None):
             model(X)
             y_pred = model.readout
             loss = loss_fn(y_pred, y)
-            loss += torch.norm(model.low_rank.U, p=2, dim=0).mean()
-            loss += torch.norm(model.low_rank.V, p=2, dim=0).mean()
 
             loss.backward()
 
@@ -839,7 +837,7 @@ def plot_overlap(readout, labels=['pair', 'unpair'], figname='fig.svg'):
             ax[i].set_xlabel('Time (s)')
 
       ax[0].set_ylabel('Sample Overlap (Hz)')
-      ax[1].set_ylabel('Go/NoGo Overlap (Hz)')
+      ax[1].set_ylabel('Choice Overlap (Hz)')
       if readout.shape[-1] == 3:
             ax[-1].set_ylabel('Readout (Hz)')
 
@@ -858,10 +856,10 @@ def plot_overlap(readout, labels=['pair', 'unpair'], figname='fig.svg'):
 #+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "train_dual.yml"
-DEVICE = 'cuda:0'
+DEVICE = 'cuda:1'
 
 # seed = np.random.randint(0, 1e6)
-seed = 31
+seed = 10
 print(seed)
 
 A0 = 1.0 # sample/dist
@@ -871,7 +869,7 @@ C0 = 0.0 # DRT rwd
 
 
 #+RESULTS:
-: 31
+: 10
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1)
@@ -905,148 +903,6 @@ torch.cuda.reset_accumulated_memory_stats(DEVICE)
 #+RESULTS:
 
 * DPA Task
-** Training
-*** Parameters
-
-#+begin_src ipython
-model.J_STP.requires_grad = False
-
-if model.LR_READOUT:
-    for param in model.low_rank.linear.parameters():
-        param.requires_grad = False
-    model.low_rank.linear.bias.requires_grad = False
-
-if model.LR_KAPPA:
-    model.low_rank.lr_kappa.requires_grad = True
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-for name, param in model.named_parameters():
-    if param.requires_grad:
-        print(name, param.shape)
-#+end_src
-
-#+RESULTS:
-: low_rank.V torch.Size([750, 2])
-: low_rank.U torch.Size([750, 2])
-
-#+begin_src ipython
-steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
-mask = (steps >= (model.N_STIM_ON[4].cpu().numpy() - model.N_STEADY)) & (steps <= (model.N_STEPS - model.N_STEADY))
-rwd_idx = np.where(mask)[0]
-print('rwd', rwd_idx)
-
-# mask for A/B memory from sample to test
-stim_mask = (steps >= (model.N_STIM_ON[0].cpu().numpy() - model.N_STEADY)) & (steps < (model.N_STIM_ON[-1].cpu().numpy() - model.N_STEADY))
-stim_idx = np.where(stim_mask)[0]
-print('stim', stim_idx)
-
-model.lr_eval_win = np.max((rwd_idx.shape[0], stim_idx.shape[0]))
-
-mask_zero = ~mask  # & ~stim_mask
-zero_idx = np.where(mask_zero)[0]
-print('zero', zero_idx)
-#+end_src
-
-#+RESULTS:
-: rwd [ 70  71  72  73  74  75  76  77  78  79  80  81  82  83  84  85  86  87
-:   88  89  90  91  92  93  94  95  96  97  98  99 100]
-: stim [10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33
-:  34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57
-:  58 59 60 61 62 63 64 65 66 67 68 69]
-: zero [ 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23
-:  24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
-:  48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69]
-
-*** Inputs and Labels
-
-#+begin_src ipython
-N_BATCH = 256
-model.N_BATCH = N_BATCH
-
-model.lr_eval_win = np.max( (rwd_idx.shape[0], stim_idx.shape[0]))
-
-ff_input = []
-labels = np.zeros((2, 4, model.N_BATCH, model.lr_eval_win))
-
-l=0
-for i in [-1, 1]:
-        for k in [-1, 1]:
-
-            model.I0[0] = i # sample
-            model.I0[4] = k # test
-
-            if i == 1:
-                    labels[1, l] = np.ones((model.N_BATCH, model.lr_eval_win))
-
-            if i==k: # Pair Trials
-                labels[0, l] = np.ones((model.N_BATCH, model.lr_eval_win))
-
-            l+=1
-
-            ff_input.append(model.init_ff_input())
-
-labels = torch.tensor(labels, dtype=torch.float, device=DEVICE).reshape(2, -1, model.lr_eval_win).transpose(0, 1)
-
-ff_input = torch.vstack(ff_input)
-print('ff_input', ff_input.shape, 'labels', labels.shape)
-#+end_src
-
-#+RESULTS:
-: ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
-
-*** Run
-
-#+begin_src ipython
-splits = [split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)]
-# splits = cross_val_data(ff_input, labels, n_splits=5, batch_size=batch_size)
-criterion = DualLoss(alpha=1.0, thresh=4.0, rwd_idx=rwd_idx, stim_idx=stim_idx, zero_idx=zero_idx, imbalance=[1.0, 1.0], read_idx=[1, 0])
-
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-# or add l2 regularization
-# params = [{'params': [model.low_rank.U, model.low_rank.V], 'weight_decay': .01}]
-# optimizer = optim.Adam(params, lr=learning_rate)
-#+end_src
-
-#+RESULTS:
-: torch.Size([819, 605, 1000]) torch.Size([205, 605, 1000])
-: torch.Size([819, 2, 60]) torch.Size([205, 2, 60])
-
-#+begin_src ipython
-print('training DPA')
-num_epochs = 15
-start = perf_counter()
-for train_loader, val_loader in splits:
-    loss, val_loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs, zero_grad=None)
-end = perf_counter()
-print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
-torch.save(model.state_dict(), '../models/dual/dpa_%d.pth' % seed)
-#+end_src
-
-#+RESULTS:
-: training DPA
-: Epoch 1/15, Training Loss: 20.7198, Validation Loss: 7.9986
-: Epoch 2/15, Training Loss: 8.2824, Validation Loss: 7.9999
-: Epoch 3/15, Training Loss: 8.1066, Validation Loss: 7.9998
-: Epoch 4/15, Training Loss: 8.0937, Validation Loss: 8.0005
-: Epoch 5/15, Training Loss: 8.0912, Validation Loss: 8.0002
-
-#+begin_src ipython
-print(model.low_rank.lr_kappa, model.J_STP)
-#+end_src
-
-#+RESULTS:
-: 91f27118-6579-4645-a353-96aea28cb5c0
-
-#+begin_src ipython
-torch.save(model.state_dict(), '../models/dual/dpa_%d.pth' % seed)
-#+end_src
-
-#+RESULTS:
-: ecb28377-04e8-4de1-a379-72ecba0403ab
-
 ** Testing
 :PROPERTIES:
 :tangle no
@@ -1059,7 +915,6 @@ model.eval();
 #+end_src
 
 #+RESULTS:
-: 056d6671-49c1-48a7-acf0-17242df0ffc0
 
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
 N_BATCH = 1
@@ -1086,14 +941,14 @@ for i in [-1, 1]:
             l+=1
             ff_input.append(model.init_ff_input())
 
-labels = torch.tensor(labels, dtype=torch.float, device=DEVICE).reshape(2, -1)
+y_labels = torch.tensor(labels, dtype=torch.float, device=DEVICE).reshape(2, -1)
 
 ff_input = torch.vstack(ff_input)
 print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: 2cc35237-cb2b-4a33-b821-8fb2ffe0981d
+: ff_input torch.Size([4, 605, 1000]) labels (2, 4, 1)
 
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
 rates = model.forward(ff_input=ff_input).detach().cpu().numpy()
@@ -1101,7 +956,7 @@ print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: 5a509f81-9b45-41b5-8450-5371fe422ea9
+: (4, 101, 750)
 
 #+begin_src ipython
 def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fig.svg', title='first'):
@@ -1118,13 +973,14 @@ def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fi
         y_ = y.copy()
 
     print(y_.shape)
-    fig, ax = plt.subplots(1, size, figsize=[size*width, height], sharey=True)
+    fig, ax = plt.subplots(1, size+1, figsize=[(size+1)*width, height])
 
     time = np.linspace(0, 10, readout.shape[1])
     colors = ['r', 'b', 'g']
-    ls = ['--', '-', '-.', ':']
-    label = ['AD', 'AC', 'BD', 'BC']
+    ls = ['--', '-', '--', '-']
+    label = ['BC', 'BD', 'AD', 'AC']
 
+    mean_overlaps = []
     for k in range(2): # readout
         for j in range(2): # sample
             for i in range(2): # pair
@@ -1132,7 +988,9 @@ def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fi
 
                 mean, ci = mean_ci(data)
 
-                ax[k].plot(time, mean, ls=ls[i+2*j], label=label[i+2*j], color=colors[task], alpha=1-j/4)
+                mean_overlaps.append(mean)
+
+                ax[k].plot(time, mean, ls=ls[i+2*j], label=label[i+2*j], color=colors[task], alpha=1-(1-j)/2)
                 ax[k].fill_between(time, mean - ci, mean + ci, color=colors[task], alpha=0.1)
 
                 add_vlines(ax[k])
@@ -1141,11 +999,20 @@ def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fi
         if k==0:
             ax[k].set_ylabel('A/B Overlap (Hz)')
         elif k==1:
-            ax[k].set_ylabel('GNG Overlap (Hz)')
+            ax[k].set_ylabel('Choice Overlap (Hz)')
         else:
             ax[k].set_ylabel('Readout (Hz)')
 
         ax[k].axhline(0, color='k', ls='--')
+
+    mean_overlaps = np.array(mean_overlaps).reshape((2, 2, 2, -1))
+    print(mean_overlaps.shape)
+    for j in range(2): # sample
+        for i in range(2): # pair
+            ax[-1].plot(mean_overlaps[0, j, i], mean_overlaps[1, j, i], color=colors[task], ls=ls[i+2*j], label=label[i+2*j], alpha=1-(1-j)/2)
+
+    ax[-1].set_xlabel('A/B Overlap (Hz)')
+    ax[-1].set_ylabel('Choice Overlap (Hz)')
 
     plt.legend(fontsize=10)
     plt.savefig('../figures/dual/%s' % figname, dpi=300)
@@ -1153,14 +1020,24 @@ def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fi
 #+end_src
 
 #+RESULTS:
-: 788b9b31-f294-4129-ba3a-c903bbb91d76
 
 #+begin_src ipython
-plot_overlap_label(model.readout.cpu().detach().numpy(), labels.cpu().numpy(), task=0)
+plot_overlap_label(model.readout.cpu().detach().numpy(), y_labels.cpu().numpy(), task=0, figname='dpa_overlaps.svg')
 #+end_src
 
 #+RESULTS:
-: 62f1d9d1-a93f-427a-a5f9-1a6d07be4315
+:RESULTS:
+: (2, 4)
+: (4, 4)
+: (2, 2, 2, 101)
+[[./figures/dual/figure_39.png]]
+:END:
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -1180,7 +1057,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 300b2862-d9bf-42ea-acca-f9a0eb4f136d
+[[./figures/dual/figure_41.png]]
 
 #+begin_src ipython
 odors = model.odors.cpu().numpy()
@@ -1191,18 +1068,17 @@ n1 = V[:, 0]
 m2 = U[:, 1]
 n2 = V[:, 1]
 
-vectors = [m1, n1, m2, n2]
-labels = ['$m_\\text{AB}$', '$n_\\text{AB}$', '$m_\\text{GnG}$', '$n_\\text{GnG}$']
+vectors = [m1 * m2, n1 * n2, odors[4], -odors[9]]
+# labels = ['$m_\\text{AB}$', '$n_\\text{AB}$', '$m_\\text{GnG}$', '$n_\\text{GnG}$', 'C', 'D']
+labels = ['$m_\\text{AB}$ $m_\\text{GnG}$', '$n_\\text{AB}$ $n_\\text{GnG}$', 'odor C', 'odor D']
 #+end_src
 
 #+RESULTS:
-: b8820b33-81f0-4406-9c19-52f4a1d0b940
 
 #+begin_src ipython
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Calculate the covariance matrix
 num_vectors = len(vectors)
 cov_matrix = np.zeros((num_vectors, num_vectors))
 
@@ -1216,38 +1092,42 @@ masked_cov_matrix = np.ma.masked_array(cov_matrix, mask=mask)
 #+end_src
 
 #+RESULTS:
-: f94606ca-4501-4a24-ab12-1a19ce553a8d
+
+#+begin_src ipython
+def plot_cov(mask, num_vectors, labels):
+    # Plot the masked covariance matrix
+    img = plt.imshow(mask, cmap='coolwarm', interpolation='nearest')
+    # cbar = plt.colorbar(label='Angle (°)')
+    # cbar.set_ticks([30, 90, 120])
+
+    # Set axis labels on top and left
+    plt.xticks(ticks=np.arange(num_vectors), labels=labels, fontsize=18)
+    plt.yticks(ticks=np.arange(num_vectors), labels=labels, fontsize=18)
+
+    # Invert y-axis
+    ax.xaxis.set_ticks_position('top')
+    ax.xaxis.set_label_position('top')
+
+    # ax.yaxis.set_ticks_position('right')
+    # ax.yaxis.set_label_position('right')
+    ax.invert_yaxis()
+
+    for i in range(num_vectors):
+        for j in range(i + 1):
+            plt.text(j, i, f'{cov_matrix[i, j]:.0f}', ha='center', va='center', color='black')
+#+end_src
+
+#+RESULTS:
 
 #+begin_src ipython
 fig, ax = plt.subplots(figsize=(8, 6))
-
-# Plot the masked covariance matrix
-img = plt.imshow(masked_cov_matrix, cmap='coolwarm', interpolation='nearest')
-# cbar = plt.colorbar(label='Angle (°)')
-# cbar.set_ticks([30, 90, 120])
-
-# Set axis labels on top and left
-plt.xticks(ticks=np.arange(num_vectors), labels=labels)
-plt.yticks(ticks=np.arange(num_vectors), labels=labels)
-
-# Invert y-axis
-ax.xaxis.set_ticks_position('top')
-ax.xaxis.set_label_position('top')
-
-# ax.yaxis.set_ticks_position('right')
-# ax.yaxis.set_label_position('right')
-ax.invert_yaxis()
-
-for i in range(num_vectors):
-    for j in range(i + 1):
-        plt.text(j, i, f'{cov_matrix[i, j]:.0f}', ha='center', va='center', color='black')
-
-plt.savefig('../figures/dual/cov_dpa_%d.svg' % seed, dpi=300)
+plot_cov(masked_cov_matrix, num_vectors, labels)
+# plt.savefig('../figures/dual/cov_dpa_%d.svg' % seed, dpi=300)
 plt.show()
 #+end_src
 
 #+RESULTS:
-: 7333ed86-22b1-4a5a-aa2c-69c736ad9727
+[[./figures/dual/figure_45.png]]
 
 
 #+begin_src ipython
@@ -1255,132 +1135,8 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: f2a35c72-f1b7-49f3-b8cd-55f53b1de38d
 
 * Go/NoGo Task
-
-
-#+begin_src ipython
-model_state_dict = torch.load('../models/dual/dpa_%d.pth' % seed)
-model.load_state_dict(model_state_dict)
-#+end_src
-
-#+RESULTS:
-: e952b7df-ccc5-4171-a7dd-1ed803070270
-
-** Training
-
-
-#+begin_src ipython
-model.J_STP.requires_grad = False
-model.low_rank.lr_kappa.requires_grad = False
-#+end_src
-
-#+RESULTS:
-: 50bb45df-737f-4889-8c1f-9b462dc8f3d2
-
-#+begin_src ipython
-for name, param in model.named_parameters():
-      if param.requires_grad:
-            print(name, param.shape)
-#+end_src
-
-#+RESULTS:
-: c57affb5-e039-46b5-a515-091828e18597
-
-#+begin_src ipython
-steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
-
-# mask for lick/nolick  from cue to test
-rwd_mask = (steps >= (model.N_STIM_ON[2].cpu().numpy() - model.N_STEADY)) & (steps < (model.N_STIM_ON[4].cpu().numpy() - model.N_STEADY))
-rwd_idx = np.where(rwd_mask)[0]
-print('rwd', rwd_idx)
-
-# mask for Go/NoGo memory from dist to cue
-stim_mask = (steps >= (model.N_STIM_ON[1].cpu().numpy() - model.N_STEADY)) & (steps < (model.N_STIM_ON[2].cpu().numpy() - model.N_STEADY))
-stim_idx = np.where(stim_mask)[0]
-# stim_idx = []
-print('stim', stim_idx)
-
-mask_zero = (steps < (model.N_STIM_ON[1].cpu().numpy() - model.N_STEADY))
-zero_idx = np.where(mask_zero)[0]
-print('zero', zero_idx)
-
-model.lr_eval_win = np.max( (rwd_idx.shape[0], stim_idx.shape[0]))
-#+end_src
-
-#+RESULTS:
-: bdcf1169-f75e-4afe-96a3-dd4451a3df1e
-
-#+begin_src ipython
-model.N_BATCH = 512
-
-model.I0[0] = 0
-model.I0[1] = A0
-model.I0[2] = float(B0)
-model.I0[3] = 0
-model.I0[4] = 0
-
-Go = model.init_ff_input()
-
-model.I0[0] = 0
-model.I0[1] = -A0
-model.I0[2] = float(B0)
-model.I0[3] = 0
-model.I0[4] = 0
-
-NoGo = model.init_ff_input()
-
-ff_input = torch.cat((Go, NoGo))
-print(ff_input.shape)
-#+end_src
-
-#+RESULTS:
-: 2e042714-9fe3-4884-b5e1-68b569e30292
-
-#+begin_src ipython
-labels_Go = torch.ones((model.N_BATCH, model.lr_eval_win))
-labels_NoGo = torch.zeros((model.N_BATCH, model.lr_eval_win))
-labels = torch.cat((labels_Go, labels_NoGo))
-print(labels.shape)
-labels =  labels.repeat((2, 1, 1))
-labels = torch.transpose(labels, 0, 1)
-print('labels', labels.shape)
-#+end_src
-
-#+RESULTS:
-: 8872cd8e-d7e6-418f-9931-3a6d2bb3a593
-
-*** Run
-
-#+begin_src ipython
-train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
-criterion = DualLoss(alpha=1.0, thresh=4.0, rwd_idx=rwd_idx, zero_idx=zero_idx, stim_idx=stim_idx, imbalance=[0.0, 1.0], read_idx=[1, 1])
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-#+end_src
-
-#+RESULTS:
-: ec8f12af-c93d-4074-bf82-617f68e5df9e
-
-#+begin_src ipython
-print('training DRT')
-num_epochs = 15
-start = perf_counter()
-loss, val_loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs, zero_grad=0)
-end = perf_counter()
-print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
-#+end_src
-
-#+RESULTS:
-: 23ecdada-1185-4416-b708-ab1b31793e93
-
- #+begin_src ipython
-torch.save(model.state_dict(), '../models/dual/dual_naive_%d.pth' % seed)
-#+end_src
-
-#+RESULTS:
-: 84436c49-e27f-430e-bce3-1b05fd5af385
-
 ** Test
 :PROPERTIES:
 :tangle no
@@ -1393,7 +1149,6 @@ model.eval();
 #+end_src
 
 #+RESULTS:
-: 8b23fe4d-60aa-45f6-b80f-e60ab6c2ee6a
 
    #+begin_src ipython
 model.N_BATCH = 1
@@ -1419,7 +1174,7 @@ print('ff_input', ff_input.shape)
   #+end_src
 
   #+RESULTS:
-  : b30836fc-5187-4ab2-9be5-d29c17064102
+  : ff_input torch.Size([2, 605, 1000])
 
   #+begin_src ipython
 rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
@@ -1427,14 +1182,14 @@ print(rates.shape)
   #+end_src
 
 #+RESULTS:
-: 0384cb8f-400c-4fe9-8416-635813ddbd28
+: (2, 101, 750)
 
   #+begin_src ipython
 plot_overlap(model.readout.cpu().detach().numpy(), labels=['Go', 'NoGo'], figname='../figures/dual/GoNoGo_overlaps_%d.svg' % seed)
  #+end_src
 
 #+RESULTS:
-: 819db480-9faa-4e87-aefd-fe31b754d968
+[[./figures/dual/figure_50.png]]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -1454,7 +1209,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 88ec4807-718c-416e-80f6-d00c09f34493
+[[./figures/dual/figure_51.png]]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
@@ -1507,14 +1262,13 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: ccaa002d-3a9d-406c-8430-8777e5c6fbcf
+[[./figures/dual/figure_52.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 28fe5c26-7f35-42f3-ab8a-2d4e19055feb
 
 * Dual Task
 ** Testing
@@ -1530,7 +1284,6 @@ model.eval();
 #+end_src
 
 #+RESULTS:
-: defcb212-4ef6-4f7e-a110-bea4a45fd483
 
 #+begin_src ipython
 steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
@@ -1557,7 +1310,14 @@ print('zero', zero_idx)
 #+end_src
 
 #+RESULTS:
-: be96ff54-87d4-4427-9c6c-ec8eae6bdba9
+: rwd [ 70  71  72  73  74  75  76  77  78  79  80  81  82  83  84  85  86  87
+:   88  89  90  91  92  93  94  95  96  97  98  99 100]
+: cue [50 51 52 53 54 55 56 57 58 59 60]
+: GnG [40 41 42 43 44 45 46 47 48 49 50]
+: stim [10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33
+:  34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57
+:  58 59 60 61 62 63 64 65 66 67 68 69 70]
+: zero [0 1 2 3 4 5 6 7 8 9]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
@@ -1612,10 +1372,10 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 16351613-9dd9-4591-bbd8-7e241c974b76
+[[./figures/dual/figure_56.png]]
 
 #+begin_src ipython
-N_BATCH = 10
+N_BATCH = 64
 model.N_BATCH = N_BATCH
 
 model.lr_eval_win = np.max( (rwd_idx.shape[0], cue_idx.shape[0]))
@@ -1629,11 +1389,11 @@ for j in [0, 1, -1]:
         for k in [-1, 1]:
 
             model.I0[0] = i # sample
-            if i==1:
-                labels[1, l] = i * np.ones((model.N_BATCH, model.lr_eval_win))
-
             model.I0[1] = j # distractor
             model.I0[4] = k # test
+
+            if i==1:
+                labels[1, l] = np.ones((model.N_BATCH, model.lr_eval_win))
 
             if i==k: # Pair Trials
                 labels[0, l] = np.ones((model.N_BATCH, model.lr_eval_win))
@@ -1663,7 +1423,7 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: a1eaa7dc-e8b5-44e8-b184-70e770a56bce
+: ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
 
 #+begin_src ipython
 rates = model.forward(ff_input=ff_input).detach()
@@ -1672,7 +1432,7 @@ print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: 486c703e-89e6-41ef-9a7f-290f86eba5a4
+: (768, 101, 750)
 
 
 #+RESULTS:
@@ -1686,7 +1446,7 @@ print(readout.shape, y_labels.shape)
 #+end_src
 
 #+RESULTS:
-: 583ead26-9d14-4f19-974e-2028bd847bfa
+: (768, 101, 2) (3, 768)
 
 #+begin_src ipython
 def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fig.svg', title='first'):
@@ -1704,20 +1464,20 @@ def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fi
         tasks = [0, 1, -1]
 
     print(y_.shape)
-    fig, ax = plt.subplots(1, 2, figsize=[2*width, height], sharey=True)
+    fig, ax = plt.subplots(1, 3, figsize=[3*width, height], sharey=True)
 
     time = np.linspace(0, 10, readout.shape[1])
     colors = ['r', 'b', 'g']
-    ls = ['--', '-', '-.', ':']
+    ls = ['--', '-', '-', '--']
     label = ['AD', 'AC', 'BD', 'BC']
-
+    mean_overlaps = []
     for k in range(2): # readout
         for j in range(2): # sample
             for i in range(2): # pair
                 data = readout[(y_[0]==i) & (y_[1]==j) & (y_[2]==task), :, k]
                 mean, ci = mean_ci(data)
-
-                ax[k].plot(time, mean, ls=ls[i+2*j], label=label[i+2*j], color=colors[task], alpha=1-j/4)
+                mean_overlaps.append(mean)
+                ax[k].plot(time, mean, ls=ls[i+2*j], label=label[i+2*j], color=colors[task], alpha=1-(1-j)/2)
                 ax[k].fill_between(time, mean - ci, mean + ci, color=colors[task], alpha=0.1)
 
         add_vlines(ax[k])
@@ -1732,42 +1492,63 @@ def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fi
 
         ax[k].axhline(0, color='k', ls='--')
 
+    mean_overlaps = np.array(mean_overlaps).reshape((2, 2, 2, -1))
+    print(mean_overlaps.shape)
+    for j in range(2): # sample
+        for i in range(2): # pair
+            ax[-1].plot(mean_overlaps[0, j, i], mean_overlaps[1, j, i], color=colors[task], ls=ls[i+2*j], label=label[i+2*j], alpha=1-(1-j)/2)
+
+    ax[-1].set_xlabel('A/B Overlap (Hz)')
+    ax[-1].set_ylabel('Choice Overlap (Hz)')
+
     plt.legend(fontsize=10)
     plt.savefig('../figures/dual/%s' % figname, dpi=300)
     plt.show()
 #+end_src
 
 #+RESULTS:
-: 9b032d78-f99f-4586-acc9-de84e658cc04
 
 #+begin_src ipython
-plot_overlap_label(readout, y_labels, task=0, figname='sample_overlaps_naive.svg')
+plot_overlap_label(readout, y_labels, task=0, figname='overlaps_naive_dpa.svg')
 #+end_src
 
 #+RESULTS:
-: 1694a417-eacd-4a4e-be55-2d9009b710d9
+:RESULTS:
+: (3, 768)
+: (3, 768)
+: (2, 2, 2, 101)
+[[./figures/dual/figure_61.png]]
+:END:
 
 #+begin_src ipython
-plot_overlap_label(readout, y_labels, task=1, figname='sample_overlaps_naive.svg')
+plot_overlap_label(readout, y_labels, task=1, figname='overlaps_naive_go.svg')
 #+end_src
 
 #+RESULTS:
-: 1090fee7-05ff-491c-b354-c3bc0fe54806
+:RESULTS:
+: (3, 768)
+: (3, 768)
+: (2, 2, 2, 101)
+[[./figures/dual/figure_62.png]]
+:END:
 
 #+begin_src ipython
-plot_overlap_label(readout, y_labels, task=-1, figname='sample_overlaps_naive.svg')
+plot_overlap_label(readout, y_labels, task=-1, figname='overlaps_naive_nogo.svg')
 #+end_src
 
 #+RESULTS:
-: 35f0f521-389a-41cf-a882-1701df0ab3e8
+:RESULTS:
+: (3, 768)
+: (3, 768)
+: (2, 2, 2, 101)
+[[./figures/dual/figure_63.png]]
+:END:
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 17800a17-5976-4bdd-9667-034df75d3fd3
-
 
 *** Perf
 
@@ -1777,7 +1558,6 @@ dpa_perf, drt_perf = criterion(model.readout, labels.clone())
 #+end_src
 
 #+RESULTS:
-: 1c88e4ea-cb48-4905-ac75-8a9024ff39a3
 
 #+begin_src ipython
 dpa_mean = []
@@ -1794,14 +1574,19 @@ dpa_sem = np.stack(dpa_sem)
 #+end_src
 
 #+RESULTS:
-: c82bf281-a1f8-47c0-a02d-89c3c2199ef0
+
+#+begin_src ipython
+print(dpa_mean)
+#+end_src
+
+#+RESULTS:
+: tensor([0.7500, 0.7305, 0.7500], device='cuda:1')
 
 #+begin_src ipython
 drt_mean, drt_sem = calculate_mean_accuracy_and_sem(drt_perf)
 #+end_src
 
 #+RESULTS:
-: ba27402d-2271-46d6-abaf-9d0440723e40
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[1.5*width, height])
@@ -1834,7 +1619,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 1fd4a41b-399f-4bdb-a980-d363b3631cac
+[[./figures/dual/figure_69.png]]
 
 
 #+begin_src ipython
@@ -1842,129 +1627,6 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: fa4695c3-3040-40d8-8500-ab2559c364e8
-
-** Training
-
-#+begin_src ipython
-steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
-
-mask_rwd = (steps >= (model.N_STIM_ON[-1].cpu().numpy() - model.N_STEADY))
-rwd_idx = np.where(mask_rwd)[0]
-print('rwd', rwd_idx)
-
-mask_cue = (steps >= (model.N_STIM_ON[2].cpu().numpy() - model.N_STEADY)) & (steps <= (model.N_STIM_OFF[3].cpu().numpy() - model.N_STEADY))
-cue_idx = np.where(mask_cue)[0]
-print('cue', cue_idx)
-
-mask_GnG = (steps >= (model.N_STIM_OFF[1].cpu().numpy() - model.N_STEADY)) & (steps <= (model.N_STIM_ON[2].cpu().numpy() - model.N_STEADY))
-GnG_idx = np.where(mask_GnG)[0]
-print('GnG', GnG_idx)
-
-mask_stim = (steps >= (model.N_STIM_ON[0].cpu().numpy() - model.N_STEADY)) & (steps <= (model.N_STIM_ON[-1].cpu().numpy() - model.N_STEADY))
-stim_idx = np.where(mask_stim)[0]
-print('stim', stim_idx)
-
-mask_zero = ~mask_rwd & ~mask_cue & ~mask_stim
-zero_idx = np.where(mask_zero)[0]
-print('zero', zero_idx)
-#+end_src
-
-#+RESULTS:
-: 0112ebd1-bb95-4f36-b2be-8c4fd2bfb900
-
-#+begin_src ipython
-model.J_STP.requires_grad = False
-model.low_rank.lr_kappa.requires_grad = False
-#+end_src
-
-  #+RESULTS:
-  : c3f87308-7b39-4195-8777-37930288c35c
-
-#+begin_src ipython
-model.N_BATCH = 64
-
-model.lr_eval_win = np.max( (rwd_idx.shape[0], cue_idx.shape[0]))
-
-ff_input = []
-labels = np.zeros((3, 12, model.N_BATCH, model.lr_eval_win))
-
-l=0
-for i in [-1, 1]:
-    for j in [-1, 0, 1]:
-        for k in [-1, 1]:
-
-            model.I0[0] = i # sample
-            model.I0[1] = j # distractor
-            model.I0[4] = k # test
-
-            if i==1:
-                labels[1, l] = np.ones((model.N_BATCH, model.lr_eval_win))
-
-            if i==k: # Pair Trials
-                labels[0, l] = np.ones((model.N_BATCH, model.lr_eval_win))
-
-            if j==1: # Go
-                model.I0[2] = float(B0) # cue
-                model.I0[3] = float(C0) * model.IF_RL # rwd
-
-                labels[2, l] = np.ones((model.N_BATCH, model.lr_eval_win))
-
-            elif j==-1: # NoGo
-                model.I0[2] = float(B0) # cue
-                model.I0[3] = 0.0 # rwd
-
-            else: # DPA
-                model.I0[2] = 0 # cue
-                model.I0[3] = 0 # rwd
-
-            l+=1
-
-            ff_input.append(model.init_ff_input())
-
-labels = torch.tensor(labels, dtype=torch.float, device=DEVICE).reshape(3, -1, model.lr_eval_win).transpose(0, 1)
-ff_input = torch.vstack(ff_input)
-print('ff_input', ff_input.shape, 'labels', labels.shape)
-#+end_src
-
-#+RESULTS:
-: 28cb032b-1cef-409f-b60e-7a8bcfd7e33a
-
-#+begin_src ipython
-train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
-criterion = DualLoss(alpha=1.0, thresh=4.0, stim_idx=stim_idx, cue_idx=cue_idx, rwd_idx=rwd_idx, zero_idx=zero_idx, imbalance=[1.0, 0.0], read_idx=[1, 0, 1])
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-#+end_src
-
-#+RESULTS:
-: 73ba8769-fa06-409f-86fa-6d5e8a0e71e6
-
-#+begin_src ipython
-print('training Dual')
-num_epochs = 15
-start = perf_counter()
-
-loss, val_loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs, zero_grad=None)
-end = perf_counter()
-print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
-#+end_src
-
-#+RESULTS:
-: deabd85d-0852-4e9d-a77a-b448e62d109f
-
-#+begin_src ipython
-torch.save(model.state_dict(), '../models/dual/dual_train_%d.pth' % seed)
-#+end_src
-
-#+RESULTS:
-: 000d0438-587e-4c71-b4e7-e78dd893e1ac
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
-: a2497a18-b522-410b-97fe-e9b17c12eb8a
 
 ** Re-Testing
 :PROPERTIES:
@@ -1978,7 +1640,6 @@ model.eval();
 #+end_src
 
 #+RESULTS:
-: 8663dc7e-18e4-4a53-9b0d-65b1bc8d95e3
 
 
 #+begin_src ipython
@@ -2006,7 +1667,14 @@ print('zero', zero_idx)
 #+end_src
 
 #+RESULTS:
-: e2ebb3e4-8f65-4b17-86af-1cc4fc936ecf
+: rwd [ 70  71  72  73  74  75  76  77  78  79  80  81  82  83  84  85  86  87
+:   88  89  90  91  92  93  94  95  96  97  98  99 100]
+: cue [50 51 52 53 54 55 56 57 58 59 60]
+: GnG [40 41 42 43 44 45 46 47 48 49 50]
+: stim [10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33
+:  34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57
+:  58 59 60 61 62 63 64 65 66 67 68 69 70]
+: zero [0 1 2 3 4 5 6 7 8 9]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
@@ -2058,7 +1726,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 202f9bbc-1291-428a-b72a-5ee04c5c1854
+[[./figures/dual/figure_73.png]]
 
 #+begin_src ipython
 N_BATCH = 10
@@ -2109,7 +1777,7 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: 8393439e-a585-4c96-a7d3-f72f391a0523
+: ff_input torch.Size([120, 605, 1000]) labels torch.Size([120, 3, 31])
 
 #+begin_src ipython
 rates = model.forward(ff_input=ff_input).detach()
@@ -2118,7 +1786,7 @@ print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: 5988795e-75d6-4d82-a2ba-7c31978c395f
+: (120, 101, 750)
 
 *** Overlaps
 
@@ -2129,87 +1797,49 @@ print(readout.shape, y_labels.shape)
 #+end_src
 
 #+RESULTS:
-: d5226b1f-4aa8-44d6-82ff-d3554547bdf0
+: (120, 101, 2) (3, 120)
 
 #+begin_src ipython
-def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fig.svg', title='first'):
-    '''
-    y[0] is pairs, y[1] is samples, y[2] is task if not None
-    '''
-    print(y.shape)
-    size = y.shape[0]
-    if size ==2:
-        ones_slice = np.zeros(y.shape)
-        y_ = np.vstack((y.copy(), ones_slice))
-        task = 0
-    else:
-        y_ = y.copy()
-        tasks = [0, 1, -1]
-
-    print(y_.shape)
-    fig, ax = plt.subplots(1, 2, figsize=[2*width, height], sharey=True)
-
-    time = np.linspace(0, 10, readout.shape[1])
-    colors = ['r', 'b', 'g']
-    ls = ['--', '-', '-.', ':']
-    label = ['AD', 'AC', 'BD', 'BC']
-
-    for k in range(2): # readout
-        for j in range(2): # sample
-            for i in range(2): # pair
-                data = readout[(y_[0]==i) & (y_[1]==j) & (y_[2]==task), :, k]
-                mean, ci = mean_ci(data)
-
-                ax[k].plot(time, mean, ls=ls[i+2*j], label=label[i+2*j], color=colors[task], alpha=1-j/4)
-                ax[k].fill_between(time, mean - ci, mean + ci, color=colors[task], alpha=0.1)
-
-        add_vlines(ax[k])
-        ax[k].set_xlabel('Time (s)')
-
-        if k==0:
-            ax[k].set_ylabel('A/B Overlap (Hz)')
-        elif k==1:
-            ax[k].set_ylabel('GNG Overlap (Hz)')
-        else:
-            ax[k].set_ylabel('Readout (Hz)')
-
-        ax[k].axhline(0, color='k', ls='--')
-
-    plt.legend(fontsize=10)
-    plt.savefig('../figures/dual/%s' % figname, dpi=300)
-    plt.show()
+plot_overlap_label(readout, y_labels, task=0, figname='overlaps_expert_dpa.svg')
 #+end_src
 
 #+RESULTS:
-: eaf4de90-e0e7-41ab-ad51-27d55044bcf4
+:RESULTS:
+: (3, 120)
+: (3, 120)
+: (2, 2, 2, 101)
+[[./figures/dual/figure_77.png]]
+:END:
 
 #+begin_src ipython
-plot_overlap_label(readout, y_labels, task=0, figname='sample_overlaps_naive.svg')
+plot_overlap_label(readout, y_labels, task=1, figname='overlaps_expert_go.svg')
 #+end_src
 
 #+RESULTS:
-: 2e61c031-f5cc-4bce-b4fb-9ea1405fbb0f
+:RESULTS:
+: (3, 120)
+: (3, 120)
+: (2, 2, 2, 101)
+[[./figures/dual/figure_78.png]]
+:END:
 
 #+begin_src ipython
-plot_overlap_label(readout, y_labels, task=1, figname='sample_overlaps_naive.svg')
+plot_overlap_label(readout, y_labels, task=-1, figname='overlaps_expert_nogo.svg')
 #+end_src
 
 #+RESULTS:
-: b1f99d30-3212-414c-aeac-a6747ca37925
-
-#+begin_src ipython
-plot_overlap_label(readout, y_labels, task=-1, figname='sample_overlaps_naive.svg')
-#+end_src
-
-#+RESULTS:
-: cca9d642-2fb4-4c35-8a38-adbf366e1136
+:RESULTS:
+: (3, 120)
+: (3, 120)
+: (2, 2, 2, 101)
+[[./figures/dual/figure_79.png]]
+:END:
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 4b55648d-2a0e-4c96-8da5-47561f6cce0a
 
 *** Perf
 
@@ -2219,7 +1849,6 @@ dpa_perf, drt_perf = criterion(model.readout, labels.clone())
 #+end_src
 
 #+RESULTS:
-: 16136676-17e5-462c-b31a-6bb50136062a
 
 #+begin_src ipython
 dpa_mean2 = []
@@ -2236,14 +1865,12 @@ dpa_sem2 = np.stack(dpa_sem2)
 #+end_src
 
 #+RESULTS:
-: 17bba0bc-87b1-43b1-aaa3-2c3695e98650
 
 #+begin_src ipython
 drt_mean2, drt_sem2 = calculate_mean_accuracy_and_sem(drt_perf)
 #+end_src
 
 #+RESULTS:
-: 945ea0bc-9c86-49ad-8567-c1e33da595f8
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[1.5*width, height])
@@ -2281,7 +1908,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: f8e37edf-e756-4511-8649-f5057f47800b
+[[./figures/dual/figure_84.png]]
 
 
 #+begin_src ipython
@@ -2302,7 +1929,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: b974e206-c027-471f-9772-a3d08158f482
+[[./figures/dual/figure_85.png]]
 
  #+begin_src ipython
 plt.scatter(V[:, 0], V[:, 1])
@@ -2312,11 +1939,10 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: ad89c5ee-039c-40d1-a9cc-eb5ac81a8111
+[[./figures/dual/figure_86.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: fef90fca-ebf4-4c66-a26c-d21e6675f6dc

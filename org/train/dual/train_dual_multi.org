@@ -1,0 +1,376 @@
+#+Startup: fold
+#+TITLE: Training Low Rank RNNs
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session train_dual_multi :kernel torch :exports results :output-dir ./figures/multi :file (lc/org-babel-tangle-figure-filename)
+
+* Notebook Settings
+
+#+begin_src ipython :tangle no
+%load_ext autoreload
+%autoreload 2
+%reload_ext autoreload
+%run ../../../notebooks/setup.py
+%matplotlib inline
+%config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Imports
+
+#+begin_src ipython
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torchmetrics
+from torch.utils.data import Dataset, TensorDataset, DataLoader
+
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+pal = sns.color_palette("tab10")
+DEVICE = 'cuda:0'
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import sys
+sys.path.insert(0, '../../../')
+
+from notebooks.setup import *
+
+import pandas as pd
+import torch.nn as nn
+from time import perf_counter
+from scipy.stats import circmean
+
+from src.network import Network
+from src.plot_utils import plot_con
+from src.decode import decode_bump, circcvl
+from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
+#+end_src
+
+#+RESULTS:
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Train
+
+#+begin_src ipython
+sys.path.insert(0, '../../../src')
+# import src.train
+from src.train.dual.train_dpa import train_dpa
+from src.train.dual.train_gng import train_gng
+from src.train.dual.train_dual import train_dual
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+conf_name = "train_dual.yml"
+DEVICE = 'cuda:0'
+
+# seed = np.random.randint(0, 1e6)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+for ite in range(12, 30):
+    seed = ite
+    print('model', seed)
+    train_dpa(REPO_ROOT, conf_name, seed, DEVICE)
+    train_gng(REPO_ROOT, conf_name, seed, DEVICE)
+    train_dual(REPO_ROOT, conf_name, seed, DEVICE)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+#+begin_example
+model 12
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [16:14<00:00, 64.99s/it]
+
+Elapsed (with compilation) = 0h 16m 14sff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 33% 5/15 [06:24<12:49, 76.95s/it]Stopping training as loss has fallen below the threshold: 0.004694047285458789, 0.004292221281041459
+Elapsed (with compilation) = 0h 6m 24s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+ 87% 13/15 [11:14<01:43, 51.86s/it]Stopping training as loss has fallen below the threshold: 0.004299849391174622, 0.004523036517686658
+Elapsed (with compilation) = 0h 11m 14s
+model 13
+
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [22:59<00:00, 91.93s/it]
+Elapsed (with compilation) = 0h 22m 59s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 27% 4/15 [05:39<15:34, 84.94s/it]Stopping training as loss has fallen below the threshold: 0.0048624921966200834, 0.0037334179403487504
+Elapsed (with compilation) = 0h 5m 39s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [13:37<00:00, 54.52s/it]
+Elapsed (with compilation) = 0h 13m 37s
+model 14
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [20:40<00:00, 82.70s/it]
+Elapsed (with compilation) = 0h 20m 40s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 27% 4/15 [07:00<19:16, 105.15s/it]Stopping training as loss has fallen below the threshold: 0.0044853888774433965, 0.003983410275200518
+Elapsed (with compilation) = 0h 7m 0s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [15:10<00:00, 60.69s/it]
+Elapsed (with compilation) = 0h 15m 10s
+model 15
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [32:29<00:00, 129.96s/it]
+Elapsed (with compilation) = 0h 32m 29s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 13% 2/15 [06:27<42:00, 193.91s/it]Stopping training as loss has fallen below the threshold: 0.004558058495884045, 0.0048681631866024765
+Elapsed (with compilation) = 0h 6m 27s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [18:54<00:00, 75.62s/it]
+Elapsed (with compilation) = 0h 18m 54s
+model 16
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [21:54<00:00, 87.65s/it]
+Elapsed (with compilation) = 0h 21m 54s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 33% 5/15 [08:46<17:32, 105.25s/it]Stopping training as loss has fallen below the threshold: 0.0045405706892219875, 0.004371606917461244
+Elapsed (with compilation) = 0h 8m 46s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [15:05<00:00, 60.39s/it]
+Elapsed (with compilation) = 0h 15m 5s
+model 17
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [16:58<00:00, 67.90s/it]
+Elapsed (with compilation) = 0h 16m 58s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 33% 5/15 [06:45<13:30, 81.06s/it]Stopping training as loss has fallen below the threshold: 0.004382468249577169, 0.004334465482431214
+Elapsed (with compilation) = 0h 6m 45s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [12:41<00:00, 50.75s/it]
+Elapsed (with compilation) = 0h 12m 41s
+model 18
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [16:49<00:00, 67.32s/it]
+Elapsed (with compilation) = 0h 16m 49s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 27% 4/15 [05:37<15:26, 84.26s/it]Stopping training as loss has fallen below the threshold: 0.004893217365651463, 0.004681130968852014
+Elapsed (with compilation) = 0h 5m 37s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [12:41<00:00, 50.77s/it]
+Elapsed (with compilation) = 0h 12m 41s
+model 19
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [16:51<00:00, 67.43s/it]
+Elapsed (with compilation) = 0h 16m 51s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+  7% 1/15 [02:16<31:48, 136.29s/it]Stopping training as loss has fallen below the threshold: 0.004889561051431184, 0.004583195084705949
+Elapsed (with compilation) = 0h 2m 16s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [12:47<00:00, 51.15s/it]
+Elapsed (with compilation) = 0h 12m 47s
+model 20
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [16:55<00:00, 67.70s/it]
+Elapsed (with compilation) = 0h 16m 55s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 40% 6/15 [07:53<11:49, 78.84s/it]Stopping training as loss has fallen below the threshold: 0.004645296050092349, 0.00442734426568921
+Elapsed (with compilation) = 0h 7m 53s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [12:42<00:00, 50.83s/it]
+Elapsed (with compilation) = 0h 12m 42s
+model 21
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [16:54<00:00, 67.66s/it]
+Elapsed (with compilation) = 0h 16m 54s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 33% 5/15 [06:43<13:27, 80.79s/it]Stopping training as loss has fallen below the threshold: 0.0044717960901415115, 0.004141759236411351
+Elapsed (with compilation) = 0h 6m 43s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [12:44<00:00, 50.95s/it]
+Elapsed (with compilation) = 0h 12m 44s
+model 22
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [16:56<00:00, 67.76s/it]
+Elapsed (with compilation) = 0h 16m 56s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 27% 4/15 [05:38<15:31, 84.66s/it]Stopping training as loss has fallen below the threshold: 0.004741597284849446, 0.004501020120138802
+Elapsed (with compilation) = 0h 5m 38s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [12:44<00:00, 50.98s/it]
+Elapsed (with compilation) = 0h 12m 44s
+model 23
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [16:50<00:00, 67.36s/it]
+Elapsed (with compilation) = 0h 16m 50s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 33% 5/15 [06:46<13:32, 81.20s/it]Stopping training as loss has fallen below the threshold: 0.00475395276533583, 0.004026882993284522
+Elapsed (with compilation) = 0h 6m 46s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [12:41<00:00, 50.74s/it]
+Elapsed (with compilation) = 0h 12m 41s
+model 24
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [16:49<00:00, 67.30s/it]
+Elapsed (with compilation) = 0h 16m 49s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 13% 2/15 [03:23<22:01, 101.65s/it]Stopping training as loss has fallen below the threshold: 0.00428487287941747, 0.003841693131480275
+Elapsed (with compilation) = 0h 3m 23s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [12:40<00:00, 50.72s/it]
+Elapsed (with compilation) = 0h 12m 40s
+model 25
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [16:55<00:00, 67.70s/it]
+Elapsed (with compilation) = 0h 16m 55s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 27% 4/15 [05:40<15:37, 85.24s/it]Stopping training as loss has fallen below the threshold: 0.004715287095258156, 0.004633760529502136
+Elapsed (with compilation) = 0h 5m 40s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [12:49<00:00, 51.31s/it]
+Elapsed (with compilation) = 0h 12m 49s
+model 26
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [16:56<00:00, 67.75s/it]
+Elapsed (with compilation) = 0h 16m 56s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 33% 5/15 [06:49<13:38, 81.88s/it]Stopping training as loss has fallen below the threshold: 0.004445897854076555, 0.004422371518775457
+Elapsed (with compilation) = 0h 6m 49s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [12:46<00:00, 51.11s/it]
+Elapsed (with compilation) = 0h 12m 46s
+model 27
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [16:57<00:00, 67.86s/it]
+Elapsed (with compilation) = 0h 16m 57s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 27% 4/15 [05:44<15:46, 86.03s/it]Stopping training as loss has fallen below the threshold: 0.004780806305531699, 0.004664911765877793
+Elapsed (with compilation) = 0h 5m 44s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [14:23<00:00, 57.60s/it]
+Elapsed (with compilation) = 0h 14m 23s
+model 28
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [21:47<00:00, 87.19s/it]
+Elapsed (with compilation) = 0h 21m 47s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 27% 4/15 [07:22<20:17, 110.73s/it]Stopping training as loss has fallen below the threshold: 0.004670354551098381, 0.004377982315675514
+Elapsed (with compilation) = 0h 7m 22s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [16:29<00:00, 65.97s/it]
+Elapsed (with compilation) = 0h 16m 29s
+model 29
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
+training DPA
+100% 15/15 [22:05<00:00, 88.37s/it]
+Elapsed (with compilation) = 0h 22m 5s
+ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 20])
+labels torch.Size([1024, 2, 20])
+training DRT
+ 27% 4/15 [07:24<20:22, 111.18s/it]Stopping training as loss has fallen below the threshold: 0.004865180732359966, 0.0047586730794935694
+Elapsed (with compilation) = 0h 7m 24s
+
+ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
+training Dual
+100% 15/15 [16:36<00:00, 66.42s/it]Elapsed (with compilation) = 0h 16m 36s
+
+#+end_example
+:END:
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
