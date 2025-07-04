@@ -327,9 +327,99 @@ def create_mesh(x, y, size=100):
     dx_flat = dx.flatten()
     dy_flat = dy.flatten()
 
+
     # Interpolating on the grid
-    ui = griddata(points, dx_flat, (xi, yi), method='cubic', fill_value=0)
-    vi = griddata(points, dy_flat, (xi, yi), method='cubic', fill_value=0)
+    ui = griddata(points, dx_flat, (xi, yi), method='linear', fill_value=np.nan)
+    vi = griddata(points, dy_flat, (xi, yi), method='linear', fill_value=np.nan)
+
+    return xi, yi, ui, vi
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import numpy as np
+from scipy.interpolate import griddata
+from scipy.ndimage import gaussian_filter
+from scipy.spatial import cKDTree
+
+def create_mesh(x, y, size=100, sigma=1, interp_method='linear', mask_radius=10):
+    """
+    x, y: arrays of shape (n_traj, n_points)
+    size: grid size along each axis
+    sigma: Gaussian smoothing for velocities (0=none)
+    interp_method: 'linear', 'cubic', or 'nearest'
+    mask_radius: mask out grid points farther than this multiple of median point spacing
+
+    Returns: xi, yi, ui, vi (masked arrays)
+    """
+    x = np.asarray(x)
+    y = np.asarray(y)
+
+    # Flatten for easier handling
+    x_flat = x.flatten()
+    y_flat = y.flatten()
+
+    # Compute dense grid
+    x_min, x_max = np.min(x_flat)-1, np.max(x_flat)+1
+    y_min, y_max = np.min(y_flat)-1, np.max(y_flat)+1
+
+    xi, yi = np.meshgrid(np.linspace(x_min, x_max, size),
+                         np.linspace(y_min, y_max, size))
+
+    # Compute velocities (finite differences along time axis)
+    dx = np.gradient(x, axis=1)
+    dy = np.gradient(y, axis=1)
+
+    # Optional smoothing of velocities
+    if sigma > 0:
+        dx = gaussian_filter(dx, sigma=sigma)
+        dy = gaussian_filter(dy, sigma=sigma)
+
+    dx_flat = dx.flatten()
+    dy_flat = dy.flatten()
+
+    # Prepare for griddata interpolation
+    points = np.vstack((x_flat, y_flat)).T
+
+    # Interpolate velocity components onto grid
+    ui = griddata(points, dx_flat, (xi, yi), method=interp_method, fill_value=0)
+    vi = griddata(points, dy_flat, (xi, yi), method=interp_method, fill_value=0)
+
+    # Mask far-from-data regions (optional)
+    tree = cKDTree(points)
+    dists, _ = tree.query(np.column_stack([xi.flatten(), yi.flatten()]), k=1)
+    dists = dists.reshape(xi.shape)
+    median_spacing = np.median(np.sqrt(np.diff(x_flat)**2 + np.diff(y_flat)**2))
+    mask = dists > (mask_radius * median_spacing)
+    ui = np.ma.masked_where(mask, ui)
+    vi = np.ma.masked_where(mask, vi)
+
+    return xi, yi, ui, vi
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def create_mesh_rbf(x, y, size=100):
+    x_min, x_max = np.min((x, y)) - 1, np.max((x, y)) + 1
+    y_min, y_max = np.min((x, y)) - 1, np.max((x, y)) + 1
+
+    dx = np.gradient(x, axis=1)
+    dy = np.gradient(y, axis=1)
+
+    xi, yi = np.meshgrid(np.linspace(x_min, x_max, size),
+                         np.linspace(y_min, y_max, size))
+
+    x_flat = x.flatten()
+    y_flat = y.flatten()
+    dx_flat = dx.flatten()
+    dy_flat = dy.flatten()
+
+    rbf_dx = Rbf(x_flat, y_flat, dx_flat, function='linear')
+    rbf_dy = Rbf(x_flat, y_flat, dy_flat, function='linear')
+    ui = rbf_dx(xi, yi)
+    vi = rbf_dy(xi, yi)
 
     return xi, yi, ui, vi
 #+end_src
@@ -352,16 +442,16 @@ def plot_field(overlaps, ax, window, IF_FP=0, task=0):
 
     norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=False)
 
-    # strm = ax.streamplot(xi, yi, ui, vi, density=1.5, arrowsize=1.5, color=speed, cmap='jet', norm=norm)
+    heatmap = ax.streamplot(xi, yi, ui, vi, density=1.0, arrowsize=2, norm=norm, color='k')
     heatmap = ax.pcolormesh(xi, yi, speed, cmap='jet', shading='gouraud', norm=norm)
     # heatmap = ax.imshow(speed, extent=(yi.min(), yi.max(), yi.min(), yi.max()), cmap='jet', norm=norm, origin='lower', aspect='auto')
 
-    ax.set_aspect('equal')
+    # ax.set_aspect('equal')
     # ax.set_xlim([yi.min(), yi.max()])
     # ax.set_ylim([yi.min(), yi.max()])
 
-    cbar = plt.colorbar(heatmap, ax=ax)
-    cbar.set_label('Speed')
+    # cbar = plt.colorbar(heatmap, ax=ax)
+    # cbar.set_label('Speed')
 
     ax.set_xlabel('A/B Overlap')
     ax.set_ylabel('Choice Overlap')
@@ -419,8 +509,8 @@ kwargs = {
 #+begin_src ipython
 tasks = ['dpa']
 tasks = ['dpa', 'dual_naive', 'dual_train']
-seed = 31 # 10
-GRID_RANGE = .4
+seed = 100
+GRID_RANGE = .5
 #+end_src
 
 #+RESULTS:
@@ -433,7 +523,6 @@ for task in tasks:
         rates.append(run_grid(GRID_RANGE, seed, task, **kwargs))
 rates = np.array(rates)
 #+end_src
-
 
 #+RESULTS:
 
@@ -450,7 +539,7 @@ model = init_model(task, seed, **kwargs)
 overlaps, vec = get_low_rank(rates_tensor, model, IF_REC=0)
 print(overlaps.shape)
 
-window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 3
+window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
 
 # ff_overlaps = ff_input[..., model.N_STEADY: , model.slices[0]] @ vec.T
 # ff_overlaps = ff_overlaps[:, ::10]
@@ -483,7 +572,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/flow/figure_22.png]]
+[[./figures/flow/figure_23.png]]
 
 #+begin_src ipython
 from sklearn.cluster import KMeans
@@ -535,7 +624,7 @@ save_fig('traj', GRID_TEST=model.GRID_TEST)
 #+end_src
 
 #+RESULTS:
-[[./figures/flow/figure_25.png]]
+[[./figures/flow/figure_26.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 1, figsize=[width, width])
@@ -546,7 +635,7 @@ save_fig('traj_dpa', GRID_TEST=model.GRID_TEST)
 #+end_src
 
 #+RESULTS:
-[[./figures/flow/figure_26.png]]
+[[./figures/flow/figure_27.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 1, figsize=[width, width])
@@ -557,7 +646,7 @@ save_fig('traj_dual_naive', GRID_TEST=model.GRID_TEST)
 #+end_src
 
 #+RESULTS:
-[[./figures/flow/figure_27.png]]
+[[./figures/flow/figure_28.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 1, figsize=[width, width])
@@ -568,7 +657,7 @@ save_fig('traj_dual_train', GRID_TEST=model.GRID_TEST)
 #+end_src
 
 #+RESULTS:
-[[./figures/flow/figure_28.png]]
+[[./figures/flow/figure_29.png]]
 
 ** field
 
@@ -582,7 +671,7 @@ save_fig('traj_dual_train', GRID_TEST=model.GRID_TEST)
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src  ipython
 fig, ax = plt.subplots(1, 1, figsize=[width, width])
 
 plot_field(overlaps[0], ax, window, IF_FP=1, task=0)
@@ -592,7 +681,13 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/flow/figure_30.png]]
+[[./figures/flow/figure_32.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 1, figsize=[width, width])
@@ -604,7 +699,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/flow/figure_31.png]]
+[[./figures/flow/figure_34.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 1, figsize=[width, width])
@@ -621,7 +716,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/flow/figure_32.png]]
+[[./figures/flow/figure_35.png]]
 
 #+begin_src ipython
 

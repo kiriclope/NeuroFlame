@@ -96,8 +96,8 @@ class LowRankWeights(nn.Module):
                     torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * self.LR_INI
                 )
 
-                with torch.no_grad():
-                    self.U.copy_(self.V)
+                # with torch.no_grad():
+                # self.U.copy_(self.V)
             else:
                 self.U = (
                     torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * self.LR_INI

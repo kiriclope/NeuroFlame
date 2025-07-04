@@ -35,7 +35,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 pal = sns.color_palette("tab10")
-DEVICE = 'cuda:0'
+DEVICE = 'cuda:1'
 #+end_src
 
 #+RESULTS:
@@ -859,7 +859,7 @@ conf_name = "train_dual.yml"
 DEVICE = 'cuda:1'
 
 # seed = np.random.randint(0, 1e6)
-seed = 10
+seed = 100
 print(seed)
 
 A0 = 1.0 # sample/dist
@@ -869,7 +869,7 @@ C0 = 0.0 # DRT rwd
 
 
 #+RESULTS:
-: 10
+: 100
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1)
@@ -911,10 +911,11 @@ torch.cuda.reset_accumulated_memory_stats(DEVICE)
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
 model_state_dict = torch.load('../models/dual/dpa_%d.pth' % seed)
 model.load_state_dict(model_state_dict)
-model.eval();
+# model.train();
 #+end_src
 
 #+RESULTS:
+: <All keys matched successfully>
 
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
 N_BATCH = 1
@@ -1026,12 +1027,9 @@ plot_overlap_label(model.readout.cpu().detach().numpy(), y_labels.cpu().numpy(),
 #+end_src
 
 #+RESULTS:
-:RESULTS:
 : (2, 4)
 : (4, 4)
 : (2, 2, 2, 101)
-[[./figures/dual/figure_39.png]]
-:END:
 
 #+begin_src ipython
 
@@ -1057,7 +1055,6 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_41.png]]
 
 #+begin_src ipython
 odors = model.odors.cpu().numpy()
@@ -1131,10 +1128,83 @@ plt.show()
 
 
 #+begin_src ipython
+U = model.low_rank.U.cpu().detach().numpy()
+V = model.low_rank.V.cpu().detach().numpy()
 
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+# ax[0].hist(U[:, 0], histtype='step', bins='auto')
+# ax[0].hist(U[:, 1], histtype='step', bins='auto')
+ax[0].hist(V[:, 0], histtype='step', bins='auto')
+ax[1].hist(V[:, 1], histtype='step', bins='auto')
+ax[0].set_xlabel('$ n_{AB} $')
+ax[1].set_xlabel('$ n_{GNG} $')
+
+ax[0].set_ylabel('Count')
+ax[1].set_ylabel('Count')
+plt.savefig('lr_hist_dpa.svg', dpi=300)
+plt.show()
 #+end_src
 
 #+RESULTS:
+[[./figures/dual/figure_46.png]]
+
+ #+begin_src ipython
+U = model.low_rank.U.cpu().detach().numpy()
+V = model.low_rank.V.cpu().detach().numpy()
+
+fig, ax = plt.subplots(1, 4, figsize=[4*height, height])
+
+ax[0].scatter(U[:, 0], U[:, 1])
+ax[0].set_xlabel('$ m_{AB} $')
+ax[0].set_ylabel('$ m_{Choice} $')
+
+ax[1].scatter(V[:, 0], V[:, 1])
+ax[1].set_xlabel('$ n_{AB} $')
+ax[1].set_ylabel('$ n_{Choice} $')
+
+ax[2].scatter(U[:, 0], V[:, 0])
+ax[2].set_xlabel('$ m_{AB} $')
+ax[2].set_ylabel('$ n_{AB} $')
+
+ax[3].scatter(U[:, 1], V[:, 1])
+ax[3].set_xlabel('$ m_{Choice} $')
+ax[3].set_ylabel('$ n_{Choice} $')
+
+plt.savefig('lr_scatter_dpa.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/dual/figure_47.png]]
+
+#+begin_src ipython
+theta = np.arctan(V[:, 1], V[:, 0])
+idx = np.argsort(theta)
+plt.hist(theta * 180 / np.pi)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/dual/figure_48.png]]
+
+#+begin_src ipython
+Wab = model.W_stp_T.cpu().detach().numpy()
+Wab = (model.W_stp_T>0).cpu().detach().numpy()
+print(Wab.shape)
+print(Wab[0,: 10])
+#+end_src
+
+#+RESULTS:
+: (750, 750)
+: [ True  True  True  True  True  True  True  True  True  True]
+
+#+begin_src ipython
+plt.imshow(Wab[idx][idx], cmap='jet', vmin=0, vmax=1)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/dual/figure_50.png]]
 
 * Go/NoGo Task
 ** Test
@@ -1189,7 +1259,7 @@ plot_overlap(model.readout.cpu().detach().numpy(), labels=['Go', 'NoGo'], fignam
  #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_50.png]]
+[[./figures/dual/figure_52.png]]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -1209,7 +1279,36 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_51.png]]
+[[./figures/dual/figure_53.png]]
+
+ #+begin_src ipython
+U = model.low_rank.U.cpu().detach().numpy()
+V = model.low_rank.V.cpu().detach().numpy()
+
+fig, ax = plt.subplots(1, 4, figsize=[4*height, height])
+
+ax[0].scatter(U[:, 0], U[:, 1])
+ax[0].set_xlabel('$ m_{AB} $')
+ax[0].set_ylabel('$ m_{Choice} $')
+
+ax[1].scatter(V[:, 0], V[:, 1])
+ax[1].set_xlabel('$ n_{AB} $')
+ax[1].set_ylabel('$ n_{Choice} $')
+
+ax[2].scatter(U[:, 0], V[:, 0])
+ax[2].set_xlabel('$ m_{AB} $')
+ax[2].set_ylabel('$ n_{AB} $')
+
+ax[3].scatter(U[:, 1], V[:, 1])
+ax[3].set_xlabel('$ m_{Choice} $')
+ax[3].set_ylabel('$ n_{Choice} $')
+
+plt.savefig('lr_scatter_dual_naive.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/dual/figure_54.png]]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
@@ -1262,7 +1361,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_52.png]]
+[[./figures/dual/figure_55.png]]
 
 #+begin_src ipython
 
@@ -1372,7 +1471,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_56.png]]
+[[./figures/dual/figure_59.png]]
 
 #+begin_src ipython
 N_BATCH = 64
@@ -1517,7 +1616,7 @@ plot_overlap_label(readout, y_labels, task=0, figname='overlaps_naive_dpa.svg')
 : (3, 768)
 : (3, 768)
 : (2, 2, 2, 101)
-[[./figures/dual/figure_61.png]]
+[[./figures/dual/figure_64.png]]
 :END:
 
 #+begin_src ipython
@@ -1529,7 +1628,7 @@ plot_overlap_label(readout, y_labels, task=1, figname='overlaps_naive_go.svg')
 : (3, 768)
 : (3, 768)
 : (2, 2, 2, 101)
-[[./figures/dual/figure_62.png]]
+[[./figures/dual/figure_65.png]]
 :END:
 
 #+begin_src ipython
@@ -1541,7 +1640,7 @@ plot_overlap_label(readout, y_labels, task=-1, figname='overlaps_naive_nogo.svg'
 : (3, 768)
 : (3, 768)
 : (2, 2, 2, 101)
-[[./figures/dual/figure_63.png]]
+[[./figures/dual/figure_66.png]]
 :END:
 
 #+begin_src ipython
@@ -1553,7 +1652,9 @@ plot_overlap_label(readout, y_labels, task=-1, figname='overlaps_naive_nogo.svg'
 *** Perf
 
 #+begin_src ipython
-criterion = DualScore(thresh=4, cue_idx=cue_idx, rwd_idx=rwd_idx, read_idx=[1, 1])
+from src.train.dual.task_score import *
+
+criterion = DualScore(thresh=4, cue_idx=cue_idx, rwd_idx=rwd_idx, read_idx=[1, 1], DEVICE=DEVICE)
 dpa_perf, drt_perf = criterion(model.readout, labels.clone())
 #+end_src
 
@@ -1575,12 +1676,13 @@ dpa_sem = np.stack(dpa_sem)
 
 #+RESULTS:
 
+
 #+begin_src ipython
 print(dpa_mean)
 #+end_src
 
 #+RESULTS:
-: tensor([0.7500, 0.7305, 0.7500], device='cuda:1')
+: tensor([0.9967, 0.5001, 0.9314], device='cuda:1', grad_fn=<StackBackward0>)
 
 #+begin_src ipython
 drt_mean, drt_sem = calculate_mean_accuracy_and_sem(drt_perf)
@@ -1619,8 +1721,42 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_69.png]]
+[[./figures/dual/figure_72.png]]
 
+
+
+
+#+RESULTS:
+: c44f697a-b827-4b41-870b-adf06ef4b546
+
+ #+begin_src ipython
+U = model.low_rank.U.cpu().detach().numpy()
+V = model.low_rank.V.cpu().detach().numpy()
+
+fig, ax = plt.subplots(1, 4, figsize=[4*height, height])
+
+ax[0].scatter(U[:, 0], U[:, 1])
+ax[0].set_xlabel('$ m_{AB} $')
+ax[0].set_ylabel('$ m_{Choice} $')
+
+ax[1].scatter(V[:, 0], V[:, 1])
+ax[1].set_xlabel('$ n_{AB} $')
+ax[1].set_ylabel('$ n_{Choice} $')
+
+ax[2].scatter(U[:, 0], V[:, 0])
+ax[2].set_xlabel('$ m_{AB} $')
+ax[2].set_ylabel('$ n_{AB} $')
+
+ax[3].scatter(U[:, 1], V[:, 1])
+ax[3].set_xlabel('$ m_{Choice} $')
+ax[3].set_ylabel('$ n_{Choice} $')
+
+plt.savefig('lr_scatter_dual_naive.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/dual/figure_73.png]]
 
 #+begin_src ipython
 
@@ -1633,6 +1769,7 @@ plt.show()
 :tangle no
 :END:
 *** run
+
 #+begin_src ipython
 model_state_dict = torch.load('../models/dual/dual_train_%d.pth' % seed)
 model.load_state_dict(model_state_dict)
@@ -1640,7 +1777,6 @@ model.eval();
 #+end_src
 
 #+RESULTS:
-
 
 #+begin_src ipython
 steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
@@ -1726,7 +1862,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_73.png]]
+[[./figures/dual/figure_77.png]]
 
 #+begin_src ipython
 N_BATCH = 10
@@ -1808,7 +1944,7 @@ plot_overlap_label(readout, y_labels, task=0, figname='overlaps_expert_dpa.svg')
 : (3, 120)
 : (3, 120)
 : (2, 2, 2, 101)
-[[./figures/dual/figure_77.png]]
+[[./figures/dual/figure_81.png]]
 :END:
 
 #+begin_src ipython
@@ -1820,7 +1956,7 @@ plot_overlap_label(readout, y_labels, task=1, figname='overlaps_expert_go.svg')
 : (3, 120)
 : (3, 120)
 : (2, 2, 2, 101)
-[[./figures/dual/figure_78.png]]
+[[./figures/dual/figure_82.png]]
 :END:
 
 #+begin_src ipython
@@ -1832,7 +1968,7 @@ plot_overlap_label(readout, y_labels, task=-1, figname='overlaps_expert_nogo.svg
 : (3, 120)
 : (3, 120)
 : (2, 2, 2, 101)
-[[./figures/dual/figure_79.png]]
+[[./figures/dual/figure_83.png]]
 :END:
 
 #+begin_src ipython
@@ -1844,7 +1980,9 @@ plot_overlap_label(readout, y_labels, task=-1, figname='overlaps_expert_nogo.svg
 *** Perf
 
 #+begin_src ipython
-criterion = DualScore(thresh=4., cue_idx=cue_idx, rwd_idx=rwd_idx, read_idx=[1, 1])
+from src.train.dual.task_score import *
+
+criterion = DualScore(thresh=4., cue_idx=cue_idx, rwd_idx=rwd_idx, read_idx=[1, 1], DEVICE=DEVICE)
 dpa_perf, drt_perf = criterion(model.readout, labels.clone())
 #+end_src
 
@@ -1908,7 +2046,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_84.png]]
+[[./figures/dual/figure_88.png]]
 
 
 #+begin_src ipython
@@ -1929,7 +2067,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_85.png]]
+[[./figures/dual/figure_89.png]]
 
  #+begin_src ipython
 plt.scatter(V[:, 0], V[:, 1])
@@ -1939,7 +2077,36 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_86.png]]
+[[./figures/dual/figure_90.png]]
+
+ #+begin_src ipython
+U = model.low_rank.U.cpu().detach().numpy()
+V = model.low_rank.V.cpu().detach().numpy()
+
+fig, ax = plt.subplots(1, 4, figsize=[4*height, height])
+
+ax[0].scatter(U[:, 0], U[:, 1])
+ax[0].set_xlabel('$ m_{AB} $')
+ax[0].set_ylabel('$ m_{Choice} $')
+
+ax[1].scatter(V[:, 0], V[:, 1])
+ax[1].set_xlabel('$ n_{AB} $')
+ax[1].set_ylabel('$ n_{Choice} $')
+
+ax[2].scatter(U[:, 0], V[:, 0])
+ax[2].set_xlabel('$ m_{AB} $')
+ax[2].set_ylabel('$ n_{AB} $')
+
+ax[3].scatter(U[:, 1], V[:, 1])
+ax[3].set_xlabel('$ m_{Choice} $')
+ax[3].set_ylabel('$ n_{Choice} $')
+
+plt.savefig('lr_scatter_dual_train.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/dual/figure_91.png]]
 
 #+begin_src ipython
 

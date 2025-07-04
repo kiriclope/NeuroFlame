@@ -1,0 +1,690 @@
+:PROPERTIES:
+:GPTEL_MODEL: o3-mini
+:GPTEL_BACKEND: ChatGPT
+:GPTEL_SYSTEM: You are a large language model living in Emacs and a helpful assistant. Respond concisely.
+:GPTEL_BOUNDS: ((513 . 2648) (2768 . 5245) (5292 . 6524) (6569 . 12917) (12966 . 14586) (14697 . 14935) (14956 . 15682) (15691 . 16323) (16436 . 17948) (18038 . 20588) (20595 . 22708) (22715 . 25412) (25497 . 28036) (28105 . 30724))
+:END:
+
+***  I want to describe the diffusion of a particle on a ring. How would I write a drift diffusion model?
+
+For a particle moving on a ring, the position can be described by an angular coordinate θ ∈ [0, 2π), and the dynamics can be modeled using a drift–diffusion equation. One common formulation is in terms of the probability density function P(θ, t), which gives the probability of finding the particle at angle θ at time t.
+
+A general Fokker–Planck (or drift–diffusion) equation on the circle is
+
+  ∂P(θ, t)/∂t = − ∂[A(θ) P(θ, t)]/∂θ + D ∂²P(θ, t)/∂θ².
+
+Here,
+• A(θ) is the drift term (which can be a function of θ). For example, if there is a constant drift (e.g., a constant bias or velocity along the ring), you might set A(θ) = v.
+• D is the diffusion coefficient.
+• The derivatives with respect to θ account for the motion along the circular coordinate.
+
+For the simple case with constant drift v, the equation simplifies to
+
+  ∂P(θ, t)/∂t = − v ∂P(θ, t)/∂θ + D ∂²P(θ, t)/∂θ².
+
+Because the motion takes place on a ring, you must enforce periodic boundary conditions:
+  P(θ = 0, t) = P(θ = 2π, t)
+and similarly for the derivatives (so that the flux is continuous).
+
+Alternatively, this process can be described by a stochastic differential equation (SDE) in the Ito sense. The Langevin equation for the angular variable θ would be
+
+  dθ = v dt + √(2D) dW(t),
+
+where dW(t) represents the increment of a Wiener process (i.e., Gaussian white noise with zero mean and variance dt). Again, with the understanding that θ is an angular variable with periodicity 2π.
+
+This drift–diffusion model captures both the systematic drift (through the v term) and the stochastic fluctuations (through the diffusion term D) that are characteristic of many physical processes on a ring.
+
+In summary, you have two equivalent descriptions:
+1. The Fokker–Planck (drift–diffusion) equation for the probability density P(θ, t):
+  ∂P/∂t = − ∂[v P]/∂θ + D ∂²P/∂θ²,
+with periodic boundary conditions.
+
+2. The Langevin equation for the stochastic trajectory of the particle:
+  dθ = v dt + √(2D) dW,
+with θ defined modulus 2π.
+
+These formulations are standard for modeling diffusion on a ring and can be adapted to include more complex drift terms A(θ) if needed.
+
+*** If the particle starts at (1, 0) what is the probability for it to end up in [0, pi] the upper part of the ring?
+
+Let’s assume that by “ends up in [0, π]” we mean that after the diffusive process (with or without drift) the particle’s angular coordinate is within the upper half of the circle. In other words, if after a long time the probability density has reached its stationary state, then the probability of being found in the region [0, π] is the fraction of the circle that this arc represents.
+
+For a particle diffusing on a ring with periodic boundary conditions the Fokker–Planck equation is
+
+  ∂P(θ, t)/∂t = −∂[A(θ)P(θ, t)]/∂θ + D ∂²P(θ, t)/∂θ²,
+
+where A(θ) is the drift term and D is the diffusion coefficient. For the common case where the drift is a constant v (or even when v ≠ 0) the stationary solution (if the process is ergodic) is a time–independent probability density Pₛ(θ).
+
+It turns out that when you have a particle moving on a closed ring (a circle), even if there is a constant drift v, the stationary solution is uniform. (A constant drift simply shifts the density along the circle but does not change its overall shape as long as the probability “wraps around”.) Thus the stationary density is
+
+  Pₛ(θ) = 1/(2π)  for θ ∈ [0, 2π).
+
+Now, if the particle “ends up” (i.e. is observed at long times) on the upper half the circle (the arc from 0 to π) the probability is given by the fraction of the circle’s circumference contained in that arc:
+
+  Probability = (length of arc)/(total circumference)
+       = π/(2π)
+       = 1/2.
+
+An Alternative Perspective (Splitting Probability):
+
+Sometimes one considers a “first-passage” or “splitting probability” problem where one asks: starting from a given point on the circle, what is the chance that the particle “commits” to be on one side of a dividing line (say, between 0 and π) before it reaches the complementary region (π to 2π)? In standard cases for symmetric diffusion (or even for constant drift when starting exactly on the dividing boundary) the answer is 50%. Here the starting point at (1, 0) corresponds to the angle θ = 0. Being exactly at the boundary between [0, π] and its complement, one finds that—assuming the rules for “immediate” assignment are symmetric—the splitting probability is 1/2.
+
+Final Answer:
+
+Regardless of whether you interpret the question as the long–time stationary probability or as a splitting probability problem in a symmetric setting, you obtain that the probability for a particle, starting at (1, 0), to be found (or to “end up”) on the upper half of the ring [0, π] is 1/2.
+
+*** Can you write these equations in latex?
+
+Below are the LaTeX versions for the equations describing the process.
+
+1. Fokker–Planck (drift–diffusion) equation on a ring:
+
+\[
+\frac{\partial P(\theta, t)}{\partial t} = -\frac{\partial}{\partial \theta} \Bigl[A(\theta)\, P(\theta, t)\Bigr] + D\, \frac{\partial^2 P(\theta, t)}{\partial \theta^2},
+\]
+
+with periodic boundary conditions
+
+\[
+P(0,t) = P(2\pi,t) \quad \text{and} \quad \frac{\partial P}{\partial \theta}(0,t) = \frac{\partial P}{\partial \theta}(2\pi,t).
+\]
+
+For the constant drift case (where \(A(\theta)=v\)), the equation simplifies to
+
+\[
+\frac{\partial P(\theta, t)}{\partial t} = -v\, \frac{\partial P(\theta, t)}{\partial \theta} + D\, \frac{\partial^2 P(\theta, t)}{\partial \theta^2}.
+\]
+
+2. Langevin (stochastic differential) equation for the angular coordinate:
+
+\[
+d\theta = v\, dt + \sqrt{2D}\, dW(t),
+\]
+
+where \(dW(t)\) represents the increment of a Wiener process (i.e., Gaussian white noise).
+
+3. Stationary solution for the uniform distribution on the ring:
+
+\[
+P_{\text{st}}(\theta) = \frac{1}{2\pi}, \quad \theta \in [0, 2\pi).
+\]
+
+Thus, the probability of finding the particle in the upper half of the ring, \(\theta \in [0,\pi]\), is
+
+\[
+\text{Probability} = \frac{\pi}{2\pi} = \frac{1}{2}.
+\]
+
+*** What if there is a bias towards pi/2?
+
+One way to include a bias toward a particular “target angle” (in this case π/2, which lies in the upper half‐circle) is to let the drift term depend on the distance from that target. One commonly used choice is to write the drift as coming from a potential that has a minimum at π/2. For example, one may choose
+
+  A(θ) = –U′(θ)
+
+with a “harmonic‐like” potential (modulo 2π) of the form
+
+  U(θ) =  –v cos(θ – π/2)         (or, equivalently, U(θ) = v sin θ)
+
+so that
+  U′(θ) = –v (–sin(θ – π/2)) = v sin(θ – π/2).
+
+It is often more convenient to “flip signs” so that the drift actually points in the direction of π/2. One common choice is then to write the overdamped Langevin equation as
+
+  dθ = v (π/2 – θ) dt + √(2D) dW(t),
+
+if you want a linear “restoring force” pointing toward π/2 (this is valid locally on the ring, though one must be somewhat careful with global periodicity). Another (periodic) option is to choose
+  dθ = –v cos θ dt + √(2D) dW(t),
+since note that
+  –v cos θ = v sin(θ – π/2),
+and then the stationary distribution (provided detailed balance holds) becomes tilted in favor of the upper half.
+
+For definiteness, let’s work through one example that leads to an analytic answer.
+
+Example Model: Bias Toward π/2 via a Sinusoidal Drift
+
+Assume that the dynamics of the angular coordinate are given by the Ito stochastic differential equation
+
+  dθ = –v cos θ dt + √(2D) dW(t).
+              (1)
+
+Here v > 0 is a measure of the drift bias (with units of (angle)/time) and D is the angular diffusion constant. (Because cos θ is a periodic function the drift is naturally defined on the circle.) A few remarks:
+• When θ = 0, –cos 0 = –1 so that the drift is –v. In our language, “–v” pushes the particle “counterclockwise” from θ = 0 toward larger angles (remember that on the unit circle the natural convention is that angles increase counterclockwise).
+• At θ = π/2, cos(π/2) = 0 so that the drift vanishes there (a minimum of the effective potential).
+• For θ > π/2, cos θ is negative so that –cos θ becomes positive; again, the drift then points “back” toward π/2.
+Thus the drift “pulls” the particle toward the region near π/2.
+
+Steady‐State Distribution
+
+For a drift–diffusion equation defined on a ring with a drift derivable from a potential, the stationary (equilibrium) probability density is given by the Boltzmann distribution. In general, if
+  dθ = –U′(θ) dt + √(2D) dW(t),
+then the stationary density is
+
+  pₛ(θ) = (1/Z) exp[–U(θ)/D],
+with Z = ∫₀^(2π) exp[–U(θ′)/D] dθ′.
+
+In our case we can define the effective potential U(θ) by identifying
+  U′(θ) = v cos θ  ⇒  U(θ) = v sin θ + constant.
+We can drop the constant (it cancels in the normalization) so that
+
+  pₛ(θ) = (1/Z) exp[–v sin θ/D],
+with
+  Z = ∫₀^(2π) exp[–v sin θ/D] dθ.
+Because the integrals involve exponentials of sinusoids, one can show that
+
+  Z = 2π I₀(v/D),
+where I₀ is the modified Bessel function of the first kind (of order zero).
+
+Notice that when v = 0 (no bias) we have pₛ(θ) = 1/(2π), the uniform distribution.
+
+Probability to be on the Upper Half ([0, π])
+
+Now, if one is interested in the long–time probability that the particle is found in the upper half of the ring (that is, for θ ∈ [0, π]), then one simply integrates the steady–state density over that half:
+
+  P_upper = ∫₀^π pₛ(θ) dθ
+       = (1/(2π I₀(v/D))) ∫₀^π exp[–(v/D) sin θ] dθ.
+                    (2)
+
+This expression is the answer in closed–form (though the remaining integral does not simplify to elementary functions in general—it is often expressed in terms of Bessel functions or computed numerically).
+
+A few remarks:
+– When v = 0, the exponential becomes 1, so
+  P_upper(v=0) = (1/(2π)) ∫₀^π dθ = π/(2π) = 1/2,
+as expected for an unbiased situation.
+– For v > 0 the factor exp[–(v/D) sin θ] is not symmetric over [0, 2π]: since sin θ is positive for θ ∈ (0,π) and negative for θ ∈ (π,2π), the weight exp[–(v/D) sin θ] is smaller on (0,π) compared to (π,2π). At first glance this might seem to “reduce” P_upper. But note that our choice of drift –v cos θ actually makes the effective potential U(θ) = v sin θ lower (more favorable) for larger sin θ. Since sin θ is maximized at π/2, the upper half (especially near π/2) has higher probability weight. (One must be cautious with signs: if you prefer to think “bias toward π/2” then you may want a stationary density that is peaked at π/2. In the expression above, pₛ(θ) ∝ exp[–v sin θ/D] does indeed peak at θ = 3π/2 if v > 0. To have a peak at π/2 one may instead choose the drift as +v cos θ; the precise form depends on the convention adopted. What matters is that the biased dynamics yield a nonuniform pₛ(θ), and then P_upper is determined by integrating pₛ(θ) over [0,π].)
+– If you desire a drift that “pulls” toward π/2 in such a way that the stationary density is peaked at π/2, you could equivalently define the SDE as
+  dθ = +v cos θ dt + √(2D) dW(t).
+Then an identical analysis (with an overall change of sign in the potential) leads to the stationary density
+  pₛ(θ) = (1/Z) exp[+(v/D) sin θ],
+with Z = 2π I₀(v/D), and the probability to be in the upper half becomes
+  P_upper = (1/(2π I₀(v/D))) ∫₀^π exp[(v/D) sin θ] dθ.
+In this formulation the density is largest at θ = π/2 (since sin(π/2) = 1, giving the maximum weight exp(v/D)) and smallest at θ = 3π/2. Depending on your precise physical assumptions about “bias toward π/2” you can choose one formulation or the other.
+
+Summary Answer
+
+Assuming that you choose a drift that biases the particle toward π/2 so that the steady–state density is
+  pₛ(θ) = (1/(2π I₀(v/D))) exp[(v/D) sin θ],
+then the long–time probability that the particle (which started at (1,0), i.e. θ = 0) is found on the “upper” half of the ring (θ ∈ [0,π]) is
+
+  P_upper = (1/(2π I₀(v/D))) ∫₀^π exp[(v/D) sin θ] dθ.
+                        (Final Answer)
+
+This result reduces to 1/2 when v = 0 (no bias) and deviates from 1/2 when a bias is present. For a given bias strength v and diffusion constant D the integral (or equivalently its representation in terms of special functions) can be evaluated numerically.
+
+Thus, if you add a bias toward π/2, the probability of eventually being observed in the upper half of the ring is no longer 50% but is given by the integral above, reflecting the enhanced likelihood that the steady–state distribution accumulates around the favored angle.
+
+*** Can you provide these equations in latex?
+
+Below is one way to write the key equations in LaTeX. In this example we use a drift that biases the particle toward \(\pi/2\) so that the Langevin equation is
+
+\[
+d\theta = + v\,\cos\theta\, dt + \sqrt{2D}\,dW(t).
+\]
+
+The corresponding Fokker–Planck (or drift–diffusion) equation for the probability density \(p(\theta,t)\) is
+
+\[
+\frac{\partial p(\theta,t)}{\partial t} = -\frac{\partial}{\partial \theta}\Bigl[v \cos\theta\, p(\theta,t)\Bigr] + D\,\frac{\partial^2 p(\theta,t)}{\partial \theta^2}.
+\]
+
+In equilibrium (assuming detailed balance), the stationary probability density is given by the Boltzmann distribution. Since the drift can be derived from an effective potential via
+
+\[
+v\,\cos\theta = \frac{dU}{d\theta}, \quad \text{with } U(\theta)= v\,\sin\theta,
+\]
+
+the stationary density takes the form
+
+\[
+p_{\mathrm{s}}(\theta) = \frac{1}{Z}\,\exp\Bigl(\frac{v}{D}\,\sin\theta\Bigr),
+\]
+where the normalization constant \(Z\) is
+\[
+Z = \int_0^{2\pi} \exp\Bigl(\frac{v}{D}\,\sin\theta\Bigr)\,d\theta = 2\pi\, I_0\Bigl(\frac{v}{D}\Bigr),
+\]
+with \(I_0\) denoting the modified Bessel function of the first kind and order zero.
+
+Finally, the probability of finding the particle in the upper half of the ring (i.e. for \(\theta\in[0,\pi]\)) is
+
+\[
+P_{\text{upper}} = \int_0^\pi p_{\mathrm{s}}(\theta)\,d\theta = \frac{1}{2\pi\, I_0\left(\frac{v}{D}\right)} \int_0^\pi \exp\Bigl(\frac{v}{D}\,\sin\theta\Bigr)\,d\theta.
+\]
+
+These LaTeX equations summarize the drift–diffusion model with a bias toward \(\pi/2\) and the resulting expression for the probability of finding the particle on the upper half of the ring.
+
+*** How would I simulate this in python? I would like to plot the angular location of the particle vs time.
+
+Below is an example Python code that uses the Euler–Maruyama method to simulate the SDE
+
+  dθ = v cosθ dt + √(2D) dW(t)
+
+with periodic boundary conditions (θ wrapped to [0, 2π]). The code then plots θ (the angular location) versus time.
+
+#+begin_src ipython
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+v = 1.0       # drift strength
+D = 0.1       # diffusion constant
+T = 10.0      # total time
+dt = 0.001    # time step
+N = int(T / dt)  # number of time steps
+
+
+t_array = np.linspace(0, T, N)
+theta = np.zeros(N)
+theta[0] = 0.0  # starting at theta = 0; corresponds to point (1,0)
+
+
+for i in range(1, N):
+    dW = np.sqrt(dt) * np.random.randn()
+    theta[i] = theta[i-1] + v * np.cos(theta[i-1]) * dt + np.sqrt(2*D) * dW
+    # wrap theta into [0, 2π)
+    theta[i] = theta[i] % (2*np.pi)
+
+
+plt.figure(figsize=(10, 4))
+plt.plot(t_array, theta, lw=1)
+plt.xlabel("Time")
+plt.ylabel("θ (radians)")
+plt.title("Angular location of the particle vs Time")
+plt.grid(True)
+plt.show()
+#+end_src
+
+Explanation:
+
+1. The simulation parameters (drift v, diffusion constant D, total time T, and time step dt) are set at the beginning.
+2. We initialize an array for time (t_array) and for the angular coordinate (theta) with the initial condition θ = 0.
+3. In the loop, we update θ using the drift term v*cos(θ) and the noise term √(2D)/dW, where dW is drawn from a Gaussian distribution with standard deviation √(dt). After each update, we wrap θ to the interval [0, 2π) using the modulo operation.
+4. Finally, the trajectory is plotted showing θ as a function of time.
+
+You can adjust parameters and dt as needed. Happy simulating!
+
+*** Can you wrap some how the angles so that the plot does not show discontinuities when going from 0 to 2 pi
+
+Below is one way to modify the simulation so that the plotted trajectory is continuous in time by "unwrapping" the angle before plotting. You simulate using modulo arithmetic to ensure the dynamics stay in [0, 2π) but then use numpy's unwrap function to remove the 2π jumps in the time series plot.
+
+#+begin_src ipython
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Parameters
+v = 1.0       # drift strength
+D = 0.1       # diffusion constant
+T = 10.0      # total time
+dt = 0.001    # time step
+N = int(T / dt)  # number of time steps
+
+t_array = np.linspace(0, T, N)
+theta = np.zeros(N)
+theta[0] = 0.0  # starting at theta = 0 (point (1,0))
+
+# Simulate using Euler-Maruyama method
+for i in range(1, N):
+    dW = np.sqrt(dt) * np.random.randn()
+    theta[i] = theta[i-1] + v * np.cos(theta[i-1]) * dt + np.sqrt(2*D) * dW
+    # Wrap theta into [0, 2π)
+    theta[i] = theta[i] % (2*np.pi)
+
+# For a continuous plot, unwrap the angle
+theta_unwrapped = np.unwrap(theta)
+
+plt.figure(figsize=(10, 4))
+plt.plot(t_array, theta_unwrapped, lw=1)
+plt.xlabel("Time")
+plt.ylabel("θ (radians)")
+plt.title("Angular Location (Continuous) of the Particle vs Time")
+plt.grid(True)
+plt.show()
+#+end_src
+
+Explanation:
+
+1. The simulation loop updates θ using Euler–Maruyama and enforces periodic boundary conditions (with modulo 2π).
+2. The np.unwrap() function is used on the θ array to remove the discontinuities when the angle jumps from 2π back to 0.
+3. The plot then shows a continuous trajectory of the angular position.
+
+*** How would you introduce an input that rotates the phase to by 45° over a few steps
+
+Below is an example of how you might modify the simulation loop to include an input that gradually rotates the phase by 45° (π/4 radians) over a specified time window. In this example, we add an extra angular increment during the rotation period:
+
+#+begin_src ipython
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Simulation parameters
+v = 1.0         # drift strength
+D = 0.1         # diffusion constant
+T = 10.0        # total time
+dt = 0.001      # time step
+N = int(T / dt) # number of time steps
+
+# Define rotation input parameters
+rotation_start_time = 3.0   # input starts at t = 3.0 s
+rotation_end_time   = 3.5   # input ends at t = 3.5 s
+rotation_angle = np.pi/4    # total phase rotation (45° in radians)
+# Determine the number of steps during which the input is applied
+input_steps = int((rotation_end_time - rotation_start_time) / dt)
+# The constant extra angular velocity to achieve the rotation in the specified time:
+input_angular_velocity = rotation_angle / (rotation_end_time - rotation_start_time)
+
+t_array = np.linspace(0, T, N)
+theta = np.zeros(N)
+theta[0] = 0.0  # starting angle
+
+# Simulation using Euler-Maruyama method with an additional input
+for i in range(1, N):
+    t = i * dt
+
+    # Standard Euler-Maruyama step with drift (v*cos(theta)) and noise
+    dW = np.sqrt(dt) * np.random.randn()
+    dtheta = v * np.cos(theta[i-1]) * dt + np.sqrt(2*D) * dW
+
+    # Add extra rotation input during the specified time window
+    if rotation_start_time <= t <= rotation_end_time:
+        dtheta += input_angular_velocity * dt
+
+    theta[i] = theta[i-1] + dtheta
+    # wrap theta into [0, 2π)
+    theta[i] = theta[i] % (2*np.pi)
+
+# Unwrap for plotting a continuous trajectory
+theta_unwrapped = np.unwrap(theta)
+
+plt.figure(figsize=(10, 4))
+plt.plot(t_array, theta_unwrapped, lw=1)
+plt.xlabel("Time (s)")
+plt.ylabel("θ (radians)")
+plt.title("Angular Location of the Particle vs Time with Extra Phase Rotation")
+plt.grid(True)
+plt.show()
+#+end_src
+
+Explanation:
+
+1. We define an extra input that starts at t = 3.0 s and ends at t = 3.5 s and rotates the phase by 45° (π/4 radians).
+2. The extra angular velocity is calculated so that over the input period the phase changes by π/4.
+3. In the simulation loop, inside the time window the additional angular increment (input_angular_velocity * dt) is added to the update dθ.
+4. The simulation continues, and the unwrapped angle is plotted versus time.
+
+This modified simulation will show a smooth phase shift during the input time window without causing abrupt jumps in the plot.
+
+***
+
+Below is one approach. Suppose you want to "kick" the phase at a specific time (say at tinput) to rotate it by 45° (π/4 radians). During the simulation, at tinput you add an extra π/4 to the current phase. For example:
+
+#+begin_src ipython
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Parameters
+v = 1.0           # drift strength
+D = 0.1           # diffusion constant
+T = 10.0          # total time
+dt = 0.001        # time step
+N = int(T/dt)     # number of steps
+t_array = np.linspace(0, T, N)
+
+# Input parameters: at t_input we add a phase kick of 45° = π/4
+t_input = 5.0     # time at which input occurs
+kick = np.pi/4    # phase rotation
+
+theta = np.zeros(N)
+theta[0] = 0.0    # starting at angle zero (point (1,0))
+
+# Simulate using Euler–Maruyama
+for i in range(1, N):
+    dW = np.sqrt(dt) * np.random.randn()
+    theta[i] = theta[i-1] + v * np.cos(theta[i-1]) * dt + np.sqrt(2*D) * dW
+    # apply phase kick if we just passed t_input
+    if t_array[i-1] < t_input <= t_array[i]:
+        theta[i] += kick
+    # wrap theta into [0, 2π)
+    theta[i] = theta[i] % (2*np.pi)
+
+# Unwrap for continuous plotting
+theta_unwrapped = np.unwrap(theta)
+
+plt.figure(figsize=(10,4))
+plt.plot(t_array, theta_unwrapped, lw=1)
+plt.xlabel("Time")
+plt.ylabel("θ (radians)")
+plt.title("Angular Location vs Time (with 45° Phase Kick at t={})".format(t_input))
+plt.grid(True)
+plt.show()
+#+end_src
+
+Explanation:
+
+1. We set t_input (in this example 5.0 seconds) at which time we add a phase "kick" of π/4 radians.
+2. Inside the simulation loop we check if the current time step crosses t_input; if so, we add the kick to the phase for that step.
+3. After updating at each step we wrap the angle into [0, 2π) (for the dynamics) and then use np.unwrap to produce a continuously plotted trajectory.
+4. Adjusting the parameters or input time is straightforward.
+
+Alternatively, if you want to add a continuous input (for example, an extra drift term udt), then you can modify the SDE as
+
+  dθ = v cosθ dt + u dt + √(2D)dW(t),
+
+where u = (π/4)/Δt over some small time interval Δt (and zero elsewhere) approximates an impulse.
+
+***
+
+Below is one way to modify the simulation so that at a given time (or upon an “input event”) the particle’s phase is reset to a “diagonal” value. In this example we assume the “diagonal” is represented by an angle of π/4 (45°). (You could also modify the reset value in any way such as computing a function of sin(2θ) if that’s what you need.)
+
+Below is a complete ipython source code block that
+
+• Simulates the SDE using Euler–Maruyama,
+• Wraps the angle periodically,
+• Uses np.unwrap for a continuous plot, and
+• Resets the phase at a chosen time T_reset so that the particle starts diffusing from the reset angle.
+
+#+begin_src ipython
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Parameters
+v = 1.0       # drift strength
+D = 0.1       # diffusion constant
+T = 10.0      # total simulation time
+dt = 0.001    # time step
+N = int(T / dt)     # number of steps
+
+t_array = np.linspace(0, T, N)
+theta = np.zeros(N)
+theta[0] = 0.0      # initial condition (theta = 0 corresponds to (1,0))
+
+# Set reset parameters
+T_reset = 5.0       # time at which we reset the phase
+reset_angle = np.pi/4  # reset angle (diagonal); you could choose this as a function of sin 2θ if desired
+
+# Use a flag so the reset happens only once
+reset_done = False
+
+# Euler–Maruyama simulation
+for i in range(1, N):
+    if (not reset_done) and (t_array[i] >= T_reset):
+        theta[i-1] = reset_angle  # reset the phase
+        reset_done = True
+    dW = np.sqrt(dt) * np.random.randn()
+    theta[i] = theta[i-1] + v * np.cos(theta[i-1]) * dt + np.sqrt(2*D) * dW
+    # Wrap the angle into [0, 2π)
+    theta[i] = theta[i] % (2*np.pi)
+
+# For a continuous plot, unwrap the angle
+theta_unwrapped = np.unwrap(theta)
+
+plt.figure(figsize=(10, 4))
+plt.plot(t_array, theta_unwrapped, lw=1)
+plt.xlabel("Time")
+plt.ylabel("θ (radians)")
+plt.title("Angular Location vs Time (with Phase Reset at T = {:.1f})".format(T_reset))
+plt.grid(True)
+plt.show()
+#+end_src
+
+Explanation:
+
+1. The code sets up a basic Euler–Maruyama integration for the SDE
+  dθ = v cosθ dt + √(2D) dW(t)
+   while enforcing that θ remains in [0, 2π).
+
+2. We choose a reset time T_reset (here 5.0 seconds) and a reset angle (here π/4). When the simulation time reaches T_reset, the current phase is overridden by reset_angle and then the simulation continues from that state.
+
+3. The np.unwrap() function is used to remove the 2π discontinuities when plotting.
+
+If you wish to have a more dynamic “input” (for example, waiting for a user key press or an external signal), you could replace the time-based reset with code that listens for an event. For many simulation contexts, however, a time-based reset (as shown above) is a simple and effective approach.
+
+*** I would like to play a little animation of the particle diffusing on the ring
+
+Below is an example using matplotlib’s animation module. In this code, we simulate the particle’s angular diffusion on the ring using Euler–Maruyama, and then animate the particle moving along a circle. (Remember that the particle’s Cartesian position on the ring is (cos θ, sin θ)):
+
+#+begin_src ipython
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+
+# Simulation parameters
+v   = 1.0       # drift strength
+D   = 0.1       # diffusion constant
+T   = 10.0      # total simulation time
+dt  = 0.01      # time step
+N   = int(T/dt) # number of steps
+
+# Initialize time and theta arrays.
+t_array = np.linspace(0, T, N)
+theta   = np.zeros(N)
+theta[0] = 0.0  # starting at theta=0 (position = (1, 0))
+
+# Euler-Maruyama simulation for dθ = v*cos(θ)*dt + sqrt(2D)dW
+for i in range(1, N):
+    dW = np.sqrt(dt) * np.random.randn()
+    theta[i] = theta[i-1] + v * np.cos(theta[i-1]) * dt + np.sqrt(2*D) * dW
+    # Wrap theta into [0, 2pi)
+    theta[i] %= (2*np.pi)
+
+# Precompute Cartesian coordinates on the circle for animation
+x_vals = np.cos(theta)
+y_vals = np.sin(theta)
+
+# Create figure and axis for the animation
+fig, ax = plt.subplots()
+ax.set_aspect('equal')
+ax.set_xlim(-1.2, 1.2)
+ax.set_ylim(-1.2, 1.2)
+ax.set_title("Particle Diffusing on a Ring")
+
+# Draw the ring
+circle = plt.Circle((0, 0), 1, color='black', fill=False, linestyle='--')
+ax.add_artist(circle)
+
+# Initialize the particle point
+point, = ax.plot([], [], 'ro', ms=8)
+
+# Initialization function for the animation
+def init():
+    point.set_data([], [])
+    return point,
+
+# Animation function: update the position of the particle at frame i
+def animate(i):
+    point.set_data(x_vals[i], y_vals[i])
+    return point,
+
+# Create the animation using FuncAnimation.
+# The interval parameter sets the delay between frames in milliseconds.
+ani = animation.FuncAnimation(fig, animate, frames=N,
+                              init_func=init, blit=True, interval=20)
+
+plt.show()
+#+end_src
+
+Explanation:
+
+1. The simulation block uses the Euler–Maruyama method to compute the angular positions (θ) at each time step, ensuring the angle stays in [0, 2π).
+
+2. The Cartesian coordinates (x, y) are computed using x = cos(θ) and y = sin(θ). These coordinates are used to update the position of the particle in the animation.
+
+3. The matplotlib.animation.FuncAnimation function creates an animation that updates the particle’s position on the circle at every time step.
+
+Adjust dt, T, and other parameters as needed. Enjoy your animated simulation!
+
+*** Is there a way to get the animation to play in an org buffer?
+
+Yes—you can. One common approach is to have your Python code save the animation to a GIF (or MP4) file and then display that file inline in your Org buffer. Here’s one procedure you can follow:
+
+1. Modify your Python code to save the animation. For example, using matplotlib’s animation writers (like pillow for GIFs):
+
+──────────────────────────────
+#+begin_src ipython :results file
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+
+# Simulation parameters
+v   = 1.0       # drift strength
+D   = 0.1       # diffusion constant
+T   = 10.0      # total simulation time
+dt  = 0.01      # timestep
+N   = int(T/dt) # number of steps
+
+t_array = np.linspace(0, T, N)
+theta = np.zeros(N)
+theta[0] = 0.0  # starting at theta = 0
+
+for i in range(1, N):
+    dW = np.sqrt(dt) * np.random.randn()
+    theta[i] = theta[i-1] + v * np.cos(theta[i-1]) * dt + np.sqrt(2*D)*dW
+    theta[i] %= (2*np.pi)
+
+x_vals = np.cos(theta)
+y_vals = np.sin(theta)
+
+fig, ax = plt.subplots()
+ax.set_aspect('equal')
+ax.set_xlim(-1.2, 1.2)
+ax.set_ylim(-1.2, 1.2)
+ax.set_title("Particle Diffusing on a Ring")
+circle = plt.Circle((0,0), 1, color='black', fill=False, linestyle='--')
+ax.add_artist(circle)
+point, = ax.plot([], [], 'ro', ms=8)
+
+def init():
+    point.set_data([], [])
+    return point,
+
+def animate(i):
+    point.set_data(x_vals[i], y_vals[i])
+    return point,
+
+ani = animation.FuncAnimation(fig, animate, frames=N,
+                              init_func=init, blit=True, interval=20)
+
+# Save animation as a GIF file
+ani.save("ring_diffusion.gif", writer="pillow", fps=30)
+
+plt.close(fig)
+"ring_diffusion.gif"
+#+end_src
+──────────────────────────────
+
+This code will create and save a file called "ring_diffusion.gif".
+
+2. In your Org buffer, you can then refer to that file as an inline image. For example, add a link like:
+
+   [[file:ring_diffusion.gif]]
+
+Or, if you want Org mode to display it automatically, use:
+
+   #+ATTR_HTML: :width 400
+   #+ATTR_LATEX: :width 0.4\textwidth
+   [[file:ring_diffusion.gif]]
+
+3. Now, when you export your Org file (or even use Org’s inline image feature with C-c C-x C-v), your animation should appear in the Org buffer.
+
+Note: If you’re using Emacs 27+, inline images will show automatically when you execute the source block (with appropriate Org Babel configuration). Also, make sure that your Emacs installation has external image viewer support (e.g. the ImageMagick package for animated GIFs).
+
+This approach lets you generate the animation from IPython (or a Python Org Babel source block), save it, and then display it seamlessly in your Org file.
+
+***

@@ -201,7 +201,7 @@ class Network(nn.Module):
         elif self.SPARSE == "semi":
             hidden = (Wab_T @ rates.T).T
         else:
-            hidden = rates @ Wab_T
+            hidden = rates @ Wab_T # here @ is rj * Wji hence it's j to i (row are presyn)
 
         # update stp variables
         if self.IF_STP:
@@ -296,49 +296,60 @@ class Network(nn.Module):
         if self.IF_STP:
             W_stp_T = self.GAIN * self.W_stp_T
 
-        # Train Low rank vectors
-        if self.LR_TRAIN:
-            self.Wab_train = self.low_rank(self.LR_NORM, self.LR_CLAMP) / self.Na[0]
+        if self.training:
+            # Train Low rank vectors
+            if self.LR_TRAIN:
+                self.Wab_train = self.low_rank(self.LR_NORM, self.LR_CLAMP) / self.Na[0]
 
-        # Training
-        if self.ODR_TRAIN or self.LR_TRAIN:
-            if self.IF_STP:
+            # Training
+            if self.ODR_TRAIN or self.LR_TRAIN:
+                if self.IF_STP:
+                    if self.ODR_TRAIN:
+                        W_stp_T = self.GAIN * (self.W_stp_T + self.Wab_train[self.slices[0], self.slices[0]])
+                        W_stp_T = W_stp_T / torch.sqrt(self.Ka[0])
 
-                if self.ODR_TRAIN:
-                    # W_stp_T = self.GAIN * self.Wab_train[self.slices[0], self.slices[0]] / self.Na[0]
-                    # W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
-                    W_stp_T = self.GAIN * (self.W_stp_T + self.Wab_train[self.slices[0], self.slices[0]])
-                    W_stp_T = W_stp_T / torch.sqrt(self.Ka[0])
+                    if self.LR_TRAIN:
+                        if self.LR_TYPE == 'full':
+                            # W_stp_T = self.GAIN * (self.Wab_train[self.slices[0], self.slices[0]])
+                            W_stp_T = self.GAIN * (torch.sqrt(self.Ka[0]) / self.Na[0] + self.Wab_train[self.slices[0], self.slices[0]])
+                        elif self.LR_TYPE == 'sparse':
+                            W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
+                        elif self.LR_TYPE == 'rand_full':
+                            W_stp_T = self.GAIN * (self.W_stp_T / torch.sqrt(self.Ka[0])
+                                                   + self.Wab_train[self.slices[0], self.slices[0]]) # / torch.sqrt(self.Ka[0])
+                        elif self.LR_TYPE == 'rand_sparse':
+                            Wij = 1.0 + self.Wab_train[self.slices[0], self.slices[0]] / torch.sqrt(self.Ka[0])
+                            Wij_p = clamp_tensor(Wij, 0, self.slices)
+                            W_stp_T = self.GAIN * (self.W_stp_T * Wij_p) / torch.sqrt(self.Ka[0])
+                            # W_stp_T = self.GAIN * (self.W_stp_T * Wij_p + (1.0 - self.W_stp_T) * Wij_p) / torch.sqrt(self.Ka[0])
+                            # Wij_p = (torch.rand(self.Na[0], self.Na[0], device=self.device) <=
+                            # ((self.Ka[0] / self.Na[0]) * Wij).clamp_(min=0, max=1))
+                            # W_stp_T = self.GAIN * Wij_p / torch.sqrt(self.Ka[0])
 
-                if self.LR_TRAIN:
-                    if self.LR_TYPE == 'full':
-                        # W_stp_T = self.GAIN * (self.Wab_train[self.slices[0], self.slices[0]])
-                        W_stp_T = self.GAIN * (torch.sqrt(self.Ka[0]) / self.Na[0] + self.Wab_train[self.slices[0], self.slices[0]])
-                    elif self.LR_TYPE == 'sparse':
-                        W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
-                    elif self.LR_TYPE == 'rand_full':
-                        W_stp_T = self.GAIN * (self.W_stp_T / torch.sqrt(self.Ka[0])
-                                               + self.Wab_train[self.slices[0], self.slices[0]]) # / torch.sqrt(self.Ka[0])
-                    elif self.LR_TYPE == 'rand_sparse':
-                        Wij = 1.0 + self.Wab_train[self.slices[0], self.slices[0]] / torch.sqrt(self.Ka[0])
-                        Wij_p = clamp_tensor(Wij, 0, self.slices)
-                        # W_stp_T = self.GAIN * (self.W_stp_T * Wij_p) / torch.sqrt(self.Ka[0])
-                        # W_stp_T = self.GAIN * (self.W_stp_T * Wij_p + (1.0 - self.W_stp_T) * Wij_p) / torch.sqrt(self.Ka[0])
-                        # Wij_p = torch.rand(self.Na[0], self.Na[0], device=self.device) <= ((self.Ka[0] / self.Na[0]) * Wij).clamp_(min=0, max=1)
-                        W_stp_T = self.GAIN * Wij_p / torch.sqrt(self.Ka[0])
+                        if self.CLAMP:
+                            W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
 
             if self.TRAIN_EI:
                 Wab_train = normalize_tensor(self.Wab_train, 0, self.slices, self.Na)
                 Wab_train = normalize_tensor(Wab_train, 1, self.slices, self.Na)
                 Wab_T = self.GAIN * (self.Wab_T + self.train_mask * Wab_train)
 
-            if self.CLAMP:
-                if self.IF_STP and (self.LR_TYPE!='rand_sparse'):
-                    W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
-                if self.TRAIN_EI:
+                del Wab_train
+
+                if self.CLAMP:
                     # Check indices Think need some transpose
                     Wab_T = clamp_tensor(Wab_T.T, 0, self.slices).T
                     Wab_T = clamp_tensor(Wab_T.T, 1, self.slices).T
+
+        if self.IF_OPTO:
+            # rand_idx = torch.randperm(W_stp_T.size(0))[:self.N_OPTO]
+            # W_stp_T[:, rand_idx] = 0
+
+            rand_idx = torch.randperm(W_stp_T.size(0))[:self.N_OPTO]
+            W_stp_T[rand_idx] = 0
+
+            # _, idx = torch.sort(self.low_rank.V[:,1])
+            # W_stp_T[idx[:self.N_OPTO]] = 0
 
         # Moving average
         mv_rates, mv_ff, mv_rec = 0, 0, 0
@@ -346,23 +357,17 @@ class Network(nn.Module):
 
         # Temporal loop
         for step in range(self.N_STEPS):
+            # add noise to the rates
             if self.RATE_NOISE:
                 rate_noise = torch.randn((self.N_BATCH, self.N_NEURON), device=self.device)
                 rates = rates + rate_noise * self.VAR_RATE
-            # update dynamics
+
+            # create ff input at each time step
             if self.LIVE_FF_UPDATE:
                 ff_input = live_ff_input(self, step, ff_input)
                 rates, rec_input = self.update_dynamics(rates, ff_input, rec_input, Wab_T, W_stp_T)
             else:
-                # if self.LR_TRAIN:
-                #     # ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD-1)
-                #     if self.IF_RL:
-                #         ff_input = rl_ff_udpdate(self, ff_input, rates, step, self.RWD)
-                #     else:
-                #         self.RWD = 22
-
                 rates, rec_input = self.update_dynamics(rates, ff_input[:, step], rec_input, Wab_T, W_stp_T)
-
 
             # update moving average
             mv_rates += rates
@@ -429,6 +434,15 @@ class Network(nn.Module):
             self.ff_input = ff_input[..., self.slices[0]]
 
         del ff_input, rec_input
+
+        if self.training:
+            self.Wab_T = Wab_T / self.GAIN
+            del Wab_T
+
+            if self.IF_STP:
+                self.W_stp_T = W_stp_T / self.GAIN
+                del W_stp_T
+
         clear_cache()
 
         return rates

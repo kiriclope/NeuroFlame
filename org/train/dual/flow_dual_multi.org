@@ -368,7 +368,7 @@ def save_fig(figname, GRID_TEST):
 #+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "train_dual.yml"
-DEVICE = 'cuda:0'
+DEVICE = 'cuda:1'
 #+end_src
 
 #+RESULTS:
@@ -380,8 +380,8 @@ kwargs = {
     'T_STIM_ON': [1.0, 2.0],
     'T_STIM_OFF': [2.0, 300.0],
     'I0': [1.0, 1.0],
-    'GRID_SIZE': 15,
-    'GRID_TEST': None,
+    'GRID_SIZE': 10,
+    'GRID_TEST': 4,
     'GRID_INPUT': 0,
 }
 #+end_src
@@ -390,32 +390,58 @@ kwargs = {
 
 #+begin_src ipython
 tasks = ['dpa', 'dual_naive', 'dual_train']
-seed = 29 # 10
-GRID_RANGE = .4
+seed = 10
+GRID_RANGE = .5
+dum = 'test_C'
 #+end_src
 
 #+RESULTS:
 
 * Flow
 
-#+begin_src ipython
+ #+begin_src ipython
 from tqdm import tqdm
 centers = []
-for seed in tqdm(range(30)):
+for seed in tqdm(range(0, 100)):
     fp = []
     for task in tasks:
         fp.append(run_grid(GRID_RANGE, seed, task, **kwargs))
-        centers.append(fp)
+    centers.append(fp)
+
 centers = np.array(centers)
+print()
 print(centers.shape)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: 100% 30/30 [09:19<00:00, 18.67s/it](90, 3, 2, 5)
+: 100% 100/100 [26:15<00:00, 15.75s/it]
+: (100, 3, 2, 5)
 :
-:
-:END:
+
+#+begin_src ipython
+dum = 'test_C_last'
+pkl_save(centers, 'fp_multi_%s' % dum, path="/home/leon/")
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+# dum = 'last'
+# centers = pkl_load('fp_multi_%s' % dum, path="/home/leon/")
+# print(centers.shape)
+
+# dum = '100'
+# centers2 = pkl_load('fp_multi_%s' % dum, path="/home/leon/")
+# centers = np.vstack((centers, centers2))
+# print(centers2.shape)
+
+# dum = 'last2'
+# pkl_save(centers, 'fp_multi_%s' % dum, path="/home/leon/")
+#+end_src
+
+#+RESULTS:
+: (80, 3, 2, 5)
+: (19, 3, 2, 5)
 
 #+begin_src ipython
 centers_ = np.moveaxis(centers, 0, -1)
@@ -425,7 +451,7 @@ print(centers__.shape)
 #+end_src
 
 #+RESULTS:
-: (2, 5, 3, 90)
+: (2, 5, 3, 100)
 
 #+begin_src ipython
 centers = centers__
@@ -434,15 +460,37 @@ centers = centers__
 #+RESULTS:
 
 #+begin_src ipython
-x = centers[0, :2, 1].reshape(-1)
-y = centers[1, :2, 1].reshape(-1)
+x = centers[0, :, 0].reshape(-1)
+y = centers[1, :, 0].reshape(-1)
 
 print(x.shape, y.shape)
 
 fp = np.stack((x, y)).T
 print(fp.shape)
 
-kmeans = KMeans(n_clusters=5, random_state=None, init='k-means++')
+kmeans = KMeans(n_clusters=2, random_state=None, init='k-means++')
+kmeans.fit(fp)
+centers_mm = np.array(kmeans.cluster_centers_).T
+print(centers_mm.shape)
+# radius = np.sqrt(centers_mean[0, -1]**2 + centers_mean[1, -1]**2)
+#print(radius)
+#+end_src
+
+#+RESULTS:
+: (500,) (500,)
+: (500, 2)
+: (2, 2)
+
+#+begin_src ipython
+x = centers[0, :, 1].reshape(-1)
+y = centers[1, :, 1].reshape(-1)
+
+print(x.shape, y.shape)
+
+fp = np.stack((x, y)).T
+print(fp.shape)
+
+kmeans = KMeans(n_clusters=2, random_state=None, init='k-means++')
 kmeans.fit(fp)
 centers_m = np.array(kmeans.cluster_centers_).T
 print(centers_m.shape)
@@ -451,65 +499,75 @@ print(centers_m.shape)
 #+end_src
 
 #+RESULTS:
-: (180,) (180,)
-: (180, 2)
-: (2, 5)
+: (500,) (500,)
+: (500, 2)
+: (2, 2)
 
 #+begin_src ipython
-x = centers[0, :2, -1].reshape(-1)
-y = centers[1, :2, -1].reshape(-1)
+x = centers[0, :, -1].reshape(-1)
+y = centers[1, :, -1].reshape(-1)
 
 print(x.shape, y.shape)
 
 fp = np.stack((x, y)).T
 print(fp.shape)
 
-kmeans = KMeans(n_clusters=3, random_state=None, init='k-means++')
+kmeans = KMeans(n_clusters=2, random_state=None, init='k-means++')
 kmeans.fit(fp)
 centers_mean = np.array(kmeans.cluster_centers_).T
 print(centers_mean.shape)
-radius = np.sqrt(centers_mean[0, -1]**2 + centers_mean[1, -1]**2)
+radius = np.sqrt(centers_mean[0, 1]**2 + centers_mean[1, 1]**2)
 print(radius)
 #+end_src
 
 #+RESULTS:
-: (180,) (180,)
-: (180, 2)
-: (2, 3)
-: 10.480978601607667
+: (500,) (500,)
+: (500, 2)
+: (2, 2)
+: 10.608218447513725
 
 #+begin_src ipython
 import matplotlib.patches as patches
 palette = sns.color_palette('husl', centers.shape[-1])
 
-fig, ax = plt.subplots(1, 2, figsize=(2*width, width), sharex=1, sharey=1)
+fig, ax = plt.subplots(1, 3, figsize=(3*width, width), sharex=1, sharey=1)
 for i in range(centers.shape[-1]):
-    ax[0].plot(centers[0, :2, 1, i], centers[1, :2, 1, i], 'o', color=palette[i])
-    ax[1].plot(centers[0, :2, -1, i], centers[1, :2, -1, i], 'o', color=palette[i])
+    ax[0].plot(centers[0, :2, 0, i], centers[1, :2, 0, i], 'o', color=palette[i])
+    ax[1].plot(centers[0, :2, 1, i], centers[1, :2, 1, i], 'o', color=palette[i])
+    ax[2].plot(centers[0, :2, -1, i], centers[1, :2, -1, i], 'o', color=palette[i])
 
-ax[1].plot(centers_mean[0], centers_mean[1], 'ko', ms=12)
-ax[0].plot(centers_m[0], centers_m[1], 'ko', ms=12)
+ax[2].plot(centers_mean[0], centers_mean[1], 'ko', ms=12)
+ax[1].plot(centers_m[0], centers_m[1], 'ko', ms=12)
+ax[0].plot(centers_mm[0], centers_mm[1], 'ko', ms=12)
+
+ax[0].set_aspect('equal')
+ax[1].set_aspect('equal')
+ax[2].set_aspect('equal')
 
 circle = patches.Circle((0, 0), radius, edgecolor='k', facecolor='none')  # Red outline, no fill
 circle2 = patches.Circle((0, 0), radius, edgecolor='k', facecolor='none')  # Red outline, no fill
+circle3 = patches.Circle((0, 0), radius, edgecolor='k', facecolor='none')  # Red outline, no fill
+
 ax[0].add_patch(circle)
 ax[1].add_patch(circle2)
+ax[2].add_patch(circle3)
 
-for i in range(2):
+for i in range(3):
     # ax[i].add_patch(circle)
 
     ax[i].axhline(0, ls='--', color='k')
     ax[i].set_xlabel('Sample Overlap')
     ax[i].set_ylabel('Choice Overlap')
 
-ax[0].set_title('Naive')
-ax[1].set_title('Expert')
-plt.savefig('figures/barccsyn25/fp_multi.svg', dpi=300)
+ax[0].set_title('DPA')
+ax[1].set_title('Naive')
+ax[2].set_title('Expert')
+plt.savefig('figures/barccsyn25/fp_multi_%s.svg' % dum, dpi=300)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/flow_multi/figure_24.png]]
+[[./figures/flow_multi/figure_27.png]]
 
 #+begin_src ipython
 # pkl_save(rates_multi, 'rates_multi', path="/home/leon/")
