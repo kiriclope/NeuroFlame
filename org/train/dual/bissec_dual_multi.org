@@ -1,0 +1,677 @@
+#+Startup: fold
+#+TITLE: Training Low Rank RNNs
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual_flow_multi :kernel torch :exports results :output-dir ./figures/flow_multi :file (lc/org-babel-tangle-figure-filename)
+
+* TODO Urgent
+** Model
+
+ run multiple models see if there is a push down of the wells or diff strategies
+ see how go affects models try to understand how it impairs pairing.
+ plot task trajectories (DPA, GO, NOGO)
+
+** Data
+
+ try wells with sample LD and CHOICE if it works (push down that s gold)
+ if not try to make dPCA better and get day by day wells
+ if not go back to the go no go axis
+ and plot trajectories
+
+* Notebook Settings
+
+#+begin_src ipython :tangle no
+%load_ext autoreload
+%autoreload 2
+%reload_ext autoreload
+%run ../../../notebooks/setup.py
+%matplotlib inline
+%config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+#+RESULTS:
+
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Imports
+
+#+begin_src ipython
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torchmetrics
+import gc
+from torch.utils.data import Dataset, TensorDataset, DataLoader
+
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+pal = sns.color_palette("tab10")
+DEVICE = 'cuda:0'
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import sys
+sys.path.insert(0, '../../../')
+
+from notebooks.setup import *
+
+import pandas as pd
+import torch.nn as nn
+from time import perf_counter
+from scipy.stats import circmean
+
+from src.network import Network
+from src.plot_utils import plot_con
+from src.decode import decode_bump, circcvl
+from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
+#+end_src
+
+#+RESULTS:
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+#+begin_src ipython :tangle ../src/torch/utils.py
+import pickle as pkl
+
+def pkl_save(obj, name, path="."):
+      pkl.dump(obj, open(path + "/" + name + ".pkl", "wb"))
+
+
+def pkl_load(name, path="."):
+      return pkl.load(open(path + "/" + name + '.pkl', "rb"))
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def add_vlines(model, ax=None):
+
+    if ax is None:
+        for i in range(len(model.T_STIM_ON)):
+            plt.axvspan(model.T_STIM_ON[i], model.T_STIM_OFF[i], alpha=0.25)
+    else:
+        for i in range(len(model.T_STIM_ON)):
+            ax.axvspan(model.T_STIM_ON[i], model.T_STIM_OFF[i], alpha=0.25)
+
+#+end_src
+
+#+RESULTS:
+
+* Utils
+
+#+begin_src ipython
+from sklearn.cluster import KMeans
+def get_fp(overlaps, window, task, GRID_TEST=0):
+
+
+    x = overlaps[:, window:, 0]
+    y = overlaps[:, window:, 1]
+
+    x_fp = x[:, -1]
+    y_fp = y[:, -1]
+    fp = np.stack((x_fp, y_fp)).T
+
+    kmeans = KMeans(n_clusters=5, random_state=None)
+    kmeans.fit(fp)
+    center = np.array(kmeans.cluster_centers_).T
+
+    return center
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+from sklearn.cluster import KMeans
+def get_fp(overlaps, window, task, GRID_TEST=None, x=None, y=None):
+    kmeans = KMeans(n_clusters=5, random_state=None)
+
+    if x is None:
+        x = overlaps[:, window:, 0]
+        y = overlaps[:, window:, 1]
+
+    x_fp = x[:, -1]
+    y_fp = y[:, -1]
+    fp = np.stack((x_fp, y_fp)).T
+
+    # print(fp.shape)
+    kmeans.fit(fp)
+    center = np.array(kmeans.cluster_centers_)
+    center_ = []
+
+    if GRID_TEST is None:
+        pkl_save(center, 'center_%s' % task, path="/home/leon/")
+    else:
+        center_ = pkl_load('center_%s' % task, path="/home/leon/")
+
+    return center, center_
+#+end_src
+
+#+RESULTS:
+
+
+#+begin_src ipython
+def init_model(task, seed, **kwargs):
+    model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
+    model_state_dict = torch.load('../models/dual/%s_%d.pth' % (task, seed))
+    model.load_state_dict(model_state_dict)
+    # print('task', task, 'seed', seed)
+
+    return model
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def del_tensor(tensor):
+    DEVICE = tensor.device
+    del tensor
+    gc.collect()
+
+    torch.cuda.empty_cache()
+    torch.cuda.device(DEVICE)
+    torch.cuda.synchronize()
+    torch.cuda.reset_accumulated_memory_stats(DEVICE)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def run_grid(GRID_RANGE, seed, task, **kwargs):
+
+    GRID_LIST = [[-GRID_RANGE, 0], [0, GRID_RANGE]]
+
+    rates_grid = []
+    for GRID_X_RANGE in GRID_LIST:
+        for GRID_Y_RANGE in GRID_LIST:
+            model = init_model(task, seed, **kwargs)
+
+            model.GRID_X_RANGE = GRID_X_RANGE
+            model.GRID_Y_RANGE = GRID_Y_RANGE
+
+            model.N_BATCH = int(model.GRID_SIZE * model.GRID_SIZE)
+
+            ff_input = model.init_ff_input()
+            rates = model(ff_input, RET_REC=0)
+            rates_grid.append(rates)
+            del_tensor(ff_input)
+
+    rates_grid = torch.vstack(rates_grid)
+    overlaps, vec = get_low_rank(rates_grid, model, IF_REC=0)
+    del_tensor(rates_grid)
+    del_tensor(model)
+
+    window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
+    # centers = get_fp(overlaps, window, task, GRID_TEST=0)
+
+    sep_points = plot_empirical_separatrix(overlaps, None, window, near_thresh=5)
+    slope, _ = plot_separatrix_bestfit(sep_points, None, kind="linear")
+
+    return slope
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def get_low_rank(rates, model, IF_REC=0):
+    if IF_REC==0:
+        vec1 = model.low_rank.V.T[0]
+        vec2 = model.low_rank.V.T[1]
+
+        vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
+
+        # vec1 = vec1 / torch.linalg.norm(vec1)
+        # vec2 = vec2 / torch.linalg.norm(vec2)
+
+        vec = torch.stack((vec1, vec2))
+        overlaps = rates @ vec.T / model.Na[0]
+    else:
+        vec1 = model.low_rank.U.T[0]
+        vec2 = model.low_rank.U.T[1]
+        # vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
+        vec1 = vec1 / torch.linalg.norm(vec1)**2
+        vec2 = vec2 / torch.linalg.norm(vec2)**2
+
+        vec = torch.stack((vec1, vec2))
+        overlaps = model.rec_input[0, :, :] @ vec.T
+
+    return overlaps.cpu().detach().numpy(), vec.cpu().detach().numpy()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def plot_spaghetti(overlaps, ax, window, IF_FP=0):
+    palette = sns.color_palette('husl', overlaps.shape[0])
+    for i in range(overlaps.shape[0]):
+        ax.plot(overlaps[i, window:, 0], overlaps[i, window: , 1], color=palette[i])
+
+    center, center_ = get_fp(overlaps, window, task, GRID_TEST=0)
+
+    for i in range(center.shape[0]):
+        ax.plot(center[i][0], center[i][1], 'o', color='k', ms=10)
+        # if IF_FP:
+        #     ax.plot(center_[i][0], center_[i][1], 'o', color='b', ms=10)
+
+    ax.plot([-10, 10], [-10, 10], '--k', alpha=.5)
+    ax.plot([-10, 10], [10, -10], '--k', alpha=.5)
+    # ax.set_aspect('equal')
+
+    ax.set_xlabel('$\\kappa_{AB}$')
+    ax.set_ylabel('$\\kappa_{GNG}$')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def plot_ring(overlaps, ax, window, IF_FP=0):
+    palette = sns.color_palette('husl', overlaps.shape[0])
+    # for i in range(overlaps.shape[0]):
+    #     ax.plot(overlaps[i, window:, 0], overlaps[i, window: , 1], color=palette[i])
+
+    center, center_ = get_fp(overlaps, window, task, GRID_TEST=0)
+
+    for i in range(center.shape[0]):
+        ax.plot(center[i][0], center[i][1], 'o', color='k', ms=10)
+        # if IF_FP:
+        #     ax.plot(center_[i][0], center_[i][1], 'o', color='b', ms=10)
+
+    ax.plot([-10, 10], [-10, 10], '--k', alpha=.5)
+    ax.plot([-10, 10], [10, -10], '--k', alpha=.5)
+    # ax.set_aspect('equal')
+
+    ax.set_xlabel('$\\kappa_{AB}$')
+    ax.set_ylabel('$\\kappa_{GNG}$')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def plot_quiver(overlaps, ax, window, IF_FP=0):
+    palette = sns.color_palette('husl', overlaps.shape[0])
+    x = overlaps[:, window:, 0]
+    y = overlaps[:, window:, 1]
+
+    dx = np.gradient(x, axis=1)
+    dy = np.gradient(y, axis=1)
+
+    # flow_magnitude = np.sqrt(dx**2 + dy**2)
+
+    ax.quiver(x[::2, ::2], y[::2, ::2], dx[::2, ::2], dy[::2, ::2], angles='xy', scale_units='xy', scale=1, color=palette)
+    ax.plot([-10, 10], [10, -10], '--k', alpha=.5)
+    ax.plot([-10, 10], [-10, 10], '--k', alpha=.5)
+
+    # plt.colorbar()
+    # plt.clim([0, 1.5])
+
+    ax.set_xlabel('$\\kappa_{AB}$')
+    ax.set_ylabel('$\\kappa_{GNG}$')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+from scipy.interpolate import griddata
+
+def create_mesh(x, y, size=200):
+    x_min, x_max = np.min(x), np.max(x)
+    y_min, y_max = np.min(y), np.max(y)
+
+    dx = np.gradient(x, axis=1)
+    dy = np.gradient(y, axis=1)
+
+    # Create a dense grid
+    xi, yi = np.meshgrid(np.linspace(x_min, x_max, size),
+                         np.linspace(y_min, y_max, size))
+
+    # Flatten your dx and dy along with x and y for interpolation
+    points = np.vstack((x.flatten(), y.flatten())).T
+    dx_flat = dx.flatten()
+    dy_flat = dy.flatten()
+
+    # Interpolating on the grid
+    ui = griddata(points, dx_flat, (xi, yi), method='cubic', fill_value=0)
+    vi = griddata(points, dy_flat, (xi, yi), method='cubic', fill_value=0)
+
+    return xi, yi, ui, vi
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import matplotlib as mpl
+
+def plot_field(overlaps, ax, window, IF_FP=0):
+    x = overlaps[:, window:, 0]
+    y = overlaps[:, window:, 1]
+
+    xi, yi, ui, vi = create_mesh(x, y, size=100)
+    speed = np.sqrt(ui**2+vi**2)
+    # speed /= speed.max()
+
+    norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=False)
+    strm = ax.streamplot(xi, yi, ui, vi, density=1.5, arrowsize=1.5, color=speed, cmap='jet', norm=norm)
+    # fig.colorbar(strm.lines)
+    # ax.set_aspect('equal')
+    ax.set_xlabel('$\\kappa_{AB}$')
+    ax.set_ylabel('$\\kappa_{GNG}$')
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def save_fig(figname, GRID_TEST):
+
+    if GRID_TEST==4:
+        plt.savefig('../figures/flow/%s_test_C_%d.png' % (figname, seed), dpi=300)
+    elif GRID_TEST==9:
+        plt.savefig('../figures/flow/%s_test_D_%d.png' % (figname, seed), dpi=300)
+    elif GRID_TEST==1:
+        plt.savefig('../figures/flow/%s_go_%d.png' % (figname, seed), dpi=300)
+    elif GRID_TEST==6:
+        plt.savefig('../figures/flow/%s_nogo_%d.png' % (figname, seed), dpi=300)
+    elif GRID_TEST==0:
+        plt.savefig('../figures/flow/%s_sample_A_%d.png' % (figname, seed), dpi=300)
+    elif GRID_TEST==5:
+        plt.savefig('../figures/flow/%s_sample_B_%d.png' % (figname, seed), dpi=300)
+    else:
+        plt.savefig('../figures/flow/%s_%d.png' % (figname, seed), dpi=300)
+
+   #+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def plot_empirical_separatrix(
+    overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0,
+    near_thresh=10, label=None, s=11, alpha=0.9, color='k'):
+    """
+    Overlay an empirical separatrix estimated from trajectory endpoints.
+
+    For all pairs of trajectories that start nearby but end at different fixed points,
+    plot the midpoint of their starting points.
+
+    Parameters:
+        overlaps, ax, window, ...      : as for plot_field
+        near_thresh (float)            : threshold for 'nearby' in phase space
+        label                          : plot label for legend
+        s, alpha, color                : scatter plot appearance
+    """
+    # Extract data as in plot_field
+    x = overlaps[:, window:, 0]
+    y = overlaps[:, window:, 1]
+    n_traj = x.shape[0]
+    starts = np.column_stack([x[:, 0], y[:, 0]])
+
+    # Get fixed points (your function)
+    center, center_ = get_fp(overlaps, window, task, GRID_TEST=GRID_TEST)
+    fp = center if GRID_TEST is None else center_
+    # Assign endpoint label (closest FP)
+    ends = np.column_stack([x[:, -1], y[:, -1]])
+    dists = np.linalg.norm(ends[:, None, :] - fp[None, :, :], axis=2)
+    fp_labels = np.argmin(dists, axis=1)
+
+    sep_points = []
+    for i in range(n_traj-1):
+        for j in range(i+1, n_traj):
+            # Only look at pairs starting close by
+            if np.linalg.norm(starts[i] - starts[j]) < near_thresh:
+                # ...and ending at different FPs
+                if fp_labels[i] != fp_labels[j]:
+                    sep_points.append(0.5 * (starts[i] + starts[j]))
+
+    sep_points = np.array(sep_points)
+
+    return sep_points
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def plot_separatrix_bestfit(
+    sep_points, ax=None, kind='bspline', degree=3, color='k', linewidth=2, s=1.0, **kwargs):
+    import numpy as np
+    sep_points = np.asarray(sep_points)
+
+    # Order points in some coherent way (here: by x)
+    ind = np.argsort(sep_points[:,0])
+    xs, ys = sep_points[ind,0], sep_points[ind,1]
+    slope, intercept = np.polyfit(xs, ys, 1)
+    fit_y = slope * xs + intercept
+
+    # ax.legend()
+    return slope, intercept
+#+end_src
+
+#+RESULTS:
+
+* Model
+
+#+begin_src ipython
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+conf_name = "train_dual.yml"
+DEVICE = 'cuda:1'
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+kwargs = {
+    'DURATION': 10.0,
+    'TASK': 'dual_flow',
+    'T_STIM_ON': [1.0, 2.0],
+    'T_STIM_OFF': [2.0, 300.0],
+    'I0': [1.0, 1.0],
+    'GRID_SIZE': 10,
+    'GRID_TEST': 4,
+    'GRID_INPUT': 0,
+}
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+tasks = ['dpa', 'dual_naive', 'dual_train']
+seed = 10
+GRID_RANGE = .5
+dum = 'test_C'
+#+end_src
+
+#+RESULTS:
+
+* Flow
+
+ #+begin_src ipython
+from tqdm import tqdm
+centers = []
+for seed in tqdm(range(0, 100)):
+    fp = []
+    for task in tasks:
+        fp.append(run_grid(GRID_RANGE, seed, task, **kwargs))
+    centers.append(fp)
+
+centers = np.array(centers)
+print()
+print(centers.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+:   0% 0/100 [00:05<?, ?it/s]Not enough points for curve fitting.
+:
+:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+TypeError                                 Traceback (most recent call last)
+Cell In[55], line 6
+      4     fp = []
+      5     for task in tasks:
+----> 6         fp.append(run_grid(GRID_RANGE, seed, task, **kwargs))
+      7     centers.append(fp)
+      9 centers = np.array(centers)
+
+Cell In[41], line 29, in run_grid(GRID_RANGE, seed, task, **kwargs)
+     26 # centers = get_fp(overlaps, window, task, GRID_TEST=0)
+     28 sep_points = plot_empirical_separatrix(overlaps, None, window, near_thresh=5)
+---> 29 slope, _ = plot_separatrix_bestfit(sep_points, None, kind="linear")
+     31 return slope
+
+TypeError: cannot unpack non-iterable NoneType object
+#+end_example
+:END:
+
+#+begin_src ipython
+dum = 'test_C_last'
+pkl_save(centers, 'slope_multi_%s' % dum, path="/home/leon/")
+#+end_src
+
+#+RESULTS:
+
+
+
+#+begin_src ipython
+centers_ = np.moveaxis(centers, 0, -1)
+centers__ = np.moveaxis(centers_, 0, 2)
+# centers = np.swapaxes(centers, 1, 2)
+print(centers__.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 5, 3, 100)
+
+#+begin_src ipython
+centers = centers__
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+x = centers[0, :, 0].reshape(-1)
+y = centers[1, :, 0].reshape(-1)
+
+print(x.shape, y.shape)
+
+fp = np.stack((x, y)).T
+print(fp.shape)
+
+kmeans = KMeans(n_clusters=2, random_state=None, init='k-means++')
+kmeans.fit(fp)
+centers_mm = np.array(kmeans.cluster_centers_).T
+print(centers_mm.shape)
+# radius = np.sqrt(centers_mean[0, -1]**2 + centers_mean[1, -1]**2)
+#print(radius)
+#+end_src
+
+#+RESULTS:
+: (500,) (500,)
+: (500, 2)
+: (2, 2)
+
+#+begin_src ipython
+x = centers[0, :, 1].reshape(-1)
+y = centers[1, :, 1].reshape(-1)
+
+print(x.shape, y.shape)
+
+fp = np.stack((x, y)).T
+print(fp.shape)
+
+kmeans = KMeans(n_clusters=2, random_state=None, init='k-means++')
+kmeans.fit(fp)
+centers_m = np.array(kmeans.cluster_centers_).T
+print(centers_m.shape)
+# radius = np.sqrt(centers_mean[0, -1]**2 + centers_mean[1, -1]**2)
+#print(radius)
+#+end_src
+
+#+RESULTS:
+: (500,) (500,)
+: (500, 2)
+: (2, 2)
+
+#+begin_src ipython
+x = centers[0, :, -1].reshape(-1)
+y = centers[1, :, -1].reshape(-1)
+
+print(x.shape, y.shape)
+
+fp = np.stack((x, y)).T
+print(fp.shape)
+
+kmeans = KMeans(n_clusters=2, random_state=None, init='k-means++')
+kmeans.fit(fp)
+centers_mean = np.array(kmeans.cluster_centers_).T
+print(centers_mean.shape)
+radius = np.sqrt(centers_mean[0, 1]**2 + centers_mean[1, 1]**2)
+print(radius)
+#+end_src
+
+#+RESULTS:
+: (500,) (500,)
+: (500, 2)
+: (2, 2)
+: 10.608218447513725
+
+#+begin_src ipython
+import matplotlib.patches as patches
+palette = sns.color_palette('husl', centers.shape[-1])
+
+fig, ax = plt.subplots(1, 3, figsize=(3*width, width), sharex=1, sharey=1)
+for i in range(centers.shape[-1]):
+    ax[0].plot(centers[0, :2, 0, i], centers[1, :2, 0, i], 'o', color=palette[i])
+    ax[1].plot(centers[0, :2, 1, i], centers[1, :2, 1, i], 'o', color=palette[i])
+    ax[2].plot(centers[0, :2, -1, i], centers[1, :2, -1, i], 'o', color=palette[i])
+
+ax[2].plot(centers_mean[0], centers_mean[1], 'ko', ms=12)
+ax[1].plot(centers_m[0], centers_m[1], 'ko', ms=12)
+ax[0].plot(centers_mm[0], centers_mm[1], 'ko', ms=12)
+
+ax[0].set_aspect('equal')
+ax[1].set_aspect('equal')
+ax[2].set_aspect('equal')
+
+circle = patches.Circle((0, 0), radius, edgecolor='k', facecolor='none')  # Red outline, no fill
+circle2 = patches.Circle((0, 0), radius, edgecolor='k', facecolor='none')  # Red outline, no fill
+circle3 = patches.Circle((0, 0), radius, edgecolor='k', facecolor='none')  # Red outline, no fill
+
+ax[0].add_patch(circle)
+ax[1].add_patch(circle2)
+ax[2].add_patch(circle3)
+
+for i in range(3):
+    # ax[i].add_patch(circle)
+
+    ax[i].axhline(0, ls='--', color='k')
+    ax[i].set_xlabel('Sample Overlap')
+    ax[i].set_ylabel('Choice Overlap')
+
+ax[0].set_title('DPA')
+ax[1].set_title('Naive')
+ax[2].set_title('Expert')
+plt.savefig('figures/barccsyn25/fp_multi_%s.svg' % dum, dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/flow_multi/figure_27.png]]
+
+#+begin_src ipython
+# pkl_save(rates_multi, 'rates_multi', path="/home/leon/")
+#+end_src
+
+#+RESULTS:

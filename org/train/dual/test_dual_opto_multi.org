@@ -1,0 +1,1244 @@
+#+Startup: fold
+#+TITLE: Training Low Rank RNNs
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session test_dual_opto_multi :kernel torch :exports results :output-dir ./figures/opto_multi :file (lc/org-babel-tangle-figure-filename)
+
+* Notebook Settings
+
+#+begin_src ipython :tangle no
+%load_ext autoreload
+%autoreload 2
+%reload_ext autoreload
+%run ../../../notebooks/setup.py
+%matplotlib inline
+%config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Imports
+
+#+begin_src ipython
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torchmetrics
+from torch.utils.data import Dataset, TensorDataset, DataLoader
+
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+pal = sns.color_palette("tab10")
+DEVICE = 'cuda:1'
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import sys
+sys.path.insert(0, '../../../')
+
+from notebooks.setup import *
+
+import pandas as pd
+import torch.nn as nn
+from time import perf_counter
+from scipy.stats import circmean
+
+from src.network import Network
+from src.plot_utils import plot_con
+from src.decode import decode_bump, circcvl
+from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
+#+end_src
+
+#+RESULTS:
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Test
+** utils
+
+#+begin_src ipython :tangle ../src/torch/utils.py
+import pickle as pkl
+
+def pkl_save(obj, name, path="."):
+      pkl.dump(obj, open(path + "/" + name + ".pkl", "wb"))
+
+
+def pkl_load(name, path="."):
+      return pkl.load(open(path + "/" + name + '.pkl', "rb"))
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def add_vlines(ax=None, mouse=""):
+    t_BL = [0, 1]
+    t_STIM = [1 , 2]
+    t_ED = [2, 3]
+    t_DIST = [3 , 4]
+    t_MD = [4 , 5]
+    t_CUE = [5 , 5.5]
+    t_RWD = [5.5, 6.0]
+    t_LD = [6.0 , 7.0]
+    t_TEST = [7.0, 8.0]
+    t_RWD2 = [11 , 12]
+
+    # time_periods = [t_STIM, t_DIST, t_TEST, t_CUE, t_RWD, t_RWD2]
+    # colors = ["b", "b", "b", "g", "y", "y"]
+
+    time_periods = [t_STIM, t_DIST, t_TEST, t_CUE]
+    colors = ["b", "b", "b", "g"]
+
+    if ax is None:
+        for period, color in zip(time_periods, colors):
+            plt.axvspan(period[0], period[1], alpha=0.1, color=color)
+    else:
+        for period, color in zip(time_periods, colors):
+            ax.axvspan(period[0], period[1], alpha=0.1, color=color)
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import sem, t
+
+def mean_ci(data):
+  # Calculate mean and SEM
+  mean = np.nanmean(data, axis=0)
+  serr = sem(data, axis=0, nan_policy='omit')
+
+  # Calculate the t critical value for 95% CI
+  n = np.sum(~np.isnan(data), axis=0)
+  t_val = t.ppf(0.975, df=n - 1)  # 0.975 for two-tailed 95% CI
+
+  # Calculate 95% confidence intervals
+  ci = t_val * serr
+
+  return mean, ci
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fig.svg', title='first'):
+    '''
+    y[0] is pairs, y[1] is samples, y[2] is task if not None
+    '''
+
+    size = y.shape[0]
+    if size ==2:
+        ones_slice = np.zeros(y.shape)
+        y_ = np.vstack((y.copy(), ones_slice))
+        task = 0
+    else:
+        y_ = y.copy()
+        tasks = [0, 1, -1]
+
+
+    fig, ax = plt.subplots(1, 3, figsize=[3*width, height], sharey=True)
+
+    time = np.linspace(0, 10, readout.shape[1])
+    colors = ['r', 'b', 'g']
+    ls = ['--', '-', '-.', ':']
+    label = ['AD', 'AC', 'BD', 'BC']
+    mean_overlaps = []
+    for k in range(2): # readout
+        for j in range(2): # sample
+            for i in range(2): # pair
+                data = readout[(y_[0]==i) & (y_[1]==j) & (y_[2]==task), :, k]
+                mean, ci = mean_ci(data)
+                mean_overlaps.append(mean)
+                ax[k].plot(time, mean, ls=ls[i+2*j], label=label[i+2*j], color=colors[task], alpha=1-j/4)
+                ax[k].fill_between(time, mean - ci, mean + ci, color=colors[task], alpha=0.1)
+
+        add_vlines(ax[k])
+        ax[k].set_xlabel('Time (s)')
+
+        if k==0:
+            ax[k].set_ylabel('A/B Overlap (Hz)')
+        elif k==1:
+            ax[k].set_ylabel('GNG Overlap (Hz)')
+        else:
+            ax[k].set_ylabel('Readout (Hz)')
+
+        ax[k].axhline(0, color='k', ls='--')
+
+    mean_overlaps = np.array(mean_overlaps).reshape((2, 2, 2, -1))
+
+    for j in range(2): # sample
+        for i in range(2): # pair
+            ax[-1].plot(mean_overlaps[0, j, i], mean_overlaps[1, j, i], color=colors[task], ls=ls[i+2*j], label=label[i+2*j])
+
+    ax[-1].set_xlabel('A/B Overlap (Hz)')
+    ax[-1].set_ylabel('Choice Overlap (Hz)')
+
+    plt.legend(fontsize=10)
+    plt.savefig('../figures/dual/%s' % figname, dpi=300)
+    plt.show()
+#+end_src
+
+#+RESULTS:
+
+** run
+
+#+begin_src ipython
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+conf_name = "train_dual.yml"
+DEVICE = 'cuda:1'
+thresh= 5
+seed = 1
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+sys.path.insert(0, '../../../src')
+from src.train.dual.train_dual import test_dual
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+accuracies = []
+readouts = []
+covariances = []
+labels = []
+
+for seed in range(0, 100):
+    acc_ = []
+    cov_ = []
+    readout_ = []
+    labels_ = []
+    for IF_OPTO in range(2):
+        state = 'train'
+        print(seed, state)
+        readout, y_labels, cov, accuracy = test_dual(REPO_ROOT, conf_name, seed, state, thresh, DEVICE, IF_OPTO)
+        acc_.append(accuracy)
+        cov_.append(cov)
+        readout_.append(readout)
+        labels_.append(y_labels)
+
+    accuracies.append(acc_)
+    readouts.append(readout_)
+    covariances.append(cov_)
+    labels.append(labels_)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+0 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.49698573 0.49451888 0.49503854] GoNoGo: 0.49303826689720154
+0 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.49839556 0.49644303 0.49182314] GoNoGo: 0.4245440363883972
+1 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99982625 0.999921   0.9999325 ] GoNoGo: 0.9665430784225464
+1 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997468 0.9997444 0.9996737] GoNoGo: 0.9448050260543823
+2 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997822  0.99987054 0.9999093 ] GoNoGo: 0.9608124494552612
+2 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99936163 0.99556005 0.9992461 ] GoNoGo: 0.9304565191268921
+3 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9957195 0.7322949 0.9774198] GoNoGo: 0.7597581744194031
+3 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.68641067 0.69308513 0.68945175] GoNoGo: 0.7379767298698425
+4 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9994154  0.99897814 0.99940103] GoNoGo: 0.8022865056991577
+4 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9965322  0.518517   0.70245004] GoNoGo: 0.7551159262657166
+5 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99958813 0.99964845 0.9997548 ] GoNoGo: 0.9017618894577026
+5 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9989115  0.99946755 0.9995571 ] GoNoGo: 0.8713973760604858
+6 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99924266 0.9993751  0.99956536] GoNoGo: 0.9176580309867859
+6 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9987458  0.9984418  0.99917245] GoNoGo: 0.8590814471244812
+7 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999169 0.999897  0.9998858] GoNoGo: 0.9111408591270447
+7 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9969527  0.99906355 0.9981247 ] GoNoGo: 0.8238686323165894
+8 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9996457 0.9994991 0.9993218] GoNoGo: 0.9162063598632812
+8 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9994607  0.99135864 0.9711709 ] GoNoGo: 0.8401888608932495
+9 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.999863   0.99980426 0.9996798 ] GoNoGo: 0.8107311725616455
+9 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99977463 0.9994713  0.9837463 ] GoNoGo: 0.7710270881652832
+10 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9992242 0.9995365 0.9996322] GoNoGo: 0.8783574104309082
+10 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9989949  0.99936914 0.99906063] GoNoGo: 0.8482296466827393
+11 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99996233 0.99994886 0.9999682 ] GoNoGo: 0.9945003986358643
+11 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999454  0.9703754  0.99918306] GoNoGo: 0.9897622466087341
+12 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99972606 0.9995799  0.99955523] GoNoGo: 0.9239463806152344
+12 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99951214 0.9972166  0.992569  ] GoNoGo: 0.8413593173027039
+13 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9996845  0.99945444 0.9995103 ] GoNoGo: 0.927128791809082
+13 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9992535  0.9740964  0.97970366] GoNoGo: 0.8752044439315796
+14 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9998363 0.9998859 0.9999008] GoNoGo: 0.9268109202384949
+14 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.999706   0.9996088  0.99935454] GoNoGo: 0.8921601176261902
+15 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9995817 0.9996514 0.9996952] GoNoGo: 0.793181300163269
+15 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99915946 0.9982208  0.99253964] GoNoGo: 0.7470127940177917
+16 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9993883  0.99968046 0.99963427] GoNoGo: 0.9184141159057617
+16 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99923635 0.9995351  0.9955172 ] GoNoGo: 0.8771969676017761
+17 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99966526 0.99954545 0.99981785] GoNoGo: 0.9568940997123718
+17 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99769855 0.9990382  0.9969828 ] GoNoGo: 0.8479079008102417
+18 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999311  0.99994254 0.9999406 ] GoNoGo: 0.9384193420410156
+18 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99989796 0.99988747 0.9998629 ] GoNoGo: 0.9161397218704224
+19 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9991684  0.9998955  0.99992484] GoNoGo: 0.9819577932357788
+19 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9976821 0.8957063 0.9709524] GoNoGo: 0.8832213282585144
+20 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99992853 0.999917   0.9998859 ] GoNoGo: 0.8788559436798096
+20 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99978983 0.99941015 0.9981963 ] GoNoGo: 0.7886528968811035
+21 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.999992   0.99995226 0.9998136 ] GoNoGo: 0.9283649921417236
+21 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99998087 0.9997869  0.9995204 ] GoNoGo: 0.9098798632621765
+22 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999889 0.9999895 0.999987 ] GoNoGo: 0.9876383543014526
+22 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99997455 0.9999099  0.9998789 ] GoNoGo: 0.9801971316337585
+23 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9996911  0.99970925 0.9997628 ] GoNoGo: 0.8371477127075195
+23 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9994112 0.9978603 0.9989263] GoNoGo: 0.7647599577903748
+24 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99915785 0.9989705  0.9992194 ] GoNoGo: 0.9030423164367676
+24 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9983751  0.99807507 0.99309576] GoNoGo: 0.8389143943786621
+25 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99966705 0.99954104 0.9994068 ] GoNoGo: 0.9314443469047546
+25 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9991691  0.99912775 0.9067551 ] GoNoGo: 0.8900577425956726
+26 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99973595 0.99976784 0.99976707] GoNoGo: 0.8360357284545898
+26 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9995004  0.9993364  0.99878025] GoNoGo: 0.7452988028526306
+27 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999092  0.9999447  0.99993306] GoNoGo: 0.8102166652679443
+27 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99967843 0.9998946  0.99955094] GoNoGo: 0.7493292093276978
+28 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99987334 0.9999118  0.99956393] GoNoGo: 0.9214398264884949
+28 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997445  0.99952304 0.97917444] GoNoGo: 0.883137583732605
+29 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99968624 0.9995506  0.99876964] GoNoGo: 0.7780389785766602
+29 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9990466 0.9943187 0.9839062] GoNoGo: 0.7680796384811401
+30 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997455 0.9996781 0.9993036] GoNoGo: 0.7774791717529297
+30 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.94775796 0.9990049  0.9757943 ] GoNoGo: 0.7019498348236084
+31 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9994047 0.9996419 0.9996457] GoNoGo: 0.8311429023742676
+31 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9992211 0.9971889 0.9974712] GoNoGo: 0.732892632484436
+32 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9996842  0.99997824 0.999965  ] GoNoGo: 0.8883205652236938
+32 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99903274 0.9999289  0.9998814 ] GoNoGo: 0.8448096513748169
+33 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9998518  0.99973446 0.99977624] GoNoGo: 0.8918412923812866
+33 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99979424 0.99965274 0.99960303] GoNoGo: 0.8806408643722534
+34 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999968 0.9999901 0.9999851] GoNoGo: 0.9807500839233398
+34 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99998796 0.9999702  0.99994415] GoNoGo: 0.9536279439926147
+35 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9995036 0.9994148 0.999436 ] GoNoGo: 0.8224983215332031
+35 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99879223 0.9858325  0.8071647 ] GoNoGo: 0.7866947650909424
+36 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99961615 0.99954915 0.9995468 ] GoNoGo: 0.9094628095626831
+36 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99926203 0.9804669  0.9284821 ] GoNoGo: 0.890943706035614
+37 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99998945 0.9999896  0.999992  ] GoNoGo: 0.9859695434570312
+37 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.999981  0.9999617 0.9999438] GoNoGo: 0.9773192405700684
+38 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99966586 0.9997598  0.99977356] GoNoGo: 0.8777508735656738
+38 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99945235 0.9994266  0.999196  ] GoNoGo: 0.8721754550933838
+39 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999499  0.999891   0.99991727] GoNoGo: 0.780626654624939
+39 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9998579  0.99921805 0.9523642 ] GoNoGo: 0.7625834941864014
+40 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997778  0.99960625 0.9997363 ] GoNoGo: 0.910667359828949
+40 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99946874 0.9980937  0.9981817 ] GoNoGo: 0.8802375793457031
+41 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99901307 0.99885106 0.9992709 ] GoNoGo: 0.8947442770004272
+41 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9979099 0.9962438 0.9977719] GoNoGo: 0.8485562205314636
+42 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9993757  0.99914336 0.9993321 ] GoNoGo: 0.9317383766174316
+42 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9970401 0.965891  0.9478309] GoNoGo: 0.8618443012237549
+43 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99933755 0.9989977  0.99979854] GoNoGo: 0.7936973571777344
+43 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.999018  0.9988075 0.9845794] GoNoGo: 0.6968868970870972
+44 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9985825  0.99939454 0.9992367 ] GoNoGo: 0.7204799652099609
+44 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9883785 0.9987482 0.9936661] GoNoGo: 0.6443536877632141
+45 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9995652  0.9992901  0.99956626] GoNoGo: 0.7991287708282471
+45 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99950314 0.9974874  0.99750304] GoNoGo: 0.711155354976654
+46 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9994316  0.99961096 0.99956715] GoNoGo: 0.8308348655700684
+46 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99902153 0.9984428  0.9020118 ] GoNoGo: 0.7872873544692993
+47 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997573  0.9998863  0.99988866] GoNoGo: 0.9440280795097351
+47 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99974525 0.99978983 0.9997818 ] GoNoGo: 0.930741548538208
+48 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99972177 0.9999009  0.99983037] GoNoGo: 0.913902759552002
+48 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99939775 0.9987028  0.9900448 ] GoNoGo: 0.8381044268608093
+49 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99957144 0.9997015  0.9993504 ] GoNoGo: 0.9155430793762207
+49 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9992198  0.9952707  0.98900807] GoNoGo: 0.8951119184494019
+50 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99993116 0.99995    0.99977225] GoNoGo: 0.8318959474563599
+50 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99868846 0.999843   0.98296225] GoNoGo: 0.7956674098968506
+51 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997651 0.9998113 0.9994594] GoNoGo: 0.9219026565551758
+51 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99958545 0.99898756 0.99499893] GoNoGo: 0.8731096982955933
+52 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99995327 0.9998635  0.9998758 ] GoNoGo: 0.7719669342041016
+52 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99989516 0.99978495 0.99960244] GoNoGo: 0.7653580904006958
+53 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99946797 0.9995346  0.99963915] GoNoGo: 0.9034842252731323
+53 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99862015 0.9759817  0.99216974] GoNoGo: 0.891659140586853
+54 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999954  0.99997467 0.9999766 ] GoNoGo: 0.9735938906669617
+54 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99999106 0.9998075  0.9999809 ] GoNoGo: 0.9619889259338379
+55 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997141 0.9990754 0.9975382] GoNoGo: 0.9856559038162231
+55 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9996145  0.99464023 0.98352766] GoNoGo: 0.9666234850883484
+56 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99970573 0.99959475 0.99951756] GoNoGo: 0.8522013425827026
+56 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99893534 0.99878347 0.99562085] GoNoGo: 0.8263726234436035
+57 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99975085 0.9998237  0.9996286 ] GoNoGo: 0.8912562131881714
+57 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9981142 0.5278651 0.5070077] GoNoGo: 0.8330845832824707
+58 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997909  0.99934006 0.9996027 ] GoNoGo: 0.8936041593551636
+58 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99830735 0.7789072  0.9976424 ] GoNoGo: 0.8739528656005859
+59 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99973524 0.99981403 0.9994644 ] GoNoGo: 0.87883460521698
+59 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9991945 0.9988401 0.9240658] GoNoGo: 0.8330678343772888
+60 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9988879  0.99872494 0.9985721 ] GoNoGo: 0.8282252550125122
+60 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9967808  0.96731853 0.92410463] GoNoGo: 0.7237607836723328
+61 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.76608133 0.99982023 0.85042906] GoNoGo: 0.7014972567558289
+61 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.7654603 0.9882314 0.7933262] GoNoGo: 0.6600433588027954
+62 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9995574 0.9993584 0.9995991] GoNoGo: 0.8156722784042358
+62 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99881196 0.9981109  0.77076674] GoNoGo: 0.7516798973083496
+63 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99968755 0.9999419  0.9999349 ] GoNoGo: 0.9908396601676941
+63 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9991936 0.9998567 0.999845 ] GoNoGo: 0.987008273601532
+64 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9996153  0.99961793 0.9990407 ] GoNoGo: 0.8361608982086182
+64 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.98863643 0.99430245 0.9589741 ] GoNoGo: 0.7231160998344421
+65 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99976647 0.99926263 0.9997338 ] GoNoGo: 0.8880257606506348
+65 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9996877  0.99720955 0.9996063 ] GoNoGo: 0.7875139117240906
+66 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99923134 0.99956375 0.9995526 ] GoNoGo: 0.8431879281997681
+66 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99901545 0.9987451  0.9982835 ] GoNoGo: 0.7425421476364136
+67 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999764  0.99996036 0.99997616] GoNoGo: 0.8508706092834473
+67 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999447  0.9999311  0.99991196] GoNoGo: 0.7803453207015991
+68 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999753 0.9997735 0.9999758] GoNoGo: 0.951149582862854
+68 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999366  0.9994161  0.99983287] GoNoGo: 0.9097690582275391
+69 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999231  0.9999316  0.99991816] GoNoGo: 0.9767626523971558
+69 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9998756 0.9996788 0.9990282] GoNoGo: 0.9627367258071899
+70 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99979866 0.9999396  0.9998288 ] GoNoGo: 0.8825055360794067
+70 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997865 0.9998507 0.9996817] GoNoGo: 0.8580498695373535
+71 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99998105 0.99982846 0.9999725 ] GoNoGo: 0.9206365346908569
+71 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99996907 0.9991698  0.999925  ] GoNoGo: 0.8913754224777222
+72 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9994967  0.99949604 0.9996453 ] GoNoGo: 0.9326468706130981
+72 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99848044 0.9643936  0.9292075 ] GoNoGo: 0.9038073420524597
+73 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99908453 0.99839866 0.9991181 ] GoNoGo: 0.8536901473999023
+73 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.998241   0.99024343 0.9855675 ] GoNoGo: 0.7938408851623535
+74 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997815  0.99981433 0.99984515] GoNoGo: 0.8989602327346802
+74 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9994963  0.99841213 0.98104674] GoNoGo: 0.8703240156173706
+75 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9968118  0.998201   0.98753506] GoNoGo: 0.7660800814628601
+75 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.94697607 0.9891106  0.9599927 ] GoNoGo: 0.7025890350341797
+76 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9996529 0.9996797 0.9994738] GoNoGo: 0.9465807676315308
+76 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99628353 0.9980203  0.9619522 ] GoNoGo: 0.8674713373184204
+77 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997797  0.99973524 0.9997523 ] GoNoGo: 0.7717897295951843
+77 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99955595 0.99729955 0.9797827 ] GoNoGo: 0.7717489004135132
+78 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99951446 0.9997994  0.9999293 ] GoNoGo: 0.9878125190734863
+78 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9986396  0.99989676 0.9995897 ] GoNoGo: 0.9747256636619568
+79 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99998313 0.99998915 0.99998826] GoNoGo: 0.979453980922699
+79 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99997926 0.99997723 0.96428585] GoNoGo: 0.8566235303878784
+80 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99998116 0.9999163  0.9999913 ] GoNoGo: 0.9881100058555603
+80 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99870574 0.9998628  0.9998437 ] GoNoGo: 0.9551383256912231
+81 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997202  0.99864495 0.99944323] GoNoGo: 0.8799445033073425
+81 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.96729445 0.99060345 0.9438211 ] GoNoGo: 0.7493733167648315
+82 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9995333  0.99968576 0.9995729 ] GoNoGo: 0.812404990196228
+82 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99926907 0.9994229  0.99928784] GoNoGo: 0.7735240459442139
+83 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997785  0.99959934 0.99927306] GoNoGo: 0.8749312162399292
+83 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99248874 0.99811065 0.96501315] GoNoGo: 0.7927432060241699
+84 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999571  0.99996686 0.9999693 ] GoNoGo: 0.9567591547966003
+84 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999058  0.9999288  0.99992085] GoNoGo: 0.9255751967430115
+85 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9993216 0.9992708 0.9993696] GoNoGo: 0.8525354266166687
+85 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99875957 0.99667287 0.97755843] GoNoGo: 0.7582683563232422
+86 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9993931 0.9998771 0.9997531] GoNoGo: 0.9723340272903442
+86 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9982834  0.9996505  0.99939275] GoNoGo: 0.9643775224685669
+87 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9995715 0.998857  0.9996005] GoNoGo: 0.824361264705658
+87 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99905205 0.9839796  0.9990113 ] GoNoGo: 0.8001992702484131
+88 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99974394 0.9998703  0.9995787 ] GoNoGo: 0.7243057489395142
+88 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.97282815 0.9994884  0.98696184] GoNoGo: 0.667576253414154
+89 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99973696 0.9988593  0.99972117] GoNoGo: 0.9685662984848022
+89 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99946266 0.9952257  0.99895334] GoNoGo: 0.95708167552948
+90 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9997933  0.99976164 0.99982697] GoNoGo: 0.8742594718933105
+90 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99960804 0.9977604  0.996507  ] GoNoGo: 0.809562087059021
+91 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99961925 0.99924934 0.9985373 ] GoNoGo: 0.8407405614852905
+91 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9994692  0.9793184  0.95139337] GoNoGo: 0.7417783141136169
+92 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9959648 0.9999399 0.9978372] GoNoGo: 0.9972988963127136
+92 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9972599 0.9999342 0.9997303] GoNoGo: 0.9957194328308105
+93 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999361  0.99988496 0.9999417 ] GoNoGo: 0.9018720388412476
+93 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999039  0.9894855  0.99984384] GoNoGo: 0.8816613554954529
+94 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9991023 0.9993324 0.9994854] GoNoGo: 0.8214221000671387
+94 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9988725  0.9973349  0.98855925] GoNoGo: 0.7330529689788818
+95 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99960244 0.99986184 0.9997989 ] GoNoGo: 0.9471052885055542
+95 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99963814 0.9997346  0.99977064] GoNoGo: 0.8821908831596375
+96 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99993664 0.999901   0.99990666] GoNoGo: 0.9061800837516785
+96 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9999163 0.9986241 0.9997331] GoNoGo: 0.8897342681884766
+97 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9994588  0.99932194 0.99892443] GoNoGo: 0.6960269212722778
+97 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99872077 0.99772257 0.9957198 ] GoNoGo: 0.5852967500686646
+98 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99998224 0.99999094 0.9999867 ] GoNoGo: 0.9280549883842468
+98 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.99997306 0.99997836 0.9999684 ] GoNoGo: 0.8970533609390259
+99 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9998689  0.9998929  0.99989116] GoNoGo: 0.8139933347702026
+99 train
+Testing Dual
+Elapsed (with compilation) = 0h 0m 0s
+Dual accuracy: [0.9996558  0.9995962  0.99953485] GoNoGo: 0.8156040906906128
+#+end_example
+
+#+begin_src ipython
+print(np.array(accuracies).shape)
+acc = np.moveaxis(np.array(accuracies), 0, -1)
+print(acc.shape)
+#+end_src
+
+#+RESULTS:
+: (100, 2, 2, 4)
+: (2, 2, 4, 100)
+
+** Perf
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[1.5*width, height])
+
+rd = np.random.normal(size=(acc.shape[-1])) / 10
+
+pal = ['r', 'b', 'g']
+for j in range(2):
+    for i in range(3):
+        acc_mean = np.mean(acc[j][0][i], -1)
+        acc_sem = np.std(acc[j][0][i], axis=-1, ddof=1) / np.sqrt(len(acc[j][0][i]))
+
+        ax[0].errorbar(i+4*j, acc_mean, yerr=acc_sem, fmt='o', color=pal[i], ecolor=pal[i], elinewidth=3, capsize=5)
+        ax[0].plot(i+rd + 4*j, acc[j][0][i], 'o', alpha=0.25)
+
+# ax[0].set_xlim(-1, 4)
+# ax[0].set_ylim(0.4, 1.1)
+
+ax[0].set_ylabel('DPA Perf.')
+ax[0].set_xticks([1, 5], ['OFF', 'ON'])
+ax[0].axhline(y=0.5, color='k', linestyle='--')
+
+# ax[1].errorbar(rd, acc[0][-1], yerr=acc[1][-1], fmt='o', label='Naive',
+#              color='k', ecolor='k', elinewidth=3, capsize=5)
+
+for i in range(2):
+    acc_mean = np.mean(acc[i][0][-1], -1)
+    acc_sem = np.std(acc[i][0][-1], axis=-1, ddof=1) / np.sqrt(len(acc[0][-1]))
+
+    ax[1].errorbar(i, acc_mean, yerr=acc_sem, fmt='o', color='k', ecolor='k', elinewidth=3, capsize=5)
+    ax[1].plot(rd+i, acc[i][0][-1], 'ko', alpha=.25)
+
+ax[1].set_xlim(-1, 2)
+ax[1].set_ylim(0.4, 1.1)
+
+ax[1].set_ylabel('Go/NoGo Perf.')
+ax[1].set_xticks([0, 1], ['OFF', 'ON'])
+ax[1].axhline(y=0.5, color='k', linestyle='--')
+
+plt.savefig('../figures/dual/dual_perf_multi_opto_%d.svg' % seed, dpi=300)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/opto_multi/figure_11.png]]
+
+** overlaps
+
+#+begin_src ipython
+print(readout.shape, y_labels.shape)
+#+end_src
+
+#+RESULTS:
+: (768, 101, 2) (3, 768)
+
+#+begin_src ipython
+plot_overlap_label(readout, y_labels, task=0, figname='overlaps_naive_dpa.svg')
+#+end_src
+
+#+RESULTS:
+[[./figures/opto_multi/figure_13.png]]
+
+#+begin_src ipython
+plot_overlap_label(readout, y_labels, task=1, figname='overlaps_naive_go.svg')
+#+end_src
+
+#+RESULTS:
+[[./figures/opto_multi/figure_14.png]]
+
+#+begin_src ipython
+plot_overlap_label(readout, y_labels, task=-1, figname='overlaps_naive_nogo.svg')
+#+end_src
+
+#+RESULTS:
+[[./figures/opto_multi/figure_15.png]]
+
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+** Perf vs overlap
+
+#+begin_src ipython
+delta_perf = acc[1] - acc[0]
+print(delta_perf.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 4, 100)
+
+#+begin_src ipython
+readouts = np.array(readouts)
+print(readouts.shape)
+reads = np.moveaxis(readouts, 0, -1)
+print(reads.shape)
+#+end_src
+
+#+RESULTS:
+: (100, 2, 768, 101, 2)
+: (2, 768, 101, 2, 100)
+
+#+begin_src ipython
+delta_read = reads[1] - reads[0]
+print(delta_read.shape)
+#+end_src
+
+#+RESULTS:
+: (768, 101, 2, 100)
+
+#+begin_src ipython
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+conf_name = "train_dual.yml"
+DEVICE = 'cuda:1'
+
+seed = 9
+print(seed)
+#+end_src
+
+
+#+RESULTS:
+: 9
+
+#+begin_src ipython
+model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1)
+device = torch.device(DEVICE if torch.cuda.is_available() else 'cpu')
+model.to(device)
+#+end_src
+
+#+RESULTS:
+: Network(
+:   (low_rank): LowRankWeights()
+:   (dropout): Dropout(p=0.0, inplace=False)
+: )
+
+#+RESULTS:
+
+#+begin_src ipython
+steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
+mask = (steps >= (model.N_STIM_OFF[3].cpu().numpy() - model.N_STEADY)) & (steps < (model.N_STIM_ON[4].cpu().numpy() - model.N_STEADY))
+LD_idx = np.where(mask)[0]
+print('LD', LD_idx)
+#+end_src
+
+#+RESULTS:
+: LD [60 61 62 63 64 65 66 67 68 69]
+
+#+begin_src ipython
+delta_read_LD = np.nanmean(delta_read[:, LD_idx], (0,1))
+print(delta_read_LD.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 100)
+
+#+begin_src ipython
+from scipy.stats import pearsonr
+
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+dperf = np.nanmean(delta_perf[0, :3], 0)
+ax[0].scatter(delta_read_LD[1], dperf)
+ax[0].set_ylabel('$\\Delta$ DPA Perf On-Off')
+ax[0].set_xlabel('$\\Delta$ Choice Overlap On-Off')
+
+corr, p_value = pearsonr(delta_read_LD[1], dperf)
+ax[0].set_title("Corr: %.2f, p-value: %.3f" % (corr, p_value))
+ax[0].set_ylim([-.25, .1])
+
+dperf = delta_perf[0, -1]
+ax[1].scatter(delta_read_LD[1], dperf)
+ax[1].set_ylabel('$\\Delta$ GoNoGo Perf On-Off')
+ax[1].set_xlabel('$\\Delta$ Choice Overlap On-Off')
+ax[1].set_ylim([-.2, .1])
+
+corr, p_value = pearsonr(dperf, delta_read_LD[1])
+ax[1].set_title("Corr: %.2f, p-value: %.3f" % (corr, p_value))
+plt.savefig('model_corr.svg')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/opto_multi/figure_24.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:

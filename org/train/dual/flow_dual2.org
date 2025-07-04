@@ -1,0 +1,709 @@
+#+Startup: fold
+#+TITLE: Training Low Rank RNNs
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual_flow :kernel torch :exports results :output-dir ./figures/flow :file (lc/org-babel-tangle-figure-filename)
+
+* TODO Urgent
+** Model
+ run multiple models see if there is a push down of the wells or diff strategies
+ see how go affects models try to understand how it impairs pairing.
+ plot task trajectories (DPA, GO, NOGO)
+
+** Data
+ try wells with sample LD and CHOICE if it works (push down that s gold)
+ if not try to make dPCA better and get day by day wells
+ if not go back to the go no go axis
+ and plot trajectories
+
+* Notebook Settings
+
+#+begin_src ipython :tangle no
+%load_ext autoreload
+%autoreload 2
+%reload_ext autoreload
+%run ../../../notebooks/setup.py
+%matplotlib inline
+%config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+#+RESULTS:
+
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Imports
+
+#+begin_src ipython
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torchmetrics
+import gc
+from torch.utils.data import Dataset, TensorDataset, DataLoader
+
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+pal = sns.color_palette("tab10")
+DEVICE = 'cuda:1'
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import sys
+sys.path.insert(0, '../../../')
+
+from notebooks.setup import *
+
+import pandas as pd
+import torch.nn as nn
+from time import perf_counter
+from scipy.stats import circmean
+
+from src.network import Network
+from src.plot_utils import plot_con
+from src.decode import decode_bump, circcvl
+from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
+#+end_src
+
+#+RESULTS:
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+#+begin_src ipython :tangle ../src/torch/utils.py
+import pickle as pkl
+
+def pkl_save(obj, name, path="."):
+      pkl.dump(obj, open(path + "/" + name + ".pkl", "wb"))
+
+
+def pkl_load(name, path="."):
+      return pkl.load(open(path + "/" + name + '.pkl', "rb"))
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def add_vlines(model, ax=None):
+
+    if ax is None:
+        for i in range(len(model.T_STIM_ON)):
+            plt.axvspan(model.T_STIM_ON[i], model.T_STIM_OFF[i], alpha=0.25)
+    else:
+        for i in range(len(model.T_STIM_ON)):
+            ax.axvspan(model.T_STIM_ON[i], model.T_STIM_OFF[i], alpha=0.25)
+
+#+end_src
+
+#+RESULTS:
+
+* Utils
+
+#+begin_src ipython
+def init_model(task, seed, **kwargs):
+    model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
+    model_state_dict = torch.load('../models/dual/%s_%d.pth' % (task, seed))
+    model.load_state_dict(model_state_dict)
+    # print('task', task, 'seed', seed)
+
+    return model
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def del_tensor(tensor):
+    DEVICE = tensor.device
+    del tensor
+    gc.collect()
+
+    torch.cuda.empty_cache()
+    torch.cuda.device(DEVICE)
+    torch.cuda.synchronize()
+    torch.cuda.reset_accumulated_memory_stats(DEVICE)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def run_grid(GRID_RANGE, seed, task, **kwargs):
+
+    GRID_LIST = [[-GRID_RANGE, 0], [0, GRID_RANGE]]
+
+    rates_grid = []
+    for GRID_X_RANGE in GRID_LIST:
+        for GRID_Y_RANGE in GRID_LIST:
+            model = init_model(task, seed, **kwargs)
+
+            model.GRID_X_RANGE = GRID_X_RANGE
+            model.GRID_Y_RANGE = GRID_Y_RANGE
+
+            model.N_BATCH = int(model.GRID_SIZE * model.GRID_SIZE)
+
+            ff_input = model.init_ff_input()
+            # print(ff_input.shape, model.N_BATCH)
+
+            rates = model(ff_input, RET_REC=0).cpu().detach().numpy()
+            # print('rates', rates.shape)
+            rates_grid.append(rates)
+
+            del_tensor(ff_input)
+            del_tensor(model)
+
+    return np.vstack(rates_grid)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def get_low_rank(rates, model, IF_REC=0):
+    if IF_REC==0:
+        vec1 = model.low_rank.V.T[0]
+        vec2 = model.low_rank.V.T[1]
+
+        vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
+
+        # vec1 = vec1 / torch.linalg.norm(vec1)
+        # vec2 = vec2 / torch.linalg.norm(vec2)
+
+        vec = torch.stack((vec1, vec2))
+        overlaps = rates @ vec.T / model.Na[0]
+    else:
+        vec1 = model.low_rank.U.T[0]
+        vec2 = model.low_rank.U.T[1]
+        # vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
+        vec1 = vec1 / torch.linalg.norm(vec1)**2
+        vec2 = vec2 / torch.linalg.norm(vec2)**2
+
+        vec = torch.stack((vec1, vec2))
+        overlaps = model.rec_input[0, :, :] @ vec.T
+
+    return overlaps.cpu().detach().numpy(), vec.cpu().detach().numpy()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import numpy as np
+
+def get_bissec(point1, point2, length=100):
+    # Calculate the directional vector of the original line
+    direction = point2 - point1
+    print(direction.shape)
+    # Midpoint of the line segment
+    midpoint = (point1 + point2) / 2
+
+    # Direction of the orthogonal line (perpendicular vector)
+    orthogonal_direction = np.array([-direction[1], direction[0]])
+
+    # Normalize the orthogonal direction
+    orthogonal_direction = orthogonal_direction / np.linalg.norm(orthogonal_direction)
+
+    # Calculate the endpoints of the orthogonal line segment
+    endpoint1 = midpoint - (length / 2) * orthogonal_direction
+    endpoint2 = midpoint + (length / 2) * orthogonal_direction
+
+    return np.array([endpoint1, endpoint2])
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+from scipy.interpolate import griddata
+
+def create_mesh(x, y, size=100):
+    x_min, x_max = np.min((x, y)) - 1, np.max((x, y)) + 1
+    y_min, y_max = np.min((x, y)) - 1, np.max((x, y)) + 1
+
+    dx = np.gradient(x, axis=1)
+    dy = np.gradient(y, axis=1)
+
+    # Create a dense grid
+    xi, yi = np.meshgrid(np.linspace(x_min, x_max, size),
+                         np.linspace(y_min, y_max, size))
+
+    # Flatten your dx and dy along with x and y for interpolation
+    points = np.vstack((x.flatten(), y.flatten())).T
+    dx_flat = dx.flatten()
+    dy_flat = dy.flatten()
+
+
+    # Interpolating on the grid
+    ui = griddata(points, dx_flat, (xi, yi), method='linear', fill_value=np.nan)
+    vi = griddata(points, dy_flat, (xi, yi), method='linear', fill_value=np.nan)
+
+    return xi, yi, ui, vi
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import numpy as np
+from scipy.interpolate import griddata
+from scipy.ndimage import gaussian_filter
+from scipy.spatial import cKDTree
+
+def create_mesh(x, y, size=100, sigma=0, interp_method='nearest', mask_radius=10):
+    """
+    x, y: arrays of shape (n_traj, n_points)
+    size: grid size along each axis
+    sigma: Gaussian smoothing for velocities (0=none)
+    interp_method: 'linear', 'cubic', or 'nearest'
+    mask_radius: mask out grid points farther than this multiple of median point spacing
+
+    Returns: xi, yi, ui, vi (masked arrays)
+    """
+    x = np.asarray(x)
+    y = np.asarray(y)
+
+    # Flatten for easier handling
+    x_flat = x.flatten()
+    y_flat = y.flatten()
+
+    # Compute dense grid
+    x_min, x_max = np.min(x_flat)-1, np.max(x_flat)+1
+    y_min, y_max = np.min(y_flat)-1, np.max(y_flat)+1
+
+    xi, yi = np.meshgrid(np.linspace(x_min, x_max, size),
+                         np.linspace(y_min, y_max, size))
+
+    # Compute velocities (finite differences along time axis)
+    dx = np.gradient(x, axis=1)
+    dy = np.gradient(y, axis=1)
+
+    # Optional smoothing of velocities
+    if sigma > 0:
+        dx = gaussian_filter(dx, sigma=sigma)
+        dy = gaussian_filter(dy, sigma=sigma)
+
+    dx_flat = dx.flatten()
+    dy_flat = dy.flatten()
+
+    # Prepare for griddata interpolation
+    points = np.vstack((x_flat, y_flat)).T
+
+    # Interpolate velocity components onto grid
+    ui = griddata(points, dx_flat, (xi, yi), method=interp_method, fill_value=np.nan)
+    vi = griddata(points, dy_flat, (xi, yi), method=interp_method, fill_value=np.nan)
+
+    # Find where it failed
+    mask = np.isnan(ui)
+
+    # Interpolate only those points with 'nearest'
+    if np.any(mask):
+        ui_nearest = griddata(points, dx_flat, (xi, yi), method='nearest')
+        vi_nearest = griddata(points, dy_flat, (xi, yi), method='nearest')
+        ui[mask] = ui_nearest[mask]
+        vi[mask] = vi_nearest[mask]
+
+    # # Mask far-from-data regions (optional)
+    # tree = cKDTree(points)
+    # dists, _ = tree.query(np.column_stack([xi.flatten(), yi.flatten()]), k=1)
+    # dists = dists.reshape(xi.shape)
+    # median_spacing = np.median(np.sqrt(np.diff(x_flat)**2 + np.diff(y_flat)**2))
+    # mask = dists > (mask_radius * median_spacing)
+    # ui = np.ma.masked_where(mask, ui)
+    # vi = np.ma.masked_where(mask, vi)
+
+    return xi, yi, ui, vi
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import matplotlib as mpl
+
+def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0):
+    x = overlaps[:, window:, 0]
+    y = overlaps[:, window:, 1]
+
+    xi, yi, ui, vi = create_mesh(x, y, size=300)
+    speed = np.sqrt(ui**2+vi**2)
+    speed = (speed - np.mean(speed)) / (np.std(speed) + 1e-6)
+
+    center, center_ = get_fp(overlaps, window, task, GRID_TEST=GRID_TEST)
+    ax.plot(center.T[0], center.T[1], 'o', color='k', ms=14)
+    if GRID_TEST is not None:
+        ax.plot(center_.T[0], center_.T[1], 'o', color='w', ms=14)
+
+    vmin, vmax = np.nanpercentile(speed, [5, 95])
+    norm = mpl.colors.Normalize(vmin, vmax)
+
+    heatmap = ax.streamplot(xi, yi, ui, vi, density=0.75, arrowsize=2, norm=norm, color='w')
+    heatmap = ax.pcolormesh(xi, yi, speed, cmap='coolwarm', shading='gouraud', norm=norm)
+    # heatmap = ax.imshow(speed, extent=(yi.min(), yi.max(), yi.min(), yi.max()), cmap='jet', norm=norm, origin='lower', aspect='auto')
+
+    # ax.set_aspect('equal')
+    # ax.set_xlim([yi.min(), yi.max()])
+    # ax.set_ylim([yi.min(), yi.max()])
+
+    # cbar = plt.colorbar(heatmap, ax=ax)
+    # cbar.set_label('Norm. Speed')
+
+    ax.set_xlabel('A/B Overlap')
+    ax.set_ylabel('Choice Overlap')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def save_fig(figname, GRID_TEST):
+
+    if GRID_TEST==4:
+        plt.savefig('../figures/flow/%s_test_C_%d.png' % (figname, seed), dpi=300)
+    elif GRID_TEST==9:
+        plt.savefig('../figures/flow/%s_test_D_%d.png' % (figname, seed), dpi=300)
+    elif GRID_TEST==1:
+        plt.savefig('../figures/flow/%s_go_%d.png' % (figname, seed), dpi=300)
+    elif GRID_TEST==6:
+        plt.savefig('../figures/flow/%s_nogo_%d.png' % (figname, seed), dpi=300)
+    elif GRID_TEST==0:
+        plt.savefig('../figures/flow/%s_sample_A_%d.png' % (figname, seed), dpi=300)
+    elif GRID_TEST==5:
+        plt.savefig('../figures/flow/%s_sample_B_%d.png' % (figname, seed), dpi=300)
+    else:
+        plt.savefig('../figures/flow/%s_%d.png' % (figname, seed), dpi=300)
+
+   #+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+from scipy.ndimage import map_coordinates
+
+def integrate_to_attractor(xi, yi, ui, vi, attractors, n_steps=500, dt=0.05, tol=1e-2):
+    """
+    For each mesh point, integrate its trajectory and assign the attractor (index) it converges to.
+    Returns: basin_map (shape of xi), index to attractor for each gridpoint.
+    """
+    shape = xi.shape
+    positions = np.stack([xi.flatten(), yi.flatten()], axis=1)
+    basin_idx = np.full(positions.shape[0], -1, dtype=int)
+
+    # Make interpolators for u,v
+    def interp_field(pos, field):
+        # input pos: Nx2, field: mesh
+        coords = [
+            (pos[:,1] - yi[0,0]) / (yi[0,-1] - yi[0,0]) * (yi.shape[1]-1),
+            (pos[:,0] - xi[0,0]) / (xi[-1,0] - xi[0,0]) * (xi.shape[0]-1)
+        ]
+        # Reversed axes, order is (y, x)
+        return map_coordinates(field.T, coords, order=1, mode='nearest')
+
+    # For each gridpoint, integrate until close to attractor or steps end
+    curr = positions.copy()
+    for step in range(n_steps):
+        if np.all(basin_idx >= 0):
+            break
+        not_assigned = (basin_idx < 0)
+        u_ = interp_field(curr[not_assigned], ui)
+        v_ = interp_field(curr[not_assigned], vi)
+        curr[not_assigned,0] += dt * u_
+        curr[not_assigned,1] += dt * v_
+
+        # Check for proximity to attractors
+        for i, fp in enumerate(attractors):
+            dists = np.linalg.norm(curr[not_assigned] - fp, axis=1)
+            close = dists < tol
+            basin_idx[not_assigned.nonzero()[0][close]] = i
+
+    basin_map = basin_idx.reshape(shape)
+    return basin_map
+#+end_src
+
+#+RESULTS:
+
+* Model
+
+#+begin_src ipython
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+conf_name = "train_dual.yml"
+DEVICE = 'cuda:1'
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+kwargs = {
+    'DURATION': 10.0,
+    'TASK': 'dual_flow',
+    'T_STIM_ON': [1.0, 2.0],
+    'T_STIM_OFF': [2.0, 300.0],
+    'I0': [1.0, 1.0],
+    'GRID_SIZE': 15,
+    'GRID_TEST': None,
+    'GRID_INPUT': 0,
+    'IF_OPTO': 0
+}
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+tasks = ['dpa']
+tasks = ['dpa', 'dual_naive', 'dual_train']
+seed = 103
+GRID_RANGE = 0.6
+#+end_src
+
+#+RESULTS:
+
+* Flow
+
+#+begin_src ipython
+rates = []
+for task in tasks:
+        rates.append(run_grid(GRID_RANGE, seed, task, **kwargs))
+rates = np.array(rates)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+rates_tensor = torch.tensor(rates).to(DEVICE)
+print(rates_tensor.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([3, 900, 101, 750])
+
+#+begin_src ipython
+model = init_model(task, seed, **kwargs)
+overlaps, vec = get_low_rank(rates_tensor, model, IF_REC=0)
+print(overlaps.shape)
+
+window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
+
+# ff_overlaps = ff_input[..., model.N_STEADY: , model.slices[0]] @ vec.T
+# ff_overlaps = ff_overlaps[:, ::10]
+# print(overlaps.shape, ff_overlaps.shape)
+#+end_src
+
+#+RESULTS:
+: (3, 900, 101, 2)
+
+* field
+
+#+begin_src ipython
+from sklearn.cluster import KMeans
+def get_fp(overlaps, window, task, GRID_TEST=None, x=None, y=None):
+    kmeans = KMeans(n_clusters=5, random_state=None)
+
+    if x is None:
+        x = overlaps[:, window:, 0]
+        y = overlaps[:, window:, 1]
+
+    x_fp = x[:, -1]
+    y_fp = y[:, -1]
+    fp = np.stack((x_fp, y_fp)).T
+
+    # print(fp.shape)
+    kmeans.fit(fp)
+    center = np.array(kmeans.cluster_centers_)
+    center_ = []
+
+    if GRID_TEST is None:
+        pkl_save(center, 'center_%s' % task, path="/home/leon/")
+    else:
+        center_ = pkl_load('center_%s' % task, path="/home/leon/")
+
+    return center, center_
+#+end_src
+
+#+RESULTS:
+
+#+begin_src  ipython
+fig, ax = plt.subplots(1, 1, figsize=[width, width])
+
+plot_field(overlaps[0], ax, window, IF_FP=1, task=0, GRID_TEST=model.GRID_TEST)
+
+save_fig('field_dpa', GRID_TEST=model.GRID_TEST)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/flow/figure_22.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 1, figsize=[width, width])
+
+plot_field(overlaps[1], ax, window, IF_FP=1, task=1, GRID_TEST=model.GRID_TEST)
+
+save_fig('field_dual_naive', GRID_TEST=model.GRID_TEST)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/flow/figure_24.png]]
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 1, figsize=[width, width])
+
+plot_field(overlaps[-1], ax, window, IF_FP=1, task=2, GRID_TEST=model.GRID_TEST)
+# plot_spaghetti(overlaps[0], ax, window, IF_FP=0, step=100, color=1)
+# plot_quiver(overlaps[0], ax, window, IF_FP=1, step=5, scale=1)
+
+# center, center_ = get_fp(overlaps[2], window, task, GRID_TEST=0)
+# ax.plot(center.T[0], center.T[1], 'o', color='k', ms=14)
+
+save_fig('field_dual_expert', GRID_TEST=model.GRID_TEST)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/flow/figure_25.png]]
+
+* Bassins
+
+#+begin_src ipython
+def plot_empirical_separatrix(
+    overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0,
+    near_thresh=10, label=None, s=11, alpha=0.9, color='k'):
+    """
+    Overlay an empirical separatrix estimated from trajectory endpoints.
+
+    For all pairs of trajectories that start nearby but end at different fixed points,
+    plot the midpoint of their starting points.
+
+    Parameters:
+        overlaps, ax, window, ...      : as for plot_field
+        near_thresh (float)            : threshold for 'nearby' in phase space
+        label                          : plot label for legend
+        s, alpha, color                : scatter plot appearance
+    """
+    # Extract data as in plot_field
+    x = overlaps[:, window:, 0]
+    y = overlaps[:, window:, 1]
+    n_traj = x.shape[0]
+    starts = np.column_stack([x[:, 0], y[:, 0]])
+
+    # Get fixed points (your function)
+    center, center_ = get_fp(overlaps, window, task, GRID_TEST=GRID_TEST)
+    fp = center if GRID_TEST is None else center_
+    # Assign endpoint label (closest FP)
+    ends = np.column_stack([x[:, -1], y[:, -1]])
+    dists = np.linalg.norm(ends[:, None, :] - fp[None, :, :], axis=2)
+    fp_labels = np.argmin(dists, axis=1)
+
+    sep_points = []
+    for i in range(n_traj-1):
+        for j in range(i+1, n_traj):
+            # Only look at pairs starting close by
+            if np.linalg.norm(starts[i] - starts[j]) < near_thresh:
+                # ...and ending at different FPs
+                if fp_labels[i] != fp_labels[j]:
+                    sep_points.append(0.5 * (starts[i] + starts[j]))
+
+    sep_points = np.array(sep_points)
+
+
+
+    return sep_points
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def plot_separatrix_bestfit(
+    sep_points, ax, kind='bspline', degree=3, color='k', linewidth=2, s=1.0, **kwargs):
+    import numpy as np
+    sep_points = np.asarray(sep_points)
+    if sep_points.shape[0] < 4:
+        print("Not enough points for curve fitting.")
+        return
+    # Order points in some coherent way (here: by x)
+    ind = np.argsort(sep_points[:,0])
+    xs, ys = sep_points[ind,0], sep_points[ind,1]
+    if kind == 'linear':
+        # Linear fit
+        slope, intercept = np.polyfit(xs, ys, 1)
+        fit_y = slope * xs + intercept
+        ax.plot(xs, fit_y, color=color, ls="--", label='Linear fit', **kwargs)
+        # ax.legend()
+        return slope, intercept
+    elif kind == 'poly':
+        p = np.polyfit(xs, ys, degree)
+        fine_x = np.linspace(xs.min(), xs.max(), 200)
+        fit_y = np.polyval(p, fine_x)
+        ax.plot(fine_x, fit_y, color=color, linewidth=linewidth, label=f'Poly (deg {degree})', **kwargs)
+    elif kind == 'bspline':
+        from scipy.interpolate import splprep, splev
+        tck, u = splprep([xs, ys], s=s)
+        unew = np.linspace(0, 1, 300)
+        xnew, ynew = splev(unew, tck)
+        ax.plot(xnew, ynew, color=color, linewidth=linewidth, label="B-spline", **kwargs)
+    elif kind == 'lowess':
+        from statsmodels.nonparametric.smoothers_lowess import lowess
+        low = lowess(ys, xs, frac=0.15)
+        ax.plot(low[:,0], low[:,1], color=color, ls='--', label="LOWESS", **kwargs)
+    else:
+        raise ValueError('kind must be poly, bspline, or lowess')
+    # ax.legend()
+    return 0, 0
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 1, figsize=[width, width])
+plot_field(overlaps[0], ax, window, IF_FP=1, task=0, GRID_TEST=model.GRID_TEST)
+sep_points = plot_empirical_separatrix(overlaps[0], ax, window, near_thresh=5)
+slope, _ = plot_separatrix_bestfit(sep_points, ax, kind="linear")
+save_fig('field_dpa', GRID_TEST=model.GRID_TEST)
+print(slope)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: -0.6274282955855452
+[[./figures/flow/figure_28.png]]
+:END:
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 1, figsize=[width, width])
+plot_field(overlaps[1], ax, window, IF_FP=1, task=1, GRID_TEST=model.GRID_TEST)
+sep_points = plot_empirical_separatrix(overlaps[1], ax, window, near_thresh=5)
+slope, _ = plot_separatrix_bestfit(sep_points, ax, kind="linear")
+save_fig('field_dual_naive', GRID_TEST=model.GRID_TEST)
+print(slope)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: -0.6737947006453265
+[[./figures/flow/figure_29.png]]
+:END:
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 1, figsize=[width, width])
+plot_field(overlaps[2], ax, window, IF_FP=1, task=2, GRID_TEST=model.GRID_TEST)
+sep_points = plot_empirical_separatrix(overlaps[2], ax, window, near_thresh=3)
+slope, _ = plot_separatrix_bestfit(sep_points, ax, kind="linear")
+ax.set_ylim([-15, 16])
+save_fig('field_dual_expert', GRID_TEST=model.GRID_TEST)
+print(slope)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: -1.731151905294439
+[[./figures/flow/figure_30.png]]
+:END:
