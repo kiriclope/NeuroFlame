@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 04 Jul. 2025 -->
+<!-- 28 Jul. 2025 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NeuroFlame: Fast Learning And Modeling Engine</title>
@@ -68,41 +68,41 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#orgba9369d">Introduction</a></li>
-<li><a href="#org92f32f1">Installation</a></li>
-<li><a href="#org0168d15">Project Structure</a></li>
-<li><a href="#orgb9c827b">Network Dynamics</a>
+<li><a href="#orgdda38d1">Introduction</a></li>
+<li><a href="#org232adf9">Installation</a></li>
+<li><a href="#orge1d28ff">Project Structure</a></li>
+<li><a href="#org9d5aecd">Network Dynamics</a>
 <ul>
 <li>
 <ul>
-<li><a href="#orgd45ce87">Dynamics</a></li>
-<li><a href="#orga8b9cd4">Connectivity</a></li>
+<li><a href="#org99d577c">Dynamics</a></li>
+<li><a href="#orgd1b50fb">Connectivity</a></li>
 </ul>
 </li>
 </ul>
 </li>
-<li><a href="#org2a70b4b">Network Simulations</a>
+<li><a href="#org08e55ac">Network Simulations</a>
 <ul>
-<li><a href="#org0f22dd7">Basic Usage</a></li>
-<li><a href="#org893fbc6">Parallel Network Simulations</a></li>
+<li><a href="#org21ce26c">Basic Usage</a></li>
+<li><a href="#org241ca23">Parallel Network Simulations</a></li>
 </ul>
 </li>
-<li><a href="#org497a268">Network Training</a></li>
-<li><a href="#org2f7460f">Tutorials</a>
+<li><a href="#org266a475">Network Training</a></li>
+<li><a href="#orgcd9e860">Tutorials</a>
 <ul>
-<li><a href="#org446beae">Balanced Networks</a></li>
-<li><a href="#org7c80ef5">Multistability</a></li>
-<li><a href="#org4d69d3d">Short Term Plasticity</a></li>
-<li><a href="#org9adc8a5">Behavioral Tasks</a></li>
-<li><a href="#org31fd60d">Serial Bias</a></li>
+<li><a href="#org8d8d493">Balanced Networks</a></li>
+<li><a href="#org76be04a">Multistability</a></li>
+<li><a href="#orgf307ecb">Short Term Plasticity</a></li>
+<li><a href="#org7ed0f0a">Behavioral Tasks</a></li>
+<li><a href="#org06f07a0">Serial Bias</a></li>
 </ul>
 </li>
-<li><a href="#org6c7a59d">Contributing</a></li>
+<li><a href="#org12ebddc">Contributing</a></li>
 </ul>
 </div>
 </nav>
 
-<figure id="org2cf709f">
+<figure id="org22953f6">
 <img src="./neuroflame.jpeg" alt="neuroflame.jpeg" width="400px">
 
 </figure>
@@ -111,9 +111,9 @@
 Copyright © 2024 by Melanie Tschiersch. All rights reserved.
 </p>
 
-<section id="outline-container-orgba9369d" class="outline-2">
-<h2 id="orgba9369d">Introduction</h2>
-<div class="outline-text-2" id="text-orgba9369d">
+<section id="outline-container-orgdda38d1" class="outline-2">
+<h2 id="orgdda38d1">Introduction</h2>
+<div class="outline-text-2" id="text-orgdda38d1">
 <p>
 This package provides an implementation of a recurrent neural network trainer and simulator with Pytorch.
 Networks can have multiple neural populations with different connectivity types (all-to-all, sparse) and structures (feature selective, spatially tuned, low rank).
@@ -125,9 +125,9 @@ Networks models can be trained in a unsupervised or supervised manner just as va
 </div>
 </section>
 
-<section id="outline-container-org92f32f1" class="outline-2">
-<h2 id="org92f32f1">Installation</h2>
-<div class="outline-text-2" id="text-org92f32f1">
+<section id="outline-container-org232adf9" class="outline-2">
+<h2 id="org232adf9">Installation</h2>
+<div class="outline-text-2" id="text-org232adf9">
 <div class="org-src-container">
 <pre class="src src-sh">pip install -r requirements.txt
 </pre>
@@ -144,49 +144,49 @@ or alternatively using conda (I recommend using mamba&rsquo;s <a href="https://g
 </div>
 </section>
 
-<section id="outline-container-org0168d15" class="outline-2">
-<h2 id="org0168d15">Project Structure</h2>
-<div class="outline-text-2" id="text-org0168d15">
+<section id="outline-container-orge1d28ff" class="outline-2">
+<h2 id="orge1d28ff">Project Structure</h2>
+<div class="outline-text-2" id="text-orge1d28ff">
 <div class="org-src-container">
 <pre class="src src-sh">.
-&#9500;&#9472;&#9472; conf  <span class="org-comment-delimiter"># </span><span class="org-comment">contains configuration files in yaml format.</span>
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; *.yml
-&#9500;&#9472;&#9472; notebooks  <span class="org-comment-delimiter"># </span><span class="org-comment">contains ipython notebooks.</span>
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; setup.py
+&#9500;&#9472;&#9472; conf  <span class="org-comment-delimiter"># </span><span class="org-comment">contains configuration files in yaml format.
+</span>&#9474;&#160;&#160; &#9500;&#9472;&#9472; *.yml
+&#9500;&#9472;&#9472; notebooks  <span class="org-comment-delimiter"># </span><span class="org-comment">contains ipython notebooks.
+</span>&#9474;&#160;&#160; &#9500;&#9472;&#9472; setup.py
 &#9474;&#160;&#160; &#9492;&#9472;&#9472; *.ipynb
-&#9500;&#9472;&#9472; org  <span class="org-comment-delimiter"># </span><span class="org-comment">contains org notebooks.</span>
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; /doc/*.org
+&#9500;&#9472;&#9472; org  <span class="org-comment-delimiter"># </span><span class="org-comment">contains org notebooks.
+</span>&#9474;&#160;&#160; &#9500;&#9472;&#9472; /doc/*.org
 &#9474;&#160;&#160; &#9492;&#9472;&#9472; *.org
-&#9500;&#9472;&#9472; src  <span class="org-comment-delimiter"># </span><span class="org-comment">contains source code.</span>
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; activation.py  <span class="org-comment-delimiter"># </span><span class="org-comment">contains custom activation functions.</span>
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; connectivity.py  <span class="org-comment-delimiter"># </span><span class="org-comment">contains custom connectivity profiles.</span>
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; decode.py
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; lif_network.py  <span class="org-comment-delimiter"># </span><span class="org-comment">implementation of a LIF network.</span>
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; lif_neuron.py
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; lr_utils.py  <span class="org-comment-delimiter"># </span><span class="org-comment">utils for low rank networks.</span>
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; network.py  <span class="org-comment-delimiter"># </span><span class="org-comment">core of the project.</span>
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; plasticity.py  <span class="org-comment-delimiter"># </span><span class="org-comment">contains STP.</span>
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; plot_utils.py
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; sparse.py  <span class="org-comment-delimiter"># </span><span class="org-comment">utils for large sparse matrices.</span>
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; stimuli.py  <span class="org-comment-delimiter"># </span><span class="org-comment">contains custom stimuli for behavioral tasks.</span>
-&#9474;&#160;&#160; &#9500;&#9472;&#9472; train.py  <span class="org-comment-delimiter"># </span><span class="org-comment">utils to train networks.</span>
-&#9492;&#9472;&#9472; &#9492;&#9472;&#9472; utils.py
+&#9500;&#9472;&#9472; src  <span class="org-comment-delimiter"># </span><span class="org-comment">contains source code.
+</span>&#9474;&#160;&#160; &#9500;&#9472;&#9472; activation.py  <span class="org-comment-delimiter"># </span><span class="org-comment">contains custom activation functions.
+</span>&#9474;&#160;&#160; &#9500;&#9472;&#9472; connectivity.py  <span class="org-comment-delimiter"># </span><span class="org-comment">contains custom connectivity profiles.
+</span>&#9474;&#160;&#160; &#9500;&#9472;&#9472; decode.py
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; lif_network.py  <span class="org-comment-delimiter"># </span><span class="org-comment">implementation of a LIF network.
+</span>&#9474;&#160;&#160; &#9500;&#9472;&#9472; lif_neuron.py
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; lr_utils.py  <span class="org-comment-delimiter"># </span><span class="org-comment">utils for low rank networks.
+</span>&#9474;&#160;&#160; &#9500;&#9472;&#9472; network.py  <span class="org-comment-delimiter"># </span><span class="org-comment">core of the project.
+</span>&#9474;&#160;&#160; &#9500;&#9472;&#9472; plasticity.py  <span class="org-comment-delimiter"># </span><span class="org-comment">contains STP.
+</span>&#9474;&#160;&#160; &#9500;&#9472;&#9472; plot_utils.py
+&#9474;&#160;&#160; &#9500;&#9472;&#9472; sparse.py  <span class="org-comment-delimiter"># </span><span class="org-comment">utils for large sparse matrices.
+</span>&#9474;&#160;&#160; &#9500;&#9472;&#9472; stimuli.py  <span class="org-comment-delimiter"># </span><span class="org-comment">contains custom stimuli for behavioral tasks.
+</span>&#9474;&#160;&#160; &#9500;&#9472;&#9472; train.py  <span class="org-comment-delimiter"># </span><span class="org-comment">utils to train networks.
+</span>&#9492;&#9472;&#9472; &#9492;&#9472;&#9472; utils.py
 </pre>
 </div>
 </div>
 </section>
 
-<section id="outline-container-orgb9c827b" class="outline-2">
-<h2 id="orgb9c827b"><a href="file:///org/doc/dynamics.html">Network Dynamics</a></h2>
-<div class="outline-text-2" id="text-orgb9c827b">
+<section id="outline-container-org9d5aecd" class="outline-2">
+<h2 id="org9d5aecd"><a href="file:///org/doc/dynamics.html">Network Dynamics</a></h2>
+<div class="outline-text-2" id="text-org9d5aecd">
 </div>
-<div id="outline-container-orgd45ce87" class="outline-4">
-<h4 id="orgd45ce87">Dynamics</h4>
-<div class="outline-text-4" id="text-orgd45ce87">
+<div id="outline-container-org99d577c" class="outline-4">
+<h4 id="org99d577c">Dynamics</h4>
+<div class="outline-text-4" id="text-org99d577c">
 </div>
 <ul class="org-ul">
-<li><a id="orgfa2fdaa"></a>Currents<br>
-<div class="outline-text-5" id="text-orgfa2fdaa">
+<li><a id="orgc7d9608"></a>Currents<br>
+<div class="outline-text-5" id="text-orgc7d9608">
 <p>
 Neuron \(i\) in population \(A\) has a reccurent input \(h^A_i\),
 </p>
@@ -205,8 +205,8 @@ or not
 </div>
 </li>
 
-<li><a id="orgdb49223"></a>Rates<br>
-<div class="outline-text-5" id="text-orgdb49223">
+<li><a id="org15b97ac"></a>Rates<br>
+<div class="outline-text-5" id="text-org15b97ac">
 <p>
 The models can have rate dynamics (setting <b>RATE_DYN</b> to 1 in the configuration file):
 </p>
@@ -235,9 +235,9 @@ Here \(\Phi\) is the transfer function defined in <b>src/activation.py</b> and c
 </ul>
 </div>
 
-<div id="outline-container-orga8b9cd4" class="outline-4">
-<h4 id="orga8b9cd4">Connectivity</h4>
-<div class="outline-text-4" id="text-orga8b9cd4">
+<div id="outline-container-orgd1b50fb" class="outline-4">
+<h4 id="orgd1b50fb">Connectivity</h4>
+<div class="outline-text-4" id="text-orgd1b50fb">
 <p>
 The connectivities available in NeuroFlame are described <a href="file:///org/tests/connectivity.html">here</a>.
 </p>
@@ -248,8 +248,8 @@ Probability of connection from population B to A:
 </div>
 
 <ul class="org-ul">
-<li><a id="org62fb41a"></a>Sparse Nets<br>
-<div class="outline-text-5" id="text-org62fb41a">
+<li><a id="orgd1cc106"></a>Sparse Nets<br>
+<div class="outline-text-5" id="text-orgd1cc106">
 <p>
 by default it is a sparse net
 </p>
@@ -278,8 +278,8 @@ and also low rank
 </div>
 </li>
 
-<li><a id="org36d2e23"></a>All to all<br>
-<div class="outline-text-5" id="text-org36d2e23">
+<li><a id="org4336c39"></a>All to all<br>
+<div class="outline-text-5" id="text-org4336c39">
 <p>
 \[ J_{ij}^{AB} =  \frac{J_{AB}}{N_B} P_{ij}^{AB} \]
 </p>
@@ -293,13 +293,13 @@ where Pij can be as above.
 </div>
 </section>
 
-<section id="outline-container-org2a70b4b" class="outline-2">
-<h2 id="org2a70b4b">Network Simulations</h2>
-<div class="outline-text-2" id="text-org2a70b4b">
+<section id="outline-container-org08e55ac" class="outline-2">
+<h2 id="org08e55ac">Network Simulations</h2>
+<div class="outline-text-2" id="text-org08e55ac">
 </div>
-<div id="outline-container-org0f22dd7" class="outline-3">
-<h3 id="org0f22dd7">Basic Usage</h3>
-<div class="outline-text-3" id="text-org0f22dd7">
+<div id="outline-container-org21ce26c" class="outline-3">
+<h3 id="org21ce26c">Basic Usage</h3>
+<div class="outline-text-3" id="text-org21ce26c">
 <p>
 Here is how to run a simulation
 </p>
@@ -327,9 +327,9 @@ rates = model()
 </div>
 </div>
 
-<div id="outline-container-org893fbc6" class="outline-3">
-<h3 id="org893fbc6"><a href="file:///org/doc/neurotorch.html">Parallel Network Simulations</a></h3>
-<div class="outline-text-3" id="text-org893fbc6">
+<div id="outline-container-org241ca23" class="outline-3">
+<h3 id="org241ca23"><a href="file:///org/doc/neurotorch.html">Parallel Network Simulations</a></h3>
+<div class="outline-text-3" id="text-org241ca23">
 <p>
 I describe in detail how to run a network simulation and use NeuroFlame to effectively run parallel simulations for different parameters <a href="file:///org/doc/neurotorch.html">here</a>.
 </p>
@@ -337,40 +337,40 @@ I describe in detail how to run a network simulation and use NeuroFlame to effec
 </div>
 </section>
 
-<section id="outline-container-org497a268" class="outline-2">
-<h2 id="org497a268"><a href="file:///org/train.html">Network Training</a></h2>
-<div class="outline-text-2" id="text-org497a268">
+<section id="outline-container-org266a475" class="outline-2">
+<h2 id="org266a475"><a href="file:///org/train.html">Network Training</a></h2>
+<div class="outline-text-2" id="text-org266a475">
 <p>
 <a href="file:///org/train.html">Here</a>, I show how to train networks.
 </p>
 </div>
 </section>
-<section id="outline-container-org2f7460f" class="outline-2">
-<h2 id="org2f7460f">Tutorials</h2>
-<div class="outline-text-2" id="text-org2f7460f">
+<section id="outline-container-orgcd9e860" class="outline-2">
+<h2 id="orgcd9e860">Tutorials</h2>
+<div class="outline-text-2" id="text-orgcd9e860">
 </div>
-<div id="outline-container-org446beae" class="outline-3">
-<h3 id="org446beae"><a href="file:///org/tests/balance.html">Balanced Networks</a></h3>
-<div class="outline-text-3" id="text-org446beae">
+<div id="outline-container-org8d8d493" class="outline-3">
+<h3 id="org8d8d493"><a href="file:///org/tests/balance.html">Balanced Networks</a></h3>
+<div class="outline-text-3" id="text-org8d8d493">
 <p>
 <a href="file:///org/tests/balance.html">Here</a>, a tutorial on balanced networks.
 </p>
 </div>
 </div>
-<div id="outline-container-org7c80ef5" class="outline-3">
-<h3 id="org7c80ef5"><a href="file:///org/search/multi_stable.html">Multistability</a></h3>
-<div class="outline-text-3" id="text-org7c80ef5">
+<div id="outline-container-org76be04a" class="outline-3">
+<h3 id="org76be04a"><a href="file:///org/search/multi_stable.html">Multistability</a></h3>
+<div class="outline-text-3" id="text-org76be04a">
 </div>
 <ul class="org-ul">
-<li><a id="org3632869"></a>Fully connected<br>
-<div class="outline-text-5" id="text-org3632869">
+<li><a id="org7f50254"></a>Fully connected<br>
+<div class="outline-text-5" id="text-org7f50254">
 <p>
 <a href="file:///org/search/ring_attractor.html">Here</a>, a notebook that shows how to use NeuroFlame to locate ring attractors in parameter space.
 </p>
 </div>
 </li>
-<li><a id="org4522e15"></a>Sparse<br>
-<div class="outline-text-5" id="text-org4522e15">
+<li><a id="orgf63320a"></a>Sparse<br>
+<div class="outline-text-5" id="text-orgf63320a">
 <p>
 <a href="file:///org/search/multi_stable.html">Here</a>, a notebook that shows how to use NeuroFlame to locate multistable balance states in parameter space.
 </p>
@@ -379,25 +379,25 @@ I describe in detail how to run a network simulation and use NeuroFlame to effec
 </ul>
 </div>
 
-<div id="outline-container-org4d69d3d" class="outline-3">
-<h3 id="org4d69d3d"><a href="file:///org/tests/stp.html">Short Term Plasticity</a></h3>
-<div class="outline-text-3" id="text-org4d69d3d">
+<div id="outline-container-orgf307ecb" class="outline-3">
+<h3 id="orgf307ecb"><a href="file:///org/tests/stp.html">Short Term Plasticity</a></h3>
+<div class="outline-text-3" id="text-orgf307ecb">
 <p>
 <a href="file:///org/tests/stp.html">Here</a>, a tutorial on STP with NeuroFlame.
 </p>
 </div>
 </div>
-<div id="outline-container-org9adc8a5" class="outline-3">
-<h3 id="org9adc8a5"><a href="file:///org/tests/stimuli.html">Behavioral Tasks</a></h3>
-<div class="outline-text-3" id="text-org9adc8a5">
+<div id="outline-container-org7ed0f0a" class="outline-3">
+<h3 id="org7ed0f0a"><a href="file:///org/tests/stimuli.html">Behavioral Tasks</a></h3>
+<div class="outline-text-3" id="text-org7ed0f0a">
 <p>
 <a href="file:///org/tests/stimuli.html">Here</a>, a tutorial on how to use different stimuli to get the model to perform different behavioral tasks.
 </p>
 </div>
 </div>
-<div id="outline-container-org31fd60d" class="outline-3">
-<h3 id="org31fd60d"><a href="file:///org/serial_bias.html">Serial Bias</a></h3>
-<div class="outline-text-3" id="text-org31fd60d">
+<div id="outline-container-org06f07a0" class="outline-3">
+<h3 id="org06f07a0"><a href="file:///org/serial_bias.html">Serial Bias</a></h3>
+<div class="outline-text-3" id="text-org06f07a0">
 <p>
 <a href="file:///org/serial_bias.html">Here</a>, a tutorial on how to get serial bias in a balanced network model.
 </p>
@@ -405,14 +405,14 @@ I describe in detail how to run a network simulation and use NeuroFlame to effec
 </div>
 </section>
 
-<section id="outline-container-org6c7a59d" class="outline-2">
-<h2 id="org6c7a59d">Contributing</h2>
-<div class="outline-text-2" id="text-org6c7a59d">
+<section id="outline-container-org12ebddc" class="outline-2">
+<h2 id="org12ebddc">Contributing</h2>
+<div class="outline-text-2" id="text-org12ebddc">
 <p>
 Feel free to contribute.
 </p>
 
-<pre class="example" id="org9c8432e">
+<pre class="example" id="orgdc75c7d">
 MIT License
 Copyright (c) [2023] [A. Mahrach]
 </pre>
@@ -421,7 +421,7 @@ Copyright (c) [2023] [A. Mahrach]
 </main>
 <footer id="postamble" class="status">
 <p class="author">Author: Alexandre Mahrach</p>
-<p class="date">Created: 04 Jul. 2025</p>
+<p class="date">Created: 28 Jul. 2025</p>
 </footer>
 </body>
 </html>
