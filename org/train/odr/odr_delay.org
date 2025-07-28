@@ -1,6 +1,6 @@
 #+STARTUP: fold
 #+TITLE: Training RNNs on ODR
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr :kernel torch :exports results :output-dir ./figures/odr :file (lc/org-babel-tangle-figure-filename)
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr :kernel python3  :exports results :output-dir ./figures/odr :file (lc/org-babel-tangle-figure-filename)
 
 * Notebook Settings
 
@@ -21,7 +21,7 @@ pal = sns.color_palette("tab10")
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
+: /home/leon/miniforge3/bin/python
 
 * Imports
 
@@ -29,7 +29,7 @@ pal = sns.color_palette("tab10")
   import torch
   import torch.nn as nn
   import torch.optim as optim
-  import torchmetrics
+  # import torchmetrics
   import torch.nn.functional as F
   from torch.utils.data import Dataset, TensorDataset, DataLoader
 #+end_src
@@ -75,12 +75,12 @@ def plot_rates_selec(rates, idx=0, thresh=0.5, figname='fig.svg'):
         fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
         r_max = thresh * np.max(rates[idx])
 
-        idx = np.random.randint(0, 96*8)
+        idx = np.random.randint(0, 96)
         ax[0].imshow(rates[idx].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
         ax[0].set_ylabel('Neuron #')
         ax[0].set_xlabel('Step')
 
-        idx = np.random.randint(0, 96*8)
+        idx = np.random.randint(0, 96)
         ax[1].imshow(rates[idx].T, aspect='auto', cmap='jet', vmin=0, vmax=r_max)
         ax[1].set_ylabel('Neuron #')
         ax[1].set_xlabel('Step')
@@ -99,8 +99,7 @@ def plot_rates_selec(rates, idx=0, thresh=0.5, figname='fig.svg'):
       fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
 
       xtime = np.linspace(0, model.DURATION, m0.shape[-1])
-      idx = np.random.randint(0, 96*8, 16)
-      print(idx)
+      idx = np.random.randint(0, 96, 16)
 
       ax[0].plot(xtime, m0[idx].T)
       #ax[0].set_ylim([0, 360])
@@ -533,12 +532,12 @@ def generate_weighted_phase_samples(N_BATCH, angles, preferred_angle, sigma):
 * Model
 
 #+begin_src ipython
-REPO_ROOT = "/home/leon/models/NeuroFlame"
+REPO_ROOT = "/home/leon/Projects/NeuroFlame"
 conf_name = "train_odr_EI.yml"
-DEVICE = 'cuda:0'
+DEVICE = 'cpu'
 
-IF_BIASED_PHASES = 1
-IF_BIAS = 1
+IF_BIASED_PHASES = 0
+IF_BIAS = 0
 IF_BIMOD = 0
 
 IF_RAND_REF = 0
@@ -552,7 +551,7 @@ if IF_BIASED_PHASES:
 else:
     class_weight = None
 
-total_batches = 128 * 8
+total_batches = 128 * 4
 batch_size = 128
 ratio = total_batches // batch_size
 
@@ -566,7 +565,7 @@ print('seed', seed)
 
 #+RESULTS:
 : reference 90 sigma 90
-: N_BATCH 1024 batch_size 128
+: N_BATCH 512 batch_size 128
 : seed 1
 
 #+begin_src ipython
@@ -591,7 +590,6 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-: fixed ref
 
 #+begin_src ipython
 print(model.random_shifts.shape)
@@ -603,8 +601,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: torch.Size([1024])
-[[./figures/odr/figure_22.png]]
+: torch.Size([512])
+[[file:./figures/odr/figure_22.png]]
 :END:
 
 * Training
@@ -630,7 +628,8 @@ if IF_RAND_REF:
 #+end_src
 
 #+RESULTS:
-: Wab_train torch.Size([750, 750])
+: Wab_train torch.Size([375, 375])
+: J_STP torch.Size([])
 
 #+begin_src ipython
 model.N_BATCH = N_BATCH
@@ -653,11 +652,16 @@ print(torch.where(rwd_mask[idx]==1)[0])
 #+end_src
 
 #+RESULTS:
-: rwd_mask torch.Size([1024, 81])
+: rwd_mask torch.Size([512, 91])
 : tensor([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
 :         28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-:         46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
-:         64, 65, 66, 67], device='cuda:0')
+:         46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63])
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 *** Inputs and Labels
 
@@ -668,7 +672,7 @@ print('total_batches', N_BATCH // batch_size)
 
 labels = []
 for _ in range(total_batches):
-    # Generate biased data for each batch
+
     if IF_BIASED_PHASES:
         if IF_BIMOD:
             batch_labels = continuous_bimodal_phases(batch_size, reference, sigma)
@@ -678,14 +682,14 @@ for _ in range(total_batches):
         batch_labels = torch.randint(0, 360, (batch_size, 1)).to(DEVICE)
 
     labels.append(batch_labels)
-# Concatenate all batch labels into a single tensor
+
 labels = torch.cat(labels, dim=0)
 print(labels.shape)
 #+end_src
 
 #+RESULTS:
-: total_batches 8
-: torch.Size([1024, 1])
+: total_batches 4
+: torch.Size([512, 1])
 
 #+begin_src ipython
 # if IF_BIASED_PHASES:
@@ -709,9 +713,9 @@ ff_input = model.init_ff_input()
 print(model.PHI0.shape, ff_input.shape, labels.shape)
 #+end_src
 #+RESULTS:
-: torch.Size([1, 750]) torch.Size([1024, 1])
-: torch.Size([1, 750]) torch.Size([1024, 1])
-: torch.Size([1024, 2, 1]) torch.Size([1024, 505, 1000]) torch.Size([1024, 81])
+: torch.Size([1, 375]) torch.Size([512, 1])
+: torch.Size([1, 375]) torch.Size([512, 1])
+: torch.Size([512, 2, 1]) torch.Size([512, 555, 500]) torch.Size([512, 91])
 
 #+begin_src ipython
 # N_BATCH = 32
@@ -751,9 +755,10 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: torch.Size([46001])
-[[./figures/odr/figure_30.png]]
+: torch.Size([25593])
+[[file:./figures/odr/figure_31.png]]
 :END:
+#+RESULTS:
 
 *** Run
 
@@ -763,16 +768,10 @@ train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_si
 
 #+RESULTS:
 :RESULTS:
-[[./figures/odr/figure_31.png]]
-: torch.Size([819, 505, 1000]) torch.Size([205, 505, 1000])
-: torch.Size([819, 81]) torch.Size([205, 81])
+[[file:./figures/odr/figure_32.png]]
+: torch.Size([409, 555, 500]) torch.Size([103, 555, 500])
+: torch.Size([409, 91]) torch.Size([103, 91])
 :END:
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
 
 #+begin_src ipython
 if IF_BIAS:
@@ -780,31 +779,20 @@ if IF_BIAS:
 else:
     criterion = AngularErrorLoss(thresh=0.75, class_weight=None, prior=reference, sigma_prior=30, sigma_stimulus=30, alpha=0.0, reg_prior=0.0)
 
-learning_rate = 0.05
+learning_rate = 0.1
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
 #+RESULTS:
 
         #+begin_src ipython
-  num_epochs = 30
+  num_epochs = 15
   start = perf_counter()
   loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs, thresh=.005)
   end = perf_counter()
   print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 #+end_src
 
-#+RESULTS:
-: Epoch 1/30, Training Loss: 0.0183, Validation Loss: 0.0154
-: Epoch 2/30, Training Loss: 0.0131, Validation Loss: 0.0130
-: Epoch 3/30, Training Loss: 0.0103, Validation Loss: 0.0104
-
-#+begin_src ipython
-print(model.J_STP)
-#+end_src
-
-#+RESULTS:
-: 92e6b5a6-04d6-4774-acb2-ccbf0962e64e
 
 #+begin_src ipython
 if IF_BIASED_PHASES:
@@ -821,7 +809,7 @@ else:
 #+end_src
 
 #+RESULTS:
-: f43e2b4a-fd72-4bd8-8468-33e84aecd112
+: ebde9a4a-9339-48cb-a80f-d5794c3b8ff5
 
 * Testing
 
@@ -836,14 +824,15 @@ if IF_BIASED_PHASES:
         else:
             model_state_dict = torch.load('../models/odr/odr_bias_%d_ref_%d.pth' % (reference, seed) )
 else:
-    model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed)
+    model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed);
 
-model.load_state_dict(model_state_dict)
-model.eval()
+model.load_state_dict(model_state_dict);
+model.eval();
+print(model.J_STP)
 #+end_src
 
 #+RESULTS:
-: a26f5b8a-ade2-4400-8acf-33661b75fdb9
+: 22680539-442d-449b-9122-33b86079abc6
 
 #+begin_src ipython
     model.N_BATCH = N_BATCH
@@ -865,7 +854,7 @@ model.eval()
 #+end_src
 
 #+RESULTS:
-: 89deebc0-6f81-46b4-9ea9-1d88c8227d1c
+: c810fd7a-23df-4b1b-9bf2-d3655504fa7f
 
 #+begin_src ipython
 #     model.N_BATCH = N_BATCH
@@ -887,7 +876,7 @@ model.eval()
  #+end_src
 
 #+RESULTS:
-: 41ffb96e-2644-43f9-ae69-d2e8f7818a27
+: 4bcae591-7f4c-4566-b351-84495696823e
 
 #+begin_src ipython
 plt.hist(labels[:, 0].cpu() * 180 / np.pi, bins='auto', density=True)
@@ -899,44 +888,44 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 496785db-d902-4517-9d89-c92bc0a82209
-
+: 495daf12-505f-4fe3-93a2-97df6d19c707
 
 #+begin_src ipython
 rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
 print('ff_input', ff_input.shape)
 print('rates', rates.shape)
 #+end_src
+
 #+RESULTS:
-: 285f743d-26e2-4a0e-b636-872c608f372f
+: a566ee82-e4c8-4cb6-a7ec-4a02a3ced30f
 
  #+begin_src ipython
 plot_rates_selec(rates=ff_input.cpu().detach().numpy(), idx=20, thresh=.5)
 #+end_src
 
 #+RESULTS:
-: 665585d5-41d6-487b-ab13-e8828dc0df66
+: 033bf88d-5826-49e3-8d8a-9fa35f087568
 
  #+begin_src ipython
 plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
 #+end_src
 
 #+RESULTS:
-: e7fbc4e6-76f5-4022-8fef-218d541bbc1c
+: 76120ec6-394a-4ac0-87b8-f436769fbc0d
 
-#+begin_src ipython
-plot_rates_selec(rates, idx=20, thresh=.1)
+ #+begin_src ipython
+plot_rates_selec(rates, idx=20, thresh=.5)
 #+end_src
 
 #+RESULTS:
-: f3ab13a8-a82a-4b21-af19-26f46fa9e768
+: 8b106024-5879-433c-93b2-c5c677e59057
 
-        #+begin_src ipython
+   #+begin_src ipython
 plot_m0_m1_phi(model, rates, 4)
 #+end_src
 
 #+RESULTS:
-: c0a116ec-452d-45b7-b38a-a20779a023d0
+: 669c7e40-15c0-4ded-b12c-4bd2129521f7
 
 #+begin_src ipython
 m0, m1, phi = decode_bump(rates, axis=-1)
@@ -965,28 +954,7 @@ errors = np.array(error_list)
 #+end_src
 
 #+RESULTS:
-: e005b978-7515-47ae-a739-92daea5431e7
-
-#+begin_src ipython
-theta = torch.linspace(0, 2.0 * torch.pi, 1000)
-loss = skewed_gaussian_loss(theta, torch.tensor(0), 0, sigma=60*torch.pi / 180, alpha=1.0)
-# loss = gaussian_loss(theta, torch.tensor(0), sigma=60*torch.pi / 180)
-plt.plot(np.exp(-loss.cpu().detach().numpy()));
-#+end_src
-
-#+RESULTS:
-: aee83946-e0c3-4e73-951b-4d9cf51ae86e
-
-#+begin_src ipython
-if IF_BIAS:
-    print('bias')
-    pkl_save(phi, 'phase_bias', path="/home/leon/")
-else:
-    pkl_save(phi, 'phase', path="/home/leon/")
-#+end_src
-
-#+RESULTS:
-: 357832cb-b4d2-405d-986a-c2863c2e2b5a
+: ad7e01a5-b4f7-4be9-b005-772adff2926a
 
 #+begin_src ipython
 targets = (target_loc + np.pi) % (2 * np.pi) - np.pi
@@ -1003,7 +971,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: b5b800c2-fb79-460b-860a-c811de701d1b
+: b3cb51b4-8b9f-4e51-b9ee-7b2a6584c7a9
 
 * Connectivity
 
@@ -1018,14 +986,14 @@ if IF_BIASED_PHASES:
         model_state_dict = torch.load('../models/odr/odr_bias_%d_ref_%d.pth' % (reference, seed) )
 else:
     print(seed)
-    model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed)
+    model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed);
 
-model.load_state_dict(model_state_dict)
-model.eval()
+model.load_state_dict(model_state_dict);
+model.eval();
 #+end_src
 
 #+RESULTS:
-: 15a91e90-6cda-4535-bdad-d95602eb4821
+: 9b22120f-52a4-4c14-af53-7726533f7543
 
 #+begin_src ipython
 from src.lr_utils import LowRankWeights, clamp_tensor
@@ -1046,7 +1014,10 @@ else:
 #+end_src
 
 #+RESULTS:
-: 8f0b2837-b5a9-40f1-bea2-90614b016e98
+: 717f060d-d331-486b-b177-269c5045843f
+
+: 1
+:END:
 
 #+begin_src ipython
   plt.figure(figsize=(2.5*width, 1.5*height))  # Set the figure size (width, height) in inches
@@ -1083,7 +1054,7 @@ else:
 #+end_src
 
 #+RESULTS:
-: 43c599fb-d570-4337-afa0-743dc4a4b53e
+: d9bcd122-a28f-4a14-a0d9-0413c1a8d024
 
 #+begin_src ipython
 if IF_BIAS==0:
@@ -1092,7 +1063,7 @@ if IF_BIAS==0:
 #+end_src
 
 #+RESULTS:
-: 86b2713b-4c9b-42c1-88cf-69f5c3b57dcb
+: 1e437749-c2ad-436d-be33-43d26a8c0b5f
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height], sharey=1)
@@ -1105,24 +1076,24 @@ if IF_BIAS==0:
   ax[0].set_xlabel("Presynaptic")
   ax[0].set_ylabel("Postsynaptic")
   ax[0].set_title('Naive')
-  ax[0].set_xticks(np.linspace(0, 750, 4))
-  ax[0].set_yticks(np.linspace(0, 750, 4))
+  # ax[0].set_xticks(np.linspace(0, 750, 4))
+  # ax[0].set_yticks(np.linspace(0, 750, 4))
 
   im = ax[1].imshow(Cij, cmap='jet', aspect=1, vmin=0)
   ax[1].set_xlabel("Presynaptic")
   ax[1].set_ylabel("Postsynaptic")
   ax[1].set_title('Trained')
-  ax[1].set_xticks(np.linspace(0, 750, 4))
-  ax[1].set_yticks(np.linspace(0, 750, 4))
+  # ax[1].set_xticks(np.linspace(0, 750, 4))
+  # ax[1].set_yticks(np.linspace(0, 750, 4))
   plt.show()
 #+end_src
 
 #+RESULTS:
-: 517df6d6-6a9b-4987-bfa6-87a57ef483a5
+: 198cbc07-6e57-4ea7-b927-578dd9df7aba
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 58238618-c6a4-47b5-b3b1-119956e14773
+: 9a5692f2-cfab-43de-a9e9-3395528e39b6

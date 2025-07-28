@@ -144,25 +144,27 @@ class Network(nn.Module):
     def initSTP(self):
         """Creates stp model for population 0"""
 
-        if self.ODR_TRAIN or self.LR_TRAIN:
-            self.J_STP = nn.Parameter(torch.tensor(self.J_STP, device=self.device))
-        else:
-            self.J_STP = torch.tensor(self.J_STP, device=self.device) / torch.sqrt(self.Ka[0])
+        self.J_STP = torch.tensor(self.J_STP, device=self.device)
+        if self.training:
+            self.J_STP = nn.Parameter(self.J_STP)
 
         self.register_buffer('W_stp_T', torch.zeros((self.Na[0], self.Na[0]), device=self.device))
 
         # NEED .clone() here otherwise BAD THINGS HAPPEN !!!
-        self.W_stp_T = (
-            self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
-        )
+        self.W_stp_T = (self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0])
+
+        if self.LR_TYPE == 'full':
+            self.W_stp_T = torch.sqrt(self.Ka[0]) / self.Na[0]
 
         self.Wab_T.data[self.slices[0], self.slices[0]] = 0.0
 
         if self.TRAIN_EI:
             self.train_mask[self.slices[0], self.slices[0]] = 0.0
 
+
     def init_ff_input(self):
         return init_ff_input(self)
+
 
     def initRates(self, ff_input=None):
         if ff_input is None:
@@ -184,11 +186,7 @@ class Network(nn.Module):
         else:
             ff = ff_input[:, 0]
 
-        rates = Activation()(
-            ff + rec_input[0],
-            func_name=self.TF_TYPE,
-            thresh=self.thresh,
-        )
+        rates = Activation()(ff + rec_input[0], func_name=self.TF_TYPE, thresh=self.thresh)
 
         return rates, ff_input, rec_input
 
@@ -206,7 +204,7 @@ class Network(nn.Module):
         # update stp variables
         if self.IF_STP:
             Aux = self.stp(rates[:, self.slices[0]])  # Aux is now u * x * rates
-            hidden_stp = self.J_STP * Aux @ W_stp_T
+            hidden_stp = Aux @ W_stp_T
             hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
 
         # update batched EtoE
@@ -294,47 +292,37 @@ class Network(nn.Module):
 
         Wab_T = self.GAIN * self.Wab_T
         if self.IF_STP:
-            W_stp_T = self.GAIN * self.W_stp_T
+            W_stp_T = self.GAIN * self.J_STP * self.W_stp_T / torch.sqrt(self.Ka[0])
 
-        if self.training:
-            # Train Low rank vectors
+        if 1:
+            Wab_train = self.Wab_train[self.slices[0], self.slices[0]]
+
             if self.LR_TRAIN:
-                self.Wab_train = self.low_rank(self.LR_NORM, self.LR_CLAMP) / self.Na[0]
+                Wab_train = self.low_rank(self.LR_NORM, self.LR_CLAMP)
 
-            # Training
-            if self.ODR_TRAIN or self.LR_TRAIN:
-                if self.IF_STP:
-                    if self.ODR_TRAIN:
-                        W_stp_T = self.GAIN * (self.W_stp_T + self.Wab_train[self.slices[0], self.slices[0]])
-                        W_stp_T = W_stp_T / torch.sqrt(self.Ka[0])
+            if self.TRAIN_SCALE == 'all':
+                Wab_train = Wab_train / self.Na[0]
+            elif self.TRAIN_SCALE == 'weak':
+                Wab_train = Wab_train / self.Ka[0]
+            elif self.TRAIN_SCALE == 'strong':
+                Wab_train = Wab_train / torch.sqrt(self.Ka[0])
 
-                    if self.LR_TRAIN:
-                        if self.LR_TYPE == 'full':
-                            # W_stp_T = self.GAIN * (self.Wab_train[self.slices[0], self.slices[0]])
-                            W_stp_T = self.GAIN * (torch.sqrt(self.Ka[0]) / self.Na[0] + self.Wab_train[self.slices[0], self.slices[0]])
-                        elif self.LR_TYPE == 'sparse':
-                            W_stp_T = self.GAIN * self.W_stp_T * self.Wab_train[self.slices[0], self.slices[0]]
-                        elif self.LR_TYPE == 'rand_full':
-                            W_stp_T = self.GAIN * (self.W_stp_T / torch.sqrt(self.Ka[0])
-                                                   + self.Wab_train[self.slices[0], self.slices[0]]) # / torch.sqrt(self.Ka[0])
-                        elif self.LR_TYPE == 'rand_sparse':
-                            Wij = 1.0 + self.Wab_train[self.slices[0], self.slices[0]] / torch.sqrt(self.Ka[0])
-                            Wij_p = clamp_tensor(Wij, 0, self.slices)
-                            W_stp_T = self.GAIN * (self.W_stp_T * Wij_p) / torch.sqrt(self.Ka[0])
-                            # W_stp_T = self.GAIN * (self.W_stp_T * Wij_p + (1.0 - self.W_stp_T) * Wij_p) / torch.sqrt(self.Ka[0])
-                            # Wij_p = (torch.rand(self.Na[0], self.Na[0], device=self.device) <=
-                            # ((self.Ka[0] / self.Na[0]) * Wij).clamp_(min=0, max=1))
-                            # W_stp_T = self.GAIN * Wij_p / torch.sqrt(self.Ka[0])
+            if self.IF_STP:
+                W_stp_T = self.GAIN * self.J_STP * (self.W_stp_T + Wab_train) / torch.sqrt(self.Ka[0])
 
-                        if self.CLAMP:
-                            W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
+                if self.LR_TYPE == 'rand_sparse':
+                    Wij = 1.0 + Wab_train
+                    Wij_p = clamp_tensor(Wij, 0, self.slices)
+                    W_stp_T = self.GAIN * (self.W_stp_T * Wij_p) / torch.sqrt(self.Ka[0])
+                    del Wij, Wij_p
+
+                if self.CLAMP:
+                    W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
 
             if self.TRAIN_EI:
                 Wab_train = normalize_tensor(self.Wab_train, 0, self.slices, self.Na)
                 Wab_train = normalize_tensor(Wab_train, 1, self.slices, self.Na)
                 Wab_T = self.GAIN * (self.Wab_T + self.train_mask * Wab_train)
-
-                del Wab_train
 
                 if self.CLAMP:
                     # Check indices Think need some transpose
@@ -435,13 +423,12 @@ class Network(nn.Module):
 
         del ff_input, rec_input
 
-        if self.training:
-            self.Wab_T = Wab_T / self.GAIN
-            del Wab_T
+        # if self.training:
+        #     self.Wab_T = Wab_T / self.GAIN
+        #     del Wab_T
 
-            if self.IF_STP:
-                self.W_stp_T = W_stp_T / self.GAIN
-                del W_stp_T
+        # if self.IF_STP:
+        #     self.W_stp_T = W_stp_T / self.GAIN
 
         clear_cache()
 

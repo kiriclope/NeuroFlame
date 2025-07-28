@@ -24,7 +24,7 @@ def decode_bump_torch(signal, axis=-1):
         signal_copy = signal_copy.movedim(axis, -1)
 
     # Calculating the mean along the specified (or last) axis
-    m0 = torch.nanmean(signal_copy, dim=-1).real
+    m0 = torch.nanmean(signal_copy.real, dim=-1)
 
     length = signal_copy.shape[-1]
     dPhi = 2.0 * torch.pi / length

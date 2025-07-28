@@ -137,13 +137,6 @@ class LowRankWeights(nn.Module):
                 if self.LR_BIAS:
                     init.normal_(self.linear.bias, mean=0.0, std=1.0)
 
-        if self.LR_GAUSS:
-            self.mu_M = nn.Parameter(torch.randn(1, self.RANK, device=self.device) * 0.01)
-            self.log_sigma_M = nn.Parameter(torch.randn(1, self.RANK, device=self.device) * 0.1 - 1.0)
-            self.mu_N = nn.Parameter(torch.randn(1, self.RANK, device=self.device) * 0.01)
-            self.log_sigma_N = nn.Parameter(torch.randn(1, self.RANK, device=self.device) * 0.1 - 1.0)
-
-
     def forward(self, LR_NORM=0, LR_CLAMP=0):
         if LR_NORM:
             U_norm = self.U.norm(p='fro') + 1e-6
@@ -155,14 +148,6 @@ class LowRankWeights(nn.Module):
         else:
             U_norm = 1.0
             V_norm = 1.0
-
-        if self.LR_GAUSS:
-            epsilon_M = torch.randn((self.Na[0], self.RANK), device=self.device)
-            epsilon_N = torch.randn((self.Na[0], self.RANK), device=self.device)
-
-            # Reparameterize to get M and N
-            self.U = self.mu_M + torch.exp(self.log_sigma_M) * epsilon_M
-            self.V = self.mu_N + torch.exp(self.log_sigma_N) * epsilon_N
 
         if self.LR_MN:
             self.lr = self.lr_kappa * ((self.U / U_norm) @ (self.V.T / V_norm))
