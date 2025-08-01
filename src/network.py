@@ -4,7 +4,7 @@ from torch.sparse import to_sparse_semi_structured, SparseSemiStructuredTensor
 
 SparseSemiStructuredTensor._FORCE_CUTLASS = True
 
-from src.configuration import Configuration
+from src.configuration import Configuration, init_time_const
 from src.connectivity import Connectivity
 from src.activation import Activation
 from src.plasticity import Plasticity
@@ -235,6 +235,11 @@ class Network(nn.Module):
 
             net_input = net_input + rec_input[1]
 
+        # this makes autograd complain about the graph
+        if self.IF_ADAPT:
+            self.thresh = self.thresh * self.EXP_DT_TAU_ADAPT
+            self.thresh = self.thresh + nn.ReLU()(rates * self.A_ADAPT) * self.DT_TAU_ADAPT
+
         # compute non linearity
         non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.thresh)
 
@@ -244,14 +249,9 @@ class Network(nn.Module):
         else:
             rates = non_linear
 
-        # this makes autograd complain about the graph
-        # if self.IF_ADAPT:
-        #     self.thresh = self.thresh * self.EXP_DT_TAU_ADAPT
-        #     self.thresh = self.thresh + nn.ReLU()(rates * self.A_ADAPT) * self.DT_TAU_ADAPT
-
         return rates, rec_input
 
-    def forward(self, ff_input=None, REC_LAST_ONLY=0, RET_FF=0, RET_STP=0, RET_REC=0):
+    def forward(self, ff_input=None, REC_LAST_ONLY=0, RET_FF=0, RET_STP=0, RET_REC=0, IF_INIT=1):
         """
         Main method of Network class, runs networks dynamics over set of timesteps
         and returns rates at each time point or just the last time point.
@@ -263,15 +263,17 @@ class Network(nn.Module):
         """
 
         # Initialization (if  ff_input is None, ff_input is generated)
-        rates, ff_input, rec_input = self.initRates(ff_input)
-        # ff_input = self.dropout(ff_input)
+        if IF_INIT:
+            print('Initializing network')
+            rates, ff_input, rec_input = self.initRates(ff_input)
+        else:
+            # self.T_STEADY = 0
+            # init_time_const(self)
+            rates, rec_input = self.rates, self.rec_input
 
         # NEED .clone() here otherwise BAD THINGS HAPPEN
         if self.IF_BATCH_J:
-            self.W_batch_T = (
-                self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
-            )
-
+            self.W_batch_T = self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0]
             self.Wab_T.data[self.slices[0], self.slices[0]] = 0
 
         # Add STP
@@ -285,8 +287,14 @@ class Network(nn.Module):
                 self.DT,
                 (self.N_BATCH, self.Na[0]),
                 STP_TYPE=self.STP_TYPE,
+                IF_INIT=IF_INIT,
                 device=self.device,
             )
+
+            # previous state is loaded
+            if IF_INIT == 0:
+                self.stp.u_stp = self.u_stp
+                self.stp.x_stp = self.x_stp
 
             self.x_list, self.u_list = [], []
 
@@ -392,6 +400,15 @@ class Network(nn.Module):
                     mv_ff = 0
                     mv_rec = 0
 
+        # makes serialisation easier treating it as epochs
+        # we save the network state and run 2 trials at a time
+        self.rates = rates
+        self.rec_input = rec_input
+
+        if self.IF_STP:
+            self.u_stp = self.stp.u_stp
+            self.x_stp = self.stp.x_stp
+
         # returns last step
         rates = rates[..., self.slices[0]]
 
@@ -399,14 +416,15 @@ class Network(nn.Module):
         if REC_LAST_ONLY == 0:
             # Stack list on 1st dim so that output is (N_BATCH, N_STEPS, N_NEURON)
             rates = torch.stack(rates_list, dim=1)
-            # del rates_list
+            del rates_list
 
             if RET_REC:
                 self.rec_input = torch.stack(rec_list, dim=2)
+                del rec_list
 
             if self.LIVE_FF_UPDATE and RET_FF:  # returns ff input
                 self.ff_input = torch.stack(ff_list, dim=1)
-                # del ff_list
+                del ff_list
 
             if self.IF_STP and RET_STP:  # returns stp u and x
                 self.u_list = torch.stack(self.u_list, dim=1)
@@ -425,7 +443,8 @@ class Network(nn.Module):
 
         # if self.training:
         #     self.Wab_T = Wab_T / self.GAIN
-        #     del Wab_T
+        del Wab_T
+        del W_stp_T
 
         # if self.IF_STP:
         #     self.W_stp_T = W_stp_T / self.GAIN

@@ -1,6 +1,6 @@
 #+STARTUP: fold
-#+TITLE: Serial Biases in the ODR
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_sb :kernel torch :exports results :output-dir ./figures/odr :file (lc/org-babel-tangle-figure-filename)
+#+TITLE: ODR serial bias
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_sb :kernel torch :exports results :output-dir ./figures/odr_sb :file (lc/org-babel-tangle-figure-filename)
 
 * Notebook Settings
 
@@ -9,7 +9,7 @@
   %autoreload 2
   %reload_ext autoreload
 
-  %run ../notebooks/setup.py
+  %run ../../../notebooks/setup.py
   %matplotlib inline
   %config InlineBackend.figure_format = 'png'
 
@@ -31,15 +31,14 @@
   import torch.optim as optim
   import torch.nn.functional as F
   from torch.utils.data import Dataset, TensorDataset, DataLoader
+  from scipy.stats import binned_statistic
 #+end_src
-
-#+RESULTS:
 
 #+RESULTS:
 
 #+begin_src ipython
   import sys
-  sys.path.insert(0, '../')
+  sys.path.insert(0, '../../../')
 
   import pandas as pd
   import torch.nn as nn
@@ -77,22 +76,25 @@
 * Helpers
 
 #+begin_src ipython
-def get_fourier_moments(signal, axis=-1):
-    # Perform the FFT
-    fft_coeffs = np.fft.fft(signal, axis=axis)
+def map2center(angles):
+    """Map angles from [0, 2π] to [-π, π] using PyTorch tensors."""
+    return np.where(angles > np.pi, angles - 2 * np.pi, angles)
 
-    # Calculate the zero, first, and second Fourier moments
-    zero_moment = fft_coeffs[..., 0]
-    first_moment = fft_coeffs[..., 1]
+def map2pos(angles):
+    """Map angles from [-π, π] to [0, 2π] using PyTorch tensors."""
+    return np.where(angles < 0, angles + 2 * np.pi, angles)
+#+end_src
 
-    # Calculate magnitude m0, m1, and m2
-    m0 = np.abs(zero_moment) / signal.shape[axis]  # Normalize m0 by the signal length
-    m1 = 2.0 * np.abs(first_moment) / signal.shape[axis]
+#+RESULTS:
 
-    # Calculate the phase of the signal
-    phases = np.angle(first_moment) % (2.0 * torch.pi)
+#+begin_src ipython
+def maptens2center(angles):
+    """Map angles from [0, 2π] to [-π, π] using PyTorch tensors."""
+    return torch.where(angles > torch.pi, angles - 2 * torch.pi, angles)
 
-    return m0, m1, phases
+def maptens2pos(angles):
+    """Map angles from [-π, π] to [0, 2π] using PyTorch tensors."""
+    return torch.where(angles < 0, angles + 2 * torch.pi, angles)
 #+end_src
 
 #+RESULTS:
@@ -111,7 +113,6 @@ def add_vlines(model, ax=None):
 
 #+RESULTS:
 
-* Bias targets
 
 #+begin_src ipython
 import torch
@@ -135,27 +136,59 @@ def generate_weighted_phase_samples(N_BATCH, angles, preferred_angle, sigma):
     phase_samples = angles_tensor[indices].reshape(N_BATCH, 1)
 
     return phase_samples
-
-# Parameters
-N_BATCH = 10000
-angles = np.array([0., 45., 90., 135., 180., 225., 270., 315.])
-reference = 90.  # Example preferred angle
-sigma = 75.  # Standard deviation of the Gaussian
-
-# Generate samples
-phase_samples = generate_weighted_phase_samples(N_BATCH, angles, reference, sigma)
-print(phase_samples.shape)
-plt.hist(phase_samples[:,0], bins=8);
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: torch.Size([10000, 1])
-[[./figures/odr/figure_6.png]]
-:END:
 
 #+begin_src ipython
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
 
+def continuous_biased_phases(N_BATCH, preferred_angle, sigma):
+    # Generate samples from a normal distribution using PyTorch
+    phase_samples = torch.normal(mean=preferred_angle, std=sigma, size=(N_BATCH, 1))
+
+    # Normalize angles to the range [0, 360)
+    phase_samples = phase_samples % 360
+
+    return phase_samples
+    #+end_src
+
+    #+RESULTS:
+
+#+begin_src ipython
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+
+def continuous_bimodal_phases(N_BATCH, preferred_angle, sigma):
+    # Sample half from preferred_angle and half from preferred_angle + 180
+    half_batch = N_BATCH // 2
+
+    # Sample from preferred_angle
+    samples_1 = torch.normal(mean=preferred_angle, std=sigma, size=(half_batch, 1))
+
+    # Sample from preferred_angle + 180
+    samples_2 = torch.normal(mean=(preferred_angle + 180) % 360, std=sigma, size=(N_BATCH - half_batch, 1))
+
+    # Combine samples and wrap around 360
+    phase_samples = torch.cat((samples_1, samples_2), dim=0) % 360
+
+    return phase_samples
+
+# Example usage
+# N_BATCH = 500
+# preferred_angle = 45
+# sigma = 45
+
+# samples = continuous_bimodal_phases(N_BATCH, preferred_angle, sigma)
+
+# plt.hist(samples.numpy(), bins='auto', density=True)
+# plt.xlabel('Phase (degrees)')
+# plt.ylabel('Probability Density')
+# plt.title('Bimodal Distribution of Phases')
+# plt.show()
 #+end_src
 
 #+RESULTS:
@@ -163,166 +196,88 @@ plt.hist(phase_samples[:,0], bins=8);
 * Model
 
 #+begin_src ipython
+kwargs = {
+    'GAIN': 1.0,
+    'DURATION': 20.0,
+    # 'T_STIM_ON': [1.0, 5.0, 7.0, 15.0],
+    # 'T_STIM_OFF': [2.0, 6.0, 8.0, 16.0],
+    'T_STIM_ON': [1.0, 6.0, 8.0, 18],
+    'T_STIM_OFF': [2.0, 7.0, 9.0, 19],
+    'I0': [1.0, -5.0, 1.0, -10.0],
+    'PHI0': [180.0, 180, 180, 180],
+    'SIGMA0': [1.0, 0.0, 1.0, 0.0],
+    'RANDOM_DELAY': 0,
+    'MIN_DELAY': 2,
+    'MAX_DELAY': 5,
+}
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
-conf_name = "test_odr_EI.yml"
+conf_name = "train_odr_EI.yml"
 DEVICE = 'cuda:1'
 seed = np.random.randint(0, 1e6)
-print(seed)
 
-seed = 181678
-seed = 975532
-
+seed = 1
+print('seed', seed)
 #+end_src
 
 #+RESULTS:
-: 269396
+: seed 1
 
 #+begin_src ipython
-model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, LIVE_FF_UPDATE=1)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-model_state_dict = torch.load('models/odr_%d.pth' % seed)
-# model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=4)
-model.load_state_dict(model_state_dict)
-model.eval()  # Set to evaluation mode
-#+end_src
-
-#+RESULTS:
-: Network(
-:   (dropout): Dropout(p=0.0, inplace=False)
-: )
-
-#+begin_src ipython
-print(model.J_STP)
-print(model.N_BATCH)
-print(model.RANDOM_DELAY)
-#+end_src
-
-#+RESULTS:
-: Parameter containing:
-: tensor(41.7043, device='cuda:1', requires_grad=True)
-: 1
-: 0
-
-* Batching Live Inputs
-
-#+begin_src ipython
-  N_PHASE = 8
-  N_BATCH = 160 * N_PHASE
-
-  PHI0 = model.PHI0.unsqueeze(-1).repeat((N_BATCH, 1, 1))
-
-  # phases =  [  0.,  45.,  90., 135., 180., 225., 270., 315.]
-  # phases_tensor = torch.tensor(phases)
-  # PHI0[:, 0] = phases_tensor[torch.randint(0, len(phases), (N_BATCH,))].unsqueeze(1)
-  # PHI0[:, -1] = phases_tensor[torch.randint(0, len(phases), (N_BATCH,))].unsqueeze(1)
-  # print(PHI0.shape)
-
-  PHI0[:, 0] = torch.randint(0, 360, (N_BATCH, 1)).to(DEVICE)
-  PHI0[:, -1] = torch.randint(0, 360, (N_BATCH, 1)).to(DEVICE)
-
-  # PHI0[:, 0] = generate_weighted_phase_samples(N_BATCH, angles, reference, sigma)
-  # PHI0[:, 1] = generate_weighted_phase_samples(N_BATCH, angles, reference, sigma)
-  # print(PHI0.shape)
- #+end_src
-
-#+RESULTS:
-: torch.Size([1, 3])
-
-#+begin_src ipython
-fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-ax[0].hist(PHI0[:, 0, 0].cpu(), bins=15)
-ax[0].set_xlabel('Prev. Stim')
-ax[1].hist(PHI0[:,-1, 0].cpu(), bins=15)
-ax[1].set_xlabel('Curr. Stim')
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr/figure_13.png]]
-
-#+begin_src ipython
-  model.PHI0 = PHI0
-  model.N_BATCH = N_PHASE
-  rates = model().cpu().detach().numpy()
-  print(rates.shape)
-#+end_src
-
-#+RESULTS:
-: (1280, 81, 750)
-
-#+begin_src ipython
-  #  m0, m1, phi = decode_bump(rates, axis=-1)
-  m0, m1, phi = get_fourier_moments(rates, axis=-1)
-  print(phi.shape)
-#+end_src
-
-#+RESULTS:
-: (1280, 81)
-
-* Batching Inputs Sequentially
-
-#+begin_src ipython
-    model.N_BATCH = N_BATCH
-    labels = torch.randint(0, 360, (N_BATCH, 1)).to(DEVICE)
-    model.PHI0 = torch.ones((N_BATCH, 2, 1), device=DEVICE, dtype=torch.float)
-    model.PHI0[:, 0] = labels
-
-    ff_input = model.init_ff_input()
-    print(model.PHI0.shape, ff_input.shape, labels.shape)
-#+end_src
-
-#+begin_src ipython
-# model.N_BATCH = 96
-# ff_input = []
-# labels = []
-
-# phase_list =  torch.tensor([  0.,  45.,  90., 135., 180., 225., 270., 315.], device=DEVICE)
-
-# model.PHI0 = torch.ones((model.N_BATCH, 3, 1), device=DEVICE, dtype=torch.float
-#                         )
-
-# for i in range(len(phase_list)):
-#     model.PHI0[:, 0] = phase_list[i]
-#     model.PHI0[:, -1] = phase_list[torch.randint(0, len(phase_list), (model.N_BATCH,))].unsqueeze(1)
-
-#     label0 = torch.ones(model.N_BATCH, device=DEVICE, dtype=torch.float) * model.PHI0[:, 0, 0] * torch.pi / 180.0
-#     label1 = torch.ones(model.N_BATCH, device=DEVICE, dtype=torch.float) * model.PHI0[:, -1, 0] * torch.pi / 180.0
-
-#     labels.append(torch.vstack((label0, label1)))
-#     ff_input.append(model.init_ff_input())
-
-# labels = torch.hstack(labels).T
-# ff_input = torch.vstack(ff_input)
-# print('ff_input', ff_input.shape, 'labels', labels.shape)
-# PHI0 = labels.unsqueeze(-1)
+N_BATCH = 128*3
+model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=N_BATCH, **kwargs)
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-# fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-# ax[0].hist(PHI0[:, 0, 0].cpu(), bins=15)
-# ax[1].hist(PHI0[:,-1, 0].cpu(), bins=15)
-# plt.show()
- #+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-# rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
-# print('ff_input', ff_input.shape)
-# print('rates', rates.shape)
+model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed)
+model.load_state_dict(model_state_dict);
+model.eval();
 #+end_src
 
 #+RESULTS:
 
+* Batching Inputs
+
 #+begin_src ipython
-  # m0, m1, phi = decode_bump(rates, axis=-1)
-  # print(phi.shape)
+print(N_BATCH)
+model.N_BATCH = N_BATCH
+model.PHI0 = torch.randint(low=0, high=360, size=(N_BATCH, len(model.I0), 1), device=DEVICE, dtype=torch.float)
+
+ff_input = model.init_ff_input()
+m0, m1, phase = decode_bump_torch(ff_input[..., model.slices[0]], axis=-1)
+#+end_src
+
+#+RESULTS:
+: 384
+: torch.Size([1, 750]) torch.Size([384, 1])
+: torch.Size([1, 750]) torch.Size([384, 1])
+: torch.Size([1, 750]) torch.Size([384, 1])
+: torch.Size([1, 750]) torch.Size([384, 1])
+
+#+begin_src ipython
+print(model.start_indices.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([4, 384])
+
+#+begin_src ipython
+rates_tensor = model.forward(ff_input=ff_input)
+rates = rates_tensor.cpu().detach().numpy()
+print('rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: rates (384, 201, 750)
+
+#+begin_src ipython
+m0, m1, phi = decode_bump(rates, axis=-1)
 #+end_src
 
 #+RESULTS:
@@ -355,210 +310,316 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_20.png]]
-
-#+begin_src ipython
-PHI0 = PHI0.cpu().detach().numpy()
-print(PHI0.shape)
-#+end_src
-
-#+RESULTS:
-: (1280, 3, 1)
+[[./figures/odr_sb/figure_18.png]]
 
 ** errors
 
 #+begin_src ipython
-target_loc = PHI0[:, -1]
+PHI0 = model.PHI0.cpu().detach().numpy() * 180.0 / np.pi
+target_loc = PHI0[:, 2]
 
-rel_loc = (PHI0[:, 0] - target_loc) * np.pi / 180.0
+rel_loc = (PHI0[:, 0] - PHI0[:, 2]) * np.pi / 180.0
 rel_loc = (rel_loc + np.pi) % (2 * np.pi) - np.pi
 rel_loc *= 180 / np.pi
 
-ref_loc = (PHI0[:, 0] - reference) * np.pi / 180.0
-ref_loc = (ref_loc + np.pi) % (2 * np.pi) - np.pi
-ref_loc *= 180 / np.pi
+error_curr = (phi - PHI0[:, 2] * np.pi / 180.0)
+error_curr = (error_curr + np.pi) % (2 * np.pi) - np.pi
+error_curr *= 180 / np.pi
 
-errors = (phi - target_loc * np.pi / 180.0)
-errors = (errors + np.pi) % (2 * np.pi) - np.pi
-errors *= 180 / np.pi
+error_prev = ((phi - PHI0[:, 0] * np.pi / 180.0))
+error_prev = (error_prev + np.pi) % (2 * np.pi) - np.pi
+error_prev *= 180 / np.pi
 
-errors2 = (phi - PHI0[:, 0] * np.pi / 180.0)
-errors2 = (errors2 + np.pi) % (2 * np.pi) - np.pi
-errors2 *= 180 / np.pi
-
-print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
+errors = np.stack((error_prev, error_curr))
+print(errors.shape, target_loc.shape, rel_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (1280, 81) (1280, 1) (1280, 1) (1280, 1)
+: (2, 384, 201) (384, 1) (384, 1)
 
 #+begin_src ipython
+time_points = np.linspace(0, model.DURATION, errors.shape[-1])
+idx = np.random.randint(errors.shape[1], size=100)
+
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-ax[0].plot(np.linspace(0, model.DURATION, errors.shape[-1]), errors2[:32].T)
+ax[0].plot(time_points, errors[0][idx].T, alpha=.4)
 add_vlines(model, ax[0])
-# ax[0].set_xlim([2.5, 4.5])
+
 ax[0].set_xlabel('t')
 ax[0].set_ylabel('prev. error (°)')
 
-ax[1].plot(np.linspace(0, model.DURATION, errors.shape[-1]), errors[:32].T)
+ax[1].plot(time_points, errors[1][idx].T, alpha=.4)
 add_vlines(model, ax[1])
+
 ax[1].set_xlabel('t')
 ax[1].set_ylabel('curr. error (°)')
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_23.png]]
+[[./figures/odr_sb/figure_20.png]]
 
 #+begin_src ipython
-fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
-ax[0].hist(rel_loc[:, 0], bins='auto')
-ax[0].set_xlabel('Rel. Location (°)')
+print(phi.shape, PHI0.shape, model.start_indices.shape)
+stim_start = (model.DT * (model.start_indices - model.N_STEADY)).cpu().numpy()
+stim_start_idx = ((model.start_indices - model.N_STEADY) / model.N_WINDOW - 1).to(int).cpu().numpy()
+stim_start_idx_half = ((model.start_indices - model.N_STEADY) / model.N_WINDOW - 75).to(int).cpu().numpy()
+print(stim_start[1][:5], model.T_STIM_ON)
+print(stim_start_idx[1][:5])
+#+end_src
 
-ax[1].hist(errors2[:, int((model.N_STIM_ON[1]-model.N_STEADY)/model.N_WINDOW)], bins='auto')
-ax[1].set_xlabel('Prev. Errors (°)')
+#+RESULTS:
+: (384, 201) (384, 4, 1) torch.Size([4, 384])
+: [6. 6. 6. 6. 6.] [1.0, 6.0, 8.0, 18]
+: [59 59 59 59 59]
 
-ax[2].hist(errors[:, -1], bins=64)
-ax[2].set_xlabel('Curr. Errors (°)')
-# ax[1].set_xlim([-45, 45])
+#+begin_src ipython
+time_points = np.linspace(0, model.DURATION, errors.shape[-1])
+idx = np.random.randint(errors.shape[1], size=(1,))
+
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+ax[0].plot(errors[0][idx].T, '-o')
+ax[0].set_xlabel('t')
+ax[0].set_ylabel('prev. error (°)')
+
+ax[0].axvline(stim_start_idx[0][idx], ls='--', c='k')
+ax[0].axvline(stim_start_idx[1][idx], ls='--', c='k')
+ax[0].axvline(stim_start_idx[2][idx], ls='--', c='k')
+ax[0].axvline(stim_start_idx[3][idx], ls='--', c='k')
+
+ax[1].plot(errors[1][idx].T)
+
+ax[1].axvline(stim_start_idx[0][idx], ls='--', c='k')
+ax[1].axvline(stim_start_idx[1][idx], ls='--', c='k')
+ax[1].axvline(stim_start_idx[2][idx], ls='--', c='k')
+ax[1].axvline(stim_start_idx[3][idx], ls='--', c='k')
+
+ax[1].axvline(stim_start_idx_half[0][idx], ls='--', c='r')
+ax[1].axvline(stim_start_idx_half[1][idx], ls='--', c='r')
+ax[1].axvline(stim_start_idx_half[2][idx], ls='--', c='r')
+ax[1].axvline(stim_start_idx_half[3][idx], ls='--', c='r')
+
+ax[1].set_xlabel('t')
+ax[1].set_ylabel('curr. error (°)')
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_24.png]]
+[[./figures/odr_sb/figure_22.png]]
 
 #+begin_src ipython
-mask = np.abs(errors) <= 35
-print(mask.shape)
+time_points = np.linspace(0, model.DURATION, errors.shape[-1])
+idx = np.random.randint(errors.shape[1])
 
-errors = np.where(mask, errors, np.nan)[:, -1]
-print(errors.shape)
-rel_loc = rel_loc[~np.isnan(errors)]
-ref_loc = ref_loc[~np.isnan(errors)]
-target_loc = target_loc[:, -1][~np.isnan(errors), np.newaxis]
-errors = errors[~np.isnan(errors), np.newaxis]
-# errors = errors[mask]
-print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
-#+end_src
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+ax[0].plot(time_points, errors[0][idx].T)
+ax[0].set_xlabel('t')
+ax[0].set_ylabel('prev. error (°)')
 
-#+RESULTS:
-: (1280, 81)
-: (1280,)
-: (269, 1) (269, 1) (269, 1) (269, 1)
+ax[0].axvline(stim_start[0][idx], ls='--', c='k')
+ax[0].axvline(stim_start[1][idx], ls='--', c='k')
+ax[0].axvline(stim_start[2][idx], ls='--', c='k')
+ax[0].axvline(stim_start[3][idx], ls='--', c='k')
 
-#+begin_src ipython
-fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
-ax[0].hist(rel_loc[:, 0], bins='auto')
-ax[0].set_xlabel('Rel. Location (°)')
+ax[1].plot(time_points, errors[1][idx].T)
 
-ax[1].hist(errors2[:, int((model.N_STIM_ON[1]-model.N_STEADY)/model.N_WINDOW)], bins='auto')
-ax[1].set_xlabel('Prev. Errors (°)')
+ax[1].axvline(stim_start[0][idx], ls='--', c='k')
+ax[1].axvline(stim_start[1][idx], ls='--', c='k')
+ax[1].axvline(stim_start[2][idx], ls='--', c='k')
+ax[1].axvline(stim_start[3][idx], ls='--', c='k')
 
-ax[2].hist(errors[:, -1], bins='auto')
-ax[2].set_xlabel('Curr. Errors (°)')
-# ax[1].set_xlim([-45, 45])
+ax[1].set_xlabel('t')
+ax[1].set_ylabel('curr. error (°)')
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_26.png]]
+[[./figures/odr_sb/figure_23.png]]
+
+#+begin_src ipython
+end_point = []
+for i, j in enumerate([1, 3]):
+    end_ = []
+    for k in range(errors.shape[1]):
+        idx = stim_start_idx[j][k]
+        end_.append(errors[i][k][idx])
+
+    end_point.append(end_)
+
+end_point = np.array(end_point)
+print(end_point.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 384)
+
+#+begin_src ipython
+end_point_half = []
+for i, j in enumerate([1, 3]):
+    end_ = []
+    for k in range(errors.shape[1]):
+        idx = stim_start_idx_half[j][k]
+        end_.append(errors[i][k][idx])
+
+    end_point_half.append(end_)
+
+end_point_half = np.array(end_point_half)
+print(end_point_half.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 384)
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
+ax[0].hist(target_loc, bins='auto')
+ax[0].set_xlabel('Targets (°)')
+
+ax[1].hist(end_point[0], bins='auto')
+ax[1].set_xlabel('Prev. Errors (°)')
+
+ax[2].hist(end_point[1], bins='auto')
+ax[2].set_xlabel('Curr. Errors (°)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_26.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 ** biases
 
 #+begin_src ipython
-fig, ax = plt.subplots(1, 3, figsize=[2.5*width, height])
+n_bins = 10
+data = pd.DataFrame({'target_loc': target_loc[:, -1], 'rel_loc': rel_loc[:, -1], 'errors': end_point[1], 'errors_half': end_point_half[1]})
+#+end_src
 
-ax[0].plot(target_loc[:, 0], errors[:,-1], 'o')
+#+RESULTS:
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
+
+ax[0].plot(data['target_loc'], data['errors'], 'o', alpha=.1)
 ax[0].set_xlabel('Target Loc. (°)')
 ax[0].set_ylabel('Error (°)')
 
-from scipy.stats import binned_statistic
-stt = binned_statistic(target_loc[:,0], errors[:,-1], statistic='mean', bins=3, range=[0, 360])
+stt = binned_statistic(data['target_loc'], data['errors'], statistic='mean', bins=n_bins, range=[0, 360])
 dstt = np.mean(np.diff(stt.bin_edges))
 ax[0].plot(stt.bin_edges[:-1]+dstt/2,stt.statistic,'r')
 
 ax[0].axhline(color='k', linestyle=":")
 
-ax[1].plot(rel_loc[:, 0], errors[:,-1], 'bo')
-# ax[1].plot(rel_loc2[:, 0], errors2[:,-1], 'ro')
+ax[1].plot(data['rel_loc'], data['errors'], 'o', alpha=.1)
 ax[1].set_xlabel('Rel. Loc. (°)')
 ax[1].set_ylabel('Error (°)')
 
-stt = binned_statistic(rel_loc[:, 0], errors[:, -1], statistic='mean', bins=6, range=[-180, 180])
+stt = binned_statistic(data['rel_loc'], data['errors'], statistic='mean', bins=n_bins, range=[-180, 180])
 dstt = np.mean(np.diff(stt.bin_edges))
 ax[1].plot(stt.bin_edges[:-1]+dstt/2, stt.statistic, 'b')
 
-ax[2].plot(ref_loc[:, 0], errors[:,-1], 'bo')
-# ax[2].plot(ref_loc2[:, 0], errors2[:,-1], 'ro')
-ax[2].set_xlabel('Ref. Loc. (°)')
+data['rel_loc_abs'] = np.abs(data['rel_loc'])             # Map -180..180 -> 0..180
+data['errors_signed'] = data['errors'] * np.sign(data['rel_loc']) # error "toward/away": flip sign for >0
+
+ax[2].plot(data['rel_loc_abs'], data['errors_signed'], 'o', alpha=0.1)
+ax[2].set_xlabel('|Rel. Loc.| (°)')
 ax[2].set_ylabel('Error (°)')
 
-stt = binned_statistic(ref_loc[:, 0], errors[:, -1], statistic='mean', bins=6, range=[-180, 180])
-dstt = np.mean(np.diff(stt.bin_edges))
-ax[2].plot(stt.bin_edges[:-1]+dstt/2, stt.statistic, 'b')
+bin_stat = binned_statistic(data['rel_loc_abs'], data['errors_signed'], statistic='mean', bins=n_bins, range=[0, 180])
+dstt = np.mean(np.diff(bin_stat.bin_edges))
+ax[2].plot(bin_stat.bin_edges[:-1] + dstt/2, bin_stat.statistic, 'b')
+ax[2].axhline(color='k', linestyle=":")
 
-# stt = binned_statistic(rel_loc2[:, 0], errors2[:, -1], statistic='mean', bins=6, range=[-180, 180])
-# dstt = np.mean(np.diff(stt.bin_edges))
-# ax[1].plot(stt.bin_edges[:-1]+dstt/2,stt.statistic, 'r')
-# ax[1].set_ylim([-120, 120])
-# ax[1].axhline(color='k', linestyle=":")
-
+# plt.savefig('../figures/figs/christos/uncorr_biases.svg', dpi=300)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_27.png]]
+[[./figures/odr_sb/figure_29.png]]
 
 #+begin_src ipython
-import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import pandas as pd
 
-# Assuming rel_loc and errors are defined earlier
-data = pd.DataFrame({'rel_loc': rel_loc[:, 0], 'errors': errors[:, -1], 'ref_loc': ref_loc[:, -1]})
+# 1. Bias-correct both error and error_half
+bin_edges = np.linspace(0, 360, n_bins + 1)
+data['bin_target'] = pd.cut(data['target_loc'], bins=bin_edges, include_lowest=True)
+mean_errors_per_bin        = data.groupby('bin_target')['errors'].mean()
+mean_errors_half_per_bin   = data.groupby('bin_target')['errors_half'].mean()
+data['adjusted_errors']        = data['errors']      - data['bin_target'].map(mean_errors_per_bin).astype(float)
+data['adjusted_errors_half']   = data['errors_half'] - data['bin_target'].map(mean_errors_half_per_bin).astype(float)
 
-# Bin data using pandas cut
-data['bin'] = pd.cut(data['rel_loc'], bins=8)
-# Calculate mean and standard error for each bin
-binned_data = data.groupby('bin')['errors'].agg(['mean', 'sem'])
-# Get bin centers
-bin_edges = binned_data.index.get_level_values(0)
-bin_centers = (bin_edges.categories.left + bin_edges.categories.right) / 2
+# 2. Bin by relative location for both sessions (full version, [-180, 180])
+data['bin_rel'] = pd.cut(data['rel_loc'], bins=n_bins)
+bin_rel       = data.groupby('bin_rel')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
+bin_rel_half  = data.groupby('bin_rel')['adjusted_errors_half'].agg(['mean', 'sem']).reset_index()
+edges  = bin_rel['bin_rel'].cat.categories
+centers = (edges.left + edges.right) / 2
 
-# Plot
-fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-ax[0].plot(bin_centers, binned_data['mean'], 'b')
-ax[0].fill_between(bin_centers,
-                binned_data['mean'] - binned_data['sem'],
-                binned_data['mean'] + binned_data['sem'],
-                color='b', alpha=0.2)
-# ax[0].set_ylim([-30, 30])
-ax[0].axhline(color='k', linestyle=":")
-ax[0].set_xlabel('Rel. Loc. (°)')
-ax[0].set_ylabel('Curr. Error (°)')
+# 3. FLIP SIGN for abs(rel_loc): defects on the left (-) are flipped so all bins reflect the same "direction"
+data['rel_loc_abs'] = np.abs(data['rel_loc'])
+data['bin_rel_abs'] = pd.cut(data['rel_loc_abs'], bins=n_bins, include_lowest=True)
 
-data['bin'] = pd.cut(data['ref_loc'], bins=8)
-# Calculate mean and standard error for each bin
-binned_data = data.groupby('bin')['errors'].agg(['mean', 'sem'])
-# Get bin centers
-bin_edges = binned_data.index.get_level_values(0)
-bin_centers = (bin_edges.categories.left + bin_edges.categories.right) / 2
+# Flip errors for abs plot:
+data['adjusted_errors_abs']      = data['adjusted_errors'] * np.sign(data['rel_loc'])
+data['adjusted_errors_half_abs'] = data['adjusted_errors_half'] * np.sign(data['rel_loc'])
 
-ax[1].plot(bin_centers, binned_data['mean'], 'b')
-ax[1].fill_between(bin_centers,
-                binned_data['mean'] - binned_data['sem'],
-                binned_data['mean'] + binned_data['sem'],
-                color='b', alpha=0.2)
-# ax[1].set_ylim([-30, 30])
-ax[1].axhline(color='k', linestyle=":")
-ax[1].set_xlabel('Ref. Loc. (°)')
-ax[1].set_ylabel('Curr. Error (°)')
+bin_rel_abs      = data.groupby('bin_rel_abs')['adjusted_errors_abs'].agg(['mean', 'sem']).reset_index()
+bin_rel_abs_half = data.groupby('bin_rel_abs')['adjusted_errors_half_abs'].agg(['mean', 'sem']).reset_index()
+edges_abs = bin_rel_abs['bin_rel_abs'].cat.categories
+centers_abs = (edges_abs.left + edges_abs.right) / 2
 
+# 4. Bin by target location for target-centered analysis (optional)
+bin_target      = data.groupby('bin_target')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
+bin_target_half = data.groupby('bin_target')['adjusted_errors_half'].agg(['mean', 'sem']).reset_index()
+edges_target = bin_target['bin_target'].cat.categories
+target_centers = (edges_target.left + edges_target.right) / 2
+
+# Result: bin_rel, bin_rel_half, bin_rel_abs, bin_rel_abs_half, bin_target, bin_target_half, and centers for all.
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
+
+# Panel 1: By Target Location
+ax[0].plot(target_centers, bin_target['mean'], 'b')
+ax[0].fill_between(target_centers, bin_target['mean'] - bin_target['sem'], bin_target['mean'] + bin_target['sem'], color='b', alpha=0.2)
+ax[0].axhline(0, color='k', linestyle=":")
+ax[0].set_xlabel('Target Loc. (°)')
+ax[0].set_ylabel('Corrected Error (°)')
+
+# Panel 2: By Relative Location (Full vs Half session, -180..180)
+ax[1].plot(centers, bin_rel['mean'], 'r', label='full')
+ax[1].fill_between(centers, bin_rel['mean'] - bin_rel['sem'], bin_rel['mean'] + bin_rel['sem'], color='r', alpha=0.2)
+ax[1].plot(centers, bin_rel_half['mean'], 'b', label='half')
+ax[1].fill_between(centers, bin_rel_half['mean'] - bin_rel_half['sem'], bin_rel_half['mean'] + bin_rel_half['sem'], color='b', alpha=0.2)
+ax[1].axhline(0, color='k', linestyle=":")
+ax[1].set_xlabel('Rel. Loc. (°)')
+ax[1].set_ylabel('Corrected Error (°)')
+ax[1].legend(fontsize=12)
+
+# Panel 3: By |Relative Location| (Full and Half)
+ax[2].plot(centers_abs, bin_rel_abs['mean'], 'r', label='full')
+ax[2].fill_between(centers_abs, bin_rel_abs['mean'] - bin_rel_abs['sem'], bin_rel_abs['mean'] + bin_rel_abs['sem'], color='r', alpha=0.2)
+ax[2].plot(centers_abs, bin_rel_abs_half['mean'], 'b', label='half')
+ax[2].fill_between(centers_abs, bin_rel_abs_half['mean'] - bin_rel_abs_half['sem'], bin_rel_abs_half['mean'] + bin_rel_abs_half['sem'], color='b', alpha=0.2)
+ax[2].axhline(0, color='k', linestyle=":")
+ax[2].set_xlabel('|Rel. Loc.| (°)')
+ax[2].set_ylabel('Corrected Error (°)')
+ax[2].legend(fontsize=12)
+
+plt.tight_layout()
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_28.png]]
+[[./figures/odr_sb/figure_31.png]]
 
 #+begin_src ipython
 

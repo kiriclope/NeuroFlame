@@ -1,6 +1,6 @@
 #+STARTUP: fold
 #+TITLE: Biased ODR
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_sb :kernel python3 :exports results :output-dir ./figures/odr_sb :file (lc/org-babel-tangle-figure-filename)
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_sb :kernel torch :exports results :output-dir ./figures/odr_sb :file (lc/org-babel-tangle-figure-filename)
 
 Run tuning dist to ref with thresholds to get repuslion. Check delay.
 
@@ -23,7 +23,7 @@ Run tuning dist to ref with thresholds to get repuslion. Check delay.
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
-: /home/leon/miniforge3/bin/python
+: /home/leon/mambaforge/envs/torch/bin/python
 
 * Imports
 
@@ -198,7 +198,7 @@ def continuous_bimodal_phases(N_BATCH, preferred_angle, sigma):
 * Model
 
 #+begin_src ipython
-REPO_ROOT = "/home/leon/Projects/NeuroFlame"
+REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "test_odr_EI.yml"
 DEVICE = 'cpu'
 seed = np.random.randint(0, 1e6)
@@ -286,7 +286,7 @@ model.thresh[0, model.slices[0]] = thresh
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_sb/figure_14.png]]
+[[./figures/odr_sb/figure_14.png]]
 
 #+begin_src ipython
 if IF_BIASED_PHASES:
@@ -332,9 +332,9 @@ m0, m1, phase = decode_bump_torch(ff_input[..., model.slices[0]], axis=-1)
 #+end_src
 
 #+RESULTS:
-: torch.Size([1, 375]) torch.Size([256, 1])
-: torch.Size([1, 375]) torch.Size([256, 1])
-: torch.Size([1, 375]) torch.Size([256, 1])
+: torch.Size([1, 750]) torch.Size([256, 1])
+: torch.Size([1, 750]) torch.Size([256, 1])
+: torch.Size([1, 750]) torch.Size([256, 1])
 
 #+begin_src ipython
 print(reference, model.PHI0[1, 0, 0].item() * 180 / torch.pi, phase[1, model.N_STIM_ON[0]].item() * 180 / torch.pi)
@@ -344,8 +344,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: 90 305.99998802465825 302.92869784171364
-[[file:./figures/odr_sb/figure_17.png]]
+: 90 289.0000023503334 292.2449159419797
+[[./figures/odr_sb/figure_17.png]]
 :END:
 
 #+begin_src ipython
@@ -361,8 +361,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: tensor(337.)
-[[file:./figures/odr_sb/figure_18.png]]
+: tensor(244.)
+[[./figures/odr_sb/figure_18.png]]
 :END:
 
 #+begin_src ipython
@@ -402,7 +402,7 @@ plt.show()
  #+end_src
 
  #+RESULTS:
- [[file:./figures/odr_sb/figure_20.png]]
+ [[./figures/odr_sb/figure_20.png]]
 
 #+begin_src ipython
 rates_tensor = model.forward(ff_input=ff_input)# [..., ::3]
@@ -411,7 +411,7 @@ print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rates (256, 91, 375)
+: rates (256, 111, 750)
 
 #+begin_src ipython
 m0, m1, phi = decode_bump(rates, axis=-1)
@@ -447,8 +447,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: tensor(89.)
-[[file:./figures/odr_sb/figure_24.png]]
+: tensor(193.)
+[[./figures/odr_sb/figure_24.png]]
 :END:
 
 * Results
@@ -479,7 +479,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_sb/figure_25.png]]
+[[./figures/odr_sb/figure_25.png]]
 
 #+begin_src ipython
 PHI0 = model.PHI0.cpu().detach().numpy() * 180.0 / np.pi
@@ -493,8 +493,8 @@ print(phi[idx, window_size] * 180 / np.pi)
 
 #+RESULTS:
 : (256, 3, 1)
-: 303.0
-: 300.7378499670968
+: 233.0
+: 220.58055162301918
 
 ** Pref loc
 
@@ -531,15 +531,6 @@ from astropy.stats.circstats import circmean
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-: ---------------------------------------------------------------------------
-: ModuleNotFoundError                       Traceback (most recent call last)
-: Cell In[49], line 1
-: ----> 1 from astropy.stats.circstats import circmean
-:
-: ModuleNotFoundError: No module named 'astropy'
-:END:
 
 #+begin_src ipython
 pref_locs = []
@@ -558,28 +549,8 @@ print(pref_locs.shape)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-#+begin_example
----------------------------------------------------------------------------
-TypeError                                 Traceback (most recent call last)
-Cell In[50], line 11
-      8         if 0 <= bin_index < nbins:  # Ensure index is within valid range
-      9             normalized_rates[j] = rate / counts[bin_index] if counts[bin_index] > 0 else 0
----> 11     pref_locs.append(circmean(angles, weights=normalized_rates, axis=0))
-     12 pref_locs = np.array(pref_locs)
-     13 print(pref_locs.shape)
-
-File ~/miniforge3/lib/python3.12/site-packages/scipy/stats/_axis_nan_policy.py:586, in _axis_nan_policy_factory.<locals>.axis_nan_policy_decorator.<locals>.axis_nan_policy_wrapper(***failed resolving arguments***)
-    583     res = _add_reduced_axes(res, reduced_axes, keepdims)
-    584     return tuple_to_result(*res)
---> 586 res = hypotest_fun_out(*samples, **kwds)
-    587 res = result_to_tuple(res, n_out)
-    588 res = _add_reduced_axes(res, reduced_axes, keepdims)
-
-TypeError: circmean() got an unexpected keyword argument 'weights'
-#+end_example
-:END:
+: (750,)
+:
 
 #+begin_src ipython
 normalized_rates = np.zeros_like(mean_rates, dtype=float)
@@ -598,28 +569,7 @@ print(pref_locs.shape, normalized_rates.shape)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-#+begin_example
----------------------------------------------------------------------------
-TypeError                                 Traceback (most recent call last)
-Cell In[51], line 10
-      8 pref_locs = []
-      9 for i in range(mean_rates.shape[1]):
----> 10         pref_locs.append(circmean(angles, weights=normalized_rates[:, i], axis=0))
-     12 pref_locs = (np.array(pref_locs) + 2.0 * np.pi) % (2.0 * np.pi)
-     13 print(pref_locs.shape, normalized_rates.shape)
-
-File ~/miniforge3/lib/python3.12/site-packages/scipy/stats/_axis_nan_policy.py:586, in _axis_nan_policy_factory.<locals>.axis_nan_policy_decorator.<locals>.axis_nan_policy_wrapper(***failed resolving arguments***)
-    583     res = _add_reduced_axes(res, reduced_axes, keepdims)
-    584     return tuple_to_result(*res)
---> 586 res = hypotest_fun_out(*samples, **kwds)
-    587 res = result_to_tuple(res, n_out)
-    588 res = _add_reduced_axes(res, reduced_axes, keepdims)
-
-TypeError: circmean() got an unexpected keyword argument 'weights'
-#+end_example
-:END:
+: (750,) (256, 750)
 
 #+begin_src ipython
 # pref_locs[pref_locs<0] += 2* np.pi
@@ -633,15 +583,90 @@ plt.show()
 #+RESULTS:
 :RESULTS:
 # [goto error]
-: ---------------------------------------------------------------------------
-: TypeError                                 Traceback (most recent call last)
-: Cell In[52], line 2
-:       1 # pref_locs[pref_locs<0] += 2* np.pi
-: ----> 2 plt.hist(pref_locs * 180 / np.pi, bins=16)
-:       3 plt.xlabel('Pref Loc (°)')
-:       4 plt.ylabel('Count')
-:
-: TypeError: unsupported operand type(s) for /: 'list' and 'float'
+#+begin_example
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+Cell In[33], line 2
+      1 # pref_locs[pref_locs<0] += 2* np.pi
+----> 2 plt.hist(pref_locs * 180 / np.pi, bins=16)
+      3 plt.xlabel('Pref Loc (°)')
+      4 plt.ylabel('Count')
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/pyplot.py:3224, in hist(x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, data, **kwargs)
+   3199 @_copy_docstring_and_deprecators(Axes.hist)
+   3200 def hist(
+   3201     x: ArrayLike | Sequence[ArrayLike],
+   (...)
+   3222     BarContainer | Polygon | list[BarContainer | Polygon],
+   3223 ]:
+-> 3224     return gca().hist(
+   3225         x,
+   3226         bins=bins,
+   3227         range=range,
+   3228         density=density,
+   3229         weights=weights,
+   3230         cumulative=cumulative,
+   3231         bottom=bottom,
+   3232         histtype=histtype,
+   3233         align=align,
+   3234         orientation=orientation,
+   3235         rwidth=rwidth,
+   3236         log=log,
+   3237         color=color,
+   3238         label=label,
+   3239         stacked=stacked,
+   3240         **({"data": data} if data is not None else {}),
+   3241         **kwargs,
+   3242     )
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/__init__.py:1465, in _preprocess_data.<locals>.inner(ax, data, *args, **kwargs)
+   1462 @functools.wraps(func)
+   1463 def inner(ax, *args, data=None, **kwargs):
+   1464     if data is None:
+-> 1465         return func(ax, *map(sanitize_sequence, args), **kwargs)
+   1467     bound = new_sig.bind(ax, *args, **kwargs)
+   1468     auto_label = (bound.arguments.get(label_namer)
+   1469                   or bound.kwargs.get(label_namer))
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_axes.py:6854, in Axes.hist(self, x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, **kwargs)
+   6850 # Loop through datasets
+   6851 for i in range(nx):
+   6852     # this will automatically overwrite bins,
+   6853     # so that each histogram uses the same bins
+-> 6854     m, bins = np.histogram(x[i], bins, weights=w[i], **hist_kwargs)
+   6855     tops.append(m)
+   6856 tops = np.array(tops, float)  # causes problems later if it's an int
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:780, in histogram(a, bins, range, density, weights)
+    680 r"""
+    681 Compute the histogram of a dataset.
+    682
+   (...)
+    776
+    777 """
+    778 a, weights = _ravel_and_check_weights(a, weights)
+--> 780 bin_edges, uniform_bins = _get_bin_edges(a, bins, range, weights)
+    782 # Histogram is an integer or a float array depending on the weights.
+    783 if weights is None:
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:426, in _get_bin_edges(a, bins, range, weights)
+    423     if n_equal_bins < 1:
+    424         raise ValueError('`bins` must be positive, when an integer')
+--> 426     first_edge, last_edge = _get_outer_edges(a, range)
+    428 elif np.ndim(bins) == 1:
+    429     bin_edges = np.asarray(bins)
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:323, in _get_outer_edges(a, range)
+    321     first_edge, last_edge = a.min(), a.max()
+    322     if not (np.isfinite(first_edge) and np.isfinite(last_edge)):
+--> 323         raise ValueError(
+    324             "autodetected range of [{}, {}] is not finite".format(first_edge, last_edge))
+    326 # expand empty range to avoid divide by zero
+    327 if first_edge == last_edge:
+
+ValueError: autodetected range of [nan, nan] is not finite
+#+end_example
+[[./figures/odr_sb/figure_32.png]]
 :END:
 
  #+begin_src ipython
@@ -654,17 +679,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-: ---------------------------------------------------------------------------
-: AttributeError                            Traceback (most recent call last)
-: Cell In[53], line 1
-: ----> 1 theta = np.linspace(0, 360, pref_locs.shape[-1])
-:       2 plt.scatter(theta, pref_locs * 180 / np.pi)
-:       3 plt.xlabel('Ground Truth (°)')
-:
-: AttributeError: 'list' object has no attribute 'shape'
-:END:
+[[./figures/odr_sb/figure_33.png]]
 
 #+begin_src ipython
 idx_pref = np.argsort(pref_locs)
@@ -827,7 +842,66 @@ plt.show()
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+Cell In[42], line 2
+      1 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+----> 2 ax[0].hist(pref_locs * 180 / np.pi, histtype='step', bins=16)
+      3 # ax[0].hist(regressor.pref_locs_ * 180 / np.pi, histtype='step', bins=16)
+      4 ax[0].set_ylabel('Count')
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/__init__.py:1465, in _preprocess_data.<locals>.inner(ax, data, *args, **kwargs)
+   1462 @functools.wraps(func)
+   1463 def inner(ax, *args, data=None, **kwargs):
+   1464     if data is None:
+-> 1465         return func(ax, *map(sanitize_sequence, args), **kwargs)
+   1467     bound = new_sig.bind(ax, *args, **kwargs)
+   1468     auto_label = (bound.arguments.get(label_namer)
+   1469                   or bound.kwargs.get(label_namer))
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_axes.py:6854, in Axes.hist(self, x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, **kwargs)
+   6850 # Loop through datasets
+   6851 for i in range(nx):
+   6852     # this will automatically overwrite bins,
+   6853     # so that each histogram uses the same bins
+-> 6854     m, bins = np.histogram(x[i], bins, weights=w[i], **hist_kwargs)
+   6855     tops.append(m)
+   6856 tops = np.array(tops, float)  # causes problems later if it's an int
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:780, in histogram(a, bins, range, density, weights)
+    680 r"""
+    681 Compute the histogram of a dataset.
+    682
+   (...)
+    776
+    777 """
+    778 a, weights = _ravel_and_check_weights(a, weights)
+--> 780 bin_edges, uniform_bins = _get_bin_edges(a, bins, range, weights)
+    782 # Histogram is an integer or a float array depending on the weights.
+    783 if weights is None:
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:426, in _get_bin_edges(a, bins, range, weights)
+    423     if n_equal_bins < 1:
+    424         raise ValueError('`bins` must be positive, when an integer')
+--> 426     first_edge, last_edge = _get_outer_edges(a, range)
+    428 elif np.ndim(bins) == 1:
+    429     bin_edges = np.asarray(bins)
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:323, in _get_outer_edges(a, range)
+    321     first_edge, last_edge = a.min(), a.max()
+    322     if not (np.isfinite(first_edge) and np.isfinite(last_edge)):
+--> 323         raise ValueError(
+    324             "autodetected range of [{}, {}] is not finite".format(first_edge, last_edge))
+    326 # expand empty range to avoid divide by zero
+    327 if first_edge == last_edge:
+
+ValueError: autodetected range of [nan, nan] is not finite
+#+end_example
 [[./figures/odr_sb/figure_41.png]]
+:END:
 
 #+begin_src ipython
 from sklearn.model_selection import cross_val_predict, LeaveOneOut
@@ -937,7 +1011,7 @@ print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (256, 91) (256, 1) (256, 1) (256, 1)
+: (256, 111) (256, 1) (256, 1) (256, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -955,7 +1029,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_sb/figure_50.png]]
+[[./figures/odr_sb/figure_50.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
@@ -972,7 +1046,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_sb/figure_51.png]]
+[[./figures/odr_sb/figure_51.png]]
 
 #+begin_src ipython
 mask = np.abs(errors) <= 25
@@ -990,9 +1064,9 @@ print(errors.shape, target_loc.shape, rel_loc.shape, ref_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (256, 91)
+: (256, 111)
 : (256,)
-: (256, 1) (256, 1) (256, 1) (256, 1)
+: (232, 1) (232, 1) (232, 1) (232, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.75*width, height])
@@ -1009,7 +1083,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_sb/figure_53.png]]
+[[./figures/odr_sb/figure_53.png]]
 
 ** biases
 
@@ -1059,7 +1133,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_sb/figure_55.png]]
+[[./figures/odr_sb/figure_55.png]]
 
 #+begin_src ipython
 n_bins = 16
@@ -1150,7 +1224,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_sb/figure_57.png]]
+[[./figures/odr_sb/figure_57.png]]
 
 #+begin_src ipython
 if ~IF_BIASED_PHASES:
@@ -1246,11 +1320,10 @@ else:
 # [goto error]
 : ---------------------------------------------------------------------------
 : NameError                                 Traceback (most recent call last)
-: Cell In[63], line 2
-:       1 if IF_BIAS:
-: ----> 2         pkl_save(landscape, 'landscape_bias', path="/home/leon/")
+: Cell In[63], line 5
 :       3         landscape_ = pkl_load('landscape', path="/home/leon/")
 :       4 else:
+: ----> 5         pkl_save(landscape, 'landscape', path="/home/leon/")
 :
 : NameError: name 'landscape' is not defined
 :END:
@@ -1507,14 +1580,10 @@ else:
 #+end_src
 
 #+RESULTS:
-: saving to /home/leon//unique_angles_bias.pkl
-: saving to /home/leon//tuning_curve_bias.pkl
-: saving to /home/leon//center_tuning_curve_bias.pkl
-: saving to /home/leon//pref_locs_bias.pkl
-: loading from /home/leon//unique_angles.pkl
-: loading from /home/leon//tuning_curve.pkl
-: loading from /home/leon//center_tuning_curve.pkl
-: loading from /home/leon//pref_locs.pkl
+: saving to /home/leon//unique_angles.pkl
+: saving to /home/leon//tuning_curve.pkl
+: saving to /home/leon//center_tuning_curve.pkl
+: saving to /home/leon//pref_locs.pkl
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height], sharex=True)
@@ -1543,7 +1612,7 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: 32 2.0782013816356812 0.3001411
+: 11 -116.43620187568833 0.17597336
 [[./figures/odr_sb/figure_78.png]]
 :END:
 
@@ -1659,7 +1728,6 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_86.png]]
 
  #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -1691,7 +1759,6 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_88.png]]
 
 #+begin_src ipython
 plt.plot(unique_angles * 180 / np.pi, center_tuning_curve.mean(axis=0), '-', label='Biased')
@@ -1727,7 +1794,6 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_91.png]]
 
 #+begin_src ipython
 def circular_distance(angle1, angle2):
@@ -1748,8 +1814,7 @@ else:
 #+end_src
 
 #+RESULTS:
-: saving to /home/leon//dist2ref_bias.pkl
-: loading from /home/leon//dist2ref.pkl
+: saving to /home/leon//dist2ref.pkl
 
 #+begin_src ipython
 plt.hist(dist2ref, bins='auto', density=True)
@@ -1773,7 +1838,6 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_95.png]]
 
 #+begin_src ipython
 def weight_mean(variable=None, weights=None):
@@ -1935,12 +1999,9 @@ else:
 #+end_src
 
 #+RESULTS:
-: saving to /home/leon//osi_bias.pkl
-: saving to /home/leon//circvar_bias.pkl
-: saving to /home/leon//pref_bias.pkl
-: loading from /home/leon//osi.pkl
-: loading from /home/leon//circvar.pkl
-: loading from /home/leon//pref.pkl
+: saving to /home/leon//osi.pkl
+: saving to /home/leon//circvar.pkl
+: saving to /home/leon//pref.pkl
 
 #+begin_src ipython
 theta = torch.linspace(
@@ -1982,7 +2043,6 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_106.png]]
 
 
 #+begin_src ipython
@@ -2006,7 +2066,67 @@ plt.show()
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+#+begin_example
+[0;31m---------------------------------------------------------------------------[0m
+[0;31mValueError[0m                                Traceback (most recent call last)
+Cell [0;32mIn[106], line 3[0m
+[1;32m      1[0m fig, ax [38;5;241m=[39m plt[38;5;241m.[39msubplots([38;5;241m1[39m, [38;5;241m2[39m, figsize[38;5;241m=[39m[[38;5;241m2[39m[38;5;241m*[39mwidth, height])
+[0;32m----> 3[0m [41max[49m[41m[[49m[38;5;241;41m0[39;49m[41m][49m[38;5;241;41m.[39;49m[41mhist[49m[41m([49m[41mosi[49m[38;5;241;41m.[39;49m[41mcpu[49m[41m([49m[41m)[49m[38;5;241;41m.[39;49m[41mdetach[49m[41m([49m[41m)[49m[41m,[49m[41m [49m[41mbins[49m[38;5;241;41m=[39;49m[38;5;124;41m'[39;49m[38;5;124;41mauto[39;49m[38;5;124;41m'[39;49m[41m,[49m[41m [49m[41mdensity[49m[38;5;241;41m=[39;49m[38;5;28;41;01mTrue[39;49;00m[41m,[49m[41m [49m[41mhisttype[49m[38;5;241;41m=[39;49m[38;5;124;41m'[39;49m[38;5;124;41mstep[39;49m[38;5;124;41m'[39;49m[41m)[49m
+[1;32m      4[0m ax[[38;5;241m0[39m][38;5;241m.[39mset_xlabel([38;5;124m'[39m[38;5;124mOSI[39m[38;5;124m'[39m)
+[1;32m      5[0m ax[[38;5;241m0[39m][38;5;241m.[39mset_ylabel([38;5;124m'[39m[38;5;124mDensity[39m[38;5;124m'[39m)
+
+File [0;32m~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/__init__.py:1465[0m, in [0;36m_preprocess_data.<locals>.inner[0;34m(ax, data, *args, **kwargs)[0m
+[1;32m   1462[0m [38;5;129m@functools[39m[38;5;241m.[39mwraps(func)
+[1;32m   1463[0m [38;5;28;01mdef[39;00m [38;5;21minner[39m(ax, [38;5;241m*[39margs, data[38;5;241m=[39m[38;5;28;01mNone[39;00m, [38;5;241m*[39m[38;5;241m*[39mkwargs):
+[1;32m   1464[0m     [38;5;28;01mif[39;00m data [38;5;129;01mis[39;00m [38;5;28;01mNone[39;00m:
+[0;32m-> 1465[0m         [38;5;28;01mreturn[39;00m [41mfunc[49m[41m([49m[41max[49m[41m,[49m[41m [49m[38;5;241;41m*[39;49m[38;5;28;41mmap[39;49m[41m([49m[41msanitize_sequence[49m[41m,[49m[41m [49m[41margs[49m[41m)[49m[41m,[49m[41m [49m[38;5;241;41m*[39;49m[38;5;241;41m*[39;49m[41mkwargs[49m[41m)[49m
+[1;32m   1467[0m     bound [38;5;241m=[39m new_sig[38;5;241m.[39mbind(ax, [38;5;241m*[39margs, [38;5;241m*[39m[38;5;241m*[39mkwargs)
+[1;32m   1468[0m     auto_label [38;5;241m=[39m (bound[38;5;241m.[39marguments[38;5;241m.[39mget(label_namer)
+[1;32m   1469[0m                   [38;5;129;01mor[39;00m bound[38;5;241m.[39mkwargs[38;5;241m.[39mget(label_namer))
+
+File [0;32m~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_axes.py:6854[0m, in [0;36mAxes.hist[0;34m(self, x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, **kwargs)[0m
+[1;32m   6850[0m [38;5;66;03m# Loop through datasets[39;00m
+[1;32m   6851[0m [38;5;28;01mfor[39;00m i [38;5;129;01min[39;00m [38;5;28mrange[39m(nx):
+[1;32m   6852[0m     [38;5;66;03m# this will automatically overwrite bins,[39;00m
+[1;32m   6853[0m     [38;5;66;03m# so that each histogram uses the same bins[39;00m
+[0;32m-> 6854[0m     m, bins [38;5;241m=[39m [41mnp[49m[38;5;241;41m.[39;49m[41mhistogram[49m[41m([49m[41mx[49m[41m[[49m[41mi[49m[41m][49m[41m,[49m[41m [49m[41mbins[49m[41m,[49m[41m [49m[41mweights[49m[38;5;241;41m=[39;49m[41mw[49m[41m[[49m[41mi[49m[41m][49m[41m,[49m[41m [49m[38;5;241;41m*[39;49m[38;5;241;41m*[39;49m[41mhist_kwargs[49m[41m)[49m
+[1;32m   6855[0m     tops[38;5;241m.[39mappend(m)
+[1;32m   6856[0m tops [38;5;241m=[39m np[38;5;241m.[39marray(tops, [38;5;28mfloat[39m)  [38;5;66;03m# causes problems later if it's an int[39;00m
+
+File [0;32m~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:780[0m, in [0;36mhistogram[0;34m(a, bins, range, density, weights)[0m
+[1;32m    680[0m [38;5;250m[39m[38;5;124mr[39m[38;5;124;03m"""[39;00m
+[1;32m    681[0m [38;5;124;03mCompute the histogram of a dataset.[39;00m
+[1;32m    682[0m
+[0;32m   (...)[0m
+[1;32m    776[0m
+[1;32m    777[0m [38;5;124;03m"""[39;00m
+[1;32m    778[0m a, weights [38;5;241m=[39m _ravel_and_check_weights(a, weights)
+[0;32m--> 780[0m bin_edges, uniform_bins [38;5;241m=[39m [41m_get_bin_edges[49m[41m([49m[41ma[49m[41m,[49m[41m [49m[41mbins[49m[41m,[49m[41m [49m[38;5;28;41mrange[39;49m[41m,[49m[41m [49m[41mweights[49m[41m)[49m
+[1;32m    782[0m [38;5;66;03m# Histogram is an integer or a float array depending on the weights.[39;00m
+[1;32m    783[0m [38;5;28;01mif[39;00m weights [38;5;129;01mis[39;00m [38;5;28;01mNone[39;00m:
+
+File [0;32m~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:396[0m, in [0;36m_get_bin_edges[0;34m(a, bins, range, weights)[0m
+[1;32m    392[0m [38;5;28;01mif[39;00m weights [38;5;129;01mis[39;00m [38;5;129;01mnot[39;00m [38;5;28;01mNone[39;00m:
+[1;32m    393[0m     [38;5;28;01mraise[39;00m [38;5;167;01mTypeError[39;00m([38;5;124m"[39m[38;5;124mAutomated estimation of the number of [39m[38;5;124m"[39m
+[1;32m    394[0m                     [38;5;124m"[39m[38;5;124mbins is not supported for weighted data[39m[38;5;124m"[39m)
+[0;32m--> 396[0m first_edge, last_edge [38;5;241m=[39m [41m_get_outer_edges[49m[41m([49m[41ma[49m[41m,[49m[41m [49m[38;5;28;41mrange[39;49m[41m)[49m
+[1;32m    398[0m [38;5;66;03m# truncate the range if needed[39;00m
+[1;32m    399[0m [38;5;28;01mif[39;00m [38;5;28mrange[39m [38;5;129;01mis[39;00m [38;5;129;01mnot[39;00m [38;5;28;01mNone[39;00m:
+
+File [0;32m~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:323[0m, in [0;36m_get_outer_edges[0;34m(a, range)[0m
+[1;32m    321[0m     first_edge, last_edge [38;5;241m=[39m a[38;5;241m.[39mmin(), a[38;5;241m.[39mmax()
+[1;32m    322[0m     [38;5;28;01mif[39;00m [38;5;129;01mnot[39;00m (np[38;5;241m.[39misfinite(first_edge) [38;5;129;01mand[39;00m np[38;5;241m.[39misfinite(last_edge)):
+[0;32m--> 323[0m         [38;5;28;01mraise[39;00m [38;5;167;01mValueError[39;00m(
+[1;32m    324[0m             [38;5;124m"[39m[38;5;124mautodetected range of [[39m[38;5;132;01m{}[39;00m[38;5;124m, [39m[38;5;132;01m{}[39;00m[38;5;124m] is not finite[39m[38;5;124m"[39m[38;5;241m.[39mformat(first_edge, last_edge))
+[1;32m    326[0m [38;5;66;03m# expand empty range to avoid divide by zero[39;00m
+[1;32m    327[0m [38;5;28;01mif[39;00m first_edge [38;5;241m==[39m last_edge:
+
+[0;31mValueError[0m: autodetected range of [nan, nan] is not finite
+#+end_example
 [[./figures/odr_sb/figure_107.png]]
+:END:
 
  #+begin_src ipython
 if IF_BIAS:
@@ -2025,7 +2145,6 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_108.png]]
 
 #+begin_src ipython
 
@@ -2191,6 +2310,42 @@ tuning_width, skewness = fit_gaussian_and_estimate_params(normalized_rates, angl
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+#+begin_example
+[0;31m---------------------------------------------------------------------------[0m
+[0;31mValueError[0m                                Traceback (most recent call last)
+Cell [0;32mIn[111], line 59[0m
+[1;32m     54[0m     [38;5;28;01mreturn[39;00m width_estimates [38;5;241m*[39m [38;5;241m180[39m [38;5;241m/[39m np[38;5;241m.[39mpi, skewness_estimates
+[1;32m     56[0m [38;5;66;03m# Example usage[39;00m
+[1;32m     57[0m
+[1;32m     58[0m [38;5;66;03m# tuning_width, skewness = fit_gaussian_and_estimate_params(mean_rates.cpu().detach().numpy(), angles.cpu().numpy())[39;00m
+[0;32m---> 59[0m tuning_width, skewness [38;5;241m=[39m [41mfit_gaussian_and_estimate_params[49m[41m([49m[41mnormalized_rates[49m[41m,[49m[41m [49m[41mangles[49m[38;5;241;41m.[39;49m[41mcpu[49m[41m([49m[41m)[49m[38;5;241;41m.[39;49m[41mnumpy[49m[41m([49m[41m)[49m[41m)[49m
+
+Cell [0;32mIn[111], line 33[0m, in [0;36mfit_gaussian_and_estimate_params[0;34m(mean_rates, angles)[0m
+[1;32m     31[0m [38;5;66;03m# Fit Gaussian[39;00m
+[1;32m     32[0m [38;5;28;01mtry[39;00m:
+[0;32m---> 33[0m     popt, _ [38;5;241m=[39m [41mcurve_fit[49m[41m([49m[41mgaussian[49m[41m,[49m[41m [49m[41munique_angles[49m[41m,[49m[41m [49m[41mresponses[49m[41m,[49m[41m [49m[41mp0[49m[38;5;241;41m=[39;49m[41minitial_guess[49m[41m)[49m
+[1;32m     34[0m     mu, sigma, amplitude [38;5;241m=[39m popt
+[1;32m     36[0m     [38;5;66;03m# Save the width and inferred skewness[39;00m
+
+File [0;32m~/mambaforge/envs/torch/lib/python3.10/site-packages/scipy/optimize/_minpack_py.py:888[0m, in [0;36mcurve_fit[0;34m(f, xdata, ydata, p0, sigma, absolute_sigma, check_finite, bounds, method, jac, full_output, nan_policy, **kwargs)[0m
+[1;32m    886[0m [38;5;66;03m# optimization may produce garbage for float32 inputs, cast them to float64[39;00m
+[1;32m    887[0m [38;5;28;01mif[39;00m check_finite:
+[0;32m--> 888[0m     ydata [38;5;241m=[39m [41mnp[49m[38;5;241;41m.[39;49m[41masarray_chkfinite[49m[41m([49m[41mydata[49m[41m,[49m[41m [49m[38;5;28;41mfloat[39;49m[41m)[49m
+[1;32m    889[0m [38;5;28;01melse[39;00m:
+[1;32m    890[0m     ydata [38;5;241m=[39m np[38;5;241m.[39masarray(ydata, [38;5;28mfloat[39m)
+
+File [0;32m~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/function_base.py:630[0m, in [0;36masarray_chkfinite[0;34m(a, dtype, order)[0m
+[1;32m    628[0m a [38;5;241m=[39m asarray(a, dtype[38;5;241m=[39mdtype, order[38;5;241m=[39morder)
+[1;32m    629[0m [38;5;28;01mif[39;00m a[38;5;241m.[39mdtype[38;5;241m.[39mchar [38;5;129;01min[39;00m typecodes[[38;5;124m'[39m[38;5;124mAllFloat[39m[38;5;124m'[39m] [38;5;129;01mand[39;00m [38;5;129;01mnot[39;00m np[38;5;241m.[39misfinite(a)[38;5;241m.[39mall():
+[0;32m--> 630[0m     [38;5;28;01mraise[39;00m [38;5;167;01mValueError[39;00m(
+[1;32m    631[0m         [38;5;124m"[39m[38;5;124marray must not contain infs or NaNs[39m[38;5;124m"[39m)
+[1;32m    632[0m [38;5;28;01mreturn[39;00m a
+
+[0;31mValueError[0m: array must not contain infs or NaNs
+#+end_example
+:END:
 
 #+begin_src ipython
 if IF_BIAS:
@@ -2205,10 +2360,8 @@ else:
 #+end_src
 
 #+RESULTS:
-: saving to /home/leon//tuning_width_bias.pkl
-: saving to /home/leon//skewness_bias.pkl
-: loading from /home/leon//tuning_width.pkl
-: loading from /home/leon//skewness.pkl
+: saving to /home/leon//tuning_width.pkl
+: saving to /home/leon//skewness.pkl
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -2271,7 +2424,6 @@ if IF_BIAS:
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_117.png]]
 
 #+begin_src ipython
 

@@ -7,9 +7,7 @@ class Plasticity:
     Hansel methods for Short-Term Plasticity in synapses.
     """
 
-    def __init__(
-        self, USE, TAU_FAC, TAU_REC, DT, size, STP_TYPE="markram", device="cuda"
-    ):
+    def __init__(self, USE, TAU_FAC, TAU_REC, DT, size, STP_TYPE="markram", IF_INIT=1, device="cuda"):
         N_BATCH = size[0]
         N_NEURON = size[1]
 
@@ -25,11 +23,12 @@ class Plasticity:
         self.DT_TAU_REC = torch.tensor(DT / TAU_REC, device=device).unsqueeze(-1)
         # print('DT_TAU_REC', self.DT_TAU_REC.shape)
 
-        self.u_stp = self.USE * torch.ones((N_BATCH, N_NEURON), device=device)
-        # print('u', self.u_stp.shape)
+        if IF_INIT:
+            self.u_stp = self.USE * torch.ones((N_BATCH, N_NEURON), device=device)
+            # print('u', self.u_stp.shape)
 
-        self.x_stp = torch.ones((N_BATCH, N_NEURON), device=device)
-        # print('x', self.x_stp.shape)
+            self.x_stp = torch.ones((N_BATCH, N_NEURON), device=device)
+            # print('x', self.x_stp.shape)
 
     def markram_stp(self, rates):
         u_plus = self.u_stp + self.USE * (1.0 - self.u_stp)

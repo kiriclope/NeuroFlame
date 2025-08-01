@@ -36,6 +36,7 @@ class Configuration:
         set_seed(self.SEED)
 
         # create networks' constants
+        init_time_const(self)
         init_const(self)
 
         return self
@@ -44,23 +45,26 @@ class Configuration:
         return self.forward(**kwargs)
 
 
-def init_const(model):
+def init_time_const(model):
     ##########################################
     # creating time steps from continuous time
     ##########################################
     model.N_STEADY = int(model.T_STEADY / model.DT)
     model.N_WINDOW = int(model.T_WINDOW / model.DT)
-    model.N_STEPS = int(model.DURATION / model.DT) + model.N_STEADY + model.N_WINDOW
+    model.N_STEPS = int(model.DURATION / model.DT) + model.N_WINDOW + model.N_STEADY
 
-    model.N_STIM_ON = torch.tensor(
-        [int(i / model.DT) + model.N_STEADY for i in model.T_STIM_ON]
-    ).to(model.device)
-
+    model.N_STIM_ON = torch.tensor([int(i / model.DT) + model.N_STEADY for i in model.T_STIM_ON]).to(model.device)
     model.N_STIM_OFF = torch.tensor([int(i / model.DT) + model.N_STEADY for i in model.T_STIM_OFF]).to(model.device)
+
+    model.random_shifts = torch.zeros((model.N_BATCH,)).to(model.device)
+    model.start_indices = (model.N_STIM_ON.unsqueeze(-1) + model.random_shifts)
+    model.end_indices = (model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts)
 
     if model.RANDOM_DELAY:
         N_MAX_DELAY = model.MAX_DELAY / model.DT
         N_MIN_DELAY = model.MIN_DELAY / model.DT
+
+        model.N_STEPS += int(N_MAX_DELAY - N_MIN_DELAY)
 
         model.random_shifts = torch.randint(low=int(N_MIN_DELAY), high=int(N_MAX_DELAY), size=(model.N_BATCH,)).to(model.device)
 
@@ -76,6 +80,7 @@ def init_const(model):
             model.start_indices[:-1] = model.N_STIM_ON[:-1]
             model.end_indices[:-1] = model.N_STIM_OFF[:-1]
 
+def init_const(model):
     ##########################################
     # defining N and K per population
     ##########################################
