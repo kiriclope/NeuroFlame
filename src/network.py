@@ -174,23 +174,22 @@ class Network(nn.Module):
             ff_input = init_ff_input(self)
         else:
             ff_input.to(self.device)
-            self.N_BATCH = ff_input.shape[0]
 
-        rec_input = torch.randn(
-            (self.IF_NMDA + 1, self.N_BATCH, self.N_NEURON),
-            device=self.device,
-        )
+        self.N_BATCH = ff_input.shape[0]
+        thresh = self.thresh[:ff_input.shape[0]]
+
+        rec_input = torch.randn((self.IF_NMDA + 1, self.N_BATCH, self.N_NEURON), device=self.device)
 
         if self.LIVE_FF_UPDATE:
             ff = ff_input
         else:
             ff = ff_input[:, 0]
 
-        rates = Activation()(ff + rec_input[0], func_name=self.TF_TYPE, thresh=self.thresh)
+        rates = Activation()(ff + rec_input[0], func_name=self.TF_TYPE, thresh=thresh)
 
-        return rates, ff_input, rec_input
+        return rates, ff_input, rec_input, thresh
 
-    def update_dynamics(self, rates, ff_input, rec_input, Wab_T, W_stp_T):
+    def update_dynamics(self, rates, ff_input, rec_input, Wab_T, W_stp_T, thresh):
         """Updates the dynamics of the model at each timestep"""
 
         # update hidden state
@@ -199,7 +198,7 @@ class Network(nn.Module):
         elif self.SPARSE == "semi":
             hidden = (Wab_T @ rates.T).T
         else:
-            hidden = rates @ Wab_T # here @ is rj * Wji hence it's j to i (row are presyn)
+            hidden = rates @ Wab_T # here @ is sum_j rj * Wji hence it's j to i (row are presyn)
 
         # update stp variables
         if self.IF_STP:
@@ -209,13 +208,12 @@ class Network(nn.Module):
 
         # update batched EtoE
         if self.IF_BATCH_J:
-            hidden[:, self.slices[0]].add_(
-                self.Jab_batch * rates[:, self.slices[0]] @ self.W_batch_T
-            )
+            hidden[:, self.slices[0]].add_(self.Jab_batch * rates[:, self.slices[0]] @ self.W_batch_T)
 
         # update reccurent input
         if self.SYN_DYN:
-            rec_input[0] = rec_input[0] * self.EXP_DT_TAU_SYN + hidden * self.DT_TAU_SYN
+            # exponential euler method
+            rec_input[0] = rec_input[0] * self.EXP_DT_TAU_SYN + hidden * (1.0 - self.EXP_DT_TAU_SYN)
         else:
             rec_input[0] = hidden
 
@@ -228,28 +226,26 @@ class Network(nn.Module):
             if self.IF_STP:
                 hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
 
-            rec_input[1] = (
-                rec_input[1] * self.EXP_DT_TAU_NMDA
-                + self.R_NMDA * hidden * self.DT_TAU_NMDA
-            )
+            # exponential euler method
+            rec_input[1] = rec_input[1] * self.EXP_DT_TAU_NMDA + self.R_NMDA * hidden * (1.0 - self.EXP_DT_TAU_NMDA)
 
             net_input = net_input + rec_input[1]
 
-        # this makes autograd complain about the graph
-        if self.IF_ADAPT:
-            self.thresh = self.thresh * self.EXP_DT_TAU_ADAPT
-            self.thresh = self.thresh + nn.ReLU()(rates * self.A_ADAPT) * self.DT_TAU_ADAPT
-
         # compute non linearity
-        non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=self.thresh)
+        non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=thresh)
 
         # update rates
         if self.RATE_DYN:
-            rates = rates * self.EXP_DT_TAU + non_linear * self.DT_TAU
+            # exponential euler method
+            rates = rates * self.EXP_DT_TAU + non_linear * (1.0 - self.EXP_DT_TAU)
         else:
             rates = non_linear
 
-        return rates, rec_input
+        # adaptation
+        if self.IF_ADAPT:
+            thresh = thresh * self.EXP_DT_TAU_ADAPT + rates.detach() * self.A_ADAPT * (1.0 - self.EXP_DT_TAU_ADAPT)
+
+        return rates, rec_input, thresh
 
     def forward(self, ff_input=None, REC_LAST_ONLY=0, RET_FF=0, RET_STP=0, RET_REC=0, IF_INIT=1):
         """
@@ -264,12 +260,9 @@ class Network(nn.Module):
 
         # Initialization (if  ff_input is None, ff_input is generated)
         if IF_INIT:
-            print('Initializing network')
-            rates, ff_input, rec_input = self.initRates(ff_input)
+            rates, ff_input, rec_input, thresh = self.initRates(ff_input)
         else:
-            # self.T_STEADY = 0
-            # init_time_const(self)
-            rates, rec_input = self.rates, self.rec_input
+            rates, rec_input, thresh = self.rates, self.rec_input, self.thresh
 
         # NEED .clone() here otherwise BAD THINGS HAPPEN
         if self.IF_BATCH_J:
@@ -361,9 +354,9 @@ class Network(nn.Module):
             # create ff input at each time step
             if self.LIVE_FF_UPDATE:
                 ff_input = live_ff_input(self, step, ff_input)
-                rates, rec_input = self.update_dynamics(rates, ff_input, rec_input, Wab_T, W_stp_T)
+                rates, rec_input, thresh = self.update_dynamics(rates, ff_input, rec_input, Wab_T, W_stp_T, thresh)
             else:
-                rates, rec_input = self.update_dynamics(rates, ff_input[:, step], rec_input, Wab_T, W_stp_T)
+                rates, rec_input, thresh = self.update_dynamics(rates, ff_input[:, step], rec_input, Wab_T, W_stp_T, thresh)
 
             # update moving average
             mv_rates += rates
@@ -404,6 +397,7 @@ class Network(nn.Module):
         # we save the network state and run 2 trials at a time
         self.rates = rates
         self.rec_input = rec_input
+        self.thresh = thresh
 
         if self.IF_STP:
             self.u_stp = self.stp.u_stp
@@ -443,8 +437,8 @@ class Network(nn.Module):
 
         # if self.training:
         #     self.Wab_T = Wab_T / self.GAIN
-        del Wab_T
-        del W_stp_T
+        # del Wab_T
+        # del W_stp_T
 
         # if self.IF_STP:
         #     self.W_stp_T = W_stp_T / self.GAIN

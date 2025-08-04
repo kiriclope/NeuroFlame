@@ -127,13 +127,10 @@ def init_const(model):
 
     # Adaptation
     model.THRESH = torch.tensor(model.THRESH, device=model.device)
-    model.thresh = torch.ones(model.N_NEURON, device=model.device)
+    model.thresh = torch.ones(model.N_BATCH, model.N_NEURON, device=model.device)
 
     for i_pop in range(model.N_POP):
-        model.thresh[model.slices[i_pop]] = model.THRESH[i_pop]
-
-    # add dummy dimension for sum with rates of size (N_BATCH, N_NEURON)
-    model.thresh = model.thresh.unsqueeze(0)
+        model.thresh[:, model.slices[i_pop]] = model.THRESH[i_pop]
 
     if model.IF_ADAPT:
         model.TAU_ADAPT = torch.tensor(model.TAU_ADAPT, device=model.device)

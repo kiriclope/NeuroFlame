@@ -198,21 +198,24 @@ def continuous_bimodal_phases(N_BATCH, preferred_angle, sigma):
 #+begin_src ipython
 kwargs = {
     'GAIN': 1.0,
-    'DURATION': 20.0,
-    # 'T_STIM_ON': [1.0, 5.0, 7.0, 15.0],
-    # 'T_STIM_OFF': [2.0, 6.0, 8.0, 16.0],
-    'T_STIM_ON': [1.0, 6.0, 8.0, 18],
-    'T_STIM_OFF': [2.0, 7.0, 9.0, 19],
-    'I0': [1.0, -5.0, 1.0, -10.0],
+    'DURATION': 12.0,
+    'T_STEADY': 2,
+    'T_STIM_ON': [1.0, 5.0, 7.0, 11.0],
+    'T_STIM_OFF': [2.0, 6.0, 8.0, 12.0],
+    'I0': [1.0, -2.0, 1.0, -2.0],
     'PHI0': [180.0, 180, 180, 180],
     'SIGMA0': [1.0, 0.0, 1.0, 0.0],
     'RANDOM_DELAY': 0,
     'MIN_DELAY': 2,
     'MAX_DELAY': 5,
+    'IF_ADAPT': 1,
+    'A_ADAPT': .3,
+    'TAU_ADAPT': [250.0, 250.0],
 }
 #+end_src
 
 #+RESULTS:
+
 
 #+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
@@ -255,10 +258,6 @@ m0, m1, phase = decode_bump_torch(ff_input[..., model.slices[0]], axis=-1)
 
 #+RESULTS:
 : 384
-: torch.Size([1, 750]) torch.Size([384, 1])
-: torch.Size([1, 750]) torch.Size([384, 1])
-: torch.Size([1, 750]) torch.Size([384, 1])
-: torch.Size([1, 750]) torch.Size([384, 1])
 
 #+begin_src ipython
 print(model.start_indices.shape)
@@ -268,13 +267,14 @@ print(model.start_indices.shape)
 : torch.Size([4, 384])
 
 #+begin_src ipython
-rates_tensor = model.forward(ff_input=ff_input)
+with torch.no_grad():
+    rates_tensor = model.forward(ff_input=ff_input)
 rates = rates_tensor.cpu().detach().numpy()
 print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rates (384, 201, 750)
+: rates (384, 121, 750)
 
 #+begin_src ipython
 m0, m1, phi = decode_bump(rates, axis=-1)
@@ -335,7 +335,7 @@ print(errors.shape, target_loc.shape, rel_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (2, 384, 201) (384, 1) (384, 1)
+: (2, 384, 121) (384, 1) (384, 1)
 
 #+begin_src ipython
 time_points = np.linspace(0, model.DURATION, errors.shape[-1])
@@ -363,15 +363,15 @@ plt.show()
 print(phi.shape, PHI0.shape, model.start_indices.shape)
 stim_start = (model.DT * (model.start_indices - model.N_STEADY)).cpu().numpy()
 stim_start_idx = ((model.start_indices - model.N_STEADY) / model.N_WINDOW - 1).to(int).cpu().numpy()
-stim_start_idx_half = ((model.start_indices - model.N_STEADY) / model.N_WINDOW - 75).to(int).cpu().numpy()
+stim_start_idx_half = ((model.start_indices - model.N_STEADY) / model.N_WINDOW - 15).to(int).cpu().numpy()
 print(stim_start[1][:5], model.T_STIM_ON)
 print(stim_start_idx[1][:5])
 #+end_src
 
 #+RESULTS:
-: (384, 201) (384, 4, 1) torch.Size([4, 384])
-: [6. 6. 6. 6. 6.] [1.0, 6.0, 8.0, 18]
-: [59 59 59 59 59]
+: (384, 121) (384, 4, 1) torch.Size([4, 384])
+: [5. 5. 5. 5. 5.] [1.0, 5.0, 7.0, 11.0]
+: [49 49 49 49 49]
 
 #+begin_src ipython
 time_points = np.linspace(0, model.DURATION, errors.shape[-1])
@@ -495,7 +495,7 @@ plt.show()
 ** biases
 
 #+begin_src ipython
-n_bins = 10
+n_bins = 8
 data = pd.DataFrame({'target_loc': target_loc[:, -1], 'rel_loc': rel_loc[:, -1], 'errors': end_point[1], 'errors_half': end_point_half[1]})
 #+end_src
 
