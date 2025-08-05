@@ -262,7 +262,7 @@ class Network(nn.Module):
         if IF_INIT:
             rates, ff_input, rec_input, thresh = self.initRates(ff_input)
         else:
-            rates, rec_input, thresh = self.rates, self.rec_input, self.thresh
+            rates, rec_input, thresh = self.rates_last, self.rec_input_last, self.thresh_last
 
         # NEED .clone() here otherwise BAD THINGS HAPPEN
         if self.IF_BATCH_J:
@@ -286,8 +286,8 @@ class Network(nn.Module):
 
             # previous state is loaded
             if IF_INIT == 0:
-                self.stp.u_stp = self.u_stp
-                self.stp.x_stp = self.x_stp
+                self.stp.u_stp = self.u_stp_last
+                self.stp.x_stp = self.x_stp_last
 
             self.x_list, self.u_list = [], []
 
@@ -395,13 +395,13 @@ class Network(nn.Module):
 
         # makes serialisation easier treating it as epochs
         # we save the network state and run 2 trials at a time
-        self.rates = rates
-        self.rec_input = rec_input
-        self.thresh = thresh
+        self.rates_last = rates
+        self.rec_input_last = rec_input
+        self.thresh_update_last = thresh
 
         if self.IF_STP:
-            self.u_stp = self.stp.u_stp
-            self.x_stp = self.stp.x_stp
+            self.u_stp_last = self.stp.u_stp
+            self.x_stp_last = self.stp.x_stp
 
         # returns last step
         rates = rates[..., self.slices[0]]

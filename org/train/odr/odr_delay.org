@@ -94,8 +94,9 @@ def plot_rates_selec(rates, idx=0, thresh=0.5, figname='fig.svg'):
 #+begin_src ipython
   def plot_m0_m1_phi(model, rates, idx, figname='fig.svg'):
 
-      m0, m1, phi = decode_bump(rates, axis=-1)
-      # m0, m1, phi = get_fourier_moments(rates, axis=-1)
+      m0, m1, phi = decode_bump_torch(rates, axis=-1, RET_TENSOR=0)
+      print(m0.shape, m1.shape, phi.shape)
+
       fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
 
       xtime = np.linspace(0, model.DURATION, m0.shape[-1])
@@ -365,7 +366,7 @@ class AngularErrorLoss(nn.Module):
         self.sigma_stimulus = sigma_stimulus * torch.pi / 180.0
 
     def forward(self, readout, theta_batch):
-        m0, m1, y_pred = decode_bump_torch(readout, axis=-1)
+        m0, m1, y_pred = decode_bump_torch(readout, axis=-1, device=readout.device)
 
         valid_mask = theta_batch != -999
         invalid_mask = ~valid_mask
@@ -581,8 +582,9 @@ print(torch.where(rwd_mask[idx]==1)[0])
 : rwd_mask torch.Size([1024, 161])
 : tensor([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
 :         28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-:         46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59],
-:        device='cuda:0')
+:         46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+:         64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81,
+:         82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93], device='cuda:0')
 
 #+begin_src ipython
 
@@ -622,6 +624,7 @@ labels[~rwd_mask] = -999
 ff_input = model.init_ff_input()
 print(model.PHI0.shape, ff_input.shape, labels.shape)
 #+end_src
+
 #+RESULTS:
 : torch.Size([1024, 2, 1]) torch.Size([1024, 905, 1000]) torch.Size([1024, 161])
 
@@ -671,27 +674,27 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 #+RESULTS:
 #+begin_example
-Epoch 1/20, Training Loss: 1.6653, Validation Loss: 1.6293
-Epoch 2/20, Training Loss: 1.5901, Validation Loss: 1.5351
-Epoch 3/20, Training Loss: 1.4722, Validation Loss: 1.4046
-Epoch 4/20, Training Loss: 1.3152, Validation Loss: 1.1968
-Epoch 5/20, Training Loss: 0.8156, Validation Loss: 0.4102
-Epoch 6/20, Training Loss: 0.2709, Validation Loss: 0.1865
-Epoch 7/20, Training Loss: 0.1557, Validation Loss: 0.1366
-Epoch 8/20, Training Loss: 0.1285, Validation Loss: 0.1061
-Epoch 9/20, Training Loss: 0.0850, Validation Loss: 0.0761
-Epoch 10/20, Training Loss: 0.0624, Validation Loss: 0.0557
-Epoch 11/20, Training Loss: 0.0448, Validation Loss: 0.0399
-Epoch 12/20, Training Loss: 0.0335, Validation Loss: 0.0303
-Epoch 13/20, Training Loss: 0.0255, Validation Loss: 0.0229
-Epoch 14/20, Training Loss: 0.0204, Validation Loss: 0.0236
-Epoch 15/20, Training Loss: 0.0180, Validation Loss: 0.0176
-Epoch 16/20, Training Loss: 0.0159, Validation Loss: 0.0156
-Epoch 17/20, Training Loss: 0.0148, Validation Loss: 0.0150
-Epoch 18/20, Training Loss: 0.0146, Validation Loss: 0.0161
-Epoch 19/20, Training Loss: 0.0142, Validation Loss: 0.0148
-Epoch 20/20, Training Loss: 0.0132, Validation Loss: 0.0147
-Elapsed (with compilation) = 0h 4m 6s
+Epoch 1/20, Training Loss: 1.6345, Validation Loss: 1.5603
+Epoch 2/20, Training Loss: 1.4814, Validation Loss: 1.3347
+Epoch 3/20, Training Loss: 1.1806, Validation Loss: 0.8877
+Epoch 4/20, Training Loss: 0.5309, Validation Loss: 0.1833
+Epoch 5/20, Training Loss: 0.1416, Validation Loss: 0.1486
+Epoch 6/20, Training Loss: 0.0891, Validation Loss: 0.0699
+Epoch 7/20, Training Loss: 0.0584, Validation Loss: 0.0479
+Epoch 8/20, Training Loss: 0.0315, Validation Loss: 0.0214
+Epoch 9/20, Training Loss: 0.0204, Validation Loss: 0.0220
+Epoch 10/20, Training Loss: 0.0165, Validation Loss: 0.0157
+Epoch 11/20, Training Loss: 0.0140, Validation Loss: 0.0131
+Epoch 12/20, Training Loss: 0.0120, Validation Loss: 0.0115
+Epoch 13/20, Training Loss: 0.0113, Validation Loss: 0.0108
+Epoch 14/20, Training Loss: 0.0108, Validation Loss: 0.0107
+Epoch 15/20, Training Loss: 0.0106, Validation Loss: 0.0104
+Epoch 16/20, Training Loss: 0.0104, Validation Loss: 0.0104
+Epoch 17/20, Training Loss: 0.0103, Validation Loss: 0.0104
+Epoch 18/20, Training Loss: 0.0103, Validation Loss: 0.0104
+Epoch 19/20, Training Loss: 0.0102, Validation Loss: 0.0104
+Epoch 20/20, Training Loss: 0.0102, Validation Loss: 0.0104
+Elapsed (with compilation) = 0h 3m 58s
 #+end_example
 
 #+begin_src ipython
@@ -712,7 +715,7 @@ print(model.J_STP)
 
 #+RESULTS:
 : Parameter containing:
-: tensor(3.5521, device='cuda:0', requires_grad=True)
+: tensor(3.1004, device='cuda:0', requires_grad=True)
 
 #+begin_src ipython
 with torch.no_grad():
@@ -763,7 +766,10 @@ plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+: (1024, 905) (1024, 905) (1024, 905)
 [[./figures/odr/figure_38.png]]
+:END:
 
  #+begin_src ipython
 plot_rates_selec(rates, idx=20, thresh=.5)
@@ -778,11 +784,13 @@ plot_m0_m1_phi(model, rates, 4)
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+: (1024, 161) (1024, 161) (1024, 161)
 [[./figures/odr/figure_40.png]]
-
+:END:
 
 #+begin_src ipython
-m0, m1, phi = decode_bump(rates, axis=-1)
+m0, m1, phi = decode_bump_torch(rates, axis=-1, RET_TENSOR=0)
 print(phi.shape, labels.shape)
 
 target_loc = labels.cpu().numpy()
@@ -809,7 +817,6 @@ errors = np.array(error_list)
 
 #+RESULTS:
 : (1024, 161) torch.Size([1024, 1])
-
 
 #+begin_src ipython
 targets = (target_loc + np.pi) % (2 * np.pi) - np.pi
@@ -853,7 +860,6 @@ Ki0 = pkl_load( 'Ki', path=".")
 #+end_src
 
 #+RESULTS:
-
 
 #+begin_src ipython
   plt.figure(figsize=(2.5*width, 1.5*height))  # Set the figure size (width, height) in inches

@@ -23,6 +23,9 @@ class Plasticity:
         self.DT_TAU_REC = torch.tensor(DT / TAU_REC, device=device).unsqueeze(-1)
         # print('DT_TAU_REC', self.DT_TAU_REC.shape)
 
+        self.EXP_REC = torch.exp(-self.DT_TAU_REC)
+        self.EXP_FAC = torch.exp(-self.DT_TAU_FAC)
+
         if IF_INIT:
             self.u_stp = self.USE * torch.ones((N_BATCH, N_NEURON), device=device)
             # print('u', self.u_stp.shape)
@@ -30,7 +33,7 @@ class Plasticity:
             self.x_stp = torch.ones((N_BATCH, N_NEURON), device=device)
             # print('x', self.x_stp.shape)
 
-    def markram_stp(self, rates):
+    def markram_stp_old(self, rates):
         u_plus = self.u_stp + self.USE * (1.0 - self.u_stp)
 
         self.x_stp = (
@@ -45,6 +48,42 @@ class Plasticity:
         )
 
         return (u_plus * self.x_stp) * rates
+
+    def markram_stp(self, rates):
+        # Compute the effect of the incoming spike
+        # u_plus = self.u_stp + self.USE * (1.0 - self.u_stp)
+
+        # Depression
+        self.x_stp = (
+            self.x_stp
+            + (1.0 - self.x_stp) * self.DT_TAU_REC
+            - self.DT * self.u_stp * self.x_stp * rates
+        )
+        # Facilitation    (CORRECTED!)
+        self.u_stp = (
+            self.u_stp
+            + self.DT_TAU_FAC * (self.USE - self.u_stp)
+            + self.DT * self.USE * (1.0 - self.u_stp) * rates
+        )
+
+        return (self.u_stp * self.x_stp) * rates  # Synaptic output, can also just return (u_plus, x_stp), etc.
+
+
+    def markram_stp_exp(self, rates):
+
+        # Exact solution for decay toward equilibrium (1 for x, USE for u)
+        self.x_stp = (
+            1.0
+            + (self.x_stp - 1.0) * self.EXP_REC
+            - self.DT * self.u_stp * self.x_stp * rates
+        )
+        self.u_stp = (
+            self.USE
+            + (self.u_stp - self.USE) * self.EXP_FAC
+            + self.DT * self.USE * (1.0 - self.u_stp) * rates
+        )
+
+        return (self.u_stp * self.x_stp) * rates  # Synaptic output
 
     def hansel_stp(self, rates):
         self.x_stp = (
@@ -76,6 +115,9 @@ class Plasticity:
 
         if self.stp_type == "mato":
             return self.mato_stp(rates)
+
+        if self.stp_type == "markram_exp":
+            return self.markram_stp_exp(rates)
 
         return self.markram_stp(rates)
 

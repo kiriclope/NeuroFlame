@@ -113,109 +113,28 @@ def add_vlines(model, ax=None):
 
 #+RESULTS:
 
-
-#+begin_src ipython
-import torch
-import numpy as np
-
-def generate_weighted_phase_samples(N_BATCH, angles, preferred_angle, sigma):
-    # Convert angles list to a tensor
-    angles_tensor = torch.tensor(angles)
-
-    # Calculate Gaussian probability distribution centered at preferred_angle
-    probs = np.exp(-0.5 * ((angles - preferred_angle) / sigma) ** 2)
-    probs /= probs.sum()  # Normalize to get probabilities
-
-    # Create a categorical distribution from the computed probabilities
-    distribution = torch.distributions.Categorical(torch.tensor(probs))
-
-    # Sample from the distribution
-    indices = distribution.sample((N_BATCH,))
-
-    # Map indices to angles and reshape to (N_BATCH, 1)
-    phase_samples = angles_tensor[indices].reshape(N_BATCH, 1)
-
-    return phase_samples
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
-
-def continuous_biased_phases(N_BATCH, preferred_angle, sigma):
-    # Generate samples from a normal distribution using PyTorch
-    phase_samples = torch.normal(mean=preferred_angle, std=sigma, size=(N_BATCH, 1))
-
-    # Normalize angles to the range [0, 360)
-    phase_samples = phase_samples % 360
-
-    return phase_samples
-    #+end_src
-
-    #+RESULTS:
-
-#+begin_src ipython
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
-
-def continuous_bimodal_phases(N_BATCH, preferred_angle, sigma):
-    # Sample half from preferred_angle and half from preferred_angle + 180
-    half_batch = N_BATCH // 2
-
-    # Sample from preferred_angle
-    samples_1 = torch.normal(mean=preferred_angle, std=sigma, size=(half_batch, 1))
-
-    # Sample from preferred_angle + 180
-    samples_2 = torch.normal(mean=(preferred_angle + 180) % 360, std=sigma, size=(N_BATCH - half_batch, 1))
-
-    # Combine samples and wrap around 360
-    phase_samples = torch.cat((samples_1, samples_2), dim=0) % 360
-
-    return phase_samples
-
-# Example usage
-# N_BATCH = 500
-# preferred_angle = 45
-# sigma = 45
-
-# samples = continuous_bimodal_phases(N_BATCH, preferred_angle, sigma)
-
-# plt.hist(samples.numpy(), bins='auto', density=True)
-# plt.xlabel('Phase (degrees)')
-# plt.ylabel('Probability Density')
-# plt.title('Bimodal Distribution of Phases')
-# plt.show()
-#+end_src
-
-#+RESULTS:
-
 * Model
 
 #+begin_src ipython
 kwargs = {
     'GAIN': 1.0,
-    'DURATION': 12.0,
+    'DURATION': 10.0,
     'T_STEADY': 2,
-    'T_STIM_ON': [1.0, 5.0, 7.0, 11.0],
-    'T_STIM_OFF': [2.0, 6.0, 8.0, 12.0],
+    'T_STIM_ON': [1.0, 3.0, 5.0, 9.0],
+    'T_STIM_OFF': [2.0, 4.0, 6.0, 10.0],
     'I0': [1.0, -2.0, 1.0, -2.0],
     'PHI0': [180.0, 180, 180, 180],
     'SIGMA0': [1.0, 0.0, 1.0, 0.0],
     'RANDOM_DELAY': 0,
     'MIN_DELAY': 2,
     'MAX_DELAY': 5,
-    'IF_ADAPT': 1,
+    'IF_ADAPT': 0,
     'A_ADAPT': .3,
-    'TAU_ADAPT': [250.0, 250.0],
+    'TAU_ADAPT': [150.0, 150.0],
 }
 #+end_src
 
 #+RESULTS:
-
 
 #+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
@@ -231,7 +150,7 @@ print('seed', seed)
 : seed 1
 
 #+begin_src ipython
-N_BATCH = 128*3
+N_BATCH = 128*6
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=N_BATCH, **kwargs)
 #+end_src
 
@@ -245,39 +164,36 @@ model.eval();
 
 #+RESULTS:
 
+#+begin_src ipython
+print(model.J_STP)
+#+end_src
+
+#+RESULTS:
+: Parameter containing:
+: tensor(3.1004, device='cuda:1', requires_grad=True)
+
 * Batching Inputs
 
 #+begin_src ipython
-print(N_BATCH)
 model.N_BATCH = N_BATCH
 model.PHI0 = torch.randint(low=0, high=360, size=(N_BATCH, len(model.I0), 1), device=DEVICE, dtype=torch.float)
-
-ff_input = model.init_ff_input()
-m0, m1, phase = decode_bump_torch(ff_input[..., model.slices[0]], axis=-1)
 #+end_src
 
 #+RESULTS:
-: 384
-
-#+begin_src ipython
-print(model.start_indices.shape)
-#+end_src
-
-#+RESULTS:
-: torch.Size([4, 384])
 
 #+begin_src ipython
 with torch.no_grad():
+    ff_input = model.init_ff_input()
     rates_tensor = model.forward(ff_input=ff_input)
 rates = rates_tensor.cpu().detach().numpy()
 print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rates (384, 121, 750)
+: rates (768, 101, 750)
 
 #+begin_src ipython
-m0, m1, phi = decode_bump(rates, axis=-1)
+m0, m1, phi = decode_bump_torch(rates, axis=-1, RET_TENSOR=0)
 #+end_src
 
 #+RESULTS:
@@ -310,7 +226,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_18.png]]
+[[./figures/odr_sb/figure_15.png]]
 
 ** errors
 
@@ -335,7 +251,7 @@ print(errors.shape, target_loc.shape, rel_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (2, 384, 121) (384, 1) (384, 1)
+: (2, 768, 101) (768, 1) (768, 1)
 
 #+begin_src ipython
 time_points = np.linspace(0, model.DURATION, errors.shape[-1])
@@ -357,28 +273,29 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_20.png]]
+[[./figures/odr_sb/figure_17.png]]
 
 #+begin_src ipython
-print(phi.shape, PHI0.shape, model.start_indices.shape)
+print(phi.shape, PHI0.shape, model.start_indices.shape, errors.shape)
 stim_start = (model.DT * (model.start_indices - model.N_STEADY)).cpu().numpy()
 stim_start_idx = ((model.start_indices - model.N_STEADY) / model.N_WINDOW - 1).to(int).cpu().numpy()
-stim_start_idx_half = ((model.start_indices - model.N_STEADY) / model.N_WINDOW - 15).to(int).cpu().numpy()
+
+stim_start_idx_half = ((model.start_indices - 2 *model.N_STEADY) / model.N_WINDOW ).to(int).cpu().numpy()
 print(stim_start[1][:5], model.T_STIM_ON)
 print(stim_start_idx[1][:5])
 #+end_src
 
 #+RESULTS:
-: (384, 121) (384, 4, 1) torch.Size([4, 384])
-: [5. 5. 5. 5. 5.] [1.0, 5.0, 7.0, 11.0]
-: [49 49 49 49 49]
+: (768, 101) (768, 4, 1) torch.Size([4, 768]) (2, 768, 101)
+: [3. 3. 3. 3. 3.] [1.0, 3.0, 5.0, 9.0]
+: [29 29 29 29 29]
 
 #+begin_src ipython
 time_points = np.linspace(0, model.DURATION, errors.shape[-1])
 idx = np.random.randint(errors.shape[1], size=(1,))
 
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-ax[0].plot(errors[0][idx].T, '-o')
+ax[0].plot(errors[0][idx].T, '-')
 ax[0].set_xlabel('t')
 ax[0].set_ylabel('prev. error (°)')
 
@@ -388,6 +305,8 @@ ax[0].axvline(stim_start_idx[2][idx], ls='--', c='k')
 ax[0].axvline(stim_start_idx[3][idx], ls='--', c='k')
 
 ax[1].plot(errors[1][idx].T)
+
+ax[1].axhline((-PHI0[idx, 0, 0])%360, ls='--', c='k')
 
 ax[1].axvline(stim_start_idx[0][idx], ls='--', c='k')
 ax[1].axvline(stim_start_idx[1][idx], ls='--', c='k')
@@ -405,7 +324,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_22.png]]
+[[./figures/odr_sb/figure_19.png]]
 
 #+begin_src ipython
 time_points = np.linspace(0, model.DURATION, errors.shape[-1])
@@ -434,7 +353,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_23.png]]
+[[./figures/odr_sb/figure_20.png]]
 
 #+begin_src ipython
 end_point = []
@@ -451,7 +370,7 @@ print(end_point.shape)
 #+end_src
 
 #+RESULTS:
-: (2, 384)
+: (2, 768)
 
 #+begin_src ipython
 end_point_half = []
@@ -468,7 +387,7 @@ print(end_point_half.shape)
 #+end_src
 
 #+RESULTS:
-: (2, 384)
+: (2, 768)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
@@ -476,15 +395,17 @@ ax[0].hist(target_loc, bins='auto')
 ax[0].set_xlabel('Targets (°)')
 
 ax[1].hist(end_point[0], bins='auto')
+ax[1].hist(end_point_half[0], bins='auto', color='r', histtype='step')
 ax[1].set_xlabel('Prev. Errors (°)')
 
 ax[2].hist(end_point[1], bins='auto')
+ax[2].hist(end_point_half[1], bins='auto', color='r', histtype='step')
 ax[2].set_xlabel('Curr. Errors (°)')
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_26.png]]
+[[./figures/odr_sb/figure_23.png]]
 
 #+begin_src ipython
 
@@ -493,6 +414,46 @@ plt.show()
 #+RESULTS:
 
 ** biases
+
+#+begin_src ipython
+def get_correct_error(nbins, df, thresh=None):
+    if thresh is not None:
+        data = df[(df['errors'] >= -thresh) & (df['errors'] <= thresh)].copy()
+    else:
+        data = df.copy()
+
+    # 1. Bias-correct both error and error_half
+    bin_edges = np.linspace(0, 360, n_bins + 1)
+    data['bin_target'] = pd.cut(data['target_loc'], bins=bin_edges, include_lowest=True)
+    mean_errors_per_bin = data.groupby('bin_target')['errors'].mean()
+    data['adjusted_errors'] = data['errors'] - data['bin_target'].map(mean_errors_per_bin).astype(float)
+
+    # 2. Bin by relative location for both sessions (full version, [-180, 180])
+    data['bin_rel'] = pd.cut(data['rel_loc'], bins=n_bins)
+    bin_rel = data.groupby('bin_rel')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
+    edges = bin_rel['bin_rel'].cat.categories
+    centers = (edges.left + edges.right) / 2
+
+    # 3. FLIP SIGN for abs(rel_loc): defects on the left (-) are flipped so all bins reflect the same "direction"
+    data['rel_loc_abs'] = np.abs(data['rel_loc'])
+    data['bin_rel_abs'] = pd.cut(data['rel_loc_abs'], bins=n_bins, include_lowest=True)
+
+    # Flip errors for abs plot:
+    data['adjusted_errors_abs'] = data['adjusted_errors'] * np.sign(data['rel_loc'])
+
+    bin_rel_abs = data.groupby('bin_rel_abs')['adjusted_errors_abs'].agg(['mean', 'sem']).reset_index()
+    edges_abs = bin_rel_abs['bin_rel_abs'].cat.categories
+    centers_abs = (edges_abs.left + edges_abs.right) / 2
+
+    # 4. Bin by target location for target-centered analysis (optional)
+    bin_target = data.groupby('bin_target')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
+    edges_target = bin_target['bin_target'].cat.categories
+    target_centers = (edges_target.left + edges_target.right) / 2
+
+    return centers, bin_rel, centers_abs, bin_rel_abs
+#+end_src
+
+#+RESULTS:
 
 #+begin_src ipython
 n_bins = 8
@@ -539,11 +500,14 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_29.png]]
+[[./figures/odr_sb/figure_27.png]]
 
 #+begin_src ipython
 import numpy as np
 import pandas as pd
+
+thresh = 25
+data = data[(data['errors'] >= -thresh) & (data['errors'] <= thresh)].copy()
 
 # 1. Bias-correct both error and error_half
 bin_edges = np.linspace(0, 360, n_bins + 1)
@@ -619,7 +583,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_31.png]]
+[[./figures/odr_sb/figure_29.png]]
 
 #+begin_src ipython
 
