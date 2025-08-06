@@ -120,8 +120,8 @@ kwargs = {
     'GAIN': 1.0,
     'DURATION': 10.0,
     'T_STEADY': 2,
-    'T_STIM_ON': [1.0, 3.0, 5.0, 9.0],
-    'T_STIM_OFF': [2.0, 4.0, 6.0, 10.0],
+    'T_STIM_ON': [1.0, 4.0, 6.0, 9.0],
+    'T_STIM_OFF': [2.0, 5.0, 7.0, 10.0],
     'I0': [1.0, -2.0, 1.0, -2.0],
     'PHI0': [180.0, 180, 180, 180],
     'SIGMA0': [1.0, 0.0, 1.0, 0.0],
@@ -170,9 +170,9 @@ print(model.J_STP)
 
 #+RESULTS:
 : Parameter containing:
-: tensor(3.1004, device='cuda:1', requires_grad=True)
+: tensor(3.2149, device='cuda:1', requires_grad=True)
 
-* Batching Inputs
+* Simulations
 
 #+begin_src ipython
 model.N_BATCH = N_BATCH
@@ -184,7 +184,7 @@ model.PHI0 = torch.randint(low=0, high=360, size=(N_BATCH, len(model.I0), 1), de
 #+begin_src ipython
 with torch.no_grad():
     ff_input = model.init_ff_input()
-    rates_tensor = model.forward(ff_input=ff_input)
+    rates_tensor = model.forward(ff_input=ff_input, RET_STP=1)
 rates = rates_tensor.cpu().detach().numpy()
 print('rates', rates.shape)
 #+end_src
@@ -198,8 +198,7 @@ m0, m1, phi = decode_bump_torch(rates, axis=-1, RET_TENSOR=0)
 
 #+RESULTS:
 
-* Results
-** Rates
+* Dynamics
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[2.5*width, height])
@@ -213,7 +212,7 @@ ax[0].set_xlabel('Time (s)')
 xtime = np.linspace(0, model.DURATION, phi.shape[-1])
 idx = np.random.randint(0, model.N_BATCH, 8)
 ax[1].plot(xtime, m1[idx].T)
-ax[1].set_ylabel('m1 (Hz)')
+ax[1].set_ylabel('$\mathcal{F}_1$ (Hz)')
 ax[1].set_xlabel('Time (s)')
 add_vlines(model, ax[1])
 
@@ -228,7 +227,104 @@ plt.show()
 #+RESULTS:
 [[./figures/odr_sb/figure_15.png]]
 
-** errors
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+idx = np.random.randint(0, model.N_BATCH)
+
+ax[1].imshow(model.x_list.cpu()[idx].T, aspect='auto', cmap='jet', vmin=0.5, vmax=1, origin='lower', extent=[0, model.DURATION, 0, model.Na[0].cpu()])
+
+ax[0].imshow(model.u_list.cpu()[idx].T, aspect='auto', cmap='jet', vmin=0, vmax=0.5, origin='lower', extent=[0, model.DURATION, 0, model.Na[0].cpu()])
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_16.png]]
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+idx = np.random.randint(0, model.N_BATCH, 5)
+
+for i in idx:
+    ax[1].plot(xtime, model.x_list.cpu()[i, :, 0])
+    ax[0].plot(xtime, model.u_list.cpu()[i, :, 0])
+
+ax[0].set_xlabel('Time (s)')
+ax[1].set_xlabel('Time (s)')
+
+add_vlines(model, ax[1])
+add_vlines(model, ax[0])
+
+ax[1].set_ylabel('x')
+ax[0].set_ylabel('u')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_17.png]]
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+m0_x, m1_x, phi_x = decode_bump_torch(model.x_list, axis=-1, RET_TENSOR=0)
+
+idx = np.random.randint(0, model.N_BATCH, 5)
+
+for i in idx:
+    ax[0].plot(xtime, m1_x[i])
+    ax[1].plot(xtime, phi_x[i])
+
+ax[0].set_xlabel('Time (s)')
+ax[1].set_xlabel('Time (s)')
+
+add_vlines(model, ax[0])
+add_vlines(model, ax[1])
+
+ax[0].set_ylabel('$\mathcal{F}_1(x)$')
+ax[1].set_ylabel('$\\theta_x$')
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_18.png]]
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+
+m0_u, m1_u, phi_u = decode_bump_torch(model.u_list, axis=-1, RET_TENSOR=0)
+
+idx = np.random.randint(0, model.N_BATCH, 5)
+
+for i in idx:
+    ax[0].plot(xtime, m1_u[i])
+    ax[1].plot(xtime, phi_u[i])
+
+ax[0].set_xlabel('Time (s)')
+ax[1].set_xlabel('Time (s)')
+
+add_vlines(model, ax[0])
+add_vlines(model, ax[1])
+
+ax[0].set_ylabel('$\mathcal{F}_1(u)$')
+ax[1].set_ylabel('$\\theta_u$')
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_19.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+* Errors
 
 #+begin_src ipython
 PHI0 = model.PHI0.cpu().detach().numpy() * 180.0 / np.pi
@@ -273,7 +369,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_17.png]]
+[[./figures/odr_sb/figure_22.png]]
 
 #+begin_src ipython
 print(phi.shape, PHI0.shape, model.start_indices.shape, errors.shape)
@@ -287,8 +383,8 @@ print(stim_start_idx[1][:5])
 
 #+RESULTS:
 : (768, 101) (768, 4, 1) torch.Size([4, 768]) (2, 768, 101)
-: [3. 3. 3. 3. 3.] [1.0, 3.0, 5.0, 9.0]
-: [29 29 29 29 29]
+: [4. 4. 4. 4. 4.] [1.0, 4.0, 6.0, 9.0]
+: [39 39 39 39 39]
 
 #+begin_src ipython
 time_points = np.linspace(0, model.DURATION, errors.shape[-1])
@@ -324,7 +420,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_19.png]]
+[[./figures/odr_sb/figure_24.png]]
 
 #+begin_src ipython
 time_points = np.linspace(0, model.DURATION, errors.shape[-1])
@@ -353,7 +449,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_20.png]]
+[[./figures/odr_sb/figure_25.png]]
 
 #+begin_src ipython
 end_point = []
@@ -405,7 +501,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_23.png]]
+[[./figures/odr_sb/figure_28.png]]
 
 #+begin_src ipython
 
@@ -413,7 +509,7 @@ plt.show()
 
 #+RESULTS:
 
-** biases
+* Serial Bias
 
 #+begin_src ipython
 def get_correct_error(nbins, df, thresh=None):
@@ -500,7 +596,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_27.png]]
+[[./figures/odr_sb/figure_32.png]]
 
 #+begin_src ipython
 import numpy as np
@@ -583,7 +679,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_29.png]]
+[[./figures/odr_sb/figure_34.png]]
 
 #+begin_src ipython
 

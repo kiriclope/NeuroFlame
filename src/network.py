@@ -206,6 +206,8 @@ class Network(nn.Module):
             hidden_stp = Aux @ W_stp_T
             hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
 
+            del Aux
+
         # update batched EtoE
         if self.IF_BATCH_J:
             hidden[:, self.slices[0]].add_(self.Jab_batch * rates[:, self.slices[0]] @ self.W_batch_T)
@@ -231,6 +233,9 @@ class Network(nn.Module):
 
             net_input = net_input + rec_input[1]
 
+        if self.IF_STP:
+            del hidden_stp
+
         # compute non linearity
         non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=thresh)
 
@@ -241,11 +246,15 @@ class Network(nn.Module):
         else:
             rates = non_linear
 
+        del net_input, hidden, non_linear
+        # clear_cache()
+
         # adaptation
         if self.IF_ADAPT:
             thresh = thresh * self.EXP_DT_TAU_ADAPT + rates.detach() * self.A_ADAPT * (1.0 - self.EXP_DT_TAU_ADAPT)
 
         return rates, rec_input, thresh
+
 
     def forward(self, ff_input=None, REC_LAST_ONLY=0, RET_FF=0, RET_STP=0, RET_REC=0, IF_INIT=1):
         """
@@ -397,7 +406,7 @@ class Network(nn.Module):
         # we save the network state and run 2 trials at a time
         self.rates_last = rates
         self.rec_input_last = rec_input
-        self.thresh_update_last = thresh
+        self.thresh_last = thresh
 
         if self.IF_STP:
             self.u_stp_last = self.stp.u_stp
@@ -437,8 +446,9 @@ class Network(nn.Module):
 
         # if self.training:
         #     self.Wab_T = Wab_T / self.GAIN
-        # del Wab_T
-        # del W_stp_T
+
+        del Wab_T
+        del W_stp_T
 
         # if self.IF_STP:
         #     self.W_stp_T = W_stp_T / self.GAIN
