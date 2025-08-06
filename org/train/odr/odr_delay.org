@@ -438,13 +438,13 @@ N_BATCH = int(batch_size * ratio)
 print('N_BATCH', N_BATCH, 'batch_size', batch_size)
 
 seed = np.random.randint(0, 1e6)
-seed = 1
+seed = 2
 print('seed', seed)
 #+end_src
 
 #+RESULTS:
 : N_BATCH 1024 batch_size 128
-: seed 1
+: seed 2
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=N_BATCH)
@@ -460,10 +460,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: torch.Size([1024])
-[[./figures/odr/figure_21.png]]
-:END:
+[[./figures/odr/figure_18.png]]
 
 * Training
 
@@ -505,8 +502,7 @@ print(torch.where(rwd_mask[idx]==1)[0])
 : rwd_mask torch.Size([1024, 161])
 : tensor([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
 :         28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-:         46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59],
-:        device='cuda:0')
+:         46, 47, 48, 49, 50, 51], device='cuda:0')
 
 #+begin_src ipython
 
@@ -560,8 +556,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: torch.Size([60641])
-[[./figures/odr/figure_28.png]]
+: torch.Size([61112])
+[[./figures/odr/figure_25.png]]
 :END:
 #+RESULTS:
 
@@ -573,7 +569,7 @@ train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_si
 
 #+RESULTS:
 :RESULTS:
-[[./figures/odr/figure_29.png]]
+[[./figures/odr/figure_26.png]]
 : torch.Size([819, 905, 1000]) torch.Size([205, 905, 1000])
 : torch.Size([819, 161]) torch.Size([205, 161])
 :END:
@@ -586,7 +582,7 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 #+RESULTS:
 
-      #+begin_src ipython
+     #+begin_src ipython
   num_epochs = 20
   start = perf_counter()
   loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs, thresh=.005)
@@ -596,27 +592,27 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 #+RESULTS:
 #+begin_example
-Epoch 1/20, Training Loss: 1.3785, Validation Loss: 1.3408
-Epoch 2/20, Training Loss: 1.3158, Validation Loss: 1.3015
-Epoch 3/20, Training Loss: 1.2405, Validation Loss: 1.2135
-Epoch 4/20, Training Loss: 1.0882, Validation Loss: 1.0132
-Epoch 5/20, Training Loss: 0.6988, Validation Loss: 0.4486
-Epoch 6/20, Training Loss: 0.4981, Validation Loss: 0.1980
-Epoch 7/20, Training Loss: 0.1649, Validation Loss: 0.1253
-Epoch 8/20, Training Loss: 0.1090, Validation Loss: 0.1021
-Epoch 9/20, Training Loss: 0.0891, Validation Loss: 0.0554
-Epoch 10/20, Training Loss: 0.0559, Validation Loss: 0.0498
-Epoch 11/20, Training Loss: 0.0439, Validation Loss: 0.0447
-Epoch 12/20, Training Loss: 0.0369, Validation Loss: 0.0399
-Epoch 13/20, Training Loss: 0.0333, Validation Loss: 0.0345
-Epoch 14/20, Training Loss: 0.0307, Validation Loss: 0.0323
-Epoch 15/20, Training Loss: 0.0288, Validation Loss: 0.0306
-Epoch 16/20, Training Loss: 0.0277, Validation Loss: 0.0295
-Epoch 17/20, Training Loss: 0.0268, Validation Loss: 0.0289
-Epoch 18/20, Training Loss: 0.0262, Validation Loss: 0.0281
-Epoch 19/20, Training Loss: 0.0256, Validation Loss: 0.0276
-Epoch 20/20, Training Loss: 0.0251, Validation Loss: 0.0273
-Elapsed (with compilation) = 0h 3m 54s
+Epoch 1/20, Training Loss: 1.4094, Validation Loss: 1.4057
+Epoch 2/20, Training Loss: 1.3508, Validation Loss: 1.3465
+Epoch 3/20, Training Loss: 1.2620, Validation Loss: 1.2309
+Epoch 4/20, Training Loss: 1.0876, Validation Loss: 0.9722
+Epoch 5/20, Training Loss: 0.6810, Validation Loss: 0.4688
+Epoch 6/20, Training Loss: 0.3140, Validation Loss: 0.2304
+Epoch 7/20, Training Loss: 0.1910, Validation Loss: 0.1132
+Epoch 8/20, Training Loss: 0.1131, Validation Loss: 0.0923
+Epoch 9/20, Training Loss: 0.0924, Validation Loss: 0.0718
+Epoch 10/20, Training Loss: 0.0573, Validation Loss: 0.0505
+Epoch 11/20, Training Loss: 0.0472, Validation Loss: 0.0434
+Epoch 12/20, Training Loss: 0.0376, Validation Loss: 0.0361
+Epoch 13/20, Training Loss: 0.0326, Validation Loss: 0.0334
+Epoch 14/20, Training Loss: 0.0307, Validation Loss: 0.0301
+Epoch 15/20, Training Loss: 0.0280, Validation Loss: 0.0299
+Epoch 16/20, Training Loss: 0.0274, Validation Loss: 0.0275
+Epoch 17/20, Training Loss: 0.0264, Validation Loss: 0.0295
+Epoch 18/20, Training Loss: 0.0255, Validation Loss: 0.0278
+Epoch 19/20, Training Loss: 0.0247, Validation Loss: 0.0278
+Epoch 20/20, Training Loss: 0.0264, Validation Loss: 0.0295
+Elapsed (with compilation) = 0h 4m 4s
 #+end_example
 
 #+begin_src ipython
@@ -637,7 +633,7 @@ print(model.J_STP)
 
 #+RESULTS:
 : Parameter containing:
-: tensor(3.2149, device='cuda:0', requires_grad=True)
+: tensor(3.1190, device='cuda:0', requires_grad=True)
 
 #+begin_src ipython
 with torch.no_grad():
@@ -665,7 +661,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_35.png]]
+[[./figures/odr/figure_32.png]]
 
 #+begin_src ipython
 with torch.no_grad():
@@ -681,7 +677,7 @@ plot_rates_selec(rates=ff_input.cpu().detach().numpy(), idx=20, thresh=.5)
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_37.png]]
+[[./figures/odr/figure_34.png]]
 
  #+begin_src ipython
 plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
@@ -690,7 +686,7 @@ plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
 #+RESULTS:
 :RESULTS:
 : (1024, 905) (1024, 905) (1024, 905)
-[[./figures/odr/figure_38.png]]
+[[./figures/odr/figure_35.png]]
 :END:
 
  #+begin_src ipython
@@ -698,7 +694,7 @@ plot_rates_selec(rates, idx=20, thresh=.5)
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_39.png]]
+[[./figures/odr/figure_36.png]]
 
 
    #+begin_src ipython
@@ -708,7 +704,7 @@ plot_m0_m1_phi(model, rates, 4)
 #+RESULTS:
 :RESULTS:
 : (1024, 161) (1024, 161) (1024, 161)
-[[./figures/odr/figure_40.png]]
+[[./figures/odr/figure_37.png]]
 :END:
 
 #+begin_src ipython
@@ -755,7 +751,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_42.png]]
+[[./figures/odr/figure_39.png]]
 
 * Connectivity
 
@@ -767,7 +763,7 @@ model.eval();
 #+end_src
 
 #+RESULTS:
-: 1
+: 2
 
 #+begin_src ipython
 from src.lr_utils import LowRankWeights, clamp_tensor
@@ -818,7 +814,7 @@ Ki0 = pkl_load( 'Ki', path=".")
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_45.png]]
+[[./figures/odr/figure_42.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height], sharey=1)
@@ -844,7 +840,7 @@ Ki0 = pkl_load( 'Ki', path=".")
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_46.png]]
+[[./figures/odr/figure_43.png]]
 
 #+begin_src ipython
 

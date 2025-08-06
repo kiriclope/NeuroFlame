@@ -359,8 +359,8 @@ plt.show()
 * Errors
 
 #+begin_src ipython
-n_half = num_epochs // 3
-n_half = 5
+n_half = num_epochs // 2
+# n_half = 1
 
 phi0_ini =  (phi0_list[:n_half]) * 180.0 / np.pi
 phi0_last = (phi0_list[-n_half:]) * 180.0 / np.pi
@@ -369,7 +369,7 @@ print(phi0_ini.shape, phi0_last.shape, reference.shape)
 #+end_src
 
 #+RESULTS:
-: (5, 768, 4, 1) (5, 768, 4, 1) torch.Size([768, 1])
+: (24, 768, 4, 1) (24, 768, 4, 1) torch.Size([768, 1])
 
 #+begin_src ipython
 _, _, phi_ini = decode_bump_torch(rates_list[:n_half], axis=-1)
@@ -377,7 +377,7 @@ print(phi_ini.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([5, 768, 121])
+: torch.Size([24, 768, 121])
 
 #+begin_src ipython
 _, _, phi_last = decode_bump_torch(rates_list[-n_half:], axis=-1)
@@ -385,7 +385,7 @@ print(phi_last.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([5, 768, 121])
+: torch.Size([24, 768, 121])
 
 #+begin_src ipython
 def get_rel_tar_error(phi, phi0, reference):
@@ -445,7 +445,7 @@ print(ref_ini.shape, rel_ini.shape, errors_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (3840, 1) (3840, 1) (5, 2, 768, 121)
+: (18432, 1) (18432, 1) (24, 2, 768, 121)
 
 #+begin_src ipython
 end_point_ini = get_end_point(model, errors_ini)
@@ -473,13 +473,14 @@ plt.show()
 #+RESULTS:
 
 * Biases
+** Serial Bias Curves
 
 #+begin_src ipython
 print(targ_ini.shape, rel_ini.shape, ref_ini.shape, end_point_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (3840, 1) (3840, 1) (3840, 1) (2, 3840)
+: (18432, 1) (18432, 1) (18432, 1) (2, 18432)
 
 #+begin_src ipython
 n_bins = 8
@@ -490,34 +491,48 @@ data_last = pd.DataFrame({'target_loc': targ_last[:, -1], 'rel_loc': rel_last[:,
 #+RESULTS:
 
 #+begin_src ipython
-def get_correct_error(nbins, df, error_type='rel_loc', thresh=25):
+def get_correct_error(n_bins, df, error_type='rel_loc', thresh=25):
+    import numpy as np
+    import pandas as pd
+
+    # 1. Threshold errors
     if thresh is not None:
         data = df[(df['errors'] >= -thresh) & (df['errors'] <= thresh)].copy()
     else:
         data = df.copy()
 
+    # 2. Bin target locations
     bin_edges = np.linspace(0, 360, n_bins + 1)
     data['bin_target'] = pd.cut(data['target_loc'], bins=bin_edges, include_lowest=True)
     mean_errors_per_bin = data.groupby('bin_target')['errors'].mean()
 
+    # 3. Remove mean error per target location (for rel_loc)
     if error_type == 'rel_loc':
         data['adjusted_errors'] = data['errors'] - data['bin_target'].map(mean_errors_per_bin).astype(float)
     else:
         data['adjusted_errors'] = data['errors']
 
-
-    # 2. Bin by relative location for both sessions (full version, [-180, 180])
+    # 4. Bin by error_type for both full versions
     data['bin_error'] = pd.cut(data[error_type], bins=n_bins)
     bin_error = data.groupby('bin_error')['adjusted_errors'].agg(['mean', 'sem']).reset_index()
     edges = bin_error['bin_error'].cat.categories
     centers = (edges.left + edges.right) / 2
 
-    # 3. FLIP SIGN for abs(rel_loc): defects on the left (-) are flipped so all bins reflect the same "direction"
-    data['error_abs'] = np.abs(data[error_type])
-    data['bin_error_abs'] = pd.cut(data['error_abs'], bins=n_bins, include_lowest=True)
+    # 5. Flipped error absolute analysis
+    if error_type == 'rel_loc':
+        # Bin abs(rel_loc) from 0 to 180
+        data['error_abs'] = np.abs(data[error_type])
+        data['bin_error_abs'] = pd.cut(data['error_abs'], bins=n_bins, include_lowest=True)
+        # Flip so all directions use same sign
+        data['adjusted_errors_abs'] = data['adjusted_errors'] * np.sign(data[error_type])
+    else:
+        # Bin abs(ref_loc) from 0 to 90
+        data['error_abs'] = np.abs(data[error_type])
+        data = data[data['error_abs'] <= 90.0]  # Only 0-90
+        data['bin_error_abs'] = pd.cut(data['error_abs'], bins=n_bins, include_lowest=True)
+        # Flip so all directions use same sign for ref_loc
+        data['adjusted_errors_abs'] = data['adjusted_errors'] * np.sign(data[error_type])
 
-    # Flip errors for abs plot:
-    data['adjusted_errors_abs'] = data['adjusted_errors'] * np.sign(data[error_type])
     bin_error_abs = data.groupby('bin_error_abs')['adjusted_errors_abs'].agg(['mean', 'sem']).reset_index()
     edges_abs = bin_error_abs['bin_error_abs'].cat.categories
     centers_abs = (edges_abs.left + edges_abs.right) / 2
@@ -537,26 +552,28 @@ centers_last, bin_rel_last, centers_abs_last, bin_rel_abs_last = get_correct_err
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
-ax[0].plot(centers_ini, bin_rel_ini['mean'], 'r', label='First')
+ax[0].plot(centers_ini, bin_rel_ini['mean'], 'r', label='First half')
 ax[0].fill_between(centers_ini, bin_rel_ini['mean'] - bin_rel_ini['sem'], bin_rel_ini['mean'] + bin_rel_ini['sem'], color='r', alpha=0.2)
 
-ax[0].plot(centers_last, bin_rel_last['mean'], 'b', label='Last')
+ax[0].plot(centers_last, bin_rel_last['mean'], 'b', label='Last half')
 ax[0].fill_between(centers_last, bin_rel_last['mean'] - bin_rel_last['sem'], bin_rel_last['mean'] + bin_rel_last['sem'], color='b', alpha=0.2)
 
 ax[0].axhline(0, color='k', linestyle=":")
 ax[0].set_xlabel('Rel. Loc. (°)')
 ax[0].set_ylabel('Error (°)')
+ax[0].set_xticks(np.linspace(-180, 180, 5))
 
-ax[1].plot(centers_abs_ini, bin_rel_abs_ini['mean'], 'r', label='First')
+ax[1].plot(centers_abs_ini, bin_rel_abs_ini['mean'], 'r', label='First half')
 ax[1].fill_between(centers_abs_ini, bin_rel_abs_ini['mean'] - bin_rel_abs_ini['sem'], bin_rel_abs_ini['mean'] + bin_rel_abs_ini['sem'], color='r', alpha=0.2)
 
-ax[1].plot(centers_abs_last, bin_rel_abs_last['mean'], 'b', label='Last')
+ax[1].plot(centers_abs_last, bin_rel_abs_last['mean'], 'b', label='Last half')
 ax[1].fill_between(centers_abs_last, bin_rel_abs_last['mean'] - bin_rel_abs_last['sem'], bin_rel_abs_last['mean'] + bin_rel_abs_last['sem'], color='b', alpha=0.2)
 
 ax[1].axhline(0, color='k', linestyle=":")
-ax[1].set_xlabel('|Rel. Loc.| (°)')
-ax[1].set_ylabel('Abs. Error (°)')
+ax[1].set_xlabel('Rel. Loc. (°)')
+ax[1].set_ylabel('Flip. Error (°)')
 ax[1].legend(fontsize=12)
+ax[1].set_xticks(np.linspace(0, 180, 3))
 
 plt.tight_layout()
 plt.show()
@@ -575,26 +592,28 @@ centers_ref_last, bin_ref_last, centers_ref_abs_last, bin_ref_abs_last = get_cor
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
-ax[0].plot(centers_ref_ini, bin_ref_ini['mean'], 'r', label='First')
+ax[0].plot(centers_ref_ini, bin_ref_ini['mean'], 'r', label='First half')
 ax[0].fill_between(centers_ref_ini, bin_ref_ini['mean'] - bin_ref_ini['sem'], bin_ref_ini['mean'] + bin_ref_ini['sem'], color='r', alpha=0.2)
 
-ax[0].plot(centers_ref_last, bin_ref_last['mean'], 'b', label='Last')
+ax[0].plot(centers_ref_last, bin_ref_last['mean'], 'b', label='Last half')
 ax[0].fill_between(centers_ref_last, bin_ref_last['mean'] - bin_ref_last['sem'], bin_ref_last['mean'] + bin_ref_last['sem'], color='b', alpha=0.2)
 
 ax[0].axhline(0, color='k', linestyle=":")
 ax[0].set_xlabel('Ref. Loc. (°)')
 ax[0].set_ylabel('Error (°)')
+ax[0].set_xticks(np.linspace(-180, 180, 5))
 
-ax[1].plot(centers_ref_abs_ini, bin_ref_abs_ini['mean'], 'r', label='First')
+ax[1].plot(centers_ref_abs_ini, bin_ref_abs_ini['mean'], 'r', label='First half')
 ax[1].fill_between(centers_ref_abs_ini, bin_ref_abs_ini['mean'] - bin_ref_abs_ini['sem'], bin_ref_abs_ini['mean'] + bin_ref_abs_ini['sem'], color='r', alpha=0.2)
 
-ax[1].plot(centers_ref_abs_last, bin_ref_abs_last['mean'], 'b', label='Last')
+ax[1].plot(centers_ref_abs_last, bin_ref_abs_last['mean'], 'b', label='Last half')
 ax[1].fill_between(centers_ref_abs_last, bin_ref_abs_last['mean'] - bin_ref_abs_last['sem'], bin_ref_abs_last['mean'] + bin_ref_abs_last['sem'], color='b', alpha=0.2)
 
 ax[1].axhline(0, color='k', linestyle=":")
-ax[1].set_xlabel('|Ref. Loc.| (°)')
-ax[1].set_ylabel('Abs. Error (°)')
+ax[1].set_xlabel('Ref. Loc. (°)')
+ax[1].set_ylabel('Flip. Error (°)')
 ax[1].legend(fontsize=12)
+ax[1].set_xticks(np.linspace(0, 90, 3))
 
 plt.tight_layout()
 plt.show()
@@ -609,8 +628,91 @@ plt.show()
 
 #+RESULTS:
 
-* Decoder
+** Bias Evolution along a session
 
+#+begin_src ipython
+_, _, phi_list = decode_bump_torch(rates_list, axis=-1)
+print(phi_list.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([50, 768, 121])
+
+#+begin_src ipython
+print(phi0_list.shape, reference.shape)
+#+end_src
+
+#+RESULTS:
+: (50, 768, 4, 1) torch.Size([768, 1])
+
+#+begin_src ipython
+n_bins = 8
+
+serial_list = []
+ref_list = []
+
+for i in range(phi_list.shape[0]):
+    targ_trial, rel_trial, ref_trial, errors_trial = get_rel_tar_error(phi_list[i, np.newaxis], phi0_list[i, np.newaxis], reference)
+    end_point_trial = get_end_point(model, errors_trial)
+
+    # print(targ_trial.shape, rel_trial.shape, ref_trial.shape, errors_trial.shape, end_point_trial.shape)
+
+    data = pd.DataFrame({'target_loc': targ_trial[:, -1], 'rel_loc': rel_trial[:, -1], 'ref_loc': ref_trial[:, -1], 'errors': end_point_trial[1]})
+
+    centers, bin_rel, centers_abs, bin_rel_abs = get_correct_error(n_bins, data)
+    centers, bin_ref, centers_abs, bin_ref_abs = get_correct_error(n_bins, data, error_type='ref_loc')
+
+    idx_max = np.argmax(abs(bin_rel_abs['mean']))
+    serial_max = bin_rel_abs['mean'][idx_max]
+    serial_std = bin_rel_abs['sem'][idx_max]
+
+    serial_list.append([serial_max, serial_std])
+
+    idx_max = np.argmax(abs(bin_ref_abs['mean']))
+    ref_max = bin_ref_abs['mean'][idx_max]
+    ref_std = bin_ref_abs['sem'][idx_max]
+
+    ref_list.append([ref_max, ref_std])
+
+serial_list = np.array(serial_list).T
+ref_list = np.array(ref_list).T
+print(serial_list.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 50)
+
+#+begin_src ipython
+delay_duration = 100
+xdelay = np.linspace(0, delay_duration, serial_list.shape[1])
+
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+ax[0].plot(xdelay, serial_list[0], '-')
+ax[0].fill_between(xdelay, serial_list[0] - serial_list[1], serial_list[0] + serial_list[1], color='b', alpha=0.2)
+
+ax[0].set_xlabel('Trial #')
+ax[0].set_ylabel('Serial Bias (°)')
+
+ax[1].plot(xdelay, ref_list[0], '-')
+ax[1].fill_between(xdelay, ref_list[0] - ref_list[1], ref_list[0] + ref_list[1], color='b', alpha=0.2)
+
+ax[1].set_xlabel('Trial #')
+ax[1].set_ylabel('Ref. Bias (°)')
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/bodr_seq_sb/figure_43.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+* Decoder
 ** Decoding Bump Location
 
 #+begin_src ipython
@@ -692,7 +794,7 @@ class AngleDecoder(BaseEstimator, RegressorMixin):
         Y = np.column_stack((np.cos(y), np.sin(y)))
 
         weights = None
-        if self.class_weight=='balanced' or self.class_weight:
+        if self.class_weight=='balanced' or self.class_weight is not None:
             # weights = weights_from_hist(angles, n_bins=32)
             weights = weights_from_pdf(y, bandwidth=1.0, beta=0.1)
 
@@ -761,7 +863,7 @@ print('\n', pred_list.shape)
 #+end_src
 
 #+RESULTS:
-: 100% 2/2 [00:00<00:00, 22671.91it/s]
+: 100% 2/2 [00:00<00:00, 31775.03it/s]
 :  (0,)
 :
 
@@ -771,36 +873,44 @@ Decoding session by session for all trial
 from mne.decoding import SlidingEstimator, GeneralizingEstimator
 from sklearn.model_selection import cross_val_predict, LeaveOneOut
 
-regressor = AngleDecoder(penalty=None, scaler=True, class_weight='balanced')
+regressor = AngleDecoder(penalty=None, scaler=True, class_weight=None)
 mne_estimator = SlidingEstimator(regressor, n_jobs=64, verbose=False)
 # mne_estimator = GeneralizingEstimator(regressor, n_jobs=-1, verbose=False)
 
 half_trial = rates_list.shape[2] // 2
-N_SESSIONS = 500
+N_SESSIONS = 768
 
 pred_list = []
 for session in tqdm(range(N_SESSIONS)):
 
     rates = rates_list[:, session, :half_trial].swapaxes(1, 2)
     angles = phi0_list[:, session, 0, 0]
-    pred_locs1 = cross_val_predict(mne_estimator, rates, angles, cv=5, n_jobs=64)
+    # pred_locs1 = cross_val_predict(mne_estimator, rates, angles, cv=5, n_jobs=64)
 
     rates = rates_list[:, session, half_trial:].swapaxes(1, 2)
     angles = phi0_list[:, session, 2, 0]
-    pred_locs2 = cross_val_predict(mne_estimator, rates, angles, cv=5, n_jobs=64)
+    # pred_locs2 = cross_val_predict(mne_estimator, rates, angles, cv=5, n_jobs=64)
 
-    pred_locs = np.concatenate((pred_locs1, pred_locs2), axis=-1)
+    # pred_locs = np.concatenate((pred_locs1, pred_locs2), axis=-1)
 
-    pred_list.append(pred_locs)
+    # pred_list.append(pred_locs)
 
-pred_list = np.array(pred_list)
-pred_list = pred_list.swapaxes(0,1)
+# pred_list = np.array(pred_list)
+# pred_list = pred_list.swapaxes(0,1)
 
-print('\n', pred_list.shape)
+# print('\n', pred_list.shape)
 #+end_src
 
 #+RESULTS:
-:   7% 33/500 [00:54<09:23,  1.21s/it]
+
+
+#+begin_src ipython
+# pkl_save(pred_list, './pred_list')
+pred_list = pkl_load('./pred_list')
+#+end_src
+
+#+RESULTS:
+: loading from ././pred_list.pkl
 
 #+begin_src ipython
 import matplotlib.cm as cm
@@ -840,19 +950,18 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 93505777-7fe4-4858-8213-23086322cd2e
+[[./figures/bodr_seq_sb/figure_52.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 1cc35782-141d-4340-9cdd-60fb327e03d5
 
 ** Errors
 
 #+begin_src ipython
-n_half = num_epochs // 3
+n_half = num_epochs // 2
 # n_half = 5
 
 phi0_ini =  (phi0_list[:n_half, :N_SESSIONS]) * 180.0 / np.pi
@@ -866,7 +975,7 @@ print(phi_ini.shape, phi0_last.shape, refs.shape)
 #+end_src
 
 #+RESULTS:
-: (16, 200, 121) (16, 200, 4, 1) torch.Size([200, 1])
+: (24, 768, 121) (24, 768, 4, 1) torch.Size([768, 1])
 
 #+begin_src ipython
 targ_ini, rel_ini, ref_ini, errors_ini = get_rel_tar_error(phi_ini, phi0_ini, refs)
@@ -883,8 +992,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: (3200, 1) (3200, 1) (16, 2, 200, 121)
-[[./figures/bodr_seq_sb/figure_51.png]]
+: (18432, 1) (18432, 1) (24, 2, 768, 121)
+[[./figures/bodr_seq_sb/figure_56.png]]
 :END:
 
 #+begin_src ipython
@@ -900,17 +1009,17 @@ fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
 ax[0].hist(reference[:, 0])
 ax[0].set_xlabel('References')
 
-ax[1].hist(end_point_ini[1])
+ax[1].hist(end_point_ini[1], bins='auto')
 ax[1].set_xlabel('Prev. Error (°)')
 
-ax[2].hist(end_point_last[1])
+ax[2].hist(end_point_last[1], bins='auto')
 ax[2].set_xlabel('Curr. Error (°)')
 
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/bodr_seq_sb/figure_53.png]]
+[[./figures/bodr_seq_sb/figure_58.png]]
 
 #+begin_src ipython
 
@@ -925,7 +1034,7 @@ print(targ_ini.shape, rel_ini.shape, ref_ini.shape, end_point_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (3200, 1) (3200, 1) (3200, 1) (2, 3200)
+: (18432, 1) (18432, 1) (18432, 1) (2, 18432)
 
 #+begin_src ipython
 n_bins = 8
@@ -945,33 +1054,35 @@ centers_last, bin_rel_last, centers_abs_last, bin_rel_abs_last = get_correct_err
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
-ax[0].plot(centers_ini, bin_rel_ini['mean'], 'r', label='First')
+ax[0].plot(centers_ini, bin_rel_ini['mean'], 'r', label='First half')
 ax[0].fill_between(centers_ini, bin_rel_ini['mean'] - bin_rel_ini['sem'], bin_rel_ini['mean'] + bin_rel_ini['sem'], color='r', alpha=0.2)
 
-ax[0].plot(centers_last, bin_rel_last['mean'], 'b', label='Last')
+ax[0].plot(centers_last, bin_rel_last['mean'], 'b', label='Last half')
 ax[0].fill_between(centers_last, bin_rel_last['mean'] - bin_rel_last['sem'], bin_rel_last['mean'] + bin_rel_last['sem'], color='b', alpha=0.2)
 
 ax[0].axhline(0, color='k', linestyle=":")
 ax[0].set_xlabel('Rel. Loc. (°)')
 ax[0].set_ylabel('Error (°)')
+ax[0].set_xticks(np.linspace(-180, 180, 5))
 
-ax[1].plot(centers_abs_ini, bin_rel_abs_ini['mean'], 'r', label='First')
+ax[1].plot(centers_abs_ini, bin_rel_abs_ini['mean'], 'r', label='First half')
 ax[1].fill_between(centers_abs_ini, bin_rel_abs_ini['mean'] - bin_rel_abs_ini['sem'], bin_rel_abs_ini['mean'] + bin_rel_abs_ini['sem'], color='r', alpha=0.2)
 
-ax[1].plot(centers_abs_last, bin_rel_abs_last['mean'], 'b', label='Last')
+ax[1].plot(centers_abs_last, bin_rel_abs_last['mean'], 'b', label='Last half')
 ax[1].fill_between(centers_abs_last, bin_rel_abs_last['mean'] - bin_rel_abs_last['sem'], bin_rel_abs_last['mean'] + bin_rel_abs_last['sem'], color='b', alpha=0.2)
 
 ax[1].axhline(0, color='k', linestyle=":")
-ax[1].set_xlabel('|Rel. Loc.| (°)')
-ax[1].set_ylabel('Abs. Error (°)')
+ax[1].set_xlabel('Rel. Loc. (°)')
+ax[1].set_ylabel('Flip. Error (°)')
 ax[1].legend(fontsize=12)
+ax[1].set_xticks(np.linspace(0, 180, 3))
 
 plt.tight_layout()
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/bodr_seq_sb/figure_58.png]]
+[[./figures/bodr_seq_sb/figure_63.png]]
 
 #+begin_src ipython
 centers_ref_ini, bin_ref_ini, centers_ref_abs_ini, bin_ref_abs_ini = get_correct_error(n_bins, data_ini, error_type='ref_loc')
@@ -983,33 +1094,35 @@ centers_ref_last, bin_ref_last, centers_ref_abs_last, bin_ref_abs_last = get_cor
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
-ax[0].plot(centers_ref_ini, bin_ref_ini['mean'], 'r', label='First')
+ax[0].plot(centers_ref_ini, bin_ref_ini['mean'], 'r', label='First half')
 ax[0].fill_between(centers_ref_ini, bin_ref_ini['mean'] - bin_ref_ini['sem'], bin_ref_ini['mean'] + bin_ref_ini['sem'], color='r', alpha=0.2)
 
-ax[0].plot(centers_ref_last, bin_ref_last['mean'], 'b', label='Last')
+ax[0].plot(centers_ref_last, bin_ref_last['mean'], 'b', label='Last half')
 ax[0].fill_between(centers_ref_last, bin_ref_last['mean'] - bin_ref_last['sem'], bin_ref_last['mean'] + bin_ref_last['sem'], color='b', alpha=0.2)
 
 ax[0].axhline(0, color='k', linestyle=":")
 ax[0].set_xlabel('Ref. Loc. (°)')
 ax[0].set_ylabel('Error (°)')
+ax[0].set_xticks(np.linspace(-180, 180, 5))
 
-ax[1].plot(centers_ref_abs_ini, bin_ref_abs_ini['mean'], 'r', label='First')
+ax[1].plot(centers_ref_abs_ini, bin_ref_abs_ini['mean'], 'r', label='First half')
 ax[1].fill_between(centers_ref_abs_ini, bin_ref_abs_ini['mean'] - bin_ref_abs_ini['sem'], bin_ref_abs_ini['mean'] + bin_ref_abs_ini['sem'], color='r', alpha=0.2)
 
-ax[1].plot(centers_ref_abs_last, bin_ref_abs_last['mean'], 'b', label='Last')
+ax[1].plot(centers_ref_abs_last, bin_ref_abs_last['mean'], 'b', label='Last half')
 ax[1].fill_between(centers_ref_abs_last, bin_ref_abs_last['mean'] - bin_ref_abs_last['sem'], bin_ref_abs_last['mean'] + bin_ref_abs_last['sem'], color='b', alpha=0.2)
 
 ax[1].axhline(0, color='k', linestyle=":")
-ax[1].set_xlabel('|Ref. Loc.| (°)')
-ax[1].set_ylabel('Abs. Error (°)')
+ax[1].set_xlabel('Ref. Loc. (°)')
+ax[1].set_ylabel('Flip. Error (°)')
 ax[1].legend(fontsize=12)
+ax[1].set_xticks(np.linspace(0, 90, 3))
 
 plt.tight_layout()
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/bodr_seq_sb/figure_60.png]]
+[[./figures/bodr_seq_sb/figure_65.png]]
 
 #+begin_src ipython
 

@@ -118,18 +118,21 @@ def add_vlines(model, ax=None):
 #+begin_src ipython
 kwargs = {
     'GAIN': 1.0,
-    'DURATION': 10.0,
+    'DURATION': 14.0,
     'T_STEADY': 2,
-    'T_STIM_ON': [1.0, 4.0, 6.0, 9.0],
-    'T_STIM_OFF': [2.0, 5.0, 7.0, 10.0],
-    'I0': [1.0, -2.0, 1.0, -2.0],
+    'T_STIM_ON': [1.0, 4.0, 7.0, 13.0],
+    'T_STIM_OFF': [2.0, 5.0, 8.0, 14.0],
+    'I0': [1.0, -6.0, 1.0, -6.0],
     'PHI0': [180.0, 180, 180, 180],
     'SIGMA0': [1.0, 0.0, 1.0, 0.0],
     'RANDOM_DELAY': 0,
     'MIN_DELAY': 2,
     'MAX_DELAY': 5,
-    'IF_ADAPT': 0,
-    'A_ADAPT': .3,
+    'USE': 0.03,
+    'TAU_FAC': 1.0,
+    'TAU_REC': 0.2,
+    'IF_ADAPT': 1,
+    'A_ADAPT': 0.5,
     'TAU_ADAPT': [150.0, 150.0],
 }
 #+end_src
@@ -139,15 +142,15 @@ kwargs = {
 #+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "train_odr_EI.yml"
-DEVICE = 'cuda:1'
+DEVICE = 'cuda'
 seed = np.random.randint(0, 1e6)
 
-seed = 1
+seed = 2
 print('seed', seed)
 #+end_src
 
 #+RESULTS:
-: seed 1
+: seed 2
 
 #+begin_src ipython
 N_BATCH = 128*6
@@ -165,12 +168,14 @@ model.eval();
 #+RESULTS:
 
 #+begin_src ipython
-print(model.J_STP)
+print(model.J_STP.item())
+model.J_STP = nn.Parameter(1.05 * model.J_STP)
+print(model.J_STP.item())
 #+end_src
 
 #+RESULTS:
-: Parameter containing:
-: tensor(3.2149, device='cuda:1', requires_grad=True)
+: 3.118954658508301
+: 3.27490234375
 
 * Simulations
 
@@ -190,7 +195,7 @@ print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rates (768, 101, 750)
+: rates (768, 141, 750)
 
 #+begin_src ipython
 m0, m1, phi = decode_bump_torch(rates, axis=-1, RET_TENSOR=0)
@@ -347,7 +352,7 @@ print(errors.shape, target_loc.shape, rel_loc.shape)
 #+end_src
 
 #+RESULTS:
-: (2, 768, 101) (768, 1) (768, 1)
+: (2, 768, 141) (768, 1) (768, 1)
 
 #+begin_src ipython
 time_points = np.linspace(0, model.DURATION, errors.shape[-1])
@@ -374,7 +379,10 @@ plt.show()
 #+begin_src ipython
 print(phi.shape, PHI0.shape, model.start_indices.shape, errors.shape)
 stim_start = (model.DT * (model.start_indices - model.N_STEADY)).cpu().numpy()
+stim_end = (model.DT * (model.end_indices - model.N_STEADY)).cpu().numpy()
+
 stim_start_idx = ((model.start_indices - model.N_STEADY) / model.N_WINDOW - 1).to(int).cpu().numpy()
+stim_end_idx = ((model.end_indices - model.N_STEADY) / model.N_WINDOW - 1).to(int).cpu().numpy()
 
 stim_start_idx_half = ((model.start_indices - 2 *model.N_STEADY) / model.N_WINDOW ).to(int).cpu().numpy()
 print(stim_start[1][:5], model.T_STIM_ON)
@@ -382,8 +390,8 @@ print(stim_start_idx[1][:5])
 #+end_src
 
 #+RESULTS:
-: (768, 101) (768, 4, 1) torch.Size([4, 768]) (2, 768, 101)
-: [4. 4. 4. 4. 4.] [1.0, 4.0, 6.0, 9.0]
+: (768, 141) (768, 4, 1) torch.Size([4, 768]) (2, 768, 141)
+: [4. 4. 4. 4. 4.] [1.0, 4.0, 7.0, 13.0]
 : [39 39 39 39 39]
 
 #+begin_src ipython
@@ -510,6 +518,7 @@ plt.show()
 #+RESULTS:
 
 * Serial Bias
+** Serial Curves
 
 #+begin_src ipython
 def get_correct_error(nbins, df, thresh=None):
@@ -645,34 +654,29 @@ target_centers = (edges_target.left + edges_target.right) / 2
 #+RESULTS:
 
 #+begin_src ipython
-fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
-
-# Panel 1: By Target Location
-ax[0].plot(target_centers, bin_target['mean'], 'b')
-ax[0].fill_between(target_centers, bin_target['mean'] - bin_target['sem'], bin_target['mean'] + bin_target['sem'], color='b', alpha=0.2)
-ax[0].axhline(0, color='k', linestyle=":")
-ax[0].set_xlabel('Target Loc. (°)')
-ax[0].set_ylabel('Corrected Error (°)')
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
 # Panel 2: By Relative Location (Full vs Half session, -180..180)
-ax[1].plot(centers, bin_rel['mean'], 'r', label='full')
-ax[1].fill_between(centers, bin_rel['mean'] - bin_rel['sem'], bin_rel['mean'] + bin_rel['sem'], color='r', alpha=0.2)
-ax[1].plot(centers, bin_rel_half['mean'], 'b', label='half')
-ax[1].fill_between(centers, bin_rel_half['mean'] - bin_rel_half['sem'], bin_rel_half['mean'] + bin_rel_half['sem'], color='b', alpha=0.2)
-ax[1].axhline(0, color='k', linestyle=":")
-ax[1].set_xlabel('Rel. Loc. (°)')
-ax[1].set_ylabel('Corrected Error (°)')
-ax[1].legend(fontsize=12)
+ax[0].plot(centers, bin_rel['mean'], 'r', label='full')
+ax[0].fill_between(centers, bin_rel['mean'] - bin_rel['sem'], bin_rel['mean'] + bin_rel['sem'], color='r', alpha=0.2)
+ax[0].plot(centers, bin_rel_half['mean'], 'b', label='half')
+ax[0].fill_between(centers, bin_rel_half['mean'] - bin_rel_half['sem'], bin_rel_half['mean'] + bin_rel_half['sem'], color='b', alpha=0.2)
+ax[0].axhline(0, color='k', linestyle=":")
+ax[0].set_xlabel('Rel. Loc. (°)')
+ax[0].set_ylabel('Error (°)')
+ax[0].set_xticks(np.linspace(-180, 180, 5))
+
 
 # Panel 3: By |Relative Location| (Full and Half)
-ax[2].plot(centers_abs, bin_rel_abs['mean'], 'r', label='full')
-ax[2].fill_between(centers_abs, bin_rel_abs['mean'] - bin_rel_abs['sem'], bin_rel_abs['mean'] + bin_rel_abs['sem'], color='r', alpha=0.2)
-ax[2].plot(centers_abs, bin_rel_abs_half['mean'], 'b', label='half')
-ax[2].fill_between(centers_abs, bin_rel_abs_half['mean'] - bin_rel_abs_half['sem'], bin_rel_abs_half['mean'] + bin_rel_abs_half['sem'], color='b', alpha=0.2)
-ax[2].axhline(0, color='k', linestyle=":")
-ax[2].set_xlabel('|Rel. Loc.| (°)')
-ax[2].set_ylabel('Corrected Error (°)')
-ax[2].legend(fontsize=12)
+ax[1].plot(centers_abs, bin_rel_abs['mean'], 'r', label='3s delay')
+ax[1].fill_between(centers_abs, bin_rel_abs['mean'] - bin_rel_abs['sem'], bin_rel_abs['mean'] + bin_rel_abs['sem'], color='r', alpha=0.2)
+ax[1].plot(centers_abs, bin_rel_abs_half['mean'], 'b', label='1s delay')
+ax[1].fill_between(centers_abs, bin_rel_abs_half['mean'] - bin_rel_abs_half['sem'], bin_rel_abs_half['mean'] + bin_rel_abs_half['sem'], color='b', alpha=0.2)
+ax[1].axhline(0, color='k', linestyle=":")
+ax[1].set_xlabel('Rel. Loc. (°)')
+ax[1].set_ylabel('Flip. Error (°)')
+ax[1].legend(fontsize=12)
+ax[1].set_xticks(np.linspace(0, 180, 3))
 
 plt.tight_layout()
 plt.show()
@@ -680,6 +684,68 @@ plt.show()
 
 #+RESULTS:
 [[./figures/odr_sb/figure_34.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+** Delay Dependency
+
+#+begin_src ipython
+delay_point = []
+for i in range(errors.shape[1]):
+        idx_start = stim_end_idx[2][i] + 1
+        idx_end = stim_start_idx[3][i]
+
+        end_ = []
+        for idx in range(idx_start, idx_end):
+                end_.append(errors[1][i][idx])
+
+        delay_point.append(end_)
+
+delay_point = np.array(delay_point)
+print(delay_point.shape, errors.shape)
+#+end_src
+
+#+RESULTS:
+: (768, 49) (2, 768, 141)
+
+#+begin_src ipython
+n_bins = 8
+
+serial_list = []
+for i in range(delay_point.shape[1]):
+    data = pd.DataFrame({'target_loc': target_loc[:, -1], 'rel_loc': rel_loc[:, -1], 'errors': delay_point[:, i]})
+    centers, bin_rel, centers_abs, bin_rel_abs = get_correct_error(n_bins, data)
+
+    idx_max = np.argmax(abs(bin_rel_abs['mean']))
+    serial_max = bin_rel_abs['mean'][idx_max]
+    serial_std = bin_rel_abs['sem'][idx_max]
+
+    serial_list.append([serial_max, serial_std])
+
+serial_list = np.array(serial_list).T
+print(serial_list.shape)
+#+end_src
+
+#+RESULTS:
+: (2, 49)
+
+#+begin_src ipython
+delay_duration = stim_start[3, 0] - stim_end[2, 0]
+xdelay = np.linspace(0, delay_duration, serial_list.shape[1])
+
+plt.plot(xdelay, serial_list[0], '-')
+plt.fill_between(xdelay, serial_list[0] - serial_list[1], serial_list[0] + serial_list[1], color='b', alpha=0.2)
+plt.xlabel('Delay Length (s)')
+plt.ylabel('Serial Bias (°)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_38.png]]
 
 #+begin_src ipython
 
