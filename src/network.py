@@ -185,6 +185,9 @@ class Network(nn.Module):
         else:
             ff = ff_input[:, 0]
 
+        if self.IF_FF_ADAPT:
+            self.thresh_ff = torch.zeros_like(ff_input[:, 0])
+
         rates = Activation()(ff + rec_input[0], func_name=self.TF_TYPE, thresh=thresh)
 
         return rates, ff_input, rec_input, thresh
@@ -218,6 +221,11 @@ class Network(nn.Module):
             rec_input[0] = rec_input[0] * self.EXP_DT_TAU_SYN + hidden * (1.0 - self.EXP_DT_TAU_SYN)
         else:
             rec_input[0] = hidden
+
+        if self.IF_FF_ADAPT:
+            # ff_input = ff_input / (1.0 + self.thresh_ff)
+            ff_input = torch.sign(ff_input) * nn.ReLU()(ff_input - self.thresh_ff)
+            self.thresh_ff = self.thresh_ff * self.EXP_FF_ADAPT + nn.ReLU()(ff_input) * self.A_FF_ADAPT * (1.0-self.EXP_FF_ADAPT)
 
         # compute net input
         net_input = ff_input + rec_input[0]

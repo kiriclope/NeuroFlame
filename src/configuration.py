@@ -132,6 +132,10 @@ def init_const(model):
     for i_pop in range(model.N_POP):
         model.thresh[:, model.slices[i_pop]] = model.THRESH[i_pop]
 
+    if model.IF_FF_ADAPT:
+        model.TAU_FF_ADAPT = torch.tensor(model.TAU_FF_ADAPT, device=model.device)
+        model.EXP_FF_ADAPT = torch.exp(-model.DT / model.TAU_FF_ADAPT)
+
     if model.IF_ADAPT:
         model.TAU_ADAPT = torch.tensor(model.TAU_ADAPT, device=model.device)
         model.EXP_DT_TAU_ADAPT = torch.ones(model.N_NEURON, device=model.device)
