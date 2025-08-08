@@ -1,6 +1,6 @@
 #+STARTUP: fold
 #+TITLE: ODR Sequential Serial Bias
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_sb :kernel torch :exports results :output-dir ./figures/odr_sb :file (lc/org-babel-tangle-figure-filename)
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_seq_sb :kernel torch :exports results :output-dir ./figures/odr_sb :file (lc/org-babel-tangle-figure-filename)
 
 * Notebook Settings
 
@@ -121,20 +121,31 @@ def add_vlines(model, ax=None):
 kwargs = {
     'GAIN': 1.0,
     'DURATION': 12.0,
-    'T_STEADY': 2,
-    'T_STIM_ON': [1.0, 5.0, 7.0, 11.0],
-    'T_STIM_OFF': [2.0, 6.0, 8.0, 12.0],
+    'T_STEADY': 4,
+    'T_STIM_ON': [1.0, 4.0, 6.0, 10.0],
+    'T_STIM_OFF': [2.0, 5.0, 7.0, 12.0],
     'I0': [1.0, -2.0, 1.0, -2.0],
     'PHI0': [180.0, 180, 180, 180],
     'SIGMA0': [1.0, 0.0, 1.0, 0.0],
     'RANDOM_DELAY': 0,
     'MIN_DELAY': 2,
     'MAX_DELAY': 5,
+    'USE': 0.03,
+    'TAU_FAC': 2.0,
+    'TAU_REC': 0.2,
     'IF_ADAPT': 1,
-    'A_ADAPT': 0.25,
+    'A_ADAPT': 0.5,
     'TAU_ADAPT': [150.0, 150.0],
+    'IF_FF_ADAPT': 0,
+    'A_FF_ADAPT': 0.1,
+    'TAU_FF_ADAPT': 150.0,
+    'RATE_NOISE': 0,
+    'VAR_RATE': 10.0,
+    'REP_BIAS': 15.0,
+    'REP_VAR': 2.5,
 }
 #+end_src
+
 
 #+RESULTS:
 
@@ -144,12 +155,12 @@ conf_name = "train_odr_EI.yml"
 DEVICE = 'cuda'
 seed = np.random.randint(0, 1e6)
 
-seed = 1
+seed = 2
 print('seed', seed)
 #+end_src
 
 #+RESULTS:
-: seed 1
+: seed 2
 
 #+begin_src ipython
 N_BATCH = 768
@@ -168,12 +179,12 @@ model.eval();
 
 #+begin_src ipython
 print(model.J_STP)
-model.J_STP = torch.nn.Parameter(torch.tensor(3.0).to(model.device))
+# model.J_STP = torch.nn.Parameter(torch.tensor(3.0).to(model.device))
 #+end_src
 
 #+RESULTS:
 : Parameter containing:
-: tensor(3.5521, device='cuda:0', requires_grad=True)
+: tensor(2.5162, device='cuda:0', requires_grad=True)
 
 * Batching Inputs
 
@@ -213,25 +224,31 @@ colors = cm.tab10.colors  # or cm.viridis.colors, etc.
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
 for i in range(5):
-    ax[0].plot(phi_ext[i].T, color=colors[i], alpha=.4)
+    ax[0].plot((-phi_ext[i].T)% (2 * np.pi), color=colors[i], alpha=.4)
     ax[0].axhline(model.PHI0[i, 0, 0].cpu().detach(), xmin=0, xmax=0.5, ls='--', color=colors[i])
     ax[0].axhline(model.PHI0[i, 2, 0].cpu().detach(), xmin=0.5, ls='--', color=colors[i])
 
     ax[1].plot(phi[i].T, color=colors[i], alpha=.4)
     ax[1].axhline(model.PHI0[i, 0, 0].cpu().detach(), xmin=0, xmax=0.5, ls='--', color=colors[i])
     ax[1].axhline(model.PHI0[i, 2, 0].cpu().detach(), xmin=0.5, ls='--', color=colors[i])
+
+ax[0].set_ylabel('FF Input')
+ax[0].set_ylabel('Rates')
+plt.show()
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+: Text(0, 0.5, 'Rates')
 [[./figures/odr_sb/figure_14.png]]
-
+:END:
 
 #+begin_src ipython
-num_epochs = 50
+num_epochs = 49
 
 rates_list = [rates_tensor.cpu().detach()]
-phi0_list = [model.PHI0.cpu().detach()]
-thresh_list = [model.thresh.cpu().detach()]
+phi0_list = [model.PHI0_UNBIASED.cpu().detach()]
+thresh_list = [model.thresh_last.cpu().detach()]
 
 for epoch in tqdm(range(num_epochs)):
     with torch.no_grad():
@@ -243,11 +260,11 @@ for epoch in tqdm(range(num_epochs)):
         ff_input = model.init_ff_input()
         rates = model.forward(ff_input=ff_input, IF_INIT=0)
 
-        phi0_list.append(model.PHI0.cpu().detach())
+        phi0_list.append(model.PHI0_UNBIASED.cpu().detach())
         rates_list.append(rates.cpu().detach())
-        thresh_list.append(model.thresh.cpu().detach())
+        thresh_list.append(model.thresh_last.cpu().detach())
 
-        del ff_input, model.PHI0
+        del ff_input, model.PHI0, model.PHI0_UNBIASED
         clear_cache()
 
 rates_list = np.stack(rates_list)
@@ -259,9 +276,9 @@ print('rates', rates_list.shape, 'thresh', thresh_list.shape, 'phi0', phi0_list.
 
 #+RESULTS:
 :RESULTS:
-: 100% 50/50 [00:50<00:00,  1.01s/it]
+: 100% 49/49 [00:53<00:00,  1.09s/it]
 :
-: rates (51, 768, 121, 750) thresh (51, 768, 1000) phi0 (51, 768, 4, 1)
+: rates (50, 768, 121, 750) thresh (50, 768, 1000) phi0 (50, 768, 4, 1)
 :END:
 
 #+begin_src ipython
@@ -272,7 +289,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_14.png]]
+[[./figures/odr_sb/figure_16.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -283,7 +300,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_15.png]]
+[[./figures/odr_sb/figure_17.png]]
 
 #+begin_src ipython
 plt.plot(thresh_list[:, 0, :10])
@@ -293,20 +310,26 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_16.png]]
+[[./figures/odr_sb/figure_18.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 * Errors
 
 #+begin_src ipython
-n_half = num_epochs // 5
-n_half = 6
-phi0_ini =  (phi0_list[:n_half]) * 180.0 / np.pi
-phi0_last = (phi0_list[-n_half:]) * 180.0 / np.pi
+n_half = num_epochs // 2
+# n_half = 1
+phi0_ini =  phi0_list[:n_half]
+phi0_last = phi0_list[-n_half:]
 print(phi0_ini.shape, phi0_last.shape)
 #+end_src
 
 #+RESULTS:
-: (6, 768, 4, 1) (6, 768, 4, 1)
+: (24, 768, 4, 1) (24, 768, 4, 1)
 
 #+begin_src ipython
 _, _, phi_ini = decode_bump_torch(rates_list[:n_half], axis=-1, RET_TENSOR=0)
@@ -314,7 +337,7 @@ print(phi_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (6, 768, 121)
+: (24, 768, 121)
 
 #+begin_src ipython
 _, _, phi_last = decode_bump_torch(rates_list[-n_half:], axis=-1, RET_TENSOR=0)
@@ -322,21 +345,21 @@ print(phi_last.shape)
 #+end_src
 
 #+RESULTS:
-: (6, 768, 121)
+: (24, 768, 121)
 
 #+begin_src ipython
 def get_rel_tar_error(phi, phi0):
-    target_loc = phi0[:, :, 2]
+    target_loc = phi0[:, :, 2] * 180.0 / np.pi
 
-    rel_loc = (phi0[:, :, 0] - phi0[:, :, 2]) * np.pi / 180.0
+    rel_loc = (phi0[:, :, 0] - phi0[:, :, 2])
     rel_loc = (rel_loc + np.pi) % (2 * np.pi) - np.pi
     rel_loc *= 180 / np.pi
 
-    error_curr = (phi - phi0[:, :, 2] * np.pi / 180.0)
+    error_curr = (phi - phi0[:, :, 2])
     error_curr = (error_curr + np.pi) % (2 * np.pi) - np.pi
     error_curr *= 180 / np.pi
 
-    error_prev = ((phi - phi0[:, :,0] * np.pi / 180.0))
+    error_prev = (phi - phi0[:, :,0] )
     error_prev = (error_prev + np.pi) % (2 * np.pi) - np.pi
     error_prev *= 180 / np.pi
 
@@ -373,7 +396,7 @@ print(targ_ini.shape, rel_ini.shape, errors_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (4608, 1) (4608, 1) (6, 2, 768, 121)
+: (18432, 1) (18432, 1) (24, 2, 768, 121)
 
 #+begin_src ipython
 end_point_ini = get_end_point(model, errors_ini)
@@ -382,19 +405,20 @@ print(end_point_ini.shape, end_point_last.shape)
 #+end_src
 
 #+RESULTS:
-: (2, 4608) (2, 4608)
+: (2, 18432) (2, 18432)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
 
 ax[0].hist(targ_ini[:, 0])
-ax[1].hist(end_point_ini[1])
-ax[2].hist(end_point_last[1])
+ax[1].hist(end_point_ini[1], bins=50)
+ax[2].hist(end_point_last[1], bins=50)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_24.png]]
+[[./figures/odr_sb/figure_27.png]]
+
 
 #+begin_src ipython
 
@@ -409,7 +433,7 @@ print(targ_ini.shape, rel_ini.shape, end_point_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (4608, 1) (4608, 1) (2, 4608)
+: (18432, 1) (18432, 1) (2, 18432)
 
 #+begin_src ipython
 n_bins = 8
@@ -499,7 +523,113 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_30.png]]
+[[./figures/odr_sb/figure_33.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+** Delay Dependency
+
+#+begin_src ipython
+print(phi0_list.shape, phi0_list[0, :5, 0, 0])
+#+end_src
+
+#+RESULTS:
+: (50, 768, 4, 1) [0.13962634 3.6477382  0.47123888 2.7925267  2.4260077 ]
+
+#+begin_src ipython
+_, _, phi_list = decode_bump_torch(rates_list, axis=-1, RET_TENSOR=0)
+print(phi_list.shape, phi_list[0, :5, 0])
+#+end_src
+
+#+RESULTS:
+: (50, 768, 121) [3.0457628 5.351302  2.8073006 2.3477678 3.8147376]
+
+#+begin_src ipython
+targ_list, rel_list, errors_list = get_rel_tar_error(phi_list[-1:], phi0_list[-1:])
+print(targ_list.shape, rel_list.shape, rel_list[:5, 0], errors_list.shape, errors_list[0, 0, :5, 0])
+#+end_src
+
+#+RESULTS:
+: (768, 1) (768, 1) [ -61.999992 -108.00001    78.00001   -32.999992  -97.      ] (1, 2, 768, 121) [152.54442   -86.46101     1.401227  -98.336174   -4.7557516]
+
+#+begin_src ipython
+stim_start = (model.DT * (model.start_indices - model.N_STEADY)).cpu().numpy()
+stim_end = (model.DT * (model.end_indices - model.N_STEADY)).cpu().numpy()
+
+stim_start_idx = ((model.start_indices - model.N_STEADY) / model.N_WINDOW - 1).to(int).cpu().numpy()
+stim_end_idx = ((model.end_indices - model.N_STEADY) / model.N_WINDOW - 1).to(int).cpu().numpy()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+delay_point = []
+for i in range(errors_list.shape[2]):
+        idx_start = stim_end_idx[2][i]
+        idx_end = stim_start_idx[3][i]
+
+        end_ = []
+
+        for idx in range(idx_start, idx_end):
+                end__ = []
+                for j in range(errors_list.shape[0]):
+                        end__.append(errors_list[j, 1, i, idx])
+
+                end_.append(end__)
+
+        delay_point.append(end_)
+
+delay_point = np.vstack(np.array(delay_point).swapaxes(1,2))
+print(delay_point.shape, errors_list.shape)
+#+end_src
+
+#+RESULTS:
+: (768, 30) (1, 2, 768, 121)
+
+#+begin_src ipython
+n_bins = 8
+
+serial_list = []
+for i in range(delay_point.shape[1]):
+    data = pd.DataFrame({'target_loc': targ_list[:, -1], 'rel_loc': rel_list[:, -1], 'errors': delay_point[:, i]})
+    centers, bin_rel, centers_abs, bin_rel_abs = get_correct_error(n_bins, data)
+
+    plt.plot(centers, bin_rel['mean'])
+
+    idx_max = np.argmax(abs(bin_rel_abs['mean']))
+    serial_max = bin_rel_abs['mean'][idx_max]
+    serial_std = bin_rel_abs['sem'][idx_max]
+
+    serial_list.append([serial_max, serial_std])
+
+serial_list = np.array(serial_list).T
+print(serial_list.shape)
+plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (2, 30)
+[[./figures/odr_sb/figure_40.png]]
+:END:
+
+#+begin_src ipython
+delay_duration = stim_start[3, 0] - stim_end[2, 0]
+xdelay = np.linspace(0, delay_duration, serial_list.shape[1])
+
+plt.plot(xdelay, serial_list[0], '-')
+plt.fill_between(xdelay, serial_list[0] - serial_list[1], serial_list[0] + serial_list[1], color='b', alpha=0.2)
+plt.xlabel('Delay Length (s)')
+plt.ylabel('Serial Bias (°)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_sb/figure_41.png]]
 
 #+begin_src ipython
 

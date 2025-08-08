@@ -259,7 +259,7 @@ class Network(nn.Module):
 
         # adaptation
         if self.IF_ADAPT:
-            thresh = thresh * self.EXP_DT_TAU_ADAPT + rates.detach() * self.A_ADAPT * (1.0 - self.EXP_DT_TAU_ADAPT)
+            thresh = thresh * self.EXP_DT_TAU_ADAPT + rates * self.A_ADAPT * (1.0 - self.EXP_DT_TAU_ADAPT)
 
         return rates, rec_input, thresh
 

@@ -138,6 +138,9 @@ def init_ff_seq(model):
         size = (model.N_BATCH, model.Na[0])
         Stimulus = Stimuli(model.TASK, size, device=model.device)
 
+        sizeI = (model.N_BATCH, model.Na[1])
+        StimulusI = Stimuli(model.TASK, sizeI, device=model.device)
+
         if "flow" in model.TASK:
             grid_inputs = get_grid_inputs(model)
 
@@ -205,6 +208,11 @@ def init_ff_seq(model):
                         else:
                             ff_input[j, mask, model.slices[0]].add_(stimulus[j])
                 else:
+                    # if model.I0[i]<0:
+                    #     stimulusI = StimulusI(-model.I0[i], model.SIGMA0[i], model.PHI0[:, i]).unsqueeze(1)
+                    #     ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[1]].add_(stimulusI)
+                    #     del stimulusI
+                    # else:
                     ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[0]].add_(stimulus)
 
             del stimulus
@@ -238,8 +246,24 @@ def rl_ff_udpdate(model, ff_input, rates, step, rwd):
 
     return ff_input
 
+def shifted_phase(phase1, phase2, bias_strength, bias_var, direction=-1):
+    """
+    shift phase2_original away from phase1 by bias_strength (in radians)
+    direction='repulsive' for away, 'attractive' for toward
+    All phases in radians
+    """
+    delta = (phase1 - phase2) * torch.pi / 180.0
+    # - for repulsion, + for attraction
+    phase2_biased = phase2 + direction * bias_strength * torch.sin(delta) + bias_var * torch.randn_like(phase2)
+    return torch.remainder(phase2_biased, 360.0)
+
+
 def init_ff_input(model):
     if model.TASK=='odr':
+        if model.REP_BIAS>0:
+            model.PHI0_UNBIASED = torch.deg2rad(model.PHI0.clone())
+            model.PHI0[:, 2] = shifted_phase(model.PHI0[:, 0], model.PHI0[:, 2], model.REP_BIAS, model.REP_VAR)
+
         model.PHI0 = torch.deg2rad(model.PHI0) if torch.any(model.PHI0 > 2 * torch.pi) else model.PHI0
 
     if model.LIVE_FF_UPDATE:

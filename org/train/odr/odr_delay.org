@@ -426,6 +426,32 @@ class AngularErrorLoss(nn.Module):
 * Model
 
 #+begin_src ipython
+kwargs = {
+    'GAIN': 1.0,
+    'DURATION': 8.0,
+    'T_STEADY': 4,
+    'T_STIM_ON': [1.0, 5.0],
+    'T_STIM_OFF': [2.0, 6.0],
+    'I0': [1.0, -2.0, 1.0, -2.0],
+    'PHI0': [180.0, 180, 180, 180],
+    'SIGMA0': [1.0, 0.0, 1.0, 0.0],
+    'RANDOM_DELAY': 1,
+    'MIN_DELAY': 0,
+    'MAX_DELAY': 3,
+    'TAU_FAC': 2.0,
+    'TAU_REC': 0.2,
+    'IF_ADAPT': 1,
+    'A_ADAPT': 0.1,
+    'TAU_ADAPT': [150.0, 150.0],
+    'IF_FF_ADAPT': 0,
+    'A_FF_ADAPT': 0.1,
+    'TAU_FF_ADAPT': 150.0,
+}
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "train_odr_EI.yml"
 DEVICE = 'cuda'
@@ -447,7 +473,7 @@ print('seed', seed)
 : seed 2
 
 #+begin_src ipython
-model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=N_BATCH)
+model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=N_BATCH, **kwargs)
 #+end_src
 
 #+RESULTS:
@@ -460,7 +486,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_18.png]]
+[[./figures/odr/figure_19.png]]
 
 * Training
 
@@ -499,10 +525,11 @@ print(torch.where(rwd_mask[idx]==1)[0])
 #+end_src
 
 #+RESULTS:
-: rwd_mask torch.Size([1024, 161])
+: rwd_mask torch.Size([1024, 111])
 : tensor([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
 :         28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-:         46, 47, 48, 49, 50, 51], device='cuda:0')
+:         46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61],
+:        device='cuda:0')
 
 #+begin_src ipython
 
@@ -544,7 +571,7 @@ print(model.PHI0.shape, ff_input.shape, labels.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([1024, 2, 1]) torch.Size([1024, 905, 1000]) torch.Size([1024, 161])
+: torch.Size([1024, 2, 1]) torch.Size([1024, 755, 1000]) torch.Size([1024, 111])
 
 
 #+begin_src ipython
@@ -556,8 +583,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: torch.Size([61112])
-[[./figures/odr/figure_25.png]]
+: torch.Size([56292])
+[[./figures/odr/figure_26.png]]
 :END:
 #+RESULTS:
 
@@ -569,9 +596,9 @@ train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_si
 
 #+RESULTS:
 :RESULTS:
-[[./figures/odr/figure_26.png]]
-: torch.Size([819, 905, 1000]) torch.Size([205, 905, 1000])
-: torch.Size([819, 161]) torch.Size([205, 161])
+[[./figures/odr/figure_27.png]]
+: torch.Size([819, 755, 1000]) torch.Size([205, 755, 1000])
+: torch.Size([819, 111]) torch.Size([205, 111])
 :END:
 
 #+begin_src ipython
@@ -582,8 +609,8 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 #+RESULTS:
 
-     #+begin_src ipython
-  num_epochs = 20
+    #+begin_src ipython
+  num_epochs = 15
   start = perf_counter()
   loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs, thresh=.005)
   end = perf_counter()
@@ -592,27 +619,22 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 #+RESULTS:
 #+begin_example
-Epoch 1/20, Training Loss: 1.4094, Validation Loss: 1.4057
-Epoch 2/20, Training Loss: 1.3508, Validation Loss: 1.3465
-Epoch 3/20, Training Loss: 1.2620, Validation Loss: 1.2309
-Epoch 4/20, Training Loss: 1.0876, Validation Loss: 0.9722
-Epoch 5/20, Training Loss: 0.6810, Validation Loss: 0.4688
-Epoch 6/20, Training Loss: 0.3140, Validation Loss: 0.2304
-Epoch 7/20, Training Loss: 0.1910, Validation Loss: 0.1132
-Epoch 8/20, Training Loss: 0.1131, Validation Loss: 0.0923
-Epoch 9/20, Training Loss: 0.0924, Validation Loss: 0.0718
-Epoch 10/20, Training Loss: 0.0573, Validation Loss: 0.0505
-Epoch 11/20, Training Loss: 0.0472, Validation Loss: 0.0434
-Epoch 12/20, Training Loss: 0.0376, Validation Loss: 0.0361
-Epoch 13/20, Training Loss: 0.0326, Validation Loss: 0.0334
-Epoch 14/20, Training Loss: 0.0307, Validation Loss: 0.0301
-Epoch 15/20, Training Loss: 0.0280, Validation Loss: 0.0299
-Epoch 16/20, Training Loss: 0.0274, Validation Loss: 0.0275
-Epoch 17/20, Training Loss: 0.0264, Validation Loss: 0.0295
-Epoch 18/20, Training Loss: 0.0255, Validation Loss: 0.0278
-Epoch 19/20, Training Loss: 0.0247, Validation Loss: 0.0278
-Epoch 20/20, Training Loss: 0.0264, Validation Loss: 0.0295
-Elapsed (with compilation) = 0h 4m 4s
+Epoch 1/15, Training Loss: 1.2778, Validation Loss: 1.1452
+Epoch 2/15, Training Loss: 0.9996, Validation Loss: 0.7003
+Epoch 3/15, Training Loss: 0.4226, Validation Loss: 0.7342
+Epoch 4/15, Training Loss: 0.2051, Validation Loss: 0.1566
+Epoch 5/15, Training Loss: 0.1711, Validation Loss: 0.1866
+Epoch 6/15, Training Loss: 0.1608, Validation Loss: 0.1361
+Epoch 7/15, Training Loss: 0.1050, Validation Loss: 0.0894
+Epoch 8/15, Training Loss: 0.0700, Validation Loss: 0.0684
+Epoch 9/15, Training Loss: 0.0559, Validation Loss: 0.0516
+Epoch 10/15, Training Loss: 0.0425, Validation Loss: 0.0444
+Epoch 11/15, Training Loss: 0.0363, Validation Loss: 0.0379
+Epoch 12/15, Training Loss: 0.0312, Validation Loss: 0.0332
+Epoch 13/15, Training Loss: 0.0280, Validation Loss: 0.0307
+Epoch 14/15, Training Loss: 0.0265, Validation Loss: 0.0291
+Epoch 15/15, Training Loss: 0.0255, Validation Loss: 0.0281
+Elapsed (with compilation) = 0h 3m 12s
 #+end_example
 
 #+begin_src ipython
@@ -633,7 +655,7 @@ print(model.J_STP)
 
 #+RESULTS:
 : Parameter containing:
-: tensor(3.1190, device='cuda:0', requires_grad=True)
+: tensor(2.6684, device='cuda:0', requires_grad=True)
 
 #+begin_src ipython
 with torch.no_grad():
@@ -649,7 +671,7 @@ with torch.no_grad():
 #+end_src
 
 #+RESULTS:
-: torch.Size([1024, 2, 1]) torch.Size([1024, 905, 1000]) torch.Size([1024, 1])
+: torch.Size([1024, 2, 1]) torch.Size([1024, 755, 1000]) torch.Size([1024, 1])
 
 #+begin_src ipython
 plt.hist(labels[:, 0].cpu() * 180 / np.pi, bins='auto', density=True)
@@ -661,7 +683,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_32.png]]
+[[./figures/odr/figure_33.png]]
 
 #+begin_src ipython
 with torch.no_grad():
@@ -670,14 +692,14 @@ print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rates (1024, 161, 750)
+: rates (1024, 111, 750)
 
  #+begin_src ipython
 plot_rates_selec(rates=ff_input.cpu().detach().numpy(), idx=20, thresh=.5)
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_34.png]]
+[[./figures/odr/figure_35.png]]
 
  #+begin_src ipython
 plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
@@ -685,8 +707,8 @@ plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
 
 #+RESULTS:
 :RESULTS:
-: (1024, 905) (1024, 905) (1024, 905)
-[[./figures/odr/figure_35.png]]
+: (1024, 755) (1024, 755) (1024, 755)
+[[./figures/odr/figure_36.png]]
 :END:
 
  #+begin_src ipython
@@ -694,7 +716,7 @@ plot_rates_selec(rates, idx=20, thresh=.5)
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_36.png]]
+[[./figures/odr/figure_37.png]]
 
 
    #+begin_src ipython
@@ -703,8 +725,8 @@ plot_m0_m1_phi(model, rates, 4)
 
 #+RESULTS:
 :RESULTS:
-: (1024, 161) (1024, 161) (1024, 161)
-[[./figures/odr/figure_37.png]]
+: (1024, 111) (1024, 111) (1024, 111)
+[[./figures/odr/figure_38.png]]
 :END:
 
 #+begin_src ipython
@@ -734,7 +756,7 @@ errors = np.array(error_list)
 #+end_src
 
 #+RESULTS:
-: (1024, 161) torch.Size([1024, 1])
+: (1024, 111) torch.Size([1024, 1])
 
 #+begin_src ipython
 targets = (target_loc + np.pi) % (2 * np.pi) - np.pi
@@ -751,14 +773,14 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_39.png]]
+[[./figures/odr/figure_40.png]]
 
 * Connectivity
 
  #+begin_src ipython
 print(seed)
-model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed);
-model.load_state_dict(model_state_dict);
+# model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed);
+# model.load_state_dict(model_state_dict);
 model.eval();
 #+end_src
 
@@ -814,7 +836,7 @@ Ki0 = pkl_load( 'Ki', path=".")
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_42.png]]
+[[./figures/odr/figure_43.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height], sharey=1)
@@ -836,11 +858,12 @@ Ki0 = pkl_load( 'Ki', path=".")
   ax[1].set_title('Trained')
   # ax[1].set_xticks(np.linspace(0, 750, 4))
   # ax[1].set_yticks(np.linspace(0, 750, 4))
+  plt.tight_layout()
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr/figure_43.png]]
+[[./figures/odr/figure_44.png]]
 
 #+begin_src ipython
 
