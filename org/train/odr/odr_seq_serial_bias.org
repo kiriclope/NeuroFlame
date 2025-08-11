@@ -1,6 +1,6 @@
 #+STARTUP: fold
 #+TITLE: ODR Sequential Serial Bias
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_seq_sb :kernel torch :exports results :output-dir ./figures/odr_sb :file (lc/org-babel-tangle-figure-filename)
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_seq_sb :kernel torch :exports results :output-dir ./figures/odr_seq_sb :file (lc/org-babel-tangle-figure-filename)
 
 * Notebook Settings
 
@@ -133,15 +133,15 @@ kwargs = {
     'USE': 0.03,
     'TAU_FAC': 2.0,
     'TAU_REC': 0.2,
-    'IF_ADAPT': 1,
-    'A_ADAPT': 0.5,
+    'IF_ADAPT': 0,
+    'A_ADAPT': 10.0,
     'TAU_ADAPT': [150.0, 150.0],
-    'IF_FF_ADAPT': 0,
-    'A_FF_ADAPT': 0.1,
-    'TAU_FF_ADAPT': 150.0,
+    'IF_FF_ADAPT': 1,
+    'A_FF_ADAPT': 1.0,
+    'TAU_FF_ADAPT': 2.0,
     'RATE_NOISE': 0,
     'VAR_RATE': 10.0,
-    'REP_BIAS': 15.0,
+    'REP_BIAS': 0.0,
     'REP_VAR': 2.5,
 }
 #+end_src
@@ -155,12 +155,12 @@ conf_name = "train_odr_EI.yml"
 DEVICE = 'cuda'
 seed = np.random.randint(0, 1e6)
 
-seed = 2
+seed = 3
 print('seed', seed)
 #+end_src
 
 #+RESULTS:
-: seed 2
+: seed 3
 
 #+begin_src ipython
 N_BATCH = 768
@@ -184,7 +184,7 @@ print(model.J_STP)
 
 #+RESULTS:
 : Parameter containing:
-: tensor(2.5162, device='cuda:0', requires_grad=True)
+: tensor(2.5643, device='cuda:0', requires_grad=True)
 
 * Batching Inputs
 
@@ -238,10 +238,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: Text(0, 0.5, 'Rates')
-[[./figures/odr_sb/figure_14.png]]
-:END:
+[[./figures/odr_seq_sb/figure_14.png]]
 
 #+begin_src ipython
 num_epochs = 49
@@ -276,7 +273,7 @@ print('rates', rates_list.shape, 'thresh', thresh_list.shape, 'phi0', phi0_list.
 
 #+RESULTS:
 :RESULTS:
-: 100% 49/49 [00:53<00:00,  1.09s/it]
+: 100% 49/49 [00:53<00:00,  1.10s/it]
 :
 : rates (50, 768, 121, 750) thresh (50, 768, 1000) phi0 (50, 768, 4, 1)
 :END:
@@ -289,7 +286,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_16.png]]
+[[./figures/odr_seq_sb/figure_16.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -300,7 +297,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_17.png]]
+[[./figures/odr_seq_sb/figure_17.png]]
 
 #+begin_src ipython
 plt.plot(thresh_list[:, 0, :10])
@@ -310,7 +307,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_18.png]]
+[[./figures/odr_seq_sb/figure_18.png]]
 
 #+begin_src ipython
 
@@ -321,15 +318,15 @@ plt.show()
 * Errors
 
 #+begin_src ipython
-n_half = num_epochs // 2
-# n_half = 1
+n_half = num_epochs // 3
+#n_half = 1
 phi0_ini =  phi0_list[:n_half]
 phi0_last = phi0_list[-n_half:]
 print(phi0_ini.shape, phi0_last.shape)
 #+end_src
 
 #+RESULTS:
-: (24, 768, 4, 1) (24, 768, 4, 1)
+: (16, 768, 4, 1) (16, 768, 4, 1)
 
 #+begin_src ipython
 _, _, phi_ini = decode_bump_torch(rates_list[:n_half], axis=-1, RET_TENSOR=0)
@@ -337,7 +334,7 @@ print(phi_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (24, 768, 121)
+: (16, 768, 121)
 
 #+begin_src ipython
 _, _, phi_last = decode_bump_torch(rates_list[-n_half:], axis=-1, RET_TENSOR=0)
@@ -345,7 +342,7 @@ print(phi_last.shape)
 #+end_src
 
 #+RESULTS:
-: (24, 768, 121)
+: (16, 768, 121)
 
 #+begin_src ipython
 def get_rel_tar_error(phi, phi0):
@@ -396,7 +393,7 @@ print(targ_ini.shape, rel_ini.shape, errors_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (18432, 1) (18432, 1) (24, 2, 768, 121)
+: (12288, 1) (12288, 1) (16, 2, 768, 121)
 
 #+begin_src ipython
 end_point_ini = get_end_point(model, errors_ini)
@@ -405,7 +402,7 @@ print(end_point_ini.shape, end_point_last.shape)
 #+end_src
 
 #+RESULTS:
-: (2, 18432) (2, 18432)
+: (2, 12288) (2, 12288)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
@@ -417,7 +414,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_27.png]]
+[[./figures/odr_seq_sb/figure_27.png]]
 
 
 #+begin_src ipython
@@ -433,7 +430,7 @@ print(targ_ini.shape, rel_ini.shape, end_point_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (18432, 1) (18432, 1) (2, 18432)
+: (12288, 1) (12288, 1) (2, 12288)
 
 #+begin_src ipython
 n_bins = 8
@@ -523,7 +520,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_33.png]]
+[[./figures/odr_seq_sb/figure_33.png]]
 
 #+begin_src ipython
 
@@ -531,14 +528,223 @@ plt.show()
 
 #+RESULTS:
 
-** Delay Dependency
+* Bias Evolution along a session
+
+#+begin_src ipython
+import numpy as np
+from scipy.optimize import curve_fit
+
+def fit_deriv_gaussian_circular(df, n_bins, target_col='target_loc', error_col='errors', rel_col='rel_loc', n_tries=20, thresh=25):
+    if thresh is not None:
+        data = df[(df['errors'] >= -thresh) & (df['errors'] <= thresh)].copy()
+    else:
+        data = df.copy()
+
+    # 1. Compute "adjusted_errors"
+    bin_edges = np.linspace(0, 360, n_bins + 1)
+    data = data.copy()
+    data['bin_target'] = pd.cut(
+        data[target_col], bins=bin_edges, include_lowest=True, right=False)
+    mean_errors_per_bin = data.groupby('bin_target', observed=False)[error_col].mean()
+
+    data['adjusted_errors'] = (
+        data[error_col] - data['bin_target'].map(mean_errors_per_bin).astype(float)
+    )
+
+    # 2. Circular binning for kernel fitting
+    x = data[rel_col].values
+    y = data['adjusted_errors'].values
+    bins = np.linspace(-180, 180, n_bins + 1)
+    bin_indices = np.digitize(x, bins, right=False) - 1
+    bin_indices[bin_indices == n_bins] = 0
+
+    bin_centers = (bins[:-1] + bins[1:]) / 2
+    bin_means = np.array([
+        y[bin_indices == i].mean() if np.any(bin_indices == i) else np.nan
+        for i in range(n_bins)
+    ])
+
+    # Guess parameters from the data
+    ampl_guess = (np.nanmax(bin_means) - np.nanmin(bin_means)) / 2
+    sigma_guess = (np.nanmax(bin_centers) - np.nanmin(bin_centers)) / 4
+
+    # Model
+    def deriv_gaussian(x, A, sigma, mu=0):
+        return -A * (x - mu) * np.exp(-((x - mu) ** 2) / (2 * sigma ** 2)) / (sigma ** 2)
+
+    mask = np.isfinite(bin_means)
+    fit_centers = bin_centers[mask]
+    fit_means = bin_means[mask]
+
+    best_loss = np.inf
+    best_popt = None
+
+    for _ in range(n_tries):
+        # Vary around data-driven guess
+        p0 = [
+            ampl_guess * np.random.uniform(0.0, 10.0),
+            sigma_guess * np.random.uniform(1.0, 10.0),
+        ]
+        try:
+            popt, _ = curve_fit(
+                deriv_gaussian, fit_centers, fit_means, p0=p0, maxfev=5000)
+            residuals = fit_means - deriv_gaussian(fit_centers, *popt)
+            loss = np.sum(residuals**2)
+            if loss < best_loss:
+                best_loss = loss
+                best_popt = popt
+        except RuntimeError:
+            continue
+
+    if best_popt is None:
+        raise RuntimeError("Fit did not converge in any of the tries.")
+
+    result = {
+        'amplitude_at_90': -best_popt[0] * (90 - 0) * np.exp(-((90 - 0) ** 2) / (2 * best_popt[1] ** 2)) / (best_popt[1] ** 2),
+        'bin_centers': bin_centers,
+        'bin_means': bin_means,
+        'fit': lambda x: deriv_gaussian(x, *best_popt),
+        'data': data
+    }
+
+    return result
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+from joblib import Parallel, delayed
+import numpy as np
+
+def bootstrap_amplitude_at_90(
+    data, n_bins, n_boot=100, n_jobs=-1, random_state=None, fit_kwargs=None
+):
+    # fit_kwargs: dict for extra arguments to fit_deriv_gaussian_circular
+    if fit_kwargs is None:
+        fit_kwargs = {}
+    rng = np.random.RandomState(random_state)
+
+    def _single_boot(random_seed):
+        import warnings
+        from scipy.optimize import OptimizeWarning
+        warnings.simplefilter("ignore", OptimizeWarning)
+        np.random.seed(random_seed)
+        d_samp = data.sample(frac=1, replace=True, random_state=np.random.randint(0, 2**32))
+        try:
+            res = fit_deriv_gaussian_circular(d_samp, n_bins, **fit_kwargs)
+            return res['amplitude_at_90']
+        except Exception:
+            return np.nan
+
+    seeds = rng.randint(0, 2**32, size=n_boot)
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(_single_boot)(s) for s in seeds
+    )
+    results = np.array([r for r in results if np.isfinite(r)])
+    ci = np.percentile(results, [2.5, 97.5])
+    return ci
+#+end_src
+
+#+RESULTS:
+
+
+#+begin_src ipython
+_, _, phi_list = decode_bump_torch(rates_list, axis=-1)
+print(phi_list.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([50, 768, 121])
+
+#+begin_src ipython
+print(phi0_list.shape)
+#+end_src
+
+#+RESULTS:
+: (50, 768, 4, 1)
+
+#+begin_src ipython
+n_bins = 16
+
+cmap = plt.get_cmap('Blues')
+colors = [cmap((i+1)/ phi_list.shape[0]) for i in range(phi_list.shape[0])]
+
+serial_list = []
+
+for i in range(phi_list.shape[0]):
+    targ_trial, rel_trial, errors_trial = get_rel_tar_error(phi_list[i, np.newaxis], phi0_list[i, np.newaxis])
+    end_point_trial = get_end_point(model, errors_trial)
+
+    # print(targ_trial.shape, rel_trial.shape, ref_trial.shape, errors_trial.shape, end_point_trial.shape)
+
+    data = pd.DataFrame({'target_loc': targ_trial[:, -1], 'rel_loc': rel_trial[:, -1], 'errors': end_point_trial[1]})
+
+    result = fit_deriv_gaussian_circular(data, n_bins=n_bins)
+    plt.plot(result['bin_centers'], result['fit'](result['bin_centers']), alpha=1, color=colors[i])
+    serial_list.append(result['amplitude_at_90'])
+
+    # centers, bin_rel, centers_abs, bin_rel_abs = get_correct_error(n_bins, data)
+
+    # idx_max = np.argmax(abs(bin_rel_abs['mean']))
+    # serial_max = bin_rel_abs['mean'][idx_max]
+    # serial_std = bin_rel_abs['sem'][idx_max]
+
+    # serial_list.append([serial_max, serial_std])
+
+serial_list = np.array(serial_list).T
+plt.axhline(0, ls='--', color='k')
+plt.xlabel('Rel. Loc. (°)')
+plt.ylabel('Error (°)')
+plt.show()
+
+print(serial_list.shape)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[./figures/odr_seq_sb/figure_39.png]]
+: (50,)
+:END:
+
+#+begin_src ipython
+from scipy.ndimage import gaussian_filter1d
+
+delay_duration = 100
+xdelay = np.linspace(0, delay_duration, serial_list.shape[0])
+
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+
+s0 = 2
+ax[0].plot(xdelay, serial_list, '-')
+ax[0].plot(xdelay, gaussian_filter1d(serial_list, s0), '-')
+# ax[0].fill_between(xdelay, gaussian_filter1d(serial_list[0] - serial_list[1], s0), gaussian_filter1d(serial_list[0] + serial_list[1], s0), color='b', alpha=0.2)
+
+ax[0].set_xlabel('Trial #')
+ax[0].set_ylabel('Serial Bias (°)')
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/odr_seq_sb/figure_40.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+
+* Delay Dependency
 
 #+begin_src ipython
 print(phi0_list.shape, phi0_list[0, :5, 0, 0])
 #+end_src
 
 #+RESULTS:
-: (50, 768, 4, 1) [0.13962634 3.6477382  0.47123888 2.7925267  2.4260077 ]
+: (50, 768, 4, 1) [2.86234    0.38397244 3.159046   1.553343   3.403392  ]
 
 #+begin_src ipython
 _, _, phi_list = decode_bump_torch(rates_list, axis=-1, RET_TENSOR=0)
@@ -546,7 +752,7 @@ print(phi_list.shape, phi_list[0, :5, 0])
 #+end_src
 
 #+RESULTS:
-: (50, 768, 121) [3.0457628 5.351302  2.8073006 2.3477678 3.8147376]
+: (50, 768, 121) [2.6976264  4.752024   0.91798747 1.8049409  1.9908371 ]
 
 #+begin_src ipython
 targ_list, rel_list, errors_list = get_rel_tar_error(phi_list[-1:], phi0_list[-1:])
@@ -554,7 +760,7 @@ print(targ_list.shape, rel_list.shape, rel_list[:5, 0], errors_list.shape, error
 #+end_src
 
 #+RESULTS:
-: (768, 1) (768, 1) [ -61.999992 -108.00001    78.00001   -32.999992  -97.      ] (1, 2, 768, 121) [152.54442   -86.46101     1.401227  -98.336174   -4.7557516]
+: (768, 1) (768, 1) [-155.        -16.000006   97.000015   90.       -158.      ] (1, 2, 768, 121) [ 40.95716   46.057495 112.53722  -39.561657  98.62385 ]
 
 #+begin_src ipython
 stim_start = (model.DT * (model.start_indices - model.N_STEADY)).cpu().numpy()
@@ -591,14 +797,185 @@ print(delay_point.shape, errors_list.shape)
 : (768, 30) (1, 2, 768, 121)
 
 #+begin_src ipython
-n_bins = 8
+import numpy as np
+from scipy.optimize import curve_fit
+
+def fit_deriv_gaussian_circular(df, n_bins, target_col='target_loc', error_col='errors', rel_col='rel_loc', n_tries=20, thresh=25):
+    if thresh is not None:
+        data = df[(df['errors'] >= -thresh) & (df['errors'] <= thresh)].copy()
+    else:
+        data = df.copy()
+
+    # 1. Compute "adjusted_errors"
+    bin_edges = np.linspace(0, 360, n_bins + 1)
+    data = data.copy()
+    data['bin_target'] = pd.cut(
+        data[target_col], bins=bin_edges, include_lowest=True, right=False)
+    mean_errors_per_bin = data.groupby('bin_target', observed=False)[error_col].mean()
+
+    data['adjusted_errors'] = (
+        data[error_col] - data['bin_target'].map(mean_errors_per_bin).astype(float)
+    )
+
+    # 2. Circular binning for kernel fitting
+    x = data[rel_col].values
+    y = data['adjusted_errors'].values
+    bins = np.linspace(-180, 180, n_bins + 1)
+    bin_indices = np.digitize(x, bins, right=False) - 1
+    bin_indices[bin_indices == n_bins] = 0
+
+    bin_centers = (bins[:-1] + bins[1:]) / 2
+    bin_means = np.array([
+        y[bin_indices == i].mean() if np.any(bin_indices == i) else np.nan
+        for i in range(n_bins)
+    ])
+
+    # Guess parameters from the data
+    ampl_guess = (np.nanmax(bin_means) - np.nanmin(bin_means)) / 2
+    sigma_guess = (np.nanmax(bin_centers) - np.nanmin(bin_centers)) / 4
+
+    # Model
+    def deriv_gaussian(x, A, sigma, mu=0):
+        return -A * (x - mu) * np.exp(-((x - mu) ** 2) / (2 * sigma ** 2)) / (sigma ** 2)
+
+    mask = np.isfinite(bin_means)
+    fit_centers = bin_centers[mask]
+    fit_means = bin_means[mask]
+
+    best_loss = np.inf
+    best_popt = None
+
+    for _ in range(n_tries):
+        # Vary around data-driven guess
+        p0 = [
+            ampl_guess * np.random.uniform(0.0, 10.0),
+            sigma_guess * np.random.uniform(1.0, 10.0),
+        ]
+        try:
+            popt, _ = curve_fit(
+                deriv_gaussian, fit_centers, fit_means, p0=p0, maxfev=5000)
+            residuals = fit_means - deriv_gaussian(fit_centers, *popt)
+            loss = np.sum(residuals**2)
+            if loss < best_loss:
+                best_loss = loss
+                best_popt = popt
+        except RuntimeError:
+            continue
+
+    if best_popt is None:
+        raise RuntimeError("Fit did not converge in any of the tries.")
+
+    result = {
+        'amplitude_at_90': -best_popt[0] * (90 - 0) * np.exp(-((90 - 0) ** 2) / (2 * best_popt[1] ** 2)) / (best_popt[1] ** 2),
+        'bin_centers': bin_centers,
+        'bin_means': bin_means,
+        'fit': lambda x: deriv_gaussian(x, *best_popt),
+        'data': data
+    }
+
+    return result
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+from joblib import Parallel, delayed
+import numpy as np
+
+def bootstrap_amplitude_at_90(
+    data, n_bins, n_boot=100, n_jobs=-1, random_state=None, fit_kwargs=None
+):
+    # fit_kwargs: dict for extra arguments to fit_deriv_gaussian_circular
+    if fit_kwargs is None:
+        fit_kwargs = {}
+    rng = np.random.RandomState(random_state)
+
+    def _single_boot(random_seed):
+        import warnings
+        from scipy.optimize import OptimizeWarning
+        warnings.simplefilter("ignore", OptimizeWarning)
+        np.random.seed(random_seed)
+        d_samp = data.sample(frac=1, replace=True, random_state=np.random.randint(0, 2**32))
+        try:
+            res = fit_deriv_gaussian_circular(d_samp, n_bins, **fit_kwargs)
+            return res['amplitude_at_90']
+        except Exception:
+            return np.nan
+
+    seeds = rng.randint(0, 2**32, size=n_boot)
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(_single_boot)(s) for s in seeds
+    )
+    results = np.array([r for r in results if np.isfinite(r)])
+    ci = np.percentile(results, [2.5, 97.5])
+    return ci
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import warnings
+from scipy.ndimage import gaussian_filter1d
+from scipy.optimize import OptimizeWarning
+
+n_bins = 16
+
+cmap = plt.get_cmap('Blues')
+colors = [cmap((i+1)/ delay_point.shape[1]) for i in range(delay_point.shape[1])]
+
+serial_list = []
+serial_ci = []
+for i in range(delay_point.shape[1]):
+    data = pd.DataFrame({'target_loc': targ_list[:, -1], 'rel_loc': rel_list[:, -1], 'errors': delay_point[:, i]})
+
+    result = fit_deriv_gaussian_circular(data, n_bins=n_bins)
+    ci = bootstrap_amplitude_at_90(data.copy(), n_bins=n_bins, n_boot=1000)
+
+    result = fit_deriv_gaussian_circular(data, n_bins=n_bins)
+    plt.plot(result['bin_centers'], result['fit'](result['bin_centers']), alpha=1, color=colors[i])
+
+    serial_list.append(result['amplitude_at_90'])
+    serial_ci.append(ci)
+
+serial_list = np.array(serial_list)
+serial_ci = np.array(serial_ci)
+
+plt.xlabel('Rel. Loc. (°)')
+plt.ylabel('Error (°)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+#+begin_example
+hon
+delay_duration = stim_start[3, 0] - stim_end[2, 0]
+xdelay = np.linspace(0, delay_duration, serial_list.shape[0])
+
+plt.plot(xdelay, serial_list, '-')
+plt.fill_between(xdelay, serial_ci[:,0], serial_ci[:,1], color='gray', alpha=0.3, label='95% CI')
+
+plt.xlabel('Delay Length (s)')
+plt.ylabel('Serial Bias (°)')
+
+plt.show()
+,#+end_src
+
+,#+RESULTS:
+
+,#+begin_src ipython
+n_bins = 16
+
+cmap = plt.get_cmap('Blues')
+colors = [cmap((i+1)/ delay_point.shape[1]) for i in range(delay_point.shape[1])]
 
 serial_list = []
 for i in range(delay_point.shape[1]):
     data = pd.DataFrame({'target_loc': targ_list[:, -1], 'rel_loc': rel_list[:, -1], 'errors': delay_point[:, i]})
     centers, bin_rel, centers_abs, bin_rel_abs = get_correct_error(n_bins, data)
 
-    plt.plot(centers, bin_rel['mean'])
+    plt.plot(centers, bin_rel['mean'], color=colors[i])
 
     idx_max = np.argmax(abs(bin_rel_abs['mean']))
     serial_max = bin_rel_abs['mean'][idx_max]
@@ -608,13 +985,66 @@ for i in range(delay_point.shape[1]):
 
 serial_list = np.array(serial_list).T
 print(serial_list.shape)
+plt.xlabel('Rel. Loc. (°)')
+plt.ylabel('Error (°)')
+plt.show()
+,#+end_src
+
+,#+RESULTS:
+: 87c9f05d-d1cf-47b8-8670-7d7d8fd51c90
+
+,#+begin_src ipython
+delay_duration = stim_start[3, 0] - stim_end[2, 0]
+xdelay = np.linspace(0, delay_duration, serial_list.
+#+end_example
+[[./figures/odr_seq_sb/figure_49.png]]
+:END:
+#+begin_src ipython
+delay_duration = stim_start[3, 0] - stim_end[2, 0]
+xdelay = np.linspace(0, delay_duration, serial_list.shape[0])
+
+plt.plot(xdelay, serial_list, '-')
+plt.fill_between(xdelay, serial_ci[:,0], serial_ci[:,1], color='gray', alpha=0.3, label='95% CI')
+
+plt.xlabel('Delay Length (s)')
+plt.ylabel('Serial Bias (°)')
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+: 3349f0cd-971f-4f43-815c-668ea925325b
+
+#+begin_src ipython
+n_bins = 16
+
+cmap = plt.get_cmap('Blues')
+colors = [cmap((i+1)/ delay_point.shape[1]) for i in range(delay_point.shape[1])]
+
+serial_list = []
+for i in range(delay_point.shape[1]):
+    data = pd.DataFrame({'target_loc': targ_list[:, -1], 'rel_loc': rel_list[:, -1], 'errors': delay_point[:, i]})
+    centers, bin_rel, centers_abs, bin_rel_abs = get_correct_error(n_bins, data)
+
+    plt.plot(centers, bin_rel['mean'], color=colors[i])
+
+    idx_max = np.argmax(abs(bin_rel_abs['mean']))
+    serial_max = bin_rel_abs['mean'][idx_max]
+    serial_std = bin_rel_abs['sem'][idx_max]
+
+    serial_list.append([serial_max, serial_std])
+
+serial_list = np.array(serial_list).T
+print(serial_list.shape)
+plt.xlabel('Rel. Loc. (°)')
+plt.ylabel('Error (°)')
 plt.show()
 #+end_src
 
 #+RESULTS:
 :RESULTS:
 : (2, 30)
-[[./figures/odr_sb/figure_40.png]]
+[[./figures/odr_seq_sb/figure_51.png]]
 :END:
 
 #+begin_src ipython
@@ -629,7 +1059,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_sb/figure_41.png]]
+[[./figures/odr_seq_sb/figure_52.png]]
 
 #+begin_src ipython
 

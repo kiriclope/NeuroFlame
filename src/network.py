@@ -209,7 +209,10 @@ class Network(nn.Module):
             hidden_stp = Aux @ W_stp_T
             hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
 
-            del Aux
+            del Aux, hidden_stp
+
+        if self.IF_FF_STP:
+            ff_input = ff_input + self.ff_stp(ff_input[:, self.slices[0]])
 
         # update batched EtoE
         if self.IF_BATCH_J:
@@ -225,7 +228,7 @@ class Network(nn.Module):
         if self.IF_FF_ADAPT:
             # ff_input = ff_input / (1.0 + self.thresh_ff)
             ff_input = torch.sign(ff_input) * nn.ReLU()(ff_input - self.thresh_ff)
-            self.thresh_ff = self.thresh_ff * self.EXP_FF_ADAPT + nn.ReLU()(ff_input) * self.A_FF_ADAPT * (1.0-self.EXP_FF_ADAPT)
+            self.thresh_ff[:, self.slices[0]] = self.thresh_ff[:, self.slices[0]] * self.EXP_FF_ADAPT + nn.ReLU()(ff_input[:, self.slices[0]]) * self.A_FF_ADAPT * (1.0-self.EXP_FF_ADAPT)
 
         # compute net input
         net_input = ff_input + rec_input[0]
@@ -259,7 +262,7 @@ class Network(nn.Module):
 
         # adaptation
         if self.IF_ADAPT:
-            thresh = thresh * self.EXP_DT_TAU_ADAPT + rates * self.A_ADAPT * (1.0 - self.EXP_DT_TAU_ADAPT)
+            thresh[:, self.slices[0]] = thresh[:, self.slices[0]] * self.EXP_ADAPT + rates[:, self.slices[0]] * self.A_ADAPT * (1.0 - self.EXP_ADAPT)
 
         return rates, rec_input, thresh
 
@@ -290,12 +293,7 @@ class Network(nn.Module):
         W_stp_T = None
         if self.IF_STP:
             # Need this here otherwise autograd complains
-            self.stp = Plasticity(
-                self.USE,
-                self.TAU_FAC,
-                self.TAU_REC,
-                self.DT,
-                (self.N_BATCH, self.Na[0]),
+            self.stp = Plasticity(self.USE,self.TAU_FAC, self.TAU_REC, self.DT, (self.N_BATCH, self.Na[0]),
                 STP_TYPE=self.STP_TYPE,
                 IF_INIT=IF_INIT,
                 device=self.device,
@@ -307,6 +305,13 @@ class Network(nn.Module):
                 self.stp.x_stp = self.x_stp_last
 
             self.x_list, self.u_list = [], []
+
+        if self.IF_FF_STP:
+            self.ff_stp = Plasticity(self.FF_USE,self.TAU_FF_FAC, self.TAU_FF_REC, self.DT, (self.N_BATCH, self.Na[0]),
+                STP_TYPE=self.STP_TYPE,
+                IF_INIT=IF_INIT,
+                device=self.device,
+            )
 
         Wab_T = self.GAIN * self.Wab_T
         if self.IF_STP:
