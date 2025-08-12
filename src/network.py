@@ -148,15 +148,24 @@ class Network(nn.Module):
         if self.training:
             self.J_STP = nn.Parameter(self.J_STP)
 
-        self.register_buffer('W_stp_T', torch.zeros((self.Na[0], self.Na[0]), device=self.device))
+        # self.register_buffer('W_stp_T', torch.zeros((self.Na[0], self.Na[0]), device=self.device))
 
         # NEED .clone() here otherwise BAD THINGS HAPPEN !!!
-        self.W_stp_T = (self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0])
+        self.W_stp_T = []
+        self.W_stp_T.append(self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0])
+
+        if self.TEST_I_STP:
+            # self.W_stp_T.append(self.Wab_T[self.slices[1], self.slices[0]].clone() / torch.abs(self.Jab[0, 1]))
+            # self.W_stp_T.append(self.Wab_T[self.slices[1], self.slices[1]].clone() / torch.abs(self.Jab[1, 1]))
+            self.W_stp_T.append(self.Wab_T[self.slices[0], self.slices[1]].clone() / torch.abs(self.Jab[1, 0]))
 
         if self.LR_TYPE == 'full':
-            self.W_stp_T = torch.sqrt(self.Ka[0]) / self.Na[0]
+            self.W_stp_T[0] = torch.sqrt(self.Ka[0]) / self.Na[0]
 
         self.Wab_T.data[self.slices[0], self.slices[0]] = 0.0
+        if self.TEST_I_STP:
+            # self.Wab_T.data[self.slices[1], self.slices[1]] = 0.0
+            self.Wab_T.data[self.slices[0], self.slices[1]] = 0.0
 
         if self.TRAIN_EI:
             self.train_mask[self.slices[0], self.slices[0]] = 0.0
@@ -205,14 +214,23 @@ class Network(nn.Module):
 
         # update stp variables
         if self.IF_STP:
-            Aux = self.stp(rates[:, self.slices[0]])  # Aux is now u * x * rates
-            hidden_stp = Aux @ W_stp_T
+            Aux = self.stp[0](rates[:, self.slices[0]])  # Aux is now u * x * rates
+            hidden_stp = Aux @ W_stp_T[0]
             hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
 
-            del Aux, hidden_stp
+            if self.TEST_I_STP:
+                Aux = self.stp[1](rates[:, self.slices[0]])  # Aux is now u * x * rates
+                hidden_stp = Aux @ W_stp_T[1]
+                hidden[:, self.slices[1]] = hidden[:, self.slices[1]] + hidden_stp
+
+            del Aux
+
 
         if self.IF_FF_STP:
-            ff_input = ff_input + self.ff_stp(ff_input[:, self.slices[0]])
+            hidden_ff_stp = torch.sign(ff_input[:, self.slices[0]]) * self.ff_stp(nn.ReLU()(ff_input[:, self.slices[0]]))
+            ff_input[:, self.slices[0]] = ff_input[:, self.slices[0]] + hidden_ff_stp
+
+            del hidden_ff_stp
 
         # update batched EtoE
         if self.IF_BATCH_J:
@@ -228,7 +246,7 @@ class Network(nn.Module):
         if self.IF_FF_ADAPT:
             # ff_input = ff_input / (1.0 + self.thresh_ff)
             ff_input = torch.sign(ff_input) * nn.ReLU()(ff_input - self.thresh_ff)
-            self.thresh_ff[:, self.slices[0]] = self.thresh_ff[:, self.slices[0]] * self.EXP_FF_ADAPT + nn.ReLU()(ff_input[:, self.slices[0]]) * self.A_FF_ADAPT * (1.0-self.EXP_FF_ADAPT)
+            self.thresh_ff = self.thresh_ff * self.EXP_FF_ADAPT + nn.ReLU()(ff_input) * self.A_FF_ADAPT * (1.0-self.EXP_FF_ADAPT)
 
         # compute net input
         net_input = ff_input + rec_input[0]
@@ -262,7 +280,7 @@ class Network(nn.Module):
 
         # adaptation
         if self.IF_ADAPT:
-            thresh[:, self.slices[0]] = thresh[:, self.slices[0]] * self.EXP_ADAPT + rates[:, self.slices[0]] * self.A_ADAPT * (1.0 - self.EXP_ADAPT)
+            thresh = thresh * self.EXP_ADAPT + rates.detach() * self.A_ADAPT * (1.0 - self.EXP_ADAPT)
 
         return rates, rec_input, thresh
 
@@ -290,21 +308,30 @@ class Network(nn.Module):
             self.Wab_T.data[self.slices[0], self.slices[0]] = 0
 
         # Add STP
-        W_stp_T = None
+        W_stp_T = []
+        self.stp = []
         if self.IF_STP:
             # Need this here otherwise autograd complains
-            self.stp = Plasticity(self.USE,self.TAU_FAC, self.TAU_REC, self.DT, (self.N_BATCH, self.Na[0]),
+            self.stp.append(Plasticity(self.USE[0], self.TAU_FAC[0], self.TAU_REC[0], self.DT, (self.N_BATCH, self.Na[0]),
                 STP_TYPE=self.STP_TYPE,
                 IF_INIT=IF_INIT,
                 device=self.device,
-            )
+            ))
+
+            if self.TEST_I_STP:
+                self.stp.append(Plasticity(self.USE[1], self.TAU_FAC[1], self.TAU_REC[1], self.DT, (self.N_BATCH, self.Na[0]),
+                                           STP_TYPE=self.STP_TYPE,
+                                           IF_INIT=IF_INIT,
+                                           device=self.device,
+                                           ))
 
             # previous state is loaded
             if IF_INIT == 0:
-                self.stp.u_stp = self.u_stp_last
-                self.stp.x_stp = self.x_stp_last
+                self.stp[0].u_stp = self.u_stp_last
+                self.stp[0].x_stp = self.x_stp_last
 
             self.x_list, self.u_list = [], []
+
 
         if self.IF_FF_STP:
             self.ff_stp = Plasticity(self.FF_USE,self.TAU_FF_FAC, self.TAU_FF_REC, self.DT, (self.N_BATCH, self.Na[0]),
@@ -315,7 +342,9 @@ class Network(nn.Module):
 
         Wab_T = self.GAIN * self.Wab_T
         if self.IF_STP:
-            W_stp_T = self.GAIN * self.J_STP * self.W_stp_T / torch.sqrt(self.Ka[0])
+            W_stp_T.append(self.GAIN * self.J_STP * self.W_stp_T[0] / torch.sqrt(self.Ka[0]))
+            if self.TEST_I_STP:
+                W_stp_T.append(self.GAIN * self.W_stp_T[1] / torch.sqrt(self.Ka[1]))
 
         if 1:
             Wab_train = self.Wab_train[self.slices[0], self.slices[0]]
@@ -331,16 +360,17 @@ class Network(nn.Module):
                 Wab_train = Wab_train / torch.sqrt(self.Ka[0])
 
             if self.IF_STP:
-                W_stp_T = self.GAIN * self.J_STP * (self.W_stp_T + Wab_train) / torch.sqrt(self.Ka[0])
+                W_stp_T[0] = self.GAIN * self.J_STP * (self.W_stp_T[0] + Wab_train) / torch.sqrt(self.Ka[0])
 
                 if self.LR_TYPE == 'rand_sparse':
                     Wij = 1.0 + Wab_train
                     Wij_p = clamp_tensor(Wij, 0, self.slices)
-                    W_stp_T = self.GAIN * (self.W_stp_T * Wij_p) / torch.sqrt(self.Ka[0])
+                    W_stp_T[0] = self.GAIN * (self.W_stp_T[0] * Wij_p) / torch.sqrt(self.Ka[0])
                     del Wij, Wij_p
 
                 if self.CLAMP:
-                    W_stp_T = clamp_tensor(W_stp_T, 0, self.slices)
+                    W_stp_T[0] = clamp_tensor(W_stp_T[0], 0, self.slices)
+
 
             if self.TRAIN_EI:
                 Wab_train = normalize_tensor(self.Wab_train, 0, self.slices, self.Na)
@@ -356,8 +386,8 @@ class Network(nn.Module):
             # rand_idx = torch.randperm(W_stp_T.size(0))[:self.N_OPTO]
             # W_stp_T[:, rand_idx] = 0
 
-            rand_idx = torch.randperm(W_stp_T.size(0))[:self.N_OPTO]
-            W_stp_T[rand_idx] = 0
+            rand_idx = torch.randperm(W_stp_T[0].size(0))[:self.N_OPTO]
+            W_stp_T[0][rand_idx] = 0
 
             # _, idx = torch.sort(self.low_rank.V[:,1])
             # W_stp_T[idx[:self.N_OPTO]] = 0
@@ -401,14 +431,16 @@ class Network(nn.Module):
                         print_activity(self, step, rates)
 
                     if not REC_LAST_ONLY:
+                        # rates_list.append(mv_rates / self.N_WINDOW)
                         rates_list.append(mv_rates[..., self.slices[0]] / self.N_WINDOW)
+
                         if self.LIVE_FF_UPDATE and RET_FF:
                             ff_list.append(mv_ff[..., self.slices[0]] / self.N_WINDOW)
                         if RET_REC:
                             rec_list.append(mv_rec[..., self.slices[0]] / self.N_WINDOW)
                         if self.IF_STP and RET_STP:
-                            self.x_list.append(self.stp.x_stp)
-                            self.u_list.append(self.stp.u_stp)
+                            self.x_list.append(self.stp[0].x_stp)
+                            self.u_list.append(self.stp[0].u_stp)
 
                     # Reset moving average
                     mv_rates = 0
@@ -422,11 +454,11 @@ class Network(nn.Module):
         self.thresh_last = thresh
 
         if self.IF_STP:
-            self.u_stp_last = self.stp.u_stp
-            self.x_stp_last = self.stp.x_stp
+            self.u_stp_last = self.stp[0].u_stp
+            self.x_stp_last = self.stp[0].x_stp
 
         # returns last step
-        rates = rates[..., self.slices[0]]
+        # rates = rates[..., self.slices[0]]
 
         # returns full sequence
         if REC_LAST_ONLY == 0:
