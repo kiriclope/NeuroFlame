@@ -1,6 +1,6 @@
 #+STARTUP: fold
 #+TITLE: Training Low Rank RNNs
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual :kernel torch :exports results :output-dir ./figures/dual :file (lc/org-babel-tangle-figure-filename)
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session test_dual :kernel torch :exports results :output-dir ./figures/dual/test :file (lc/org-babel-tangle-figure-filename)
 
 * Notebook Settings
 
@@ -817,7 +817,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_29.png]]
+[[./figures/dual/test/figure_29.png]]
 
 #+begin_src ipython
 def plot_overlap(readout, labels=['pair', 'unpair'], figname='fig.svg'):
@@ -848,9 +848,6 @@ def plot_overlap(readout, labels=['pair', 'unpair'], figname='fig.svg'):
 
 #+RESULTS:
 
-
-#+RESULTS:
-
 * Model
 
 #+begin_src ipython
@@ -859,7 +856,7 @@ conf_name = "train_dual.yml"
 DEVICE = 'cuda:1'
 
 # seed = np.random.randint(0, 1e6)
-seed = 100
+seed = 1
 print(seed)
 
 A0 = 1.0 # sample/dist
@@ -867,12 +864,12 @@ B0 = 1.0 # cue
 C0 = 0.0 # DRT rwd
 #+end_src
 
-
 #+RESULTS:
-: 100
+: 1
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1)
+path = model.SAVE_PATH
 device = torch.device(DEVICE if torch.cuda.is_available() else 'cpu')
 model.to(device)
 #+end_src
@@ -880,15 +877,8 @@ model.to(device)
 #+RESULTS:
 : Network(
 :   (low_rank): LowRankWeights()
-:   (dropout): Dropout(p=0.0, inplace=False)
 : )
 
-#+begin_src ipython
-batch_size = 16
-learning_rate = 0.1
-#+end_src
-
-#+RESULTS:
 
 #+begin_src ipython
 import gc
@@ -909,13 +899,20 @@ torch.cuda.reset_accumulated_memory_stats(DEVICE)
 :END:
 
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
-model_state_dict = torch.load('../models/dual/dpa_%d.pth' % seed)
+model_state_dict = torch.load('%s/dpa_%d.pth' % (path, seed))
 model.load_state_dict(model_state_dict)
-# model.train();
 #+end_src
 
 #+RESULTS:
 : <All keys matched successfully>
+
+#+begin_src ipython
+print(model.J_STP)
+#+end_src
+
+#+RESULTS:
+: Parameter containing:
+: tensor(4.8937, device='cuda:1', requires_grad=True)
 
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
 N_BATCH = 1
@@ -952,7 +949,8 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 : ff_input torch.Size([4, 605, 1000]) labels (2, 4, 1)
 
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
-rates = model.forward(ff_input=ff_input).detach().cpu().numpy()
+with torch.no_grad():
+    rates = model.forward(ff_input=ff_input).detach().cpu().numpy()
 print(rates.shape)
 #+end_src
 
@@ -1027,9 +1025,12 @@ plot_overlap_label(model.readout.cpu().detach().numpy(), y_labels.cpu().numpy(),
 #+end_src
 
 #+RESULTS:
+:RESULTS:
 : (2, 4)
 : (4, 4)
 : (2, 2, 2, 101)
+[[./figures/dual/test/figure_39.png]]
+:END:
 
 #+begin_src ipython
 
@@ -1055,6 +1056,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
+[[./figures/dual/test/figure_41.png]]
 
 #+begin_src ipython
 odors = model.odors.cpu().numpy()
@@ -1124,7 +1126,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_45.png]]
+[[./figures/dual/test/figure_45.png]]
 
 
 #+begin_src ipython
@@ -1146,7 +1148,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_46.png]]
+[[./figures/dual/test/figure_46.png]]
 
  #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -1175,36 +1177,92 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_47.png]]
+[[./figures/dual/test/figure_47.png]]
 
 #+begin_src ipython
 theta = np.arctan(V[:, 1], V[:, 0])
 idx = np.argsort(theta)
+print(idx.shape)
 plt.hist(theta * 180 / np.pi)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_48.png]]
+:RESULTS:
+: (750,)
+[[./figures/dual/test/figure_48.png]]
+:END:
 
 #+begin_src ipython
-Wab = model.W_stp_T.cpu().detach().numpy()
-Wab = (model.W_stp_T>0).cpu().detach().numpy()
+from src.lr_utils import clamp_tensor
+
+Wab = (model.W_stp_T[0] + model.Wab_train / model.Na[0])
+Wab = clamp_tensor(Wab, 0, model.slices)
+
+# Wab = model.Wab_train / model.Na[0]
+
+Wab = Wab.detach().cpu().numpy()
+# Wab = Wab>0
+
 print(Wab.shape)
 print(Wab[0,: 10])
 #+end_src
 
 #+RESULTS:
 : (750, 750)
-: [ True  True  True  True  True  True  True  True  True  True]
+: [1.0065275e-04 0.0000000e+00 0.0000000e+00 0.0000000e+00 2.4076283e-04
+:  0.0000000e+00 0.0000000e+00 2.5326804e-06 0.0000000e+00 0.0000000e+00]
 
 #+begin_src ipython
-plt.imshow(Wab[idx][idx], cmap='jet', vmin=0, vmax=1)
+plt.imshow(Wab[idx][idx], cmap='jet', vmin=0, vmax=.05)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_50.png]]
+[[./figures/dual/test/figure_50.png]]
+
+#+begin_src ipython
+  plt.figure(figsize=(2.5*width, 1.5*height))  # Set the figure size (width, height) in inches
+  Cij = Wab[idx][idx]
+  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+  im = ax1.imshow(Cij, cmap='jet', aspect=1, vmin=0)
+  ax1.set_xlabel("Presynaptic")
+  ax1.set_ylabel("Postsynaptic")
+
+  # Second column, first row
+  ax2 = plt.subplot2grid((2, 3), (0, 1))
+  Kj = np.sum(Cij, axis=0)  # sum over pres
+  ax2.plot(circcvl(Kj, windowSize=75))
+  # ax2.set_xticklabels([])
+  ax2.set_ylabel("$K_j$")
+
+  # # Second column, second row
+  ax3 = plt.subplot2grid((2, 3), (1, 1))
+  Ki = np.sum(Cij, axis=1)  # sum over pres
+  ax3.plot(circcvl(Ki, windowSize=75))
+  ax3.set_ylabel("$K_i$")
+
+  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+  diags = []
+  for i in range(int(Cij.shape[0] / 2)):
+      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+  diags = np.array(diags)
+  ax4.plot(diags)
+  ax4.set_xlabel("Neuron #")
+  ax4.set_ylabel("$P_{ij}$")
+
+  plt.tight_layout()
+  plt.show()
+#+end_src
+
+#+RESULTS:
+[[./figures/dual/test/figure_51.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 * Go/NoGo Task
 ** Test
@@ -1213,7 +1271,7 @@ plt.show()
 :END:
 
  #+begin_src ipython
-model_state_dict = torch.load('../models/dual/dual_naive_%d.pth' % seed)
+model_state_dict = torch.load('%s/dual_naive_%d.pth' % (path, seed))
 model.load_state_dict(model_state_dict)
 model.eval();
 #+end_src
@@ -1247,7 +1305,8 @@ print('ff_input', ff_input.shape)
   : ff_input torch.Size([2, 605, 1000])
 
   #+begin_src ipython
-rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
+with torch.no_grad():
+    rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
 print(rates.shape)
   #+end_src
 
@@ -1259,7 +1318,7 @@ plot_overlap(model.readout.cpu().detach().numpy(), labels=['Go', 'NoGo'], fignam
  #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_52.png]]
+[[./figures/dual/test/figure_56.png]]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -1279,7 +1338,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_53.png]]
+[[./figures/dual/test/figure_57.png]]
 
  #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -1308,7 +1367,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_54.png]]
+[[./figures/dual/test/figure_58.png]]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
@@ -1361,7 +1420,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_55.png]]
+[[./figures/dual/test/figure_59.png]]
 
 #+begin_src ipython
 
@@ -1377,7 +1436,7 @@ plt.show()
 *** Simulations
 
 #+begin_src ipython
-model_state_dict = torch.load('../models/dual/dual_naive_%d.pth' % seed)
+model_state_dict = torch.load('%s/dual_naive_%d.pth' % (path, seed))
 model.load_state_dict(model_state_dict)
 model.eval();
 #+end_src
@@ -1471,7 +1530,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_59.png]]
+[[./figures/dual/test/figure_63.png]]
 
 #+begin_src ipython
 N_BATCH = 64
@@ -1525,8 +1584,8 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 : ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 31])
 
 #+begin_src ipython
-rates = model.forward(ff_input=ff_input).detach()
-rates = rates.cpu().detach().numpy()
+with torch.no_grad():
+    rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
 print(rates.shape)
 #+end_src
 
@@ -1616,7 +1675,7 @@ plot_overlap_label(readout, y_labels, task=0, figname='overlaps_naive_dpa.svg')
 : (3, 768)
 : (3, 768)
 : (2, 2, 2, 101)
-[[./figures/dual/figure_64.png]]
+[[./figures/dual/test/figure_68.png]]
 :END:
 
 #+begin_src ipython
@@ -1628,7 +1687,7 @@ plot_overlap_label(readout, y_labels, task=1, figname='overlaps_naive_go.svg')
 : (3, 768)
 : (3, 768)
 : (2, 2, 2, 101)
-[[./figures/dual/figure_65.png]]
+[[./figures/dual/test/figure_69.png]]
 :END:
 
 #+begin_src ipython
@@ -1640,7 +1699,7 @@ plot_overlap_label(readout, y_labels, task=-1, figname='overlaps_naive_nogo.svg'
 : (3, 768)
 : (3, 768)
 : (2, 2, 2, 101)
-[[./figures/dual/figure_66.png]]
+[[./figures/dual/test/figure_70.png]]
 :END:
 
 #+begin_src ipython
@@ -1676,13 +1735,12 @@ dpa_sem = np.stack(dpa_sem)
 
 #+RESULTS:
 
-
 #+begin_src ipython
 print(dpa_mean)
 #+end_src
 
 #+RESULTS:
-: tensor([0.9967, 0.5001, 0.9314], device='cuda:1', grad_fn=<StackBackward0>)
+: tensor([0.7461, 0.7500, 0.7578], device='cuda:1')
 
 #+begin_src ipython
 drt_mean, drt_sem = calculate_mean_accuracy_and_sem(drt_perf)
@@ -1721,7 +1779,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_72.png]]
+[[./figures/dual/test/figure_76.png]]
 
 
 
@@ -1756,7 +1814,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_73.png]]
+[[./figures/dual/test/figure_77.png]]
 
 #+begin_src ipython
 
@@ -1771,7 +1829,7 @@ plt.show()
 *** run
 
 #+begin_src ipython
-model_state_dict = torch.load('../models/dual/dual_train_%d.pth' % seed)
+model_state_dict = torch.load('%s/dual_train_%d.pth' % (path, seed))
 model.load_state_dict(model_state_dict)
 model.eval();
 #+end_src
@@ -1862,7 +1920,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_77.png]]
+[[./figures/dual/test/figure_81.png]]
 
 #+begin_src ipython
 N_BATCH = 10
@@ -1916,8 +1974,8 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 : ff_input torch.Size([120, 605, 1000]) labels torch.Size([120, 3, 31])
 
 #+begin_src ipython
-rates = model.forward(ff_input=ff_input).detach()
-rates = rates.cpu().detach().numpy()
+with torch.no_grad():
+    rates = model.forward(ff_input=ff_input).cpu().detach().numpy()
 print(rates.shape)
 #+end_src
 
@@ -1944,7 +2002,7 @@ plot_overlap_label(readout, y_labels, task=0, figname='overlaps_expert_dpa.svg')
 : (3, 120)
 : (3, 120)
 : (2, 2, 2, 101)
-[[./figures/dual/figure_81.png]]
+[[./figures/dual/test/figure_85.png]]
 :END:
 
 #+begin_src ipython
@@ -1956,7 +2014,7 @@ plot_overlap_label(readout, y_labels, task=1, figname='overlaps_expert_go.svg')
 : (3, 120)
 : (3, 120)
 : (2, 2, 2, 101)
-[[./figures/dual/figure_82.png]]
+[[./figures/dual/test/figure_86.png]]
 :END:
 
 #+begin_src ipython
@@ -1968,7 +2026,7 @@ plot_overlap_label(readout, y_labels, task=-1, figname='overlaps_expert_nogo.svg
 : (3, 120)
 : (3, 120)
 : (2, 2, 2, 101)
-[[./figures/dual/figure_83.png]]
+[[./figures/dual/test/figure_87.png]]
 :END:
 
 #+begin_src ipython
@@ -2046,7 +2104,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_88.png]]
+[[./figures/dual/test/figure_92.png]]
 
 
 #+begin_src ipython
@@ -2067,7 +2125,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_89.png]]
+[[./figures/dual/test/figure_93.png]]
 
  #+begin_src ipython
 plt.scatter(V[:, 0], V[:, 1])
@@ -2077,7 +2135,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_90.png]]
+[[./figures/dual/test/figure_94.png]]
 
  #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -2106,7 +2164,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_91.png]]
+[[./figures/dual/test/figure_95.png]]
 
 #+begin_src ipython
 

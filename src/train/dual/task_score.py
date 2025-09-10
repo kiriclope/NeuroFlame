@@ -39,8 +39,8 @@ class Accuracy(nn.Module):
         idx = torch.where(targets[:, 0]==0)
         prob[idx] = 1 - prob[idx]
         # print(prob.shape)
-        # predicted = (prob >= 0.5).float()
-        accuracy = prob
+        accuracy = (prob >= 0.5).float()
+        # accuracy = prob
 
         # target_vals = self.imbal_func(targets[:, 0], imbalance).unsqueeze(-1)  # shape: (batch, 1)
         # target_vals = targets[:, 0].unsqueeze(-1)  # shape: (batch, 1)

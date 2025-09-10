@@ -56,107 +56,58 @@ class LowRankWeights(nn.Module):
         slices,
         RANK=1,
         LR_MN=1,
-        LR_KAPPA=0,
-        LR_BIAS=1,
         LR_READOUT=1,
-        LR_FIX_READ=0,
-        LR_MASK=0,
-        LR_CLASS=1,
-        LR_GAUSS=0,
         LR_INI=.001,
+        LR_UeqV=1,
         DEVICE="cuda",
     ):
         super().__init__()
 
         self.N_NEURON = N_NEURON
         self.slices = slices
+        self.Na = Na
+
         self.RANK = RANK
         self.LR_MN = LR_MN
-        self.LR_KAPPA = LR_KAPPA
-        self.LR_BIAS = LR_BIAS
         self.LR_READOUT = LR_READOUT
-        self.LR_FIX_READ = LR_FIX_READ
-        self.LR_CLASS = LR_CLASS
 
-        self.LR_MASK = LR_MASK
-        self.LR_GAUSS = LR_GAUSS
         self.LR_INI = LR_INI
+        self.LR_UeqV = LR_UeqV
 
-        self.Na = Na
         self.device = DEVICE
 
-        if self.LR_GAUSS==0:
+        self.V = nn.Parameter(
+            torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * self.LR_INI
+        )
 
-            self.V = nn.Parameter(
+        if self.LR_MN:
+            self.U = nn.Parameter(
                 torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * self.LR_INI
             )
 
-            if self.LR_MN:
-                self.U = nn.Parameter(
-                    torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * self.LR_INI
-                )
-
-                # with torch.no_grad():
-                # self.U.copy_(self.V)
-            else:
-                self.U = (
-                    torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * self.LR_INI
-                )
-
-        if self.LR_KAPPA == 1:
-            self.lr_kappa = nn.Parameter(torch.rand(1, device=self.device))
+            if self.LR_UeqV:
+                with torch.no_grad():
+                    self.U.copy_(self.V)
         else:
-            self.lr_kappa = torch.tensor(1.0, device=self.device)
-
-
-        # Mask to train excitatory neurons only
-        # self.lr_mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
-
-        # if self.LR_MASK == 0:
-        #     self.lr_mask[self.slices[0], self.slices[0]] = 1.0
-        # if self.LR_MASK == 1:
-        #     self.lr_mask[self.slices[1], self.slices[1]] = 1.0
-        # if self.LR_MASK == -1:
-        #     self.lr_mask = torch.ones(
-        #         (self.N_NEURON, self.N_NEURON), device=self.device
-        #     )
+            self.U = torch.randn((self.N_NEURON, int(self.RANK)), device=self.device) * self.LR_INI
 
         # Linear readout for supervised learning
         if self.LR_READOUT:
-            self.linear = nn.Linear(
-                self.Na[0], self.LR_CLASS, device=self.device, bias=self.LR_BIAS
-            )
-            if self.LR_FIX_READ:
-                for param in self.linear.parameters():
-                    param.requires_grad = False
+            self.linear = nn.Linear(self.Na[0], 1, device=self.device, bias=1)
 
-                # Initialize the weights with a Gaussian (normal) distribution
-                init.normal_(self.linear.weight, mean=0.0, std=1.0)
-
-                # Optionally initialize the biases as well
-                if self.LR_BIAS:
-                    init.normal_(self.linear.bias, mean=0.0, std=1.0)
 
     def forward(self, LR_NORM=0, LR_CLAMP=0):
         if LR_NORM:
             U_norm = self.U.norm(p='fro') + 1e-6
             V_norm = self.V.norm(p='fro') + 1e-6
-            #     self.lr = self.lr_kappa * (
-            #         masked_normalize(self.U) @ masked_normalize(self.V).T
-            #     )
-
         else:
             U_norm = 1.0
             V_norm = 1.0
 
         if self.LR_MN:
-            self.lr = self.lr_kappa * ((self.U / U_norm) @ (self.V.T / V_norm))
+            self.lr = (self.U / U_norm) @ (self.V.T / V_norm)
         else:
-            self.lr = self.lr_kappa * (self.V @ self.V.T)
-
-        # self.lr = self.lr_mask * self.lr
-        # if LR_NORM:
-        #     self.lr = normalize_tensor(self.lr, 0, self.slices, self.Na)
+            self.lr = (self.V @ self.V.T)
 
         if LR_CLAMP:
             self.lr = clamp_tensor(self.lr, 'lr', self.slices)

@@ -41,16 +41,11 @@ class Network(nn.Module):
 
         # Initialize weight matrix
         self.initWeights()
+        # reset seed
+        set_seed(-1)
 
         # Initialize low rank connectivity for training
         if self.LR_TRAIN:
-            self.odors = torch.randn(
-                (10, self.Na[0]),
-                device=self.device,
-            )
-
-            # the cue is the same as go
-            self.odors[2] = self.odors[1]
 
             self.low_rank = LowRankWeights(
                 self.Na[0], # N_NEURON
@@ -58,37 +53,27 @@ class Network(nn.Module):
                 self.slices,
                 self.RANK,
                 self.LR_MN,
-                self.LR_KAPPA,
-                self.LR_BIAS,
                 self.LR_READOUT,
-                self.LR_FIX_READ,
-                self.LR_MASK,
-                self.LR_CLASS,
-                self.LR_GAUSS,
                 self.LR_INI,
+                self.LR_UeqV,
                 self.device,
             )
-
-        if self.LR_TRAIN or self.ODR_TRAIN:
-            self.dropout = nn.Dropout(self.DROP_RATE)
-            # self.dropout = nn.Dropout(1.0-self.Ka[0]/self.Na[0])
 
         # Add STP
         if self.IF_STP:
             self.initSTP()
 
-        # Reset the seed
-        set_seed(0)
         clear_cache()
 
     def initWeights(self):
         """
         Initializes the connectivity matrix self.Wab.
         Loops over blocks to create the full matrix.
-        Relies on class Connectivity from connetivity.py
+        Relies on class Connectivity from connectivity.py
         """
 
         # in pytorch, Wij is i to j.
+        self.Wab_train = 0
         if self.ODR_TRAIN:
             if self.TRAIN_EI==0:
                 self.Wab_train = nn.Parameter(torch.randn((self.Na[0], self.Na[0]),
@@ -97,15 +82,13 @@ class Network(nn.Module):
                 self.Wab_train = nn.Parameter(torch.randn((self.N_NEURON, self.N_NEURON),
                                                           device=self.device)* 0.001)
 
-
                 self.train_mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
 
                 for i_pop in range(self.N_POP):
                     for j_pop in range(self.N_POP):
                         self.train_mask[self.slices[i_pop], self.slices[j_pop]] = self.IS_TRAIN[i_pop][j_pop]
 
-        self.register_buffer('Wab_T', torch.zeros((self.N_NEURON, self.N_NEURON),
-                                                  device=self.device))
+        self.Wab_T = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
 
         # Creates connetivity matrix in blocks
         for i_pop in range(self.N_POP):
@@ -132,14 +115,14 @@ class Network(nn.Module):
                     self.Jab[i_pop][j_pop] * weights
                 )
 
-        del weights, weight_mat
-
         if self.SPARSE == "full":
             self.Wab_T = self.Wab_T.T.to_sparse()
         elif self.SPARSE == "semi":
             self.Wab_T = to_sparse_semi_structured(self.Wab_T)
         else:
             self.Wab_T = self.Wab_T.T
+
+        # self.register_buffer('Wab_T', self.Wab_T)
 
     def initSTP(self):
         """Creates stp model for population 0"""
@@ -148,21 +131,20 @@ class Network(nn.Module):
         if self.training:
             self.J_STP = nn.Parameter(self.J_STP)
 
-        # self.register_buffer('W_stp_T', torch.zeros((self.Na[0], self.Na[0]), device=self.device))
-
         # NEED .clone() here otherwise BAD THINGS HAPPEN !!!
-        self.W_stp_T = []
-        self.W_stp_T.append(self.Wab_T[self.slices[0], self.slices[0]].clone() / self.Jab[0, 0])
+        self.W_stp_T = [self.GAIN * self.Wab_T[self.slices[0], self.slices[0]].clone()
+                        / self.Jab[0, 0]
+                        / torch.sqrt(self.Ka[0])]
 
         if self.TEST_I_STP:
-            # self.W_stp_T.append(self.Wab_T[self.slices[1], self.slices[0]].clone() / torch.abs(self.Jab[0, 1]))
-            # self.W_stp_T.append(self.Wab_T[self.slices[1], self.slices[1]].clone() / torch.abs(self.Jab[1, 1]))
             self.W_stp_T.append(self.Wab_T[self.slices[0], self.slices[1]].clone() / torch.abs(self.Jab[1, 0]))
 
         if self.LR_TYPE == 'full':
-            self.W_stp_T[0] = torch.sqrt(self.Ka[0]) / self.Na[0]
+            self.W_stp_T[0] = 1.0 / self.Na[0]
 
+        # remove non plastic connections
         self.Wab_T.data[self.slices[0], self.slices[0]] = 0.0
+
         if self.TEST_I_STP:
             # self.Wab_T.data[self.slices[1], self.slices[1]] = 0.0
             self.Wab_T.data[self.slices[0], self.slices[1]] = 0.0
@@ -201,16 +183,17 @@ class Network(nn.Module):
 
         return rates, ff_input, rec_input, thresh
 
+
     def update_dynamics(self, rates, ff_input, rec_input, Wab_T, W_stp_T, thresh):
         """Updates the dynamics of the model at each timestep"""
 
         # update hidden state
-        if self.SPARSE == "full":
-            hidden = torch.sparse.mm(rates, Wab_T)
-        elif self.SPARSE == "semi":
-            hidden = (Wab_T @ rates.T).T
-        else:
-            hidden = rates @ Wab_T # here @ is sum_j rj * Wji hence it's j to i (row are presyn)
+        # if self.SPARSE == "full":
+        #     hidden = torch.sparse.mm(rates, Wab_T)
+        # elif self.SPARSE == "semi":
+        #     hidden = (Wab_T @ rates.T).T
+        # else:
+        hidden = rates @ Wab_T # here @ is sum_j rj * Wji hence it's j to i (row are presyn)
 
         # update stp variables
         if self.IF_STP:
@@ -223,14 +206,9 @@ class Network(nn.Module):
                 hidden_stp = Aux @ W_stp_T[1]
                 hidden[:, self.slices[1]] = hidden[:, self.slices[1]] + hidden_stp
 
-            del Aux
-
-
         if self.IF_FF_STP:
             hidden_ff_stp = torch.sign(ff_input[:, self.slices[0]]) * self.ff_stp(nn.ReLU()(ff_input[:, self.slices[0]]))
             ff_input[:, self.slices[0]] = ff_input[:, self.slices[0]] + hidden_ff_stp
-
-            del hidden_ff_stp
 
         # update batched EtoE
         if self.IF_BATCH_J:
@@ -262,9 +240,6 @@ class Network(nn.Module):
 
             net_input = net_input + rec_input[1]
 
-        if self.IF_STP:
-            del hidden_stp
-
         # compute non linearity
         non_linear = Activation()(net_input, func_name=self.TF_TYPE, thresh=thresh)
 
@@ -275,7 +250,6 @@ class Network(nn.Module):
         else:
             rates = non_linear
 
-        del net_input, hidden, non_linear
         # clear_cache()
 
         # adaptation
@@ -308,18 +282,19 @@ class Network(nn.Module):
             self.Wab_T.data[self.slices[0], self.slices[0]] = 0
 
         # Add STP
-        W_stp_T = []
-        self.stp = []
         if self.IF_STP:
+            self.stp = []
             # Need this here otherwise autograd complains
-            self.stp.append(Plasticity(self.USE[0], self.TAU_FAC[0], self.TAU_REC[0], self.DT, (self.N_BATCH, self.Na[0]),
-                STP_TYPE=self.STP_TYPE,
-                IF_INIT=IF_INIT,
-                device=self.device,
-            ))
+            self.stp.append(Plasticity(self.USE[0], self.TAU_FAC[0], self.TAU_REC[0], self.DT,
+                                       (self.N_BATCH, self.Na[0]),
+                                       STP_TYPE=self.STP_TYPE,
+                                       IF_INIT=IF_INIT,
+                                       device=self.device,
+                                       ))
 
             if self.TEST_I_STP:
-                self.stp.append(Plasticity(self.USE[1], self.TAU_FAC[1], self.TAU_REC[1], self.DT, (self.N_BATCH, self.Na[0]),
+                self.stp.append(Plasticity(self.USE[1], self.TAU_FAC[1], self.TAU_REC[1], self.DT,
+                                           (self.N_BATCH, self.Na[0]),
                                            STP_TYPE=self.STP_TYPE,
                                            IF_INIT=IF_INIT,
                                            device=self.device,
@@ -332,55 +307,27 @@ class Network(nn.Module):
 
             self.x_list, self.u_list = [], []
 
-
         if self.IF_FF_STP:
-            self.ff_stp = Plasticity(self.FF_USE,self.TAU_FF_FAC, self.TAU_FF_REC, self.DT, (self.N_BATCH, self.Na[0]),
-                STP_TYPE=self.STP_TYPE,
-                IF_INIT=IF_INIT,
-                device=self.device,
-            )
+            self.ff_stp = Plasticity(self.FF_USE,self.TAU_FF_FAC, self.TAU_FF_REC, self.DT,
+                                     (self.N_BATCH, self.Na[0]),
+                                     STP_TYPE=self.STP_TYPE,
+                                     IF_INIT=IF_INIT,
+                                     device=self.device,
+                                     )
 
-        Wab_T = self.GAIN * self.Wab_T
+        Wab_T = self.Wab_T
+
+        if self.LR_TRAIN:
+            self.Wab_train = self.low_rank(self.LR_NORM, self.LR_CLAMP)
+
         if self.IF_STP:
-            W_stp_T.append(self.GAIN * self.J_STP * self.W_stp_T[0] / torch.sqrt(self.Ka[0]))
+            W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train / self.Na[0])]
+
+            if self.CLAMP:
+                W_stp_T[0] = clamp_tensor(W_stp_T[0], 0, self.slices)
+
             if self.TEST_I_STP:
-                W_stp_T.append(self.GAIN * self.W_stp_T[1] / torch.sqrt(self.Ka[1]))
-
-        if 1:
-            Wab_train = self.Wab_train[self.slices[0], self.slices[0]]
-
-            if self.LR_TRAIN:
-                Wab_train = self.low_rank(self.LR_NORM, self.LR_CLAMP)
-
-            if self.TRAIN_SCALE == 'all':
-                Wab_train = Wab_train / self.Na[0]
-            elif self.TRAIN_SCALE == 'weak':
-                Wab_train = Wab_train / self.Ka[0]
-            elif self.TRAIN_SCALE == 'strong':
-                Wab_train = Wab_train / torch.sqrt(self.Ka[0])
-
-            if self.IF_STP:
-                W_stp_T[0] = self.GAIN * self.J_STP * (self.W_stp_T[0] + Wab_train) / torch.sqrt(self.Ka[0])
-
-                if self.LR_TYPE == 'rand_sparse':
-                    Wij = 1.0 + Wab_train
-                    Wij_p = clamp_tensor(Wij, 0, self.slices)
-                    W_stp_T[0] = self.GAIN * (self.W_stp_T[0] * Wij_p) / torch.sqrt(self.Ka[0])
-                    del Wij, Wij_p
-
-                if self.CLAMP:
-                    W_stp_T[0] = clamp_tensor(W_stp_T[0], 0, self.slices)
-
-
-            if self.TRAIN_EI:
-                Wab_train = normalize_tensor(self.Wab_train, 0, self.slices, self.Na)
-                Wab_train = normalize_tensor(Wab_train, 1, self.slices, self.Na)
-                Wab_T = self.GAIN * (self.Wab_T + self.train_mask * Wab_train)
-
-                if self.CLAMP:
-                    # Check indices Think need some transpose
-                    Wab_T = clamp_tensor(Wab_T.T, 0, self.slices).T
-                    Wab_T = clamp_tensor(Wab_T.T, 1, self.slices).T
+                W_stp_T.append(self.GAIN * self.J_STP * self.W_stp_T[1])
 
         if self.IF_OPTO:
             # rand_idx = torch.randperm(W_stp_T.size(0))[:self.N_OPTO]
@@ -464,15 +411,12 @@ class Network(nn.Module):
         if REC_LAST_ONLY == 0:
             # Stack list on 1st dim so that output is (N_BATCH, N_STEPS, N_NEURON)
             rates = torch.stack(rates_list, dim=1)
-            del rates_list
 
             if RET_REC:
                 self.rec_input = torch.stack(rec_list, dim=2)
-                del rec_list
 
             if self.LIVE_FF_UPDATE and RET_FF:  # returns ff input
                 self.ff_input = torch.stack(ff_list, dim=1)
-                del ff_list
 
             if self.IF_STP and RET_STP:  # returns stp u and x
                 self.u_list = torch.stack(self.u_list, dim=1)
@@ -486,17 +430,6 @@ class Network(nn.Module):
 
         if self.LIVE_FF_UPDATE == 0 and RET_FF:
             self.ff_input = ff_input[..., self.slices[0]]
-
-        del ff_input, rec_input
-
-        # if self.training:
-        #     self.Wab_T = Wab_T / self.GAIN
-
-        del Wab_T
-        del W_stp_T
-
-        # if self.IF_STP:
-        #     self.W_stp_T = W_stp_T / self.GAIN
 
         clear_cache()
 

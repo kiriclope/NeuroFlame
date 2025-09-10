@@ -56,7 +56,7 @@ def validation_step(dataloader, model, loss_fn):
     val_loss /= size
     return val_loss
 
-def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100, thresh=.005, zero_grad=None):
+def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=10, thresh=.15, zero_grad=None):
       scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
       # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.1, verbose=True)
       # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)

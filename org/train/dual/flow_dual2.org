@@ -2,18 +2,6 @@
 #+TITLE: Training Low Rank RNNs
 #+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual_flow :kernel torch :exports results :output-dir ./figures/flow :file (lc/org-babel-tangle-figure-filename)
 
-* TODO Urgent
-** Model
- run multiple models see if there is a push down of the wells or diff strategies
- see how go affects models try to understand how it impairs pairing.
- plot task trajectories (DPA, GO, NOGO)
-
-** Data
- try wells with sample LD and CHOICE if it works (push down that s gold)
- if not try to make dPCA better and get day by day wells
- if not go back to the go no go axis
- and plot trajectories
-
 * Notebook Settings
 
 #+begin_src ipython :tangle no
@@ -114,7 +102,8 @@ def add_vlines(model, ax=None):
 #+begin_src ipython
 def init_model(task, seed, **kwargs):
     model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
-    model_state_dict = torch.load('../models/dual/%s_%d.pth' % (task, seed))
+    path = model.SAVE_PATH
+    model_state_dict = torch.load('%s/%s_%d.pth' % (path, task, seed))
     model.load_state_dict(model_state_dict)
     # print('task', task, 'seed', seed)
 
@@ -143,24 +132,26 @@ def run_grid(GRID_RANGE, seed, task, **kwargs):
     GRID_LIST = [[-GRID_RANGE, 0], [0, GRID_RANGE]]
 
     rates_grid = []
-    for GRID_X_RANGE in GRID_LIST:
-        for GRID_Y_RANGE in GRID_LIST:
-            model = init_model(task, seed, **kwargs)
+    with torch.no_grad():
+        for GRID_X_RANGE in GRID_LIST:
+            for GRID_Y_RANGE in GRID_LIST:
+                model = init_model(task, seed, **kwargs)
 
-            model.GRID_X_RANGE = GRID_X_RANGE
-            model.GRID_Y_RANGE = GRID_Y_RANGE
+                model.GRID_X_RANGE = GRID_X_RANGE
+                model.GRID_Y_RANGE = GRID_Y_RANGE
 
-            model.N_BATCH = int(model.GRID_SIZE * model.GRID_SIZE)
+                model.N_BATCH = int(model.GRID_SIZE * model.GRID_SIZE)
 
-            ff_input = model.init_ff_input()
-            # print(ff_input.shape, model.N_BATCH)
+                with torch.no_grad():
+                    ff_input = model.init_ff_input()
+                    # print(ff_input.shape, model.N_BATCH)
 
-            rates = model(ff_input, RET_REC=0).cpu().detach().numpy()
-            # print('rates', rates.shape)
-            rates_grid.append(rates)
+                    rates = model(ff_input, RET_REC=0).cpu().detach().numpy()
+                    # print('rates', rates.shape)
+                rates_grid.append(rates)
 
-            del_tensor(ff_input)
-            del_tensor(model)
+                del_tensor(ff_input)
+                del_tensor(model)
 
     return np.vstack(rates_grid)
 #+end_src
@@ -331,7 +322,7 @@ def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0):
 
     xi, yi, ui, vi = create_mesh(x, y, size=300)
     speed = np.sqrt(ui**2+vi**2)
-    speed = (speed - np.mean(speed)) / (np.std(speed) + 1e-6)
+    # speed = (speed - np.mean(speed)) / (np.std(speed) + 1e-6)
 
     center, center_ = get_fp(overlaps, window, task, GRID_TEST=GRID_TEST)
     ax.plot(center.T[0], center.T[1], 'o', color='k', ms=14)
@@ -341,7 +332,7 @@ def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0):
     vmin, vmax = np.nanpercentile(speed, [5, 95])
     norm = mpl.colors.Normalize(vmin, vmax)
 
-    heatmap = ax.streamplot(xi, yi, ui, vi, density=0.75, arrowsize=2, norm=norm, color='w')
+    heatmap = ax.streamplot(xi, yi, ui, vi, density=0.5, arrowsize=1.5, norm=norm, color='w')
     heatmap = ax.pcolormesh(xi, yi, speed, cmap='coolwarm', shading='gouraud', norm=norm)
     # heatmap = ax.imshow(speed, extent=(yi.min(), yi.max(), yi.min(), yi.max()), cmap='jet', norm=norm, origin='lower', aspect='auto')
 
@@ -437,13 +428,13 @@ DEVICE = 'cuda:1'
 
 #+begin_src ipython
 kwargs = {
-    'DURATION': 10.0,
+    'DURATION': 20.0,
     'TASK': 'dual_flow',
     'T_STIM_ON': [1.0, 2.0],
     'T_STIM_OFF': [2.0, 300.0],
     'I0': [1.0, 1.0],
-    'GRID_SIZE': 15,
-    'GRID_TEST': None,
+    'GRID_SIZE': 10,
+    'GRID_TEST': None, # here
     'GRID_INPUT': 0,
     'IF_OPTO': 0
 }
@@ -454,8 +445,8 @@ kwargs = {
 #+begin_src ipython
 tasks = ['dpa']
 tasks = ['dpa', 'dual_naive', 'dual_train']
-seed = 103
-GRID_RANGE = 0.6
+seed = 1
+GRID_RANGE = 0.4
 #+end_src
 
 #+RESULTS:
@@ -477,7 +468,7 @@ print(rates_tensor.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([3, 900, 101, 750])
+: torch.Size([3, 400, 201, 750])
 
 #+begin_src ipython
 model = init_model(task, seed, **kwargs)
@@ -492,9 +483,9 @@ window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
 #+end_src
 
 #+RESULTS:
-: (3, 900, 101, 2)
+: (3, 400, 201, 2)
 
-* field
+* Field
 
 #+begin_src ipython
 from sklearn.cluster import KMeans
@@ -525,11 +516,12 @@ def get_fp(overlaps, window, task, GRID_TEST=None, x=None, y=None):
 #+RESULTS:
 
 #+begin_src  ipython
-fig, ax = plt.subplots(1, 1, figsize=[width, width])
+fig, ax = plt.subplots(1, len(tasks), figsize=[len(tasks) * width, width], sharex=1, sharey=1)
 
-plot_field(overlaps[0], ax, window, IF_FP=1, task=0, GRID_TEST=model.GRID_TEST)
+for i in range(len(tasks)):
+    plot_field(overlaps[i], ax[i], window, IF_FP=1, task=i, GRID_TEST=model.GRID_TEST)
 
-save_fig('field_dpa', GRID_TEST=model.GRID_TEST)
+save_fig('flow_field', GRID_TEST=model.GRID_TEST)
 plt.show()
 #+end_src
 
@@ -539,37 +531,6 @@ plt.show()
 #+begin_src ipython
 
 #+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-fig, ax = plt.subplots(1, 1, figsize=[width, width])
-
-plot_field(overlaps[1], ax, window, IF_FP=1, task=1, GRID_TEST=model.GRID_TEST)
-
-save_fig('field_dual_naive', GRID_TEST=model.GRID_TEST)
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/flow/figure_24.png]]
-
-#+begin_src ipython
-fig, ax = plt.subplots(1, 1, figsize=[width, width])
-
-plot_field(overlaps[-1], ax, window, IF_FP=1, task=2, GRID_TEST=model.GRID_TEST)
-# plot_spaghetti(overlaps[0], ax, window, IF_FP=0, step=100, color=1)
-# plot_quiver(overlaps[0], ax, window, IF_FP=1, step=5, scale=1)
-
-# center, center_ = get_fp(overlaps[2], window, task, GRID_TEST=0)
-# ax.plot(center.T[0], center.T[1], 'o', color='k', ms=14)
-
-save_fig('field_dual_expert', GRID_TEST=model.GRID_TEST)
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/flow/figure_25.png]]
 
 * Bassins
 
@@ -673,8 +634,8 @@ print(slope)
 
 #+RESULTS:
 :RESULTS:
-: -0.6274282955855452
-[[./figures/flow/figure_28.png]]
+: 0.0701943112925685
+[[./figures/flow/figure_29.png]]
 :END:
 
 #+begin_src ipython
@@ -688,14 +649,14 @@ print(slope)
 
 #+RESULTS:
 :RESULTS:
-: -0.6737947006453265
-[[./figures/flow/figure_29.png]]
+: -0.9198391565759705
+[[./figures/flow/figure_30.png]]
 :END:
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 1, figsize=[width, width])
-plot_field(overlaps[2], ax, window, IF_FP=1, task=2, GRID_TEST=model.GRID_TEST)
-sep_points = plot_empirical_separatrix(overlaps[2], ax, window, near_thresh=3)
+plot_field(overlaps[-1], ax, window, IF_FP=1, task=2, GRID_TEST=model.GRID_TEST)
+sep_points = plot_empirical_separatrix(overlaps[-1], ax, window, near_thresh=3)
 slope, _ = plot_separatrix_bestfit(sep_points, ax, kind="linear")
 ax.set_ylim([-15, 16])
 save_fig('field_dual_expert', GRID_TEST=model.GRID_TEST)
@@ -704,6 +665,12 @@ print(slope)
 
 #+RESULTS:
 :RESULTS:
-: -1.731151905294439
-[[./figures/flow/figure_30.png]]
+: 8.088042649012793
+[[./figures/flow/figure_31.png]]
 :END:
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:

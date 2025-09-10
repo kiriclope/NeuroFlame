@@ -175,7 +175,7 @@ def init_const(model):
     # defining models' Parameters
     ##########################################
     model.Jab = (
-        torch.tensor(model.Jab, device=model.device).reshape(model.N_POP, model.N_POP)
+        model.GAIN * torch.tensor(model.Jab, device=model.device).reshape(model.N_POP, model.N_POP)
     )
 
     for i_pop in range(model.N_POP):
@@ -246,3 +246,7 @@ def init_const(model):
 
         del mean_, cov_
         del multivariate_normal
+
+        model.odors = torch.randn((10, model.Na[0]), device=model.device)
+        # the cue is the same as go
+        model.odors[2] = model.odors[1]

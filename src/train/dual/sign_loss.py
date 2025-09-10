@@ -2,47 +2,62 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+def safe_mean(tensor):
+    """Returns mean or zero if tensor is empty."""
+    if tensor.numel() == 0:
+        return torch.tensor(0.0, device=tensor.device, dtype=tensor.dtype)
+
+    return tensor.mean()
+
+class BCEOneClassLoss(nn.Module):
+    # Your original BCEOneClassLoss goes here
+    def __init__(self):
+        super().__init__()
+        self.criterion = nn.BCEWithLogitsLoss(reduction='none')
+
+    def forward(self, logits, targets, class_bal=1):
+        bce = self.criterion(logits, targets.float())
+
+        if class_bal == 0:
+            mask1 = (targets == 1)
+            pos_loss = safe_mean(bce[mask1])
+            mask0 = (targets == 0)
+            # Encourage proba = 0.5 for class 0 (logit=0)
+            neutral_loss = safe_mean(self.criterion(logits[mask0], torch.full_like(logits[mask0], 0.5)))
+            return pos_loss + 0.1 * neutral_loss
+
+        return safe_mean(bce)
+
 class SignBCELoss(nn.Module):
-      def __init__(self, alpha=1.0, thresh=2.0, imbalance=0):
-            super(SignBCELoss, self).__init__()
-            self.alpha = alpha
-            self.thresh = thresh
+    def __init__(self, alpha=0.5, thresh=1.0, class_bal=0):
+        super().__init__()
+        self.alpha = alpha
+        self.thresh = thresh
+        self.class_bal = class_bal
+        self.bce_with_logits = BCEOneClassLoss()
 
-            self.imbal = imbalance
-            self.bce_with_logits = nn.BCEWithLogitsLoss()
+    def forward(self, readout, targets):
+        # BCE loss (can be 0 if alpha==1)
+        bce_loss = 0.0
+        if self.alpha != 1.0:
+            bce_loss = self.bce_with_logits(readout, targets, self.class_bal)
 
-      def imbal_func(target, imbalance):
-          output = torch.zeros_like(target)
+        sign_overlap = torch.sign(2 * targets - 1) * readout
+        sign_loss = torch.zeros_like(sign_overlap)
 
-          output[target == 0] = imbalance
-          output[target == 1] = 1
+        if self.class_bal == 0:
+            # Penalize class 0 (targets==0) with |overlap|
+            mask0 = (targets == 0)
+            if mask0.sum() > 0:
+                sign_loss[mask0] = 0.1 * torch.abs(sign_overlap[mask0])
+            # Penalize class 1 (targets==1) with relu(thresh - overlap)
+            mask1 = (targets == 1)
+            if mask1.sum() > 0:
+                sign_loss[mask1] = F.relu(self.thresh - sign_overlap[mask1])
+        else:
+            sign_loss = F.relu(self.thresh - sign_overlap)
 
-          return output
+        # Combine safely
+        loss = ((1 - self.alpha) * bce_loss + self.alpha * safe_mean(sign_loss))
 
-      def forward(self, readout, targets):
-            if self.alpha != 1.0:
-                  bce_loss = self.bce_with_logits(readout, targets)
-            else:
-                  bce_loss = 0.0
-
-            # average readout over bins
-            mean_readout = readout.mean(dim=1).unsqueeze(-1)
-
-            # only penalizing not licking when pair
-            if self.imbal == -1:
-                  # sign_overlap = torch.abs(torch.sign(2 * targets - 1)) * mean_readout
-                  sign_overlap = torch.sign(targets) * mean_readout
-                  self.imbal = 0
-            else:
-                  sign_overlap = torch.sign(2 * targets - 1) * mean_readout
-
-            if self.imbal > 1.0:
-                  sign_loss = F.relu(torch.sign(targets) * self.thresh - self.imb_func(targets, self.imbal) * sign_overlap)
-            elif self.imbal == 0:
-                  sign_loss = F.relu(self.imbal_func(targets, self.imbal) * self.thresh - sign_overlap)
-            else:
-                  sign_loss = F.relu(self.thresh - sign_overlap)
-
-            combined_loss = (1-self.alpha) * bce_loss + self.alpha * sign_loss
-
-            return combined_loss.mean()
+        return loss
