@@ -10,50 +10,28 @@ def calculate_mean_accuracy_and_sem(accuracies):
 
 
 class Accuracy(nn.Module):
-    def __init__(self, thresh=4.0):
+    def __init__(self):
         super(Accuracy, self).__init__()
-        self.thresh = thresh
 
+    def forward(self, readout, targets, class_bal=1):
 
-    def imbal_func(self, target, imbalance=0):
-        output = torch.zeros_like(target)
-
-        output[target == 0] = imbalance
-        output[target == 1] = 1
-
-        return output
-
-
-    def forward(self, readout, targets, imbalance=0):
-        # mean_readout = readout.mean(dim=1)
-        # sign_overlap = torch.sign(2 * targets[:, 0] - 1) * mean_readout
-        # return 1.0 * (sign_overlap >= self.thresh)
-
-        # sign_loss = (mean_readout >= self.thresh)
-        # return 1.0 * (sign_loss == targets[:, 0])
-
-        # sign_readout = torch.sign(2 * targets[:, 0].unsqueeze(-1) - 1) * readout
-        # accuracy = 1.0 * (sign_readout >= self.imbal_func(targets[:,0], imbalance).unsqueeze(-1) * self.thresh).any(dim=1)
-
-        prob = torch.sigmoid(readout[..., -1])
+        prob = torch.sigmoid(readout)
         idx = torch.where(targets[:, 0]==0)
-        prob[idx] = 1 - prob[idx]
-        # print(prob.shape)
-        accuracy = (prob >= 0.5).float()
-        # accuracy = prob
+        prob[idx] = (1 - prob[idx])
 
-        # target_vals = self.imbal_func(targets[:, 0], imbalance).unsqueeze(-1)  # shape: (batch, 1)
-        # target_vals = targets[:, 0].unsqueeze(-1)  # shape: (batch, 1)
-        # accuracy = (predicted == target_vals).float()
+        # if class_bal==0:
+        #     idx2 = torch.where(prob[idx]>=0.5)
+        #     prob[idx2] = 1.0
 
-        return accuracy
+        # accuracy = (prob >= 0.5).float()
+
+        return prob
 
 
 class DualScore(nn.Module):
-    def __init__(self, thresh=2.0, cue_idx=[], rwd_idx=-1, read_idx=[-1], DEVICE='cuda'):
+    def __init__(self, cue_idx=[], rwd_idx=-1, read_idx=[-1], DEVICE='cuda'):
         super().__init__()
 
-        self.thresh = thresh
         # rwd idx for DRT
         self.cue_idx = torch.tensor(cue_idx, dtype=torch.int, device=DEVICE)
         # rwd idx for DPA
@@ -61,18 +39,18 @@ class DualScore(nn.Module):
 
         # readout idx
         self.read_idx = read_idx
-        self.score = Accuracy(thresh=self.thresh)
+
+        self.score = Accuracy()
+
 
     def forward(self, readout, targets):
-        targ = targets.clone()
-        targ[targ==-1] = 0
         is_empty = (self.cue_idx.numel() == 0)
 
         if is_empty:
-            DPA_score = self.score(readout[:, self.rwd_idx, self.read_idx[0]], targ)
+            DPA_score = self.score(readout[:, self.rwd_idx, self.read_idx[0]], targets)
             return DPA_score
 
-        DPA_score = self.score(readout[:, self.rwd_idx, self.read_idx[0]], targ[:, 0, :self.rwd_idx.shape[0]], imbalance=0)
-        DRT_score = self.score(readout[:, self.cue_idx, self.read_idx[1]], targ[:, -1, :self.cue_idx.shape[0]], imbalance=0)
+        DPA_score = self.score(readout[:, self.rwd_idx, self.read_idx[0]], targets[:, 0, :self.rwd_idx.shape[0]])
+        DRT_score = self.score(readout[:, self.cue_idx, self.read_idx[1]], targets[:, -1, :self.cue_idx.shape[0]], class_bal=0)
 
         return DPA_score, DRT_score

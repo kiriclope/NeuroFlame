@@ -12,9 +12,9 @@ from src.train.dual.task_loss import DualLoss
 from src.train.dual.optim import optimization
 
 
-def create_model(REPO_ROOT, conf_name, seed, DEVICE):
+def create_model(REPO_ROOT, conf_name, seed, DEVICE, **kwargs):
 
-    model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1)
+    model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
     device = torch.device(DEVICE if torch.cuda.is_available() else 'cpu')
     model.to(device)
 

@@ -2,20 +2,6 @@
 #+TITLE: Training Low Rank RNNs
 #+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual_flow_multi :kernel torch :exports results :output-dir ./figures/flow_multi :file (lc/org-babel-tangle-figure-filename)
 
-* TODO Urgent
-** Model
-
- run multiple models see if there is a push down of the wells or diff strategies
- see how go affects models try to understand how it impairs pairing.
- plot task trajectories (DPA, GO, NOGO)
-
-** Data
-
- try wells with sample LD and CHOICE if it works (push down that s gold)
- if not try to make dPCA better and get day by day wells
- if not go back to the go no go axis
- and plot trajectories
-
 * Notebook Settings
 
 #+begin_src ipython :tangle no
@@ -28,13 +14,10 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
-: <Figure size 600x370.82 with 0 Axes>
-:END:
 
 #+RESULTS:
 
@@ -83,6 +66,8 @@ from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
 #+end_src
 
 #+RESULTS:
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
 
 #+begin_src ipython :tangle ../src/torch/utils.py
 import pickle as pkl
@@ -393,8 +378,7 @@ kwargs = {
 
 #+begin_src ipython
 tasks = ['dpa', 'dual_naive', 'dual_train']
-seed = 10
-GRID_RANGE = .5
+GRID_RANGE = .2
 dum = 'auto'
 #+end_src
 
@@ -405,7 +389,7 @@ dum = 'auto'
  #+begin_src ipython
 from tqdm import tqdm
 centers = []
-for seed in tqdm(range(0, 10)):
+for seed in tqdm(range(0, 30)):
     fp = []
     for task in tasks:
         fp.append(run_grid(GRID_RANGE, seed, task, **kwargs))
@@ -417,8 +401,8 @@ print(centers.shape)
 #+end_src
 
 #+RESULTS:
-: 100% 10/10 [01:44<00:00, 10.45s/it]
-: (10, 3, 2, 5)
+: 100% 30/30 [05:07<00:00, 10.24s/it]
+: (30, 3, 2, 5)
 :
 
 #+begin_src ipython
@@ -451,7 +435,7 @@ print(centers__.shape)
 #+end_src
 
 #+RESULTS:
-: (2, 5, 3, 10)
+: (2, 5, 3, 30)
 
 #+begin_src ipython
 centers = centers__
@@ -468,7 +452,7 @@ print(x.shape, y.shape)
 fp = np.stack((x, y)).T
 print(fp.shape)
 
-kmeans = KMeans(n_clusters=3, random_state=None, init='k-means++')
+kmeans = KMeans(n_clusters=5, random_state=None, init='k-means++')
 kmeans.fit(fp)
 centers_mm = np.array(kmeans.cluster_centers_).T
 print(centers_mm.shape)
@@ -477,9 +461,9 @@ print(centers_mm.shape)
 #+end_src
 
 #+RESULTS:
-: (50,) (50,)
-: (50, 2)
-: (2, 3)
+: (150,) (150,)
+: (150, 2)
+: (2, 5)
 
 #+begin_src ipython
 x = centers[0, :, 1].reshape(-1)
@@ -499,8 +483,8 @@ print(centers_m.shape)
 #+end_src
 
 #+RESULTS:
-: (50,) (50,)
-: (50, 2)
+: (150,) (150,)
+: (150, 2)
 : (2, 5)
 
 #+begin_src ipython
@@ -521,10 +505,10 @@ print(radius)
 #+end_src
 
 #+RESULTS:
-: (50,) (50,)
-: (50, 2)
+: (150,) (150,)
+: (150, 2)
 : (2, 3)
-: 0.9036280011683971
+: 12.05485337307592
 
 #+begin_src ipython
 import matplotlib.patches as patches

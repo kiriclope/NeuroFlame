@@ -325,17 +325,18 @@ class SignBCELoss(nn.Module):
         sign_overlap = torch.sign(2 * targets - 1) * readout
         sign_loss = torch.zeros_like(sign_overlap)
 
-        if self.class_bal == 0:
-            # Penalize class 0 (targets==0) with |overlap|
-            mask0 = (targets == 0)
-            if mask0.sum() > 0:
-                sign_loss[mask0] = 0.1 * torch.abs(sign_overlap[mask0])
-            # Penalize class 1 (targets==1) with relu(thresh - overlap)
-            mask1 = (targets == 1)
-            if mask1.sum() > 0:
-                sign_loss[mask1] = F.relu(self.thresh - sign_overlap[mask1])
-        else:
-            sign_loss = F.relu(self.thresh - sign_overlap)
+        if self.alpha!=0:
+            if self.class_bal == 0:
+                # Penalize class 0 (targets==0) with |overlap|
+                mask0 = (targets == 0)
+                if mask0.sum() > 0:
+                    sign_loss[mask0] = 0.1 * torch.abs(sign_overlap[mask0])
+                    # Penalize class 1 (targets==1) with relu(thresh - overlap)
+                mask1 = (targets == 1)
+                if mask1.sum() > 0:
+                    sign_loss[mask1] = F.relu(self.thresh - sign_overlap[mask1])
+            else:
+                sign_loss = F.relu(self.thresh - sign_overlap)
 
         # Combine safely
         loss = ((1 - self.alpha) * bce_loss + self.alpha * safe_mean(sign_loss))
@@ -410,7 +411,7 @@ class DualLoss(nn.Module):
             loss = self.l1loss(readout[:, self.zero_idx, self.read_idx[0]], zeros)
             # zero memory only before stim
             if len(self.read_idx)>1:
-                  loss += self.l1loss(readout[:, :stim_idx[0]-1, self.read_idx[1]], zeros[:, :stim_idx[0]-1])
+                  loss += self.l1loss(readout[:, :self.stim_idx[0]-1, self.read_idx[1]], zeros[:, :self.stim_idx[0]-1])
 
             is_stim = (self.stim_idx.numel() != 0)
             is_gng = (self.gng_idx.numel() != 0)
@@ -418,7 +419,7 @@ class DualLoss(nn.Module):
             is_rwd = (self.rwd_idx.numel() != 0)
 
             if is_cue:
-                  self.loss.class_bal = self.class_bal[1]
+                  self.loss.class_bal = self.class_bal[3]
                   loss += self.loss(readout[:, self.cue_idx, self.read_idx[3]], targets[:, 2, :self.cue_idx.shape[0]])
 
             if is_gng:
@@ -865,13 +866,13 @@ conf_name = "train_dual.yml"
 DEVICE = 'cuda:0'
 
 # seed = np.random.randint(0, 1e6)
-seed = 1
+seed = 0
 print(seed)
 #+end_src
 
 
 #+RESULTS:
-: 1
+: 0
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
@@ -1942,7 +1943,12 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 
 #+begin_src ipython
 train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
-criterion = DualLoss(alpha=bce_alpha, thresh=thresh, stim_idx=stim_idx, gng_idx=gng_idx,cue_idx=cue_idx, rwd_idx=rwd_idx, zero_idx=zero_idx, class_bal=[1.0, 0.0, 1.0, 0.0], read_idx=[1, 0, 1, 1])
+
+criterion = DualLoss(alpha=bce_alpha, thresh=thresh,
+                     stim_idx=stim_idx, gng_idx=gng_idx,
+                     cue_idx=cue_idx, rwd_idx=rwd_idx, zero_idx=zero_idx,
+                     class_bal=[1.0, 0.0, 1.0, 0.0], read_idx=[1, 0, 1, 1])
+
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
@@ -1962,12 +1968,12 @@ print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
 #+RESULTS:
 : training Dual
-: Epoch 1/5, Training Loss: 0.6288, Validation Loss: 0.2417
-: Epoch 2/5, Training Loss: 0.2065, Validation Loss: 0.1966
-: Epoch 3/5, Training Loss: 0.1863, Validation Loss: 0.1825
-: Epoch 4/5, Training Loss: 0.1732, Validation Loss: 0.1736
-: Epoch 5/5, Training Loss: 0.1691, Validation Loss: 0.1680
-: Elapsed (with compilation) = 0h 3m 43s
+: Epoch 1/5, Training Loss: 0.6333, Validation Loss: 0.2478
+: Epoch 2/5, Training Loss: 0.2185, Validation Loss: 0.2020
+: Epoch 3/5, Training Loss: 0.1977, Validation Loss: 0.1810
+: Epoch 4/5, Training Loss: 0.1759, Validation Loss: 0.1639
+: Epoch 5/5, Training Loss: 0.1666, Validation Loss: 0.1558
+: Elapsed (with compilation) = 0h 3m 44s
 
 #+begin_src ipython
 torch.save(model.state_dict(), '%s/dual_train_%d.pth' % (model.SAVE_PATH, seed))
@@ -2081,6 +2087,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
+[[./figures/dual/figure_91.png]]
 
 #+begin_src ipython
 N_BATCH = 10

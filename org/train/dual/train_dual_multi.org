@@ -93,20 +93,37 @@ DEVICE = 'cuda:0'
 for ite in range(0, 1):
     seed = ite
     print('model', seed)
-    train_dpa(REPO_ROOT, conf_name, seed, DEVICE)
-    train_gng(REPO_ROOT, conf_name, seed, DEVICE)
+    # train_dpa(REPO_ROOT, conf_name, seed, DEVICE)
+    # train_gng(REPO_ROOT, conf_name, seed, DEVICE)
     train_dual(REPO_ROOT, conf_name, seed, DEVICE)
 #+end_src
 
 #+RESULTS:
-: model 0
-: ff_input torch.Size([1024, 605, 1000]) labels torch.Size([1024, 2, 60])
-: training DPA
-:   7% 1/15 [02:03<28:42, 123.02s/it]
+:RESULTS:
+#+begin_example
+model 0
+training Dual
+ 10% 1/10 [00:45<06:45, 45.04s/it]Epoch 1/10, Training Loss: 0.8179, Validation Loss: 0.2883
+
+ 20% 2/10 [01:29<05:56, 44.58s/it]Epoch 2/10, Training Loss: 0.2280, Validation Loss: 0.2009
+
+ 30% 3/10 [02:13<05:11, 44.45s/it]Epoch 3/10, Training Loss: 0.1916, Validation Loss: 0.2011
+
+ 40% 4/10 [02:57<04:25, 44.31s/it]Epoch 4/10, Training Loss: 0.1816, Validation Loss: 0.1733
+ 50% 5/10 [03:41<03:41, 44.25s/it]Epoch 5/10, Training Loss: 0.1740, Validation Loss: 0.1704
+ 60% 6/10 [04:25<02:56, 44.20s/it]Epoch 6/10, Training Loss: 0.1633, Validation Loss: 0.1588
+ 70% 7/10 [05:10<02:12, 44.17s/it]Epoch 7/10, Training Loss: 0.1572, Validation Loss: 0.1525
+ 80% 8/10 [05:54<01:28, 44.22s/it]Epoch 8/10, Training Loss: 0.1539, Validation Loss: 0.1547
+ 90% 9/10 [06:38<00:44, 44.20s/it]Epoch 9/10, Training Loss: 0.1524, Validation Loss: 0.1458
+ 90% 9/10 [07:22<00:49, 49.18s/it]Epoch 10/10, Training Loss: 0.1485, Validation Loss: 0.1471
+Stopping training as loss has fallen below the threshold: 0.14848024684649247, 0.14709122188679583
+Elapsed (with compilation) = 0h 7m 22s
+
+#+end_example
+:END:
 
 #+begin_src ipython :tangle ./run_dual_multi.py
 
 #+end_src
 
 #+RESULTS:
-: 4f63c8c5-7750-49ef-b125-b7ced0f615e2
