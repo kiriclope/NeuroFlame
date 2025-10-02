@@ -2,29 +2,6 @@
 #+TITLE: Training Low Rank RNNs
 #+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual_flow :kernel torch :exports results :output-dir ./figures/flow :file (lc/org-babel-tangle-figure-filename)
 
-* Notebook Settings
-
-#+begin_src ipython :tangle no
-%load_ext autoreload
-%autoreload 2
-%reload_ext autoreload
-%run ../../../notebooks/setup.py
-%matplotlib inline
-%config InlineBackend.figure_format = 'png'
-#+end_src
-
-#+RESULTS:
-: The autoreload extension is already loaded. To reload it, use:
-:   %reload_ext autoreload
-: Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
-
-#+RESULTS:
-
-: The autoreload extension is already loaded. To reload it, use:
-:   %reload_ext autoreload
-: Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
 
 * Imports
 
@@ -96,6 +73,30 @@ def add_vlines(model, ax=None):
 #+end_src
 
 #+RESULTS:
+
+* Notebook Settings
+
+#+begin_src ipython :tangle no
+%load_ext autoreload
+%autoreload 2
+%reload_ext autoreload
+%run ../../../notebooks/setup.py
+%matplotlib inline
+%config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+#+RESULTS:
+
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
 
 * Utils
 
@@ -316,7 +317,7 @@ def create_mesh(x, y, size=100, sigma=0, interp_method='nearest', mask_radius=10
 #+begin_src ipython
 import matplotlib as mpl
 
-def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0):
+def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0, IF_CBAR=0):
     x = overlaps[:, window:, 0]
     y = overlaps[:, window:, 1]
 
@@ -325,23 +326,28 @@ def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0):
     speed = (speed - np.mean(speed)) / (np.std(speed) + 1e-6)
 
     center, center_ = get_fp(overlaps, window, task, GRID_TEST=GRID_TEST)
-    ax.plot(center.T[0], center.T[1], 'o', color='k', ms=14)
-    if GRID_TEST is not None:
-        ax.plot(center_.T[0], center_.T[1], 'o', color='w', ms=14)
 
     vmin, vmax = np.nanpercentile(speed, [5, 95])
     norm = mpl.colors.Normalize(vmin, vmax)
 
-    heatmap = ax.streamplot(xi, yi, ui, vi, density=0.5, arrowsize=1.5, norm=norm, color='w')
+    heatmap = ax.streamplot(xi, yi, ui, vi, density=0.5, arrowsize=1.25, norm=norm, color=('w', 0.5))
     heatmap = ax.pcolormesh(xi, yi, speed, cmap='coolwarm', shading='gouraud', norm=norm)
     # heatmap = ax.imshow(speed, extent=(yi.min(), yi.max(), yi.min(), yi.max()), cmap='jet', norm=norm, origin='lower', aspect='auto')
+
+    ax.plot(center.T[0], center.T[1], 'o', color='w', ms=18)
+    # if GRID_TEST is not None:
+    #     ax.plot(center_.T[0], center_.T[1], 'o', color='w', ms=18)
 
     # ax.set_aspect('equal')
     # ax.set_xlim([yi.min(), yi.max()])
     # ax.set_ylim([yi.min(), yi.max()])
+    ax.set_yticks([-10, 0, 10])
+    heatmap.set_clim(-1.5, 1.5)
 
-    # cbar = plt.colorbar(heatmap, ax=ax)
-    # cbar.set_label('Norm. Speed')
+    if IF_CBAR:
+        cbar = plt.colorbar(heatmap, ax=ax)
+        cbar.set_label('Norm. Speed')
+        # cbar.set_clim(-1.5, 1.5)
 
     ax.set_xlabel('A/B Overlap')
     ax.set_ylabel('Choice Overlap')
@@ -350,22 +356,22 @@ def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0):
 #+RESULTS:
 
 #+begin_src ipython
-def save_fig(figname, GRID_TEST):
+def save_fig(figname, GRID_TEST, format='png'):
 
     if GRID_TEST==4:
-        plt.savefig('../figures/flow/%s_test_C_%d.png' % (figname, seed), dpi=300)
+        plt.savefig('../figures/flow/%s_test_C_%d.%s' % (figname, seed, format), dpi=300)
     elif GRID_TEST==9:
-        plt.savefig('../figures/flow/%s_test_D_%d.png' % (figname, seed), dpi=300)
+        plt.savefig('../figures/flow/%s_test_D_%d.%s' % (figname, seed, format), dpi=300)
     elif GRID_TEST==1:
-        plt.savefig('../figures/flow/%s_go_%d.png' % (figname, seed), dpi=300)
+        plt.savefig('../figures/flow/%s_go_%d.%s' % (figname, seed, format), dpi=300)
     elif GRID_TEST==6:
-        plt.savefig('../figures/flow/%s_nogo_%d.png' % (figname, seed), dpi=300)
+        plt.savefig('../figures/flow/%s_nogo_%d.%s' % (figname, seed, format), dpi=300)
     elif GRID_TEST==0:
-        plt.savefig('../figures/flow/%s_sample_A_%d.png' % (figname, seed), dpi=300)
+        plt.savefig('../figures/flow/%s_sample_A_%d.%s' % (figname, seed, format), dpi=300)
     elif GRID_TEST==5:
-        plt.savefig('../figures/flow/%s_sample_B_%d.png' % (figname, seed), dpi=300)
+        plt.savefig('../figures/flow/%s_sample_B_%d.%s' % (figname, seed, format), dpi=300)
     else:
-        plt.savefig('../figures/flow/%s_%d.png' % (figname, seed), dpi=300)
+        plt.savefig('../figures/flow/%s_%d.%s' % (figname, seed, format), dpi=300)
 
    #+end_src
 
@@ -428,13 +434,13 @@ DEVICE = 'cuda:1'
 
 #+begin_src ipython
 kwargs = {
-    'DURATION': 20.0,
+    'DURATION': 50.0,
     'TASK': 'dual_flow',
     'T_STIM_ON': [1.0, 2.0],
     'T_STIM_OFF': [2.0, 300.0],
     'I0': [1.0, 1.0],
     'GRID_SIZE': 10,
-    'GRID_TEST': 4, # here
+    'GRID_TEST': None, # here
     'GRID_INPUT': 0,
     'IF_OPTO': 0
 }
@@ -445,11 +451,14 @@ kwargs = {
 #+begin_src ipython
 tasks = ['dpa']
 tasks = ['dpa', 'dual_naive', 'dual_train']
-seed = 3
-GRID_RANGE = 0.2
+seed = np.random.randint(100)
+seed = 34
+print(seed)
+GRID_RANGE = 0.3
 #+end_src
 
 #+RESULTS:
+: 34
 
 * Flow
 
@@ -468,7 +477,7 @@ print(rates_tensor.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([3, 400, 201, 750])
+: torch.Size([3, 400, 501, 750])
 
 #+begin_src ipython
 model = init_model(task, seed, **kwargs)
@@ -483,7 +492,7 @@ window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
 #+end_src
 
 #+RESULTS:
-: (3, 400, 201, 2)
+: (3, 400, 501, 2)
 
 * Field
 
@@ -503,6 +512,10 @@ def get_fp(overlaps, window, task, GRID_TEST=None, x=None, y=None):
     # print(fp.shape)
     kmeans.fit(fp)
     center = np.array(kmeans.cluster_centers_)
+
+    if task==2:
+        center = center[:3]
+
     center_ = []
 
     if GRID_TEST is None:
@@ -516,17 +529,38 @@ def get_fp(overlaps, window, task, GRID_TEST=None, x=None, y=None):
 #+RESULTS:
 
 #+begin_src  ipython
+# fig, ax = plt.subplots(1, 1, figsize=[width, width])
+# aplot_field(overlaps[0], ax, window, IF_FP=1, task=0, GRID_TEST=model.GRID_TEST, IF_CBAR=1);
+# save_fig('flow_field_cbar_seed_%d' % (seed), GRID_TEST=model.GRID_TEST)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src  ipython
+# for i in range(len(tasks)):
+    # fig, ax = plt.subplots(1, 1, figsize=[width, width])
+    # if i==3:
+    #     plot_field(overlaps[0], ax, window, IF_FP=1, task=0, GRID_TEST=model.GRID_TEST, IF_CBAR=1)
+    #     save_fig('flow_field_cbar_seed_%d' % (seed), GRID_TEST=model.GRID_TEST)
+    # else:
+    # plot_field(overlaps[i], ax, window, IF_FP=1, task=i, GRID_TEST=model.GRID_TEST, IF_CBAR=0);
+    # save_fig('flow_field_task_%s_seed_%d' % (tasks[i], seed), GRID_TEST=model.GRID_TEST)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src  ipython
 fig, ax = plt.subplots(1, len(tasks), figsize=[len(tasks) * width, width])
 
 for i in range(len(tasks)):
     plot_field(overlaps[i], ax[i], window, IF_FP=1, task=i, GRID_TEST=model.GRID_TEST)
 
-save_fig('flow_field', GRID_TEST=model.GRID_TEST)
+save_fig('flow_field_seed_%d' % seed, GRID_TEST=model.GRID_TEST)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/flow/figure_22.png]]
+[[file:./figures/flow/figure_24.png]]
 
 #+begin_src ipython
 

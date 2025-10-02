@@ -820,7 +820,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_27.png]]
+[[file:./figures/dual/figure_27.png]]
 
 #+begin_src ipython
 def plot_overlap(readout, labels=['pair', 'unpair'], figname='fig.svg'):
@@ -866,13 +866,13 @@ conf_name = "train_dual.yml"
 DEVICE = 'cuda:0'
 
 # seed = np.random.randint(0, 1e6)
-seed = 0
+seed = 1
 print(seed)
 #+end_src
 
 
 #+RESULTS:
-: 0
+: 1
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
@@ -885,7 +885,7 @@ model.to(device);
 #+begin_src ipython
 batch_size = 16
 learning_rate = 0.1
-bce_alpha = 0.0
+bce_alpha = 1.0
 thresh = 2.0
 #+end_src
 
@@ -1028,19 +1028,18 @@ torch.save(model.state_dict(), '%s/dpa_%d.pth' % (model.SAVE_PATH, seed))
 
 #+RESULTS:
 : training DPA
-: Epoch 1/5, Training Loss: 1.1090, Validation Loss: 0.6254
-: Epoch 2/5, Training Loss: 0.4137, Validation Loss: 0.2863
-: Epoch 3/5, Training Loss: 0.1299, Validation Loss: 0.0587
-: Stopping training as loss has fallen below the threshold: 0.12990893280276886, 0.058713532729846675
-: Elapsed (with compilation) = 0h 2m 58s
+: Epoch 1/5, Training Loss: 3.2977, Validation Loss: 1.9840
+: Epoch 2/5, Training Loss: 1.0140, Validation Loss: 0.3245
+: Epoch 3/5, Training Loss: 0.1569, Validation Loss: 0.1343
+: Epoch 4/5, Training Loss: 0.1233, Validation Loss: 0.1258
+: Stopping training as loss has fallen below the threshold: 0.12327435039556943, 0.1257995952920216
+: Elapsed (with compilation) = 0h 4m 43s
 
 #+begin_src ipython
 print(model.J_STP)
 #+end_src
 
 #+RESULTS:
-: Parameter containing:
-: tensor(4.9148, device='cuda:0', requires_grad=True)
 
 ** Testing
 :PROPERTIES:
@@ -1054,6 +1053,7 @@ model.eval();
 #+end_src
 
 #+RESULTS:
+: 0a233dad-b202-4e32-8b22-82e5a06a5e63
 
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
 N_BATCH = 1
@@ -1088,7 +1088,7 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([4, 605, 1000]) labels torch.Size([2, 4])
+: d1055fe9-15da-4787-a423-9a638590eed6
 
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
 with torch.no_grad():
@@ -1158,7 +1158,7 @@ plot_overlap_label(model.readout.cpu().detach().numpy(), labels.cpu().numpy(), t
 :RESULTS:
 : (2, 4)
 : (4, 4)
-[[./figures/dual/figure_45.png]]
+[[file:./figures/dual/figure_45.png]]
 :END:
 
 #+begin_src ipython
@@ -1179,7 +1179,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_46.png]]
+[[file:./figures/dual/figure_46.png]]
 
 #+begin_src ipython
 odors = model.odors.cpu().numpy()
@@ -1244,7 +1244,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_49.png]]
+[[file:./figures/dual/figure_49.png]]
 
 
 #+begin_src ipython
@@ -1373,10 +1373,10 @@ print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
 #+RESULTS:
 : training DRT
-: Epoch 1/5, Training Loss: 0.1794, Validation Loss: 0.0786
-: Epoch 2/5, Training Loss: 0.0712, Validation Loss: 0.0649
-: Stopping training as loss has fallen below the threshold: 0.07117628972404279, 0.06494227476963182
-: Elapsed (with compilation) = 0h 1m 57s
+: Epoch 1/5, Training Loss: 1.0019, Validation Loss: 0.1305
+: Epoch 2/5, Training Loss: 0.1069, Validation Loss: 0.0902
+: Stopping training as loss has fallen below the threshold: 0.10688109165773942, 0.09024475489447757
+: Elapsed (with compilation) = 0h 2m 30s
 
  #+begin_src ipython
 torch.save(model.state_dict(), '%s/dual_naive_%d.pth' % (model.SAVE_PATH, seed))
@@ -1437,7 +1437,7 @@ plot_overlap(model.readout.cpu().detach().numpy(), labels=['Go', 'NoGo'], fignam
  #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_63.png]]
+[[file:./figures/dual/figure_63.png]]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -1457,7 +1457,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_64.png]]
+[[file:./figures/dual/figure_64.png]]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
@@ -1510,7 +1510,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_65.png]]
+[[file:./figures/dual/figure_65.png]]
 
 #+begin_src ipython
 
@@ -1620,7 +1620,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_69.png]]
+[[file:./figures/dual/figure_69.png]]
 
 #+begin_src ipython
 N_BATCH = 10
@@ -1755,7 +1755,7 @@ plot_overlap_label(readout, y_labels, task=0, figname='sample_overlaps_naive.svg
 :RESULTS:
 : (3, 120)
 : (3, 120)
-[[./figures/dual/figure_74.png]]
+[[file:./figures/dual/figure_74.png]]
 :END:
 
 #+begin_src ipython
@@ -1766,7 +1766,7 @@ plot_overlap_label(readout, y_labels, task=1, figname='sample_overlaps_naive.svg
 :RESULTS:
 : (3, 120)
 : (3, 120)
-[[./figures/dual/figure_75.png]]
+[[file:./figures/dual/figure_75.png]]
 :END:
 
 #+begin_src ipython
@@ -1777,7 +1777,7 @@ plot_overlap_label(readout, y_labels, task=-1, figname='sample_overlaps_naive.sv
 :RESULTS:
 : (3, 120)
 : (3, 120)
-[[./figures/dual/figure_76.png]]
+[[file:./figures/dual/figure_76.png]]
 :END:
 
 #+begin_src ipython
@@ -1789,11 +1789,21 @@ plot_overlap_label(readout, y_labels, task=-1, figname='sample_overlaps_naive.sv
 *** Perf
 
 #+begin_src ipython
-criterion = DualScore(thresh=4, cue_idx=cue_idx, rwd_idx=rwd_idx, read_idx=[1, 1])
+criterion = DualScore(cue_idx=cue_idx, rwd_idx=rwd_idx, read_idx=[1, 1])
 dpa_perf, drt_perf = criterion(model.readout, labels.clone())
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: TypeError                                 Traceback (most recent call last)
+: Cell In[76], line 1
+: ----> 1 criterion = DualScore(thresh=4, cue_idx=cue_idx, rwd_idx=rwd_idx, read_idx=[1, 1])
+:       2 dpa_perf, drt_perf = criterion(model.readout, labels.clone())
+:
+: TypeError: DualScore.__init__() got an unexpected keyword argument 'thresh'
+:END:
 
 #+begin_src ipython
 dpa_mean = []
@@ -1810,12 +1820,34 @@ dpa_sem = np.stack(dpa_sem)
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[77], line 6
+:       3 for i in [0, 1, -1]:
+:       4         y = torch.where(labels[:, 2, 0]==i)
+: ----> 6         mean_, sem_ = calculate_mean_accuracy_and_sem(dpa_perf[y])
+:       7         dpa_mean.append(mean_)
+:       8         dpa_sem.append(sem_)
+:
+: NameError: name 'dpa_perf' is not defined
+:END:
 
 #+begin_src ipython
 drt_mean, drt_sem = calculate_mean_accuracy_and_sem(drt_perf)
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[78], line 1
+: ----> 1 drt_mean, drt_sem = calculate_mean_accuracy_and_sem(drt_perf)
+:
+: NameError: name 'drt_perf' is not defined
+:END:
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[1.5*width, height])
@@ -1848,7 +1880,23 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_81.png]]
+:RESULTS:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+IndexError                                Traceback (most recent call last)
+Cell In[79], line 5
+      3 pal = ['r', 'b', 'g']
+      4 for i in range(3):
+----> 5     ax[0].errorbar(i, dpa_mean[i].item(), yerr=dpa_sem[i].item(), fmt='o', label='Naive',
+      6                    color=pal[i], ecolor=pal[i], elinewidth=3, capsize=5)
+      8 ax[0].set_xlim(-1, 4)
+      9 # ax[0].set_ylim(0.4, 1.1)
+
+IndexError: list index out of range
+#+end_example
+[[file:./figures/dual/figure_81.png]]
+:END:
 
 #+begin_src ipython
 
@@ -1968,12 +2016,12 @@ print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
 #+RESULTS:
 : training Dual
-: Epoch 1/5, Training Loss: 0.6333, Validation Loss: 0.2478
-: Epoch 2/5, Training Loss: 0.2185, Validation Loss: 0.2020
-: Epoch 3/5, Training Loss: 0.1977, Validation Loss: 0.1810
-: Epoch 4/5, Training Loss: 0.1759, Validation Loss: 0.1639
-: Epoch 5/5, Training Loss: 0.1666, Validation Loss: 0.1558
-: Elapsed (with compilation) = 0h 3m 44s
+: Epoch 1/5, Training Loss: 0.9197, Validation Loss: 0.3782
+: Epoch 2/5, Training Loss: 0.2655, Validation Loss: 0.2039
+: Epoch 3/5, Training Loss: 0.2008, Validation Loss: 0.1921
+: Epoch 4/5, Training Loss: 0.1854, Validation Loss: 0.1875
+: Epoch 5/5, Training Loss: 0.1748, Validation Loss: 0.1658
+: Elapsed (with compilation) = 0h 5m 22s
 
 #+begin_src ipython
 torch.save(model.state_dict(), '%s/dual_train_%d.pth' % (model.SAVE_PATH, seed))
@@ -2087,7 +2135,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_91.png]]
+[[file:./figures/dual/figure_91.png]]
 
 #+begin_src ipython
 N_BATCH = 10
@@ -2219,7 +2267,7 @@ plot_overlap_label(readout, y_labels, task=0, figname='sample_overlaps_naive.svg
 :RESULTS:
 : (3, 120)
 : (3, 120)
-[[./figures/dual/figure_96.png]]
+[[file:./figures/dual/figure_96.png]]
 :END:
 
 #+begin_src ipython
@@ -2230,7 +2278,7 @@ plot_overlap_label(readout, y_labels, task=1, figname='sample_overlaps_naive.svg
 :RESULTS:
 : (3, 120)
 : (3, 120)
-[[./figures/dual/figure_97.png]]
+[[file:./figures/dual/figure_97.png]]
 :END:
 
 #+begin_src ipython
@@ -2241,7 +2289,7 @@ plot_overlap_label(readout, y_labels, task=-1, figname='sample_overlaps_naive.sv
 :RESULTS:
 : (3, 120)
 : (3, 120)
-[[./figures/dual/figure_98.png]]
+[[file:./figures/dual/figure_98.png]]
 :END:
 
 #+begin_src ipython
@@ -2253,11 +2301,21 @@ plot_overlap_label(readout, y_labels, task=-1, figname='sample_overlaps_naive.sv
 *** Perf
 
 #+begin_src ipython
-criterion = DualScore(thresh=4., cue_idx=cue_idx, rwd_idx=rwd_idx, read_idx=[1, 1])
+criterion = DualScore(cue_idx=cue_idx, rwd_idx=rwd_idx, read_idx=[1, 1])
 dpa_perf, drt_perf = criterion(model.readout, labels.clone())
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: TypeError                                 Traceback (most recent call last)
+: Cell In[95], line 1
+: ----> 1 criterion = DualScore(thresh=4., cue_idx=cue_idx, rwd_idx=rwd_idx, read_idx=[1, 1])
+:       2 dpa_perf, drt_perf = criterion(model.readout, labels.clone())
+:
+: TypeError: DualScore.__init__() got an unexpected keyword argument 'thresh'
+:END:
 
 #+begin_src ipython
 dpa_mean2 = []
@@ -2274,12 +2332,34 @@ dpa_sem2 = np.stack(dpa_sem2)
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[96], line 6
+:       3 for i in [0, 1, -1]:
+:       4         y = torch.where(labels[:, 2, 0]==i)
+: ----> 6         mean_, sem_ = calculate_mean_accuracy_and_sem(dpa_perf[y])
+:       7         dpa_mean2.append(mean_)
+:       8         dpa_sem2.append(sem_)
+:
+: NameError: name 'dpa_perf' is not defined
+:END:
 
 #+begin_src ipython
 drt_mean2, drt_sem2 = calculate_mean_accuracy_and_sem(drt_perf)
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[97], line 1
+: ----> 1 drt_mean2, drt_sem2 = calculate_mean_accuracy_and_sem(drt_perf)
+:
+: NameError: name 'drt_perf' is not defined
+:END:
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[1.5*width, height])
@@ -2317,7 +2397,24 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_103.png]]
+:RESULTS:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+IndexError                                Traceback (most recent call last)
+Cell In[98], line 5
+      3 pal = ['r', 'b', 'g']
+      4 for i in range(3):
+----> 5     ax[0].errorbar(i, dpa_mean[i].item(), yerr=dpa_sem[i].item(), fmt='o', label='Naive',
+      6                    color=pal[i], ecolor=pal[i], elinewidth=3, capsize=5)
+      8     ax[0].errorbar(i+4, dpa_mean2[i].item(), yerr=dpa_sem2[i].item(), fmt='o', label='Naive',
+      9                    color=pal[i], ecolor=pal[i], elinewidth=3, capsize=5)
+     11 ax[0].set_xlim(-1, 7)
+
+IndexError: list index out of range
+#+end_example
+[[file:./figures/dual/figure_103.png]]
+:END:
 
 
 #+begin_src ipython
@@ -2338,7 +2435,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_104.png]]
+[[file:./figures/dual/figure_104.png]]
 
  #+begin_src ipython
 plt.scatter(V[:, 0], V[:, 1])
@@ -2348,7 +2445,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/figure_105.png]]
+[[file:./figures/dual/figure_105.png]]
 
 #+begin_src ipython
 

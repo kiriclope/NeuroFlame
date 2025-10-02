@@ -119,33 +119,29 @@ def add_vlines(model, ax=None):
 
 #+begin_src ipython
 kwargs = {
-    'GAIN': 1.0,
-    'DURATION': 12.0,
-    'T_STEADY': 4,
-    'T_STIM_ON': [1.0, 4.0, 6.0, 10.0],
-    'T_STIM_OFF': [2.0, 5.0, 7.0, 12.0],
-    'I0': [1.0, -2.0, 1.0, -2.0],
-    'PHI0': [180.0, 180, 180, 180],
-    'SIGMA0': [1.0, 0.0, 1.0, 0.0],
+    'DURATION': 6.0,
+    'T_STEADY': 2,
+    'T_STIM_ON': [1.0, 5.0],
+    'T_STIM_OFF': [2.0, 6.0],
+    'I0': [1.0, -2.0],
+    'PHI0': [180.0, 180],
+    'SIGMA0': [1.0, 0.0],
     'RANDOM_DELAY': 0,
     'MIN_DELAY': 2,
     'MAX_DELAY': 5,
     'USE': [0.03],
     'TAU_FAC': [2.0],
     'TAU_REC': [0.2],
-    'IF_ADAPT': 0,
-    'A_ADAPT': 10.0,
-    'TAU_ADAPT': [150.0, 150.0],
+    'IF_ADAPT': 1,
+    'A_ADAPT': 5.0,
+    'TAU_ADAPT': 50.0,
     'IF_FF_ADAPT': 0,
-    'A_FF_ADAPT': 1.0,
-    'TAU_FF_ADAPT': 2.0,
-    'RATE_NOISE': 0,
-    'VAR_RATE': 10.0,
-    'REP_BIAS': 0.0,
+    'A_FF_ADAPT': 0.2,
+    'TAU_FF_ADAPT': 100.0,
+    'REP_BIAS': 1.0,
     'REP_VAR': 2.5,
 }
 #+end_src
-
 
 #+RESULTS:
 
@@ -177,6 +173,7 @@ model.eval();
 
 #+RESULTS:
 
+
 #+begin_src ipython
 print(model.J_STP)
 # model.J_STP = torch.nn.Parameter(torch.tensor(3.0).to(model.device))
@@ -184,7 +181,7 @@ print(model.J_STP)
 
 #+RESULTS:
 : Parameter containing:
-: tensor(2.5643, device='cuda:0', requires_grad=True)
+: tensor(2.1417, device='cuda:0', requires_grad=True)
 
 * Batching Inputs
 
@@ -204,18 +201,20 @@ with torch.no_grad():
     rates_tensor = model.forward(ff_input=ff_input)
     # del ff_input
     clear_cache()
+print(ff_input.shape, rates_tensor.shape)
 #+end_src
 
 #+RESULTS:
+: torch.Size([768, 405, 1000]) torch.Size([768, 61, 750])
 
 #+begin_src ipython
-_, _, phi_ext = decode_bump_torch(ff_input, axis=-1, RET_TENSOR=0)
+_, _, phi_ext = decode_bump_torch(ff_input[..., model.slices[0]], axis=-1, RET_TENSOR=0)
 _, _, phi = decode_bump_torch(rates_tensor, axis=-1, RET_TENSOR=0)
 print(phi.shape, model.PHI0.shape)
 #+end_src
 
 #+RESULTS:
-: (768, 121) torch.Size([768, 4, 1])
+: (768, 61) torch.Size([768, 2, 1])
 
 #+begin_src ipython
 import matplotlib.cm as cm
@@ -224,59 +223,95 @@ colors = cm.tab10.colors  # or cm.viridis.colors, etc.
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
 for i in range(5):
-    ax[0].plot((-phi_ext[i].T)% (2 * np.pi), color=colors[i], alpha=.4)
-    ax[0].axhline(model.PHI0[i, 0, 0].cpu().detach(), xmin=0, xmax=0.5, ls='--', color=colors[i])
-    ax[0].axhline(model.PHI0[i, 2, 0].cpu().detach(), xmin=0.5, ls='--', color=colors[i])
+    ax[0].plot((-phi_ext[i].T)% (2*np.pi), color=colors[i], alpha=.4)
+    ax[0].axhline(model.PHI0[i, 0, 0].cpu().detach(), xmin=0, xmax=1, ls='--', color=colors[i])
 
     ax[1].plot(phi[i].T, color=colors[i], alpha=.4)
-    ax[1].axhline(model.PHI0[i, 0, 0].cpu().detach(), xmin=0, xmax=0.5, ls='--', color=colors[i])
-    ax[1].axhline(model.PHI0[i, 2, 0].cpu().detach(), xmin=0.5, ls='--', color=colors[i])
+    ax[1].axhline(model.PHI0[i, 0, 0].cpu().detach(), xmin=0, xmax=1, ls='--', color=colors[i])
 
-ax[0].set_ylabel('FF Input')
-ax[0].set_ylabel('Rates')
+ax[0].set_ylabel('FF Phase')
+ax[1].set_ylabel('Net Phase')
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_seq_sb/figure_14.png]]
+[[file:./figures/odr_seq_sb/figure_14.png]]
 
 #+begin_src ipython
-num_epochs = 49
+def shifted_phase(phase1, phase2, bias_strength, bias_var, direction=-1):
+    """
+    shift phase2_original away from phase1 by bias_strength (in radians)
+    direction='repulsive' for away, 'attractive' for toward
+    All phases in radians
+    """
+    delta = (phase1 - phase2) * torch.pi / 180.0
+    # - for repulsion, + for attraction
+    phase2_biased = phase2 + direction * bias_strength * torch.sin(delta) + bias_var * torch.randn_like(phase2)
+    return torch.remainder(phase2_biased, 360.0)
+#+end_src
 
-rates_list = [rates_tensor.cpu().detach()]
-phi0_list = [model.PHI0_UNBIASED.cpu().detach()]
+#+RESULTS:
+
+#+begin_src ipython
+num_epochs = 100
+
+rates_list = []
 thresh_list = [model.thresh_last.cpu().detach()]
+
+prev_list = [model.PHI0[:, 0].cpu().detach()]
+curr_list = []
 
 for epoch in tqdm(range(num_epochs)):
     with torch.no_grad():
-        model.PHI0 = torch.randint(low=0, high=360, size=(N_BATCH, len(model.I0), 1), device=DEVICE, dtype=torch.float)
 
-        # idx = torch.randint(0, 8, size=(N_BATCH, len(model.I0), 1), device=DEVICE)
-        # model.PHI0 = angles[idx]
+        model.PHI0 = torch.randint(low=0, high=360, size=(N_BATCH, len(model.I0), 1), device=DEVICE, dtype=torch.float)
+        model.PHI0_UNBIASED = torch.deg2rad(model.PHI0.clone())
+
+        if model.REP_BIAS>0:
+            model.PHI0[:, 0] = shifted_phase(prev_list[-1].to(DEVICE), model.PHI0[:, 0], model.REP_BIAS, model.REP_VAR)
 
         ff_input = model.init_ff_input()
         rates = model.forward(ff_input=ff_input, IF_INIT=0)
 
-        phi0_list.append(model.PHI0_UNBIASED.cpu().detach())
+        curr_list.append(model.PHI0_UNBIASED[:, 0].cpu().detach())
+        prev_list.append(model.PHI0_UNBIASED[:, 0].cpu().detach())
+
         rates_list.append(rates.cpu().detach())
         thresh_list.append(model.thresh_last.cpu().detach())
 
-        del ff_input, model.PHI0, model.PHI0_UNBIASED
+        del ff_input, model.PHI0, rates
         clear_cache()
 
-rates_list = np.stack(rates_list)
-thresh_list = np.stack(thresh_list)
-phi0_list = np.stack(phi0_list)
+rates_list = torch.stack(rates_list).cpu().numpy()
+thresh_list = torch.stack(thresh_list).cpu().numpy()
 
-print('rates', rates_list.shape, 'thresh', thresh_list.shape, 'phi0', phi0_list.shape)
+prev_list = torch.stack(prev_list).cpu().numpy()[:-1]
+curr_list = torch.stack(curr_list).cpu().numpy()
+
+print('rates', rates_list.shape, 'thresh', thresh_list.shape)
+print('curr', curr_list.shape, 'prev', prev_list.shape)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: 100% 49/49 [00:53<00:00,  1.10s/it]
-:
-: rates (50, 768, 121, 750) thresh (50, 768, 1000) phi0 (50, 768, 4, 1)
-:END:
+: 100% 100/100 [01:07<00:00,  1.49it/s]
+: rates (100, 768, 61, 750) thresh (101, 768, 1000)
+: curr (100, 768, 1) prev (100, 768, 1)
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+plt.hist(prev_list[:, 0, 0] * 180 / np.pi, bins=20, histtype='step')
+plt.hist(curr_list[:, 0, 0] * 180 / np.pi, bins=20, histtype='step')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/odr_seq_sb/figure_18.png]]
+
 
 #+begin_src ipython
 plt.imshow(thresh_list[:,0, :750].T, aspect='auto', cmap='jet', vmin=0)
@@ -286,7 +321,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_seq_sb/figure_16.png]]
+[[file:./figures/odr_seq_sb/figure_19.png]]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -297,7 +332,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_seq_sb/figure_17.png]]
+[[file:./figures/odr_seq_sb/figure_20.png]]
 
 #+begin_src ipython
 plt.plot(thresh_list[:, 0, :10])
@@ -307,7 +342,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_seq_sb/figure_18.png]]
+[[file:./figures/odr_seq_sb/figure_21.png]]
 
 #+begin_src ipython
 
@@ -318,15 +353,23 @@ plt.show()
 * Errors
 
 #+begin_src ipython
-n_half = num_epochs // 3
+n_half = num_epochs // 2
 #n_half = 1
-phi0_ini =  phi0_list[:n_half]
-phi0_last = phi0_list[-n_half:]
-print(phi0_ini.shape, phi0_last.shape)
 #+end_src
 
 #+RESULTS:
-: (16, 768, 4, 1) (16, 768, 4, 1)
+
+#+begin_src ipython
+curr_ini =  curr_list[:n_half]
+curr_last = curr_list[-n_half:]
+
+prev_ini =  prev_list[:n_half]
+prev_last = prev_list[-n_half:]
+print(curr_ini.shape, prev_ini.shape)
+#+end_src
+
+#+RESULTS:
+: (50, 768, 1) (50, 768, 1)
 
 #+begin_src ipython
 _, _, phi_ini = decode_bump_torch(rates_list[:n_half], axis=-1, RET_TENSOR=0)
@@ -334,7 +377,7 @@ print(phi_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (16, 768, 121)
+: (50, 768, 61)
 
 #+begin_src ipython
 _, _, phi_last = decode_bump_torch(rates_list[-n_half:], axis=-1, RET_TENSOR=0)
@@ -342,27 +385,21 @@ print(phi_last.shape)
 #+end_src
 
 #+RESULTS:
-: (16, 768, 121)
+: (50, 768, 61)
 
 #+begin_src ipython
-def get_rel_tar_error(phi, phi0):
-    target_loc = phi0[:, :, 2] * 180.0 / np.pi
+def get_error_curr_prev(phi, curr, prev):
+    target_loc = curr  * 180.0 / np.pi
 
-    rel_loc = (phi0[:, :, 0] - phi0[:, :, 2])
+    rel_loc = prev - curr
     rel_loc = (rel_loc + np.pi) % (2 * np.pi) - np.pi
     rel_loc *= 180 / np.pi
 
-    error_curr = (phi - phi0[:, :, 2])
+    error_curr = phi - curr
     error_curr = (error_curr + np.pi) % (2 * np.pi) - np.pi
     error_curr *= 180 / np.pi
 
-    error_prev = (phi - phi0[:, :,0] )
-    error_prev = (error_prev + np.pi) % (2 * np.pi) - np.pi
-    error_prev *= 180 / np.pi
-
-    errors = np.stack((error_prev, error_curr), 1)
-
-    return np.vstack(target_loc), np.vstack(rel_loc), errors
+    return np.vstack(target_loc), np.vstack(rel_loc), np.array(error_curr)
 #+end_src
 
 #+RESULTS:
@@ -373,27 +410,23 @@ def get_end_point(model, errors):
     stim_start_idx = ((model.start_indices - model.N_STEADY) / model.N_WINDOW).to(int).cpu().numpy()
 
     end_point = []
-    for i, j in enumerate([1, 3]):
-        end_ = []
-        for k in range(errors.shape[2]):
-            idx = stim_start_idx[j][k]
-            end_.append(errors[:, i, k, idx])
+    for k in range(errors.shape[1]):
+            idx = stim_start_idx[1][k]-1
+            end_point.append(errors[:, k, idx])
 
-        end_point.append(end_)
-
-    return np.vstack(np.array(end_point).T).T
+    return np.array(end_point).T.reshape(-1, 1)
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-targ_ini, rel_ini, errors_ini = get_rel_tar_error(phi_ini, phi0_ini)
-targ_last, rel_last, errors_last = get_rel_tar_error(phi_last, phi0_last)
+targ_ini, rel_ini, errors_ini = get_error_curr_prev(phi_ini, curr_ini, prev_ini)
+targ_last, rel_last, errors_last = get_error_curr_prev(phi_last, curr_last, prev_last)
 print(targ_ini.shape, rel_ini.shape, errors_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (12288, 1) (12288, 1) (16, 2, 768, 121)
+: (38400, 1) (38400, 1) (50, 768, 61)
 
 #+begin_src ipython
 end_point_ini = get_end_point(model, errors_ini)
@@ -402,20 +435,42 @@ print(end_point_ini.shape, end_point_last.shape)
 #+end_src
 
 #+RESULTS:
-: (2, 12288) (2, 12288)
+: (38400, 1) (38400, 1)
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
 
-ax[0].hist(targ_ini[:, 0])
-ax[1].hist(end_point_ini[1], bins=50)
-ax[2].hist(end_point_last[1], bins=50)
+# ax[0].hist(reference[:, 0])
+ax[1].hist(end_point_ini[:, 0], bins=50)
+ax[2].hist(end_point_last[:, 0], bins=50)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_seq_sb/figure_27.png]]
+[[file:./figures/odr_seq_sb/figure_31.png]]
 
+
+#+begin_src ipython
+time_points = np.linspace(0, model.DURATION, errors_ini.shape[-1])
+idx = np.random.randint(errors_ini.shape[1], size=100)
+
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+ax[0].plot(time_points, errors_ini[0][idx].T, alpha=.4)
+add_vlines(model, ax[0])
+
+ax[0].set_xlabel('t')
+ax[0].set_ylabel('error first half(°)')
+
+ax[1].plot(time_points, errors_last[0][idx].T, alpha=.4)
+add_vlines(model, ax[1])
+
+ax[1].set_xlabel('t')
+ax[1].set_ylabel('error last half (°)')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/odr_seq_sb/figure_32.png]]
 
 #+begin_src ipython
 
@@ -430,12 +485,12 @@ print(targ_ini.shape, rel_ini.shape, end_point_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (12288, 1) (12288, 1) (2, 12288)
+: (38400, 1) (38400, 1) (38400, 1)
 
 #+begin_src ipython
-n_bins = 8
-data_ini = pd.DataFrame({'target_loc': targ_ini[:, -1], 'rel_loc': rel_ini[:, -1], 'errors': end_point_ini[1]})
-data_last = pd.DataFrame({'target_loc': targ_last[:, -1], 'rel_loc': rel_last[:, -1], 'errors': end_point_last[1]})
+n_bins = 16
+data_ini = pd.DataFrame({'target_loc': targ_ini[:, -1], 'rel_loc': rel_ini[:, -1], 'errors': end_point_ini[:, 0]})
+data_last = pd.DataFrame({'target_loc': targ_last[:, -1], 'rel_loc': rel_last[:, -1], 'errors': end_point_last[:, 0]})
 #+end_src
 
 #+RESULTS:
@@ -492,10 +547,10 @@ centers_last, bin_rel_last, centers_abs_last, bin_rel_abs_last = get_correct_err
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
 # Panel 2: By Relative Location (Full vs Half session, -180..180)
-ax[0].plot(centers_ini, bin_rel_ini['mean'], 'r', label='ini')
+ax[0].plot(centers_ini, bin_rel_ini['mean'], 'r', label='First half')
 ax[0].fill_between(centers_ini, bin_rel_ini['mean'] - bin_rel_ini['sem'], bin_rel_ini['mean'] + bin_rel_ini['sem'], color='r', alpha=0.2)
 
-ax[0].plot(centers_last, bin_rel_last['mean'], 'b', label='last')
+ax[0].plot(centers_last, bin_rel_last['mean'], 'b', label='Second half')
 ax[0].fill_between(centers_last, bin_rel_last['mean'] - bin_rel_last['sem'], bin_rel_last['mean'] + bin_rel_last['sem'], color='b', alpha=0.2)
 
 ax[0].axhline(0, color='k', linestyle=":")
@@ -504,10 +559,10 @@ ax[0].set_ylabel('Corrected Error (°)')
 
 
 # Panel 3: By |Relative Location| (Full and Half)
-ax[1].plot(centers_abs_ini, bin_rel_abs_ini['mean'], 'r', label='ini')
+ax[1].plot(centers_abs_ini, bin_rel_abs_ini['mean'], 'r', label='First half')
 ax[1].fill_between(centers_abs_ini, bin_rel_abs_ini['mean'] - bin_rel_abs_ini['sem'], bin_rel_abs_ini['mean'] + bin_rel_abs_ini['sem'], color='r', alpha=0.2)
 
-ax[1].plot(centers_abs_last, bin_rel_abs_last['mean'], 'b', label='last')
+ax[1].plot(centers_abs_last, bin_rel_abs_last['mean'], 'b', label='Second half')
 ax[1].fill_between(centers_abs_last, bin_rel_abs_last['mean'] - bin_rel_abs_last['sem'], bin_rel_abs_last['mean'] + bin_rel_abs_last['sem'], color='b', alpha=0.2)
 
 ax[1].axhline(0, color='k', linestyle=":")
@@ -520,7 +575,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_seq_sb/figure_33.png]]
+[[file:./figures/odr_seq_sb/figure_38.png]]
 
 #+begin_src ipython
 
@@ -648,119 +703,100 @@ def bootstrap_amplitude_at_90(
 
 #+RESULTS:
 
-
 #+begin_src ipython
 _, _, phi_list = decode_bump_torch(rates_list, axis=-1)
 print(phi_list.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([50, 768, 121])
+: torch.Size([100, 768, 61])
 
 #+begin_src ipython
-print(phi0_list.shape)
-#+end_src
-
-#+RESULTS:
-: (50, 768, 4, 1)
-
-#+begin_src ipython
-n_bins = 16
-
 cmap = plt.get_cmap('Blues')
-colors = [cmap((i+1)/ phi_list.shape[0]) for i in range(phi_list.shape[0])]
+colors = [cmap( (i+1) / phi_list.shape[0] ) for i in range(phi_list.shape[0])]
+
+n_bins = 16
 
 serial_list = []
 
-for i in range(phi_list.shape[0]):
-    targ_trial, rel_trial, errors_trial = get_rel_tar_error(phi_list[i, np.newaxis], phi0_list[i, np.newaxis])
+fig, ax = plt.subplots(1, 1, figsize=[width, height])
+
+for i in range(phi_list.shape[0]): # trial by trial
+    targ_trial, rel_trial, errors_trial = get_error_curr_prev(phi_list[i, np.newaxis], curr_list[i, np.newaxis], prev_list[i, np.newaxis])
     end_point_trial = get_end_point(model, errors_trial)
 
-    # print(targ_trial.shape, rel_trial.shape, ref_trial.shape, errors_trial.shape, end_point_trial.shape)
+    data = pd.DataFrame({'target_loc': targ_trial[:, -1], 'rel_loc': rel_trial[:, -1], 'errors': end_point_trial[:, 0]})
 
-    data = pd.DataFrame({'target_loc': targ_trial[:, -1], 'rel_loc': rel_trial[:, -1], 'errors': end_point_trial[1]})
+    centers, bin_rel, centers_abs, bin_rel_abs = get_correct_error(n_bins, data)
 
-    result = fit_deriv_gaussian_circular(data, n_bins=n_bins)
-    plt.plot(result['bin_centers'], result['fit'](result['bin_centers']), alpha=1, color=colors[i])
-    serial_list.append(result['amplitude_at_90'])
+    ax.plot(centers, bin_rel['mean'], color=colors[i], alpha=1)
+    ax.axhline(0, ls='--', color='k')
+    ax.set_xlabel('Rel. Loc. (°)')
+    ax.set_ylabel('Error (°)')
+    ax.set_xticks(np.linspace(-180, 180, 5))
 
-    # centers, bin_rel, centers_abs, bin_rel_abs = get_correct_error(n_bins, data)
+    idx_max = np.argmax(abs(bin_rel_abs['mean']))
+    serial_max = bin_rel_abs['mean'][idx_max]
+    serial_std = bin_rel_abs['sem'][idx_max]
 
-    # idx_max = np.argmax(abs(bin_rel_abs['mean']))
-    # serial_max = bin_rel_abs['mean'][idx_max]
-    # serial_std = bin_rel_abs['sem'][idx_max]
-
-    # serial_list.append([serial_max, serial_std])
+    serial_list.append([serial_max, serial_std])
 
 serial_list = np.array(serial_list).T
-plt.axhline(0, ls='--', color='k')
-plt.xlabel('Rel. Loc. (°)')
-plt.ylabel('Error (°)')
-plt.show()
-
 print(serial_list.shape)
+plt.show()
 #+end_src
 
 #+RESULTS:
 :RESULTS:
-[[./figures/odr_seq_sb/figure_39.png]]
-: (50,)
+: (2, 100)
+[[file:./figures/odr_seq_sb/figure_43.png]]
 :END:
 
 #+begin_src ipython
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d, uniform_filter1d
 
 delay_duration = 100
-xdelay = np.linspace(0, delay_duration, serial_list.shape[0])
+xdelay = np.linspace(0, delay_duration, serial_list.shape[1])
 
-fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-
+fig, ax = plt.subplots(1, 1, figsize=[width, height])
 
 s0 = 2
-ax[0].plot(xdelay, serial_list, '-')
-ax[0].plot(xdelay, gaussian_filter1d(serial_list, s0), '-')
-# ax[0].fill_between(xdelay, gaussian_filter1d(serial_list[0] - serial_list[1], s0), gaussian_filter1d(serial_list[0] + serial_list[1], s0), color='b', alpha=0.2)
+ax.plot(xdelay, uniform_filter1d(serial_list[0], s0), '-')
+ax.fill_between(xdelay, uniform_filter1d(serial_list[0] - serial_list[1], s0), uniform_filter1d(serial_list[0] + serial_list[1], s0), color='b', alpha=0.2)
+ax.axhline(0, ls='--', color='k')
 
-ax[0].set_xlabel('Trial #')
-ax[0].set_ylabel('Serial Bias (°)')
+ax.set_xlabel('Trial #')
+ax.set_ylabel('Serial Bias (°)')
 
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/odr_seq_sb/figure_40.png]]
+[[file:./figures/odr_seq_sb/figure_44.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-
 
 * Delay Dependency
 
 #+begin_src ipython
-print(phi0_list.shape, phi0_list[0, :5, 0, 0])
-#+end_src
-
-#+RESULTS:
-: (50, 768, 4, 1) [2.86234    0.38397244 3.159046   1.553343   3.403392  ]
-
-#+begin_src ipython
-_, _, phi_list = decode_bump_torch(rates_list, axis=-1, RET_TENSOR=0)
+#_, _, phi_list = decode_bump_torch(rates_list, axis=-1, RET_TENSOR=0)
 print(phi_list.shape, phi_list[0, :5, 0])
 #+end_src
 
 #+RESULTS:
-: (50, 768, 121) [2.6976264  4.752024   0.91798747 1.8049409  1.9908371 ]
+: torch.Size([100, 768, 61]) tensor([3.8186, 4.2349, 3.4940, 0.7552, 2.9929])
 
 #+begin_src ipython
-targ_list, rel_list, errors_list = get_rel_tar_error(phi_list[-1:], phi0_list[-1:])
-print(targ_list.shape, rel_list.shape, rel_list[:5, 0], errors_list.shape, errors_list[0, 0, :5, 0])
+targ_list, rel_list, errors_list = get_error_curr_prev(phi_list, curr_list, prev_list)
+print(targ_list.shape, rel_list.shape, rel_list[:5, 0], errors_list.shape, errors_list[0, 0, :5])
 #+end_src
 
 #+RESULTS:
-: (768, 1) (768, 1) [-155.        -16.000006   97.000015   90.       -158.      ] (1, 2, 768, 121) [ 40.95716   46.057495 112.53722  -39.561657  98.62385 ]
+: (76800, 1) (76800, 1) [-107.99999    30.000008  177.00003   -61.00001   -82.99999 ] (100, 768, 61) [-87.20839  -35.87472  -10.295991  16.655088  41.835236]
 
 #+begin_src ipython
 stim_start = (model.DT * (model.start_indices - model.N_STEADY)).cpu().numpy()
@@ -774,27 +810,27 @@ stim_end_idx = ((model.end_indices - model.N_STEADY) / model.N_WINDOW - 1).to(in
 
 #+begin_src ipython
 delay_point = []
-for i in range(errors_list.shape[2]):
-        idx_start = stim_end_idx[2][i]
-        idx_end = stim_start_idx[3][i]
+
+for i in range(errors_list.shape[1]): # loop over sessions
+        idx_start = stim_end_idx[0][i] # delay start
+        idx_end = stim_start_idx[1][i] # delay stops
 
         end_ = []
 
-        for idx in range(idx_start, idx_end):
+        for idx in range(idx_start, idx_end): # loop over delay idx
                 end__ = []
-                for j in range(errors_list.shape[0]):
-                        end__.append(errors_list[j, 1, i, idx])
+                for j in range(errors_list.shape[0]): # loop over trials
+                        end__.append(errors_list[j, i, idx]) # append all delay errors
 
                 end_.append(end__)
-
         delay_point.append(end_)
 
-delay_point = np.vstack(np.array(delay_point).swapaxes(1,2))
+delay_point = np.vstack(np.array(delay_point).T.swapaxes(-1, 1))
 print(delay_point.shape, errors_list.shape)
 #+end_src
 
 #+RESULTS:
-: (768, 30) (1, 2, 768, 121)
+: (76800, 30) (100, 768, 61)
 
 #+begin_src ipython
 import numpy as np
@@ -883,9 +919,7 @@ def fit_deriv_gaussian_circular(df, n_bins, target_col='target_loc', error_col='
 from joblib import Parallel, delayed
 import numpy as np
 
-def bootstrap_amplitude_at_90(
-    data, n_bins, n_boot=100, n_jobs=-1, random_state=None, fit_kwargs=None
-):
+def bootstrap_amplitude_at_90(data, n_bins, n_boot=100, n_jobs=-1, random_state=None, fit_kwargs=None):
     # fit_kwargs: dict for extra arguments to fit_deriv_gaussian_circular
     if fit_kwargs is None:
         fit_kwargs = {}
@@ -923,59 +957,58 @@ n_bins = 16
 
 cmap = plt.get_cmap('Blues')
 colors = [cmap((i+1)/ delay_point.shape[1]) for i in range(delay_point.shape[1])]
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
 serial_list = []
 serial_ci = []
-for i in range(delay_point.shape[1]):
-    data = pd.DataFrame({'target_loc': targ_list[:, -1], 'rel_loc': rel_list[:, -1], 'errors': delay_point[:, i]})
+# for i in range(delay_point.shape[1]):
+#     data = pd.DataFrame({'target_loc': targ_list[:, -1], 'rel_loc': rel_list[:, -1], 'errors': delay_point[:, i]})
 
-    result = fit_deriv_gaussian_circular(data, n_bins=n_bins)
-    ci = bootstrap_amplitude_at_90(data.copy(), n_bins=n_bins, n_boot=1000)
+#     result = fit_deriv_gaussian_circular(data, n_bins=n_bins)
+#     ci = bootstrap_amplitude_at_90(data.copy(), n_bins=n_bins, n_boot=1000)
 
-    result = fit_deriv_gaussian_circular(data, n_bins=n_bins)
-    plt.plot(result['bin_centers'], result['fit'](result['bin_centers']), alpha=1, color=colors[i])
+#     result = fit_deriv_gaussian_circular(data, n_bins=n_bins)
+#     ax[1].plot(result['bin_centers'], result['fit'](result['bin_centers']), alpha=1, color=colors[i])
 
-    serial_list.append(result['amplitude_at_90'])
-    serial_ci.append(ci)
+#     serial_list.append(result['amplitude_at_90'])
+#     serial_ci.append(ci)
 
 serial_list = np.array(serial_list)
 serial_ci = np.array(serial_ci)
 
-plt.xlabel('Rel. Loc. (°)')
-plt.ylabel('Error (°)')
+ax[0].set_xlabel('Rel. Loc. (°)')
+ax[0].set_ylabel('Error (°)')
+
+delay_duration = stim_start[1, 0] - stim_end[0, 0]
+xdelay = np.linspace(0, delay_duration, serial_list.shape[0])
+
+# ax[1].plot(xdelay, serial_list, '-')
+# ax[1].fill_between(xdelay, serial_ci[:,0], serial_ci[:,1], color='gray', alpha=0.3, label='95% CI')
+
+ax[1].set_xlabel('Delay Length (s)')
+ax[1].set_ylabel('Serial Bias (°)')
+
+
 plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-#+begin_example
-hon
-delay_duration = stim_start[3, 0] - stim_end[2, 0]
-xdelay = np.linspace(0, delay_duration, serial_list.shape[0])
+[[file:./figures/odr_seq_sb/figure_52.png]]
 
-plt.plot(xdelay, serial_list, '-')
-plt.fill_between(xdelay, serial_ci[:,0], serial_ci[:,1], color='gray', alpha=0.3, label='95% CI')
-
-plt.xlabel('Delay Length (s)')
-plt.ylabel('Serial Bias (°)')
-
-plt.show()
-,#+end_src
-
-,#+RESULTS:
-
-,#+begin_src ipython
+#+begin_src ipython
 n_bins = 16
 
 cmap = plt.get_cmap('Blues')
 colors = [cmap((i+1)/ delay_point.shape[1]) for i in range(delay_point.shape[1])]
+
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
 serial_list = []
 for i in range(delay_point.shape[1]):
     data = pd.DataFrame({'target_loc': targ_list[:, -1], 'rel_loc': rel_list[:, -1], 'errors': delay_point[:, i]})
     centers, bin_rel, centers_abs, bin_rel_abs = get_correct_error(n_bins, data)
 
-    plt.plot(centers, bin_rel['mean'], color=colors[i])
+    ax[0].plot(centers, bin_rel['mean'], color=colors[i])
 
     idx_max = np.argmax(abs(bin_rel_abs['mean']))
     serial_max = bin_rel_abs['mean'][idx_max]
@@ -985,81 +1018,25 @@ for i in range(delay_point.shape[1]):
 
 serial_list = np.array(serial_list).T
 print(serial_list.shape)
-plt.xlabel('Rel. Loc. (°)')
-plt.ylabel('Error (°)')
-plt.show()
-,#+end_src
+ax[0].set_xlabel('Rel. Loc. (°)')
+ax[0].set_ylabel('Error (°)')
 
-,#+RESULTS:
-: 87c9f05d-d1cf-47b8-8670-7d7d8fd51c90
+delay_duration = stim_start[1, 0] - stim_end[0, 0]
+xdelay = np.linspace(0, delay_duration, serial_list.shape[1])
 
-,#+begin_src ipython
-delay_duration = stim_start[3, 0] - stim_end[2, 0]
-xdelay = np.linspace(0, delay_duration, serial_list.
-#+end_example
-[[./figures/odr_seq_sb/figure_49.png]]
-:END:
-#+begin_src ipython
-delay_duration = stim_start[3, 0] - stim_end[2, 0]
-xdelay = np.linspace(0, delay_duration, serial_list.shape[0])
+ax[1].plot(xdelay, serial_list[0], '-')
+ax[1].fill_between(xdelay, serial_list[0] - serial_list[1], serial_list[0] + serial_list[1], color='b', alpha=0.2)
+ax[1].set_xlabel('Delay Length (s)')
+ax[1].set_ylabel('Serial Bias (°)')
 
-plt.plot(xdelay, serial_list, '-')
-plt.fill_between(xdelay, serial_ci[:,0], serial_ci[:,1], color='gray', alpha=0.3, label='95% CI')
-
-plt.xlabel('Delay Length (s)')
-plt.ylabel('Serial Bias (°)')
-
-plt.show()
-#+end_src
-
-#+RESULTS:
-: 3349f0cd-971f-4f43-815c-668ea925325b
-
-#+begin_src ipython
-n_bins = 16
-
-cmap = plt.get_cmap('Blues')
-colors = [cmap((i+1)/ delay_point.shape[1]) for i in range(delay_point.shape[1])]
-
-serial_list = []
-for i in range(delay_point.shape[1]):
-    data = pd.DataFrame({'target_loc': targ_list[:, -1], 'rel_loc': rel_list[:, -1], 'errors': delay_point[:, i]})
-    centers, bin_rel, centers_abs, bin_rel_abs = get_correct_error(n_bins, data)
-
-    plt.plot(centers, bin_rel['mean'], color=colors[i])
-
-    idx_max = np.argmax(abs(bin_rel_abs['mean']))
-    serial_max = bin_rel_abs['mean'][idx_max]
-    serial_std = bin_rel_abs['sem'][idx_max]
-
-    serial_list.append([serial_max, serial_std])
-
-serial_list = np.array(serial_list).T
-print(serial_list.shape)
-plt.xlabel('Rel. Loc. (°)')
-plt.ylabel('Error (°)')
 plt.show()
 #+end_src
 
 #+RESULTS:
 :RESULTS:
 : (2, 30)
-[[./figures/odr_seq_sb/figure_51.png]]
+[[file:./figures/odr_seq_sb/figure_53.png]]
 :END:
-
-#+begin_src ipython
-delay_duration = stim_start[3, 0] - stim_end[2, 0]
-xdelay = np.linspace(0, delay_duration, serial_list.shape[1])
-
-plt.plot(xdelay, serial_list[0], '-')
-plt.fill_between(xdelay, serial_list[0] - serial_list[1], serial_list[0] + serial_list[1], color='b', alpha=0.2)
-plt.xlabel('Delay Length (s)')
-plt.ylabel('Serial Bias (°)')
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/odr_seq_sb/figure_52.png]]
 
 #+begin_src ipython
 

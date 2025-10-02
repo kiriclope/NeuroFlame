@@ -132,25 +132,26 @@ class Network(nn.Module):
             self.J_STP = nn.Parameter(self.J_STP)
 
         # NEED .clone() here otherwise BAD THINGS HAPPEN !!!
-        self.W_stp_T = [self.GAIN * self.Wab_T[self.slices[0], self.slices[0]].clone()
-                        / self.Jab[0, 0]
-                        / torch.sqrt(self.Ka[0])]
+        # this for LR RNN
+        # self.W_stp_T = [self.GAIN * self.Wab_T[self.slices[0], self.slices[0]].clone()
+        #                 / self.Jab[0, 0]
+        #                 / torch.sqrt(self.Ka[0])]
 
-        if self.TEST_I_STP:
-            self.W_stp_T.append(self.Wab_T[self.slices[0], self.slices[1]].clone() / torch.abs(self.Jab[1, 0]))
+        self.W_stp_T = []
+        for i in range(self.N_POP): # presyn
+            for j in range(self.N_POP): # postsyn
+                if self.IS_STP[i+j*self.N_POP]:
+                    self.W_stp_T.append(self.Wab_T[self.slices[i], self.slices[j]].clone()
+                                        / torch.abs(self.Jab[j, i]))
 
-        if self.LR_TYPE == 'full':
-            self.W_stp_T[0] = 1.0 / self.Na[0]
+                    # remove non plastic connections
+                    self.Wab_T.data[self.slices[i], self.slices[j]] = 0.0
 
-        # remove non plastic connections
-        self.Wab_T.data[self.slices[0], self.slices[0]] = 0.0
+                    if self.TRAIN_EI:
+                        self.train_mask[self.slices[i], self.slices[j]] = 0.0
 
-        if self.TEST_I_STP:
-            # self.Wab_T.data[self.slices[1], self.slices[1]] = 0.0
-            self.Wab_T.data[self.slices[0], self.slices[1]] = 0.0
-
-        if self.TRAIN_EI:
-            self.train_mask[self.slices[0], self.slices[0]] = 0.0
+            if self.LR_TYPE == 'full':
+                self.W_stp_T[i] = 1.0 / self.Na[i]
 
 
     def init_ff_input(self):
@@ -197,14 +198,19 @@ class Network(nn.Module):
 
         # update stp variables
         if self.IF_STP:
-            Aux = self.stp[0](rates[:, self.slices[0]])  # Aux is now u * x * rates
-            hidden_stp = Aux @ W_stp_T[0]
-            hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
+            # Aux = self.stp[0](rates[:, self.slices[0]])  # Aux is now u * x * rates
+            # hidden_stp = Aux @ W_stp_T[0]
+            # hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
 
-            if self.TEST_I_STP:
-                Aux = self.stp[1](rates[:, self.slices[0]])  # Aux is now u * x * rates
-                hidden_stp = Aux @ W_stp_T[1]
-                hidden[:, self.slices[1]] = hidden[:, self.slices[1]] + hidden_stp
+            k=0
+            for i in range(self.N_POP): # pre
+                for j in range(self.N_POP): # post
+                    if self.IS_STP[i+j*self.N_POP]:
+                        Aux = self.stp[k](rates[:, self.slices[i]]) # pre
+                        hidden_stp = Aux @ W_stp_T[k]
+                        k = k + 1
+                        hidden[:, self.slices[j]] = hidden[:, self.slices[j]] + hidden_stp # post
+
 
         if self.IF_FF_STP:
             hidden_ff_stp = torch.sign(ff_input[:, self.slices[0]]) * self.ff_stp(nn.ReLU()(ff_input[:, self.slices[0]]))
@@ -321,7 +327,10 @@ class Network(nn.Module):
             self.Wab_train = self.low_rank(self.LR_NORM, self.LR_CLAMP)
 
         if self.IF_STP:
-            W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train / self.Na[0])]
+            # this for lr rnn
+            # W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train / self.Na[0])]
+            # need to keep the scale for odr rnn's
+            W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train) / torch.sqrt(self.Ka[0])]
 
             if self.CLAMP:
                 W_stp_T[0] = clamp_tensor(W_stp_T[0], 0, self.slices)

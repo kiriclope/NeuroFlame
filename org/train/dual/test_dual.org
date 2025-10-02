@@ -2,22 +2,6 @@
 #+TITLE: Training Low Rank RNNs
 #+PROPERTY: header-args:ipython :results both :exports both :async yes :session test_dual :kernel torch :exports results :output-dir ./figures/dual/test :file (lc/org-babel-tangle-figure-filename)
 
-* Notebook Settings
-
-#+begin_src ipython :tangle no
-%load_ext autoreload
-%autoreload 2
-%reload_ext autoreload
-%run ../../../notebooks/setup.py
-%matplotlib inline
-%config InlineBackend.figure_format = 'png'
-#+end_src
-
-#+RESULTS:
-: The autoreload extension is already loaded. To reload it, use:
-:   %reload_ext autoreload
-: Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
 
 * Imports
 
@@ -58,6 +42,23 @@ from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
 #+end_src
 
 #+RESULTS:
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* Notebook Settings
+
+#+begin_src ipython :tangle no
+%load_ext autoreload
+%autoreload 2
+%reload_ext autoreload
+%run ../../../notebooks/setup.py
+%matplotlib inline
+%config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
 
@@ -205,6 +206,37 @@ def add_vlines(ax=None, mouse=""):
         for period, color in zip(time_periods, colors):
             ax.axvspan(period[0], period[1], alpha=0.1, color=color)
 
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def add_vdashlines(ax=None, mouse=""):
+    t_BL = [0, 1]
+    t_STIM = [1 , 2]
+    t_ED = [2, 3]
+    t_DIST = [3 , 4]
+    t_MD = [4 , 5]
+    t_CUE = [5 , 5.5]
+    t_RWD = [5.5, 6.0]
+    t_LD = [6.0 , 7.0]
+    t_TEST = [7.0, 8.0]
+    t_RWD2 = [11 , 12]
+
+    # time_periods = [t_STIM, t_DIST, t_TEST, t_CUE, t_RWD, t_RWD2]
+    # colors = ["b", "b", "b", "g", "y", "y"]
+
+    time_periods = [t_STIM, t_DIST, t_TEST, t_CUE]
+    colors = ["b", "b", "b", "g"]
+
+    if ax is None:
+        for period, color in zip(time_periods, colors):
+            plt.axvline(period[0], ls='--', color=color)
+            plt.axvline(period[1], ls='--', color=color)
+    else:
+        for period, color in zip(time_periods, colors):
+            ax.axvline(period[0], ls='--', color=color)
+            ax.axvline(period[1], ls='--', color=color)
 #+end_src
 
 #+RESULTS:
@@ -443,7 +475,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_18.png]]
+[[file:./figures/dual/test/figure_19.png]]
 
 #+begin_src ipython
 def plot_overlap(readout, labels=['pair', 'unpair'], figname='fig.svg'):
@@ -477,7 +509,7 @@ def plot_overlap(readout, labels=['pair', 'unpair'], figname='fig.svg'):
 * Model
 
 #+begin_src ipython
-kwargs = {'VAR_FF': [.25, .25]}
+kwargs = {} # {'VAR_FF': [.25, .25]}
 #+end_src
 
 #+RESULTS:
@@ -487,20 +519,18 @@ REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "train_dual.yml"
 DEVICE = 'cuda:1'
 
-# seed = np.random.randint(0, 1e6)
-seed = 3
+seed = np.random.randint(0, 100)
+# seed = 3
 print(seed)
 
-A0 = 1.0 # sample/dist
-B0 = 1.0 # cue
-C0 = 0.0 # DRT rwd
+
 #+end_src
 
 #+RESULTS:
-: 3
+: 81
 
 #+begin_src ipython
-model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
+model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs);
 path = model.SAVE_PATH
 device = torch.device(DEVICE if torch.cuda.is_available() else 'cpu')
 model.to(device)
@@ -511,6 +541,12 @@ model.to(device)
 :   (low_rank): LowRankWeights()
 : )
 
+#+begin_src ipython
+print(seed)
+#+end_src
+
+#+RESULTS:
+: 81
 
 #+begin_src ipython
 import gc
@@ -532,7 +568,7 @@ torch.cuda.reset_accumulated_memory_stats(DEVICE)
 
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
 model_state_dict = torch.load('%s/dpa_%d.pth' % (path, seed))
-model.load_state_dict(model_state_dict)
+model.load_state_dict(model_state_dict, strict=False)
 #+end_src
 
 #+RESULTS:
@@ -544,16 +580,47 @@ print(model.J_STP)
 
 #+RESULTS:
 : Parameter containing:
-: tensor(5.0028, device='cuda:1', requires_grad=True)
+: tensor(4.9657, device='cuda:1', requires_grad=True)
+
+#+begin_src ipython
+steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
+
+mask = (steps >= (model.N_STIM_OFF[0].cpu().numpy() - model.N_STEADY)) & (steps <= (model.N_STEPS - model.N_STEADY))
+rwd_idx = np.where(mask)[0]
+print('rwd', rwd_idx)
+
+model.lr_eval_win = rwd_idx.shape[0]
+
+stim_mask = (steps >= (model.N_STIM_ON[0].cpu().numpy() - model.N_STEADY)) & (steps < (model.N_STIM_OFF[0].cpu().numpy() - model.N_STEADY))
+stim_idx = np.where(stim_mask)[0]
+print('stim', stim_idx)
+
+test_mask = (steps >= (model.N_STIM_ON[-1].cpu().numpy() - model.N_STEADY)) & (steps < (model.N_STIM_OFF[-1].cpu().numpy() - model.N_STEADY))
+test_idx = np.where(test_mask)[0]
+print('test', test_idx)
+
+zero_idx = np.where(~mask & ~stim_mask )[0]
+print('zero', zero_idx)
+#+end_src
+
+#+RESULTS:
+: rwd [ 20  21  22  23  24  25  26  27  28  29  30  31  32  33  34  35  36  37
+:   38  39  40  41  42  43  44  45  46  47  48  49  50  51  52  53  54  55
+:   56  57  58  59  60  61  62  63  64  65  66  67  68  69  70  71  72  73
+:   74  75  76  77  78  79  80  81  82  83  84  85  86  87  88  89  90  91
+:   92  93  94  95  96  97  98  99 100]
+: stim [10 11 12 13 14 15 16 17 18 19]
+: test [70 71 72 73 74 75 76 77 78 79]
+: zero [0 1 2 3 4 5 6 7 8 9]
 
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
-N_BATCH = 1
+N_BATCH = 256
 model.N_BATCH = N_BATCH
 
 ff_input = []
 
 # 2 readouts (sample/choice), 4 conditions AC, AD, BC, BD
-labels = np.zeros((2, 4, model.N_BATCH))
+y_labels = np.zeros((3, 4, model.N_BATCH))
 
 l=0
 for i in [-1, 1]:
@@ -562,23 +629,26 @@ for i in [-1, 1]:
             model.I0[0] = i # sample
             model.I0[4] = k # test
 
-            if i == 1:
-                    labels[1, l] = np.ones(model.N_BATCH)
+            if k == 1: # test
+                    y_labels[2, l] = np.ones(model.N_BATCH)
+
+            if i == 1: # sample
+                    y_labels[1, l] = np.ones(model.N_BATCH)
 
             if i==k: # Pair Trials
-                labels[0, l] = np.ones(model.N_BATCH)
+                    y_labels[0, l] = np.ones(model.N_BATCH)
 
             l+=1
             ff_input.append(model.init_ff_input())
 
-y_labels = torch.tensor(labels, dtype=torch.float, device=DEVICE).reshape(2, -1)
+y_labels = torch.tensor(y_labels, dtype=torch.float, device=DEVICE).reshape(3, -1)
 
 ff_input = torch.vstack(ff_input)
-print('ff_input', ff_input.shape, 'labels', labels.shape)
+print('ff_input', ff_input.shape, 'y_labels', y_labels.shape)
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([4, 605, 1000]) labels (2, 4, 1)
+: ff_input torch.Size([1024, 605, 1000]) y_labels torch.Size([3, 1024])
 
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
 with torch.no_grad():
@@ -587,7 +657,67 @@ print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (4, 101, 750)
+: (1024, 101, 750)
+
+#+begin_src ipython
+pkl_save(rates, 'dpa_rates')
+pkl_save(y_labels, 'dpa_labels')
+#+end_src
+
+#+RESULTS:
+: saving to ./dpa_rates.pkl
+: saving to ./dpa_labels.pkl
+
+#+begin_src ipython
+import numpy as np
+
+X1 = model.odors[4].cpu().numpy()  # class 1 samples
+X2 = -model.odors[9].cpu().numpy()  # class 2 samples
+
+w = X1 - X2            # normal vector to the hyperplane
+c = 0.5 * np.dot(w, X1 + X2)  # offset
+
+def predict(x):
+    return (x @ w ) / w.shape[0] # >0: side of X1, <0: side of X2
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+dpa_pred = predict(rates)
+print(dpa_pred.shape)
+#+end_src
+
+#+RESULTS:
+: (1024, 101)
+
+#+begin_src ipython
+dpa_labels = y_labels.cpu().numpy()
+print(dpa_labels.shape)
+
+idxPair = (dpa_labels[0]==1)
+idxUnpair = (dpa_labels[0]==0)
+#+end_src
+
+#+RESULTS:
+: (3, 1024)
+
+#+begin_src ipython
+plt.plot(np.linspace(0, 10, 101), ((2 * dpa_labels[0]-1)[idxPair, None] * dpa_pred[idxPair]).mean(0), label='Pair', color='r')
+plt.plot(np.linspace(0, 10, 101), ((2 * dpa_labels[0]-1)[idxUnpair, None] * dpa_pred[idxUnpair]).mean(0), label='Unpair', color='r', ls='--')
+
+add_vlines()
+plt.xlabel('Time')
+plt.ylabel('Test Overlap')
+plt.ylim([-1, 1])
+plt.axhline(0, ls='--')
+plt.legend(fontsize=12, frameon=0)
+plt.savefig('../figures/bernstein/dpa_test_overlap.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/dual/test/figure_35.png]]
 
 #+begin_src ipython
 def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fig.svg', title='first'):
@@ -653,20 +783,16 @@ def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fi
 #+RESULTS:
 
 #+begin_src ipython
-plot_overlap_label(model.readout.cpu().detach().numpy(), y_labels.cpu().numpy(), task=0, figname='dpa_overlaps.svg')
+plot_overlap_label(model.readout.cpu().detach().numpy(), y_labels.cpu().numpy()[:2], task=0, figname='dpa_overlaps.svg')
 #+end_src
 
 #+RESULTS:
 :RESULTS:
-: (2, 4)
-: (4, 4)
+: (2, 1024)
+: (4, 1024)
 : (2, 2, 2, 101)
-[[./figures/dual/test/figure_29.png]]
+[[file:./figures/dual/test/figure_37.png]]
 :END:
-
-#+begin_src ipython
-
-#+end_src
 
 #+RESULTS:
 
@@ -688,7 +814,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_31.png]]
+[[file:./figures/dual/test/figure_38.png]]
 
 #+begin_src ipython
 odors = model.odors.cpu().numpy()
@@ -758,7 +884,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_35.png]]
+[[file:./figures/dual/test/figure_42.png]]
 
 
 #+begin_src ipython
@@ -780,7 +906,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_36.png]]
+[[file:./figures/dual/test/figure_43.png]]
 
  #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -809,10 +935,10 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_37.png]]
+[[file:./figures/dual/test/figure_44.png]]
 
 #+begin_src ipython
-theta = np.arctan(V[:, 1], V[:, 0])
+theta = np.arctan2(V[:, 1], V[:, 0])
 idx = np.argsort(theta)
 print(idx.shape)
 plt.hist(theta * 180 / np.pi)
@@ -822,7 +948,7 @@ plt.show()
 #+RESULTS:
 :RESULTS:
 : (750,)
-[[./figures/dual/test/figure_38.png]]
+[[file:./figures/dual/test/figure_45.png]]
 :END:
 
 #+begin_src ipython
@@ -842,8 +968,8 @@ print(Wab[0,: 10])
 
 #+RESULTS:
 : (750, 750)
-: [0.0000000e+00 0.0000000e+00 0.0000000e+00 5.7894248e-04 6.9366535e-04
-:  7.9777534e-04 6.4804923e-04 1.4030654e-05 7.5686246e-02 3.1497802e-03]
+: [0.00426002 0.         0.         0.         0.         0.
+:  0.00134406 0.07813778 0.01087242 0.06960063]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -855,7 +981,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_40.png]]
+[[file:./figures/dual/test/figure_47.png]]
 
 #+begin_src ipython
   plt.figure(figsize=(2.5*width, 1.5*height))  # Set the figure size (width, height) in inches
@@ -892,13 +1018,102 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_41.png]]
+[[file:./figures/dual/test/figure_48.png]]
 
 #+begin_src ipython
-
+print(dpa_labels.shape, rates.shape)
 #+end_src
 
 #+RESULTS:
+: (3, 1024) (1024, 101, 750)
+
+#+begin_src ipython
+fig, ax = plt.subplots(2, 2, figsize=[2*width, 2*height])
+
+for j in range(2):
+    for i in range(2):
+        trial_idx = np.argwhere((dpa_labels[-1] == j) & (dpa_labels[1]==1-i))[0]
+        k = np.random.randint(len(trial_idx))
+
+        vmin, vmax = np.percentile(rates[trial_idx[k], :, idx].reshape(-1), [5, 95])
+        ax[j][i].imshow(rates[trial_idx[k], :, idx], aspect='auto', cmap='viridis', vmin=vmin, vmax=vmax, extent=[0, 10, 0, 360])
+
+        ax[j][i].set_yticks(np.linspace(0, 360, 5))
+        if i==0:
+            ax[j][i].set_ylabel('Pref. Loc. (°)')
+        if j==1:
+            ax[j][i].set_xlabel('Time (s)')
+
+# add_vdashlines()
+plt.savefig('../figures/bernstein/raster_AD.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/dual/test/figure_50.png]]
+
+#+begin_src ipython
+from scipy.ndimage import gaussian_filter1d, uniform_filter1d
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+ax[0].plot(np.linspace(0, 360, 750), uniform_filter1d(model.odors[0][idx].cpu(), size=75), label='A', color='r')
+ax[0].plot(np.linspace(0, 360, 750), uniform_filter1d(-model.odors[5][idx].cpu(), size=75), label='B', color='k')
+
+
+ax[0].set_xlabel('Pref Loc. (°)')
+ax[0].set_ylabel('Sample Input')
+ax[0].set_xticks(np.linspace(0, 360, 5))
+ax[0].legend(fontsize=12, frameon=False)
+
+ax[1].plot(np.linspace(0, 360, 750), uniform_filter1d(model.odors[4][idx].cpu(), size=75), label='C')
+ax[1].plot(np.linspace(0, 360, 750), uniform_filter1d(-model.odors[9][idx].cpu(), size=75), label='D')
+
+ax[1].set_xlabel('Pref Loc. (°)')
+ax[1].set_ylabel('Test Input')
+ax[1].set_xticks(np.linspace(0, 360, 5))
+ax[1].legend(fontsize=12, frameon=False)
+
+ax[1].set_ylim([-0.75, 1.25])
+ax[0].set_ylim([-0.75, 1.25])
+
+plt.savefig('../figures/bernstein/dpa_inputs.svg', dpi=300)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/dual/test/figure_51.png]]
+
+#+begin_src ipython
+from scipy.ndimage import gaussian_filter1d, uniform_filter1d
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+w = model.odors[0].cpu().numpy() + model.odors[1].cpu().numpy()
+ax[0].plot(np.linspace(0, 360, 750), uniform_filter1d(w[idx], size=75))
+ax[0].set_ylabel("Weights A/B")
+# ax[0].axvline(180, ls='--', color='k')
+
+w = model.odors[4].cpu().numpy() + model.odors[9].cpu().numpy()
+
+ax[1].plot(np.linspace(0, 360, 750), uniform_filter1d(w[idx], size=75))
+ax[1].set_ylabel("Weights C/D")
+
+# ax[1].axvline(45, ls='--', color='k')
+# ax[1].axvline(225, ls='--', color='k')
+
+for i in range(2):
+    ax[i].set_xticks(np.linspace(0, 360, 5))
+    ax[i].axhline(0, ls='--', color='k')
+    ax[i].set_xlabel("Pref. Location (°)")
+    ax[i].set_ylim([-1.25, 1.25])
+
+plt.savefig('./figures/bernstein/test_weights.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/dual/test/figure_52.png]]
+
 
 * Go/NoGo Task
 ** Test
@@ -908,7 +1123,7 @@ plt.show()
 
  #+begin_src ipython
 model_state_dict = torch.load('%s/dual_naive_%d.pth' % (path, seed))
-model.load_state_dict(model_state_dict)
+model.load_state_dict(model_state_dict, strict=False)
 model.eval();
 #+end_src
 
@@ -918,16 +1133,16 @@ model.eval();
 model.N_BATCH = 1
 
 model.I0[0] = 0
-model.I0[1] = A0
-model.I0[2] = float(B0)
+model.I0[1] = 1.0
+model.I0[2] = 1.0
 model.I0[3] = 0.0
 model.I0[4] = 0.0
 
 A = model.init_ff_input()
 
 model.I0[0] = 0 # NoGo
-model.I0[1] = -A0 # cue
-model.I0[2] = float(B0) # rwd
+model.I0[1] = -1.0 # cue
+model.I0[2] = 1.0
 model.I0[3] = 0.0
 model.I0[4] = 0.0
 
@@ -954,7 +1169,7 @@ plot_overlap(model.readout.cpu().detach().numpy(), labels=['Go', 'NoGo'], fignam
  #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_46.png]]
+[[file:./figures/dual/test/figure_56.png]]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -974,7 +1189,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_47.png]]
+[[file:./figures/dual/test/figure_57.png]]
 
  #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -1003,7 +1218,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_48.png]]
+[[file:./figures/dual/test/figure_58.png]]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
@@ -1056,7 +1271,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_49.png]]
+[[file:./figures/dual/test/figure_59.png]]
 
 #+begin_src ipython
 
@@ -1073,7 +1288,7 @@ plt.show()
 
 #+begin_src ipython
 model_state_dict = torch.load('%s/dual_naive_%d.pth' % (path, seed))
-model.load_state_dict(model_state_dict)
+model.load_state_dict(model_state_dict, strict=False)
 model.eval();
 #+end_src
 
@@ -1166,7 +1381,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_53.png]]
+[[file:./figures/dual/test/figure_63.png]]
 
 #+begin_src ipython
 N_BATCH = 64
@@ -1193,14 +1408,16 @@ for j in [0, 1, -1]:
                 labels[0, l] = np.ones((model.N_BATCH, model.lr_eval_win))
 
             if j==1: # Go
-                model.I0[2] = float(B0) # cue
-                model.I0[3] = float(C0) * model.IF_RL # rwd
+                model.I0[2] = 1.0 # cue
+                model.I0[3] = 0.0
 
                 labels[2, l] = np.ones((model.N_BATCH, model.lr_eval_win))
+
             elif j==-1: # NoGo
-                model.I0[2] = float(B0) # cue
+                model.I0[2] = 1.0 # cue
                 model.I0[3] = 0.0 # rwd
                 labels[2, l] = -np.ones((model.N_BATCH, model.lr_eval_win))
+
             else: # DPA
                 model.I0[2] = 0 # cue
                 model.I0[3] = 0 # rwd
@@ -1228,8 +1445,91 @@ print(rates.shape)
 #+RESULTS:
 : (768, 101, 750)
 
+#+begin_src ipython
+import numpy as np
+
+X1 = model.odors[4].cpu().numpy()  # class 1 samples
+X2 = -model.odors[9].cpu().numpy()  # class 2 samples
+
+w = X2 - X1                # normal vector to the hyperplan
+c = 0.5 * np.dot(w, X2 + X1)  # offset
+
+def predict(x):
+    return (x @ w ) / w.shape[0] # >0: side of X1, <0: side of X2
+#+end_src
 
 #+RESULTS:
+
+#+begin_src ipython
+naive_pred = predict(rates)
+#+end_src
+
+#+RESULTS:
+
+#+RESULTS:
+: torch.Size([768, 3, 31])
+
+#+begin_src ipython
+naive_labels = labels.cpu().numpy().copy()
+idxPair = (naive_labels[:, 0, 0]==1) & (naive_labels[:, 2, 0]==0)
+idxUnpair = (naive_labels[:, 0, 0]==0) & (naive_labels[:, 2, 0]==0)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+plt.plot(np.linspace(0, 10, 101), ((2 * naive_labels[:, 0, 0]-1)[idxPair, None] * naive_pred[idxPair]).mean(0), label='Pair', color='r')
+plt.plot(np.linspace(0, 10, 101), ((2 * naive_labels[:, 0, 0]-1)[idxUnpair, None] * naive_pred[idxUnpair]).mean(0), label='Unpair', color='r', ls='--')
+
+add_vlines()
+plt.xlabel('Time')
+plt.ylabel('Test Overlap')
+plt.ylim([-1, 1])
+plt.axhline(0, ls='--')
+plt.legend(fontsize=12, frameon=0)
+plt.savefig('../figures/bernstein/dpa_test_overlap.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/dual/test/figure_69.png]]
+
+#+begin_src ipython
+U = model.low_rank.U.cpu().detach().numpy()
+V = model.low_rank.V.cpu().detach().numpy()
+
+theta = np.arctan2(V[:, 1], V[:, 0])
+idx = np.argsort(theta)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+ax[0].plot(np.linspace(0, 360, 750), circcvl(model.odors[0][idx].cpu(), windowSize=100), label='A')
+ax[0].plot(np.linspace(0, 360, 750), -circcvl(model.odors[5][idx].cpu(), windowSize=100), label='B')
+
+ax[0].set_xlabel('Pref Loc. (°)')
+ax[0].set_ylabel('Sample Input')
+ax[0].set_xticks(np.linspace(0, 360, 5))
+ax[0].legend(fontsize=12, frameon=False)
+
+ax[1].plot(np.linspace(0, 360, 750), circcvl(model.odors[4][idx].cpu(), windowSize=100), label='C')
+ax[1].plot(np.linspace(0, 360, 750), -circcvl(model.odors[9][idx].cpu(), windowSize=100), label='D')
+
+ax[1].set_xlabel('Pref Loc. (°)')
+ax[1].set_ylabel('Test Input')
+ax[1].set_xticks(np.linspace(0, 360, 5))
+ax[1].legend(fontsize=12, frameon=False)
+
+plt.savefig('../figures/bernstein/dual_naive_inputs.svg', dpi=300)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/dual/test/figure_71.png]]
 
 *** Overlaps
 
@@ -1311,7 +1611,7 @@ plot_overlap_label(readout, y_labels, task=0, figname='overlaps_naive_dpa.svg')
 : (3, 768)
 : (3, 768)
 : (2, 2, 2, 101)
-[[./figures/dual/test/figure_58.png]]
+[[file:./figures/dual/test/figure_74.png]]
 :END:
 
 #+begin_src ipython
@@ -1323,7 +1623,7 @@ plot_overlap_label(readout, y_labels, task=1, figname='overlaps_naive_go.svg')
 : (3, 768)
 : (3, 768)
 : (2, 2, 2, 101)
-[[./figures/dual/test/figure_59.png]]
+[[file:./figures/dual/test/figure_75.png]]
 :END:
 
 #+begin_src ipython
@@ -1335,7 +1635,7 @@ plot_overlap_label(readout, y_labels, task=-1, figname='overlaps_naive_nogo.svg'
 : (3, 768)
 : (3, 768)
 : (2, 2, 2, 101)
-[[./figures/dual/test/figure_60.png]]
+[[file:./figures/dual/test/figure_76.png]]
 :END:
 
 #+begin_src ipython
@@ -1376,7 +1676,7 @@ print(dpa_mean)
 #+end_src
 
 #+RESULTS:
-: tensor([0.9413, 0.5662, 0.5968], device='cuda:1')
+: tensor([0.9453, 0.5000, 0.9452], device='cuda:1')
 
 #+begin_src ipython
 drt_mean, drt_sem = calculate_mean_accuracy_and_sem(drt_perf)
@@ -1415,7 +1715,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_66.png]]
+[[file:./figures/dual/test/figure_82.png]]
 
 
  #+begin_src ipython
@@ -1445,7 +1745,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_67.png]]
+[[file:./figures/dual/test/figure_83.png]]
 
 #+begin_src ipython
 
@@ -1461,7 +1761,7 @@ plt.show()
 
 #+begin_src ipython
 model_state_dict = torch.load('%s/dual_train_%d.pth' % (path, seed))
-model.load_state_dict(model_state_dict)
+model.load_state_dict(model_state_dict, strict=False)
 model.eval();
 #+end_src
 
@@ -1551,10 +1851,10 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_71.png]]
+[[file:./figures/dual/test/figure_87.png]]
 
 #+begin_src ipython
-N_BATCH = 10
+N_BATCH = 32
 model.N_BATCH = N_BATCH
 
 model.lr_eval_win = np.max( (rwd_idx.shape[0], cue_idx.shape[0]))
@@ -1578,12 +1878,12 @@ for j in [0, 1, -1]:
                 labels[0, l] = np.ones((model.N_BATCH, model.lr_eval_win))
 
             if j==1: # Go
-                model.I0[2] = float(B0) # cue
-                model.I0[3] = float(C0) * model.IF_RL # rwd
+                model.I0[2] = 1.0 # cue
+                model.I0[3] = 0.0
 
                 labels[2, l] = np.ones((model.N_BATCH, model.lr_eval_win))
             elif j==-1: # NoGo
-                model.I0[2] = float(B0) # cue
+                model.I0[2] = 1.0 # cue
                 model.I0[3] = 0.0 # rwd
                 labels[2, l] = -np.ones((model.N_BATCH, model.lr_eval_win))
             else: # DPA
@@ -1602,7 +1902,7 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([120, 605, 1000]) labels torch.Size([120, 3, 31])
+: ff_input torch.Size([384, 605, 1000]) labels torch.Size([384, 3, 31])
 
 #+begin_src ipython
 with torch.no_grad():
@@ -1611,7 +1911,105 @@ print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (120, 101, 750)
+: (384, 101, 750)
+
+#+begin_src ipython
+train_pred = predict(rates)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+train_labels = labels.cpu().numpy().copy()
+idxPair = (train_labels[:, 0, 0]==1) & (train_labels[:, 2, 0]==0)
+idxUnpair = (train_labels[:, 0, 0]==0) & (train_labels[:, 2, 0]==0)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+plt.plot(np.linspace(0, 10, 101), ((2 * train_labels[:, 0, 0]-1)[idxPair, None] * train_pred[idxPair]).mean(0), label='Pair', color='r')
+plt.plot(np.linspace(0, 10, 101), ((2 * train_labels[:, 0, 0]-1)[idxUnpair, None] * train_pred[idxUnpair]).mean(0), label='Unpair', color='r', ls='--')
+
+add_vlines()
+plt.xlabel('Time')
+plt.ylabel('Test Overlap')
+plt.ylim([-1, 1])
+plt.axhline(0, ls='--')
+plt.legend(fontsize=12, frameon=0)
+plt.savefig('../figures/bernstein/dpa_test_overlap.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/dual/test/figure_92.png]]
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+idxPair = (naive_labels[:, 0, 0]==1) & (naive_labels[:, 2, 0]==0)
+idxUnpair = (naive_labels[:, 0, 0]==0) & (naive_labels[:, 2, 0]==0)
+
+ax[0].plot(np.linspace(0, 10, 101), ((2 * naive_labels[:, 0, 0]-1)[idxPair, None] * naive_pred[idxPair]).mean(0), label='Naive Pair', color='r', alpha=0.5, ls='--')
+ax[1].plot(np.linspace(0, 10, 101), ((2 * naive_labels[:, 0, 0]-1)[idxUnpair, None] * naive_pred[idxUnpair]).mean(0), label='Naive Unpair', color='r', ls='--', alpha=0.5)
+
+idxPair = (train_labels[:, 0, 0]==1) & (train_labels[:, 2, 0]==0)
+idxUnpair = (train_labels[:, 0, 0]==0) & (train_labels[:, 2, 0]==0)
+
+ax[0].plot(np.linspace(0, 10, 101), ((2 * train_labels[:, 0, 0]-1)[idxPair, None] * train_pred[idxPair]).mean(0), label='Expert Pair', color='r')
+ax[1].plot(np.linspace(0, 10, 101), ((2 * train_labels[:, 0, 0]-1)[idxUnpair, None] * train_pred[idxUnpair]).mean(0), label='Expert Unpair', color='r')
+
+for i in range(2):
+    add_vlines(ax[i])
+    ax[i].set_xlabel('Time')
+    ax[i].set_ylabel('Test Overlap')
+    ax[i].set_ylim([-1, 1])
+    ax[i].axhline(0, ls='--')
+    ax[i].legend(fontsize=12, frameon=0)
+
+plt.savefig('../figures/bernstein/dual_test_overlap.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/dual/test/figure_93.png]]
+
+#+begin_src ipython
+U = model.low_rank.U.cpu().detach().numpy()
+V = model.low_rank.V.cpu().detach().numpy()
+
+theta = np.arctan2(V[:, 1], V[:, 0])
+idx = np.argsort(theta)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+ax[0].plot(np.linspace(0, 360, 750), circcvl(model.odors[0][idx].cpu(), windowSize=100), label='A')
+ax[0].plot(np.linspace(0, 360, 750), -circcvl(model.odors[5][idx].cpu(), windowSize=100), label='B')
+
+ax[0].set_xlabel('Pref Loc. (°)')
+ax[0].set_ylabel('Sample Input')
+ax[0].set_xticks(np.linspace(0, 360, 5))
+ax[0].legend(fontsize=12, frameon=False)
+
+ax[1].plot(np.linspace(0, 360, 750), circcvl(model.odors[4][idx].cpu(), windowSize=100), label='C')
+ax[1].plot(np.linspace(0, 360, 750), -circcvl(model.odors[9][idx].cpu(), windowSize=100), label='D')
+
+ax[1].set_xlabel('Pref Loc. (°)')
+ax[1].set_ylabel('Test Input')
+ax[1].set_xticks(np.linspace(0, 360, 5))
+ax[1].legend(fontsize=12, frameon=False)
+
+plt.savefig('../figures/bernstein/dual_train_inputs.svg', dpi=300)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/dual/test/figure_95.png]]
 
 *** Overlaps
 
@@ -1622,7 +2020,7 @@ print(readout.shape, y_labels.shape)
 #+end_src
 
 #+RESULTS:
-: (120, 101, 2) (3, 120)
+: (384, 101, 2) (3, 384)
 
 #+begin_src ipython
 plot_overlap_label(readout, y_labels, task=0, figname='overlaps_expert_dpa.svg')
@@ -1630,10 +2028,10 @@ plot_overlap_label(readout, y_labels, task=0, figname='overlaps_expert_dpa.svg')
 
 #+RESULTS:
 :RESULTS:
-: (3, 120)
-: (3, 120)
+: (3, 384)
+: (3, 384)
 : (2, 2, 2, 101)
-[[./figures/dual/test/figure_75.png]]
+[[file:./figures/dual/test/figure_97.png]]
 :END:
 
 #+begin_src ipython
@@ -1642,10 +2040,10 @@ plot_overlap_label(readout, y_labels, task=1, figname='overlaps_expert_go.svg')
 
 #+RESULTS:
 :RESULTS:
-: (3, 120)
-: (3, 120)
+: (3, 384)
+: (3, 384)
 : (2, 2, 2, 101)
-[[./figures/dual/test/figure_76.png]]
+[[file:./figures/dual/test/figure_98.png]]
 :END:
 
 #+begin_src ipython
@@ -1654,10 +2052,10 @@ plot_overlap_label(readout, y_labels, task=-1, figname='overlaps_expert_nogo.svg
 
 #+RESULTS:
 :RESULTS:
-: (3, 120)
-: (3, 120)
+: (3, 384)
+: (3, 384)
 : (2, 2, 2, 101)
-[[./figures/dual/test/figure_77.png]]
+[[file:./figures/dual/test/figure_99.png]]
 :END:
 
 #+begin_src ipython
@@ -1665,6 +2063,7 @@ plot_overlap_label(readout, y_labels, task=-1, figname='overlaps_expert_nogo.svg
 #+end_src
 
 #+RESULTS:
+
 
 *** Perf
 
@@ -1735,7 +2134,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_82.png]]
+[[file:./figures/dual/test/figure_104.png]]
 
 
 #+begin_src ipython
@@ -1756,7 +2155,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_83.png]]
+[[file:./figures/dual/test/figure_105.png]]
 
  #+begin_src ipython
 plt.scatter(V[:, 0], V[:, 1])
@@ -1766,7 +2165,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_84.png]]
+[[file:./figures/dual/test/figure_106.png]]
 
  #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -1795,7 +2194,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/dual/test/figure_85.png]]
+[[file:./figures/dual/test/figure_107.png]]
 
 #+begin_src ipython
 
