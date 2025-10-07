@@ -259,7 +259,7 @@ def shifted_phase(phase1, phase2, bias_strength, bias_var, direction=-1):
 
 
 def init_ff_input(model):
-    if model.TASK=='odr':
+    if 'odr' in model.TASK:
         # model.PHI0_UNBIASED = torch.deg2rad(model.PHI0.clone())
         # if model.REP_BIAS>0:
         #     model.PHI0[:, 2] = shifted_phase(model.PHI0[:, 0], model.PHI0[:, 2], model.REP_BIAS, model.REP_VAR)

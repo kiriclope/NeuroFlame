@@ -32,11 +32,14 @@ class Configuration:
 
         self.device = torch.device(self.DEVICE)
         torch.set_default_dtype(self.FLOAT)
+
+        set_seed(-1)
+        init_time_const(self)
+
         # Set seed for the connectivity/input vectors
         set_seed(self.SEED)
 
         # create networks' constants
-        init_time_const(self)
         init_const(self)
 
         return self
@@ -50,11 +53,21 @@ def init_time_const(model):
     # creating time steps from continuous time
     ##########################################
     model.N_STEADY = int(model.T_STEADY / model.DT)
+
+    if model.RANDOM_ITI:
+        # N_MAX_ITI = model.MAX_ITI / model.DT
+        # N_MIN_ITI = model.MIN_ITI / model.DT
+        model.N_STEADY = int(torch.randint(low=int(model.MIN_ITI), high=int(model.MAX_ITI)+1, size=(1,)).item() / model.DT)
+
     model.N_WINDOW = int(model.T_WINDOW / model.DT)
     model.N_STEPS = int(model.DURATION / model.DT) + model.N_WINDOW + model.N_STEADY
 
     model.N_STIM_ON = torch.tensor([int(i / model.DT) + model.N_STEADY for i in model.T_STIM_ON]).to(model.device)
     model.N_STIM_OFF = torch.tensor([int(i / model.DT) + model.N_STEADY for i in model.T_STIM_OFF]).to(model.device)
+
+    # if 'odr' in model.TASK:
+    #     model.N_STIM_ON[2:] += int(model.ITI / model.DT)
+    #     model.N_STIM_OFF[2:] += int(model.ITI / model.DT)
 
     model.random_shifts = torch.zeros((model.N_BATCH,)).to(model.device)
     model.start_indices = (model.N_STIM_ON.unsqueeze(-1) + model.random_shifts)
@@ -79,6 +92,8 @@ def init_time_const(model):
             # random DPA delay
             model.start_indices[:-1] = model.N_STIM_ON[:-1]
             model.end_indices[:-1] = model.N_STIM_OFF[:-1]
+
+
 
 def init_const(model):
     ##########################################

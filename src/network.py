@@ -137,21 +137,26 @@ class Network(nn.Module):
         #                 / self.Jab[0, 0]
         #                 / torch.sqrt(self.Ka[0])]
 
+        label = ['EE', 'EI', 'IE', 'II']
+        k = 0
         self.W_stp_T = []
-        for i in range(self.N_POP): # presyn
-            for j in range(self.N_POP): # postsyn
-                if self.IS_STP[i+j*self.N_POP]:
-                    self.W_stp_T.append(self.Wab_T[self.slices[i], self.slices[j]].clone()
-                                        / torch.abs(self.Jab[j, i]))
+        for i in range(self.N_POP): # post
+            for j in range(self.N_POP): # pre
+                if self.IS_STP[j+i*self.N_POP]:
+                    dum = self.Wab_T[self.slices[j], self.slices[i]].clone() / torch.abs(self.Jab[i, j])
+                    print(label[j+i*self.N_POP], 'post', i, 'pre', j, 'Jab', self.Jab[i, j], dum.T.shape)
+                    self.W_stp_T.append(dum)
 
                     # remove non plastic connections
-                    self.Wab_T.data[self.slices[i], self.slices[j]] = 0.0
+                    self.Wab_T.data[self.slices[j], self.slices[i]] = 0.0
 
                     if self.TRAIN_EI:
-                        self.train_mask[self.slices[i], self.slices[j]] = 0.0
+                        self.train_mask[self.slices[j], self.slices[i]] = 0.0
 
-            if self.LR_TYPE == 'full':
-                self.W_stp_T[i] = 1.0 / self.Na[i]
+                    if self.LR_TYPE == 'full':
+                        self.W_stp_T[k] = 1.0 / self.Na[j]
+
+                    k = k + 1
 
 
     def init_ff_input(self):
@@ -203,18 +208,18 @@ class Network(nn.Module):
             # hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
 
             k=0
-            for i in range(self.N_POP): # pre
-                for j in range(self.N_POP): # post
-                    if self.IS_STP[i+j*self.N_POP]:
-                        Aux = self.stp[k](rates[:, self.slices[i]]) # pre
+            for i in range(self.N_POP): # post
+                for j in range(self.N_POP): # pre
+                    if self.IS_STP[j+i*self.N_POP]:
+                        Aux = self.stp[k](rates[:, self.slices[j]]) # pre
                         hidden_stp = Aux @ W_stp_T[k]
+                        hidden[:, self.slices[i]] = hidden[:, self.slices[i]] + hidden_stp # post
                         k = k + 1
-                        hidden[:, self.slices[j]] = hidden[:, self.slices[j]] + hidden_stp # post
-
 
         if self.IF_FF_STP:
-            hidden_ff_stp = torch.sign(ff_input[:, self.slices[0]]) * self.ff_stp(nn.ReLU()(ff_input[:, self.slices[0]]))
-            ff_input[:, self.slices[0]] = ff_input[:, self.slices[0]] + hidden_ff_stp
+            hidden_ff_stp = torch.sign(ff_input) * (self.ff_stp(torch.abs(ff_input) / torch.sqrt(self.Ka[0]))
+                                                    * torch.sqrt(self.Ka[0]))
+            ff_input = ff_input + hidden_ff_stp
 
         # update batched EtoE
         if self.IF_BATCH_J:
@@ -291,35 +296,47 @@ class Network(nn.Module):
         if self.IF_STP:
             self.stp = []
             # Need this here otherwise autograd complains
-            self.stp.append(Plasticity(self.USE[0], self.TAU_FAC[0], self.TAU_REC[0], self.DT,
-                                       (self.N_BATCH, self.Na[0]),
-                                       STP_TYPE=self.STP_TYPE,
-                                       IF_INIT=IF_INIT,
-                                       device=self.device,
-                                       ))
+            # self.stp.append(Plasticity(self.USE[0], self.TAU_FAC[0], self.TAU_REC[0], self.DT,
+            #                            (self.N_BATCH, self.Na[0]),
+            #                            STP_TYPE=self.STP_TYPE,
+            #                            IF_INIT=IF_INIT,
+            #                            device=self.device,
+            #                            ))
 
-            if self.TEST_I_STP:
-                self.stp.append(Plasticity(self.USE[1], self.TAU_FAC[1], self.TAU_REC[1], self.DT,
-                                           (self.N_BATCH, self.Na[0]),
-                                           STP_TYPE=self.STP_TYPE,
-                                           IF_INIT=IF_INIT,
-                                           device=self.device,
-                                           ))
+            k = 0
+            for i in range(self.N_POP): # post
+                for j in range(self.N_POP): # pre
+                    if self.IS_STP[j+i*self.N_POP]:
+                        self.stp.append(Plasticity(self.USE[j+i*self.N_POP],
+                                                   self.TAU_FAC[j+i*self.N_POP],
+                                                   self.TAU_REC[j+i*self.N_POP],
+                                                   self.DT,
+                                                   (self.N_BATCH, self.Na[j]),
+                                                   STP_TYPE=self.STP_TYPE,
+                                                   IF_INIT=IF_INIT,
+                                                   device=self.device,
+                                                   ))
 
-            # previous state is loaded
-            if IF_INIT == 0:
-                self.stp[0].u_stp = self.u_stp_last
-                self.stp[0].x_stp = self.x_stp_last
+                        # previous state is loaded
+                        if IF_INIT == 0:
+                            self.stp[k].u_stp = self.u_stp_last[k]
+                            self.stp[k].x_stp = self.x_stp_last[k]
+
+                        k = k + 1
 
             self.x_list, self.u_list = [], []
 
         if self.IF_FF_STP:
             self.ff_stp = Plasticity(self.FF_USE,self.TAU_FF_FAC, self.TAU_FF_REC, self.DT,
-                                     (self.N_BATCH, self.Na[0]),
+                                     (self.N_BATCH, self.N_NEURON),
                                      STP_TYPE=self.STP_TYPE,
                                      IF_INIT=IF_INIT,
                                      device=self.device,
                                      )
+            # previous state is loaded
+            if IF_INIT == 0:
+                self.ff_stp.u_stp = self.u_ff_stp_last
+                self.ff_stp.x_stp = self.x_ff_stp_last
 
         Wab_T = self.Wab_T
 
@@ -331,12 +348,16 @@ class Network(nn.Module):
             # W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train / self.Na[0])]
             # need to keep the scale for odr rnn's
             W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train) / torch.sqrt(self.Ka[0])]
-
             if self.CLAMP:
                 W_stp_T[0] = clamp_tensor(W_stp_T[0], 0, self.slices)
 
-            if self.TEST_I_STP:
-                W_stp_T.append(self.GAIN * self.J_STP * self.W_stp_T[1])
+            k = 1
+            for i in range(self.N_POP): # post
+                for j in range(self.N_POP): # pre
+                    if (self.IS_STP[j+i*self.N_POP]) and ((i+j)!=0):
+                        W_stp_T.append(self.GAIN * self.W_STP[j+i*self.N_POP] * self.J_STP * self.W_stp_T[k] / torch.sqrt(self.Ka[j]))
+                        k = k + 1
+
 
         if self.IF_OPTO:
             # rand_idx = torch.randperm(W_stp_T.size(0))[:self.N_OPTO]
@@ -410,8 +431,19 @@ class Network(nn.Module):
         self.thresh_last = thresh
 
         if self.IF_STP:
-            self.u_stp_last = self.stp[0].u_stp
-            self.x_stp_last = self.stp[0].x_stp
+            k = 0
+            self.u_stp_last = []
+            self.x_stp_last = []
+            for i in range(self.N_POP):
+                for j in range(self.N_POP):
+                    if self.IS_STP[j+i*self.N_POP]:
+                        self.u_stp_last.append(self.stp[k].u_stp)
+                        self.x_stp_last.append(self.stp[k].x_stp)
+                        k = k + 1
+
+        if self.IF_FF_STP:
+            self.u_ff_stp_last = self.ff_stp.u_stp
+            self.x_ff_stp_last = self.ff_stp.x_stp
 
         # returns last step
         # rates = rates[..., self.slices[0]]

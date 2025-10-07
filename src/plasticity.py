@@ -13,11 +13,16 @@ class Plasticity:
 
         self.stp_type = STP_TYPE
         self.DT = DT
+        self.TAU_FAC = TAU_FAC
 
         self.USE = torch.tensor(USE, device=device).unsqueeze(-1)
         # print('USE', self.USE.shape)
 
-        self.DT_TAU_FAC = torch.tensor(DT / TAU_FAC, device=device).unsqueeze(-1)
+        if TAU_FAC>0:
+            self.DT_TAU_FAC = torch.tensor(DT / TAU_FAC, device=device).unsqueeze(-1)
+        else:
+            self.DT_TAU_FAC = torch.tensor(0.0, device=device).unsqueeze(-1)
+
         # print('DT_TAU_FAC', self.DT_TAU_FAC.shape)
 
         self.DT_TAU_REC = torch.tensor(DT / TAU_REC, device=device).unsqueeze(-1)
@@ -41,6 +46,7 @@ class Plasticity:
             + (1.0 - self.x_stp) * self.DT_TAU_REC
             - self.DT * u_plus * self.x_stp * rates
         )
+
         self.u_stp = (
             self.u_stp
             - self.DT_TAU_FAC * self.u_stp
@@ -71,17 +77,22 @@ class Plasticity:
 
     def markram_stp_exp(self, rates):
 
+        if self.TAU_FAC==0:
+            self.u_stp = self.USE
+
         # Exact solution for decay toward equilibrium (1 for x, USE for u)
         self.x_stp = (
             1.0
             + (self.x_stp - 1.0) * self.EXP_REC
             - self.DT * self.u_stp * self.x_stp * rates
         )
-        self.u_stp = (
-            self.USE
-            + (self.u_stp - self.USE) * self.EXP_FAC
-            + self.DT * self.USE * (1.0 - self.u_stp) * rates
-        )
+
+        if self.TAU_FAC!=0.0:
+            self.u_stp = (
+                self.USE
+                + (self.u_stp - self.USE) * self.EXP_FAC
+                + self.DT * self.USE * (1.0 - self.u_stp) * rates
+            )
 
         return (self.u_stp * self.x_stp) * rates  # Synaptic output
 
