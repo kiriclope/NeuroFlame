@@ -140,7 +140,8 @@ class Network(nn.Module):
         for i in range(self.N_POP): # post
             for j in range(self.N_POP): # pre
                 if self.IS_STP[j+i*self.N_POP]:
-                    dum = self.Wab_T[self.slices[j], self.slices[i]].clone() / torch.abs(self.Jab[i, j]) / torch.sqrt(self.Ka[j])
+                    dum = self.Wab_T[self.slices[j], self.slices[i]].clone() / torch.abs(self.Jab[i, j])
+                    # / torch.sqrt(self.Ka[j])
                     print(label[j+i*self.N_POP], 'post', i, 'pre', j, 'Jab', self.Jab[i, j], dum.T.shape)
                     self.W_stp_T.append(dum)
 
@@ -346,9 +347,9 @@ class Network(nn.Module):
 
         if self.IF_STP:
             # this for lr rnn
-            W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train / self.Na[0])]
+            # W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train / self.Na[0])]
             # need to keep the scale for odr rnn's
-            # W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train) / torch.sqrt(self.Ka[0])]
+            W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train) / torch.sqrt(self.Ka[0])]
             if self.CLAMP:
                 W_stp_T[0] = clamp_tensor(W_stp_T[0], 0, self.slices)
 
@@ -440,7 +441,7 @@ class Network(nn.Module):
                     mv_rec = 0
 
         # makes serialisation easier treating it as epochs
-        # we save the network state and run 2 trials at a time
+        # we save the network state and run a trial at a time
         self.rates_last = rates.detach()
         self.rec_input_last = rec_input.detach()
         self.thresh_last = thresh
@@ -459,9 +460,6 @@ class Network(nn.Module):
         if self.IF_FF_STP:
             self.u_ff_stp_last = self.ff_stp.u_stp
             self.x_ff_stp_last = self.ff_stp.x_stp
-
-        # returns last step
-        # rates = rates[..., self.slices[0]]
 
         # returns full sequence
         if REC_LAST_ONLY == 0:
