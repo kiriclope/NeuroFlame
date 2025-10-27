@@ -1,0 +1,630 @@
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session toy :kernel torch :exports results
+
+
+
+#+begin_src jupyter-python
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import scipy.integrate as spi
+#+end_src
+
+#+RESULTS:
+
+Define the inputs corresponding to odors C and D:
+
+#+begin_src jupyter-python
+Nn = 128
+x= np.linspace(-np.pi, np.pi, Nn)
+
+mD = np.sin(2*x)
+mC = np.sin(2*x + np.pi)
+
+fig, ax = plt.subplots(nrows=1, ncols=2, subplot_kw={'projection': 'polar'})
+
+ax[0].plot(x, mD)
+ax[1].plot(x, mC)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+| <matplotlib.lines.Line2D | at | 0x7f62ee05ba90> |
+[[./.ob-jupyter/d67f44615970092a3901e8a94d082ca05b732868.png]]
+:END:
+
+Define the encoding vectors for odors A and B and for Go/NoGo. Check
+covariance with inputs C and D
+
+#+begin_src jupyter-python
+cs = np.cos(x)
+sn = np.sin(x)
+
+np.cov([mD, cs*sn])
+#+end_src
+
+#+RESULTS:
+: array([[0.5  , 0.25 ],
+:        [0.25 , 0.125]])
+
+#+begin_src jupyter-python
+np.cov([mC, cs*sn])
+#+end_src
+
+#+RESULTS:
+: array([[ 0.5  , -0.25 ],
+:        [-0.25 ,  0.125]])
+
+Define and visualize a connectivity matrix on the ring defined by vecors
+=cs= and =sn=
+
+#+begin_src jupyter-python
+J0 = -3.2
+J2 = 8.5
+J = J0 + J2* (np.outer(cs,cs) + np.outer(sn, sn))
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+plt.imshow(J)
+plt.colorbar()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: <matplotlib.colorbar.Colorbar at 0x7f62eddbffd0>
+[[./.ob-jupyter/44adb46c6410ecb769ca372f56c71bd3060dbe50.png]]
+:END:
+
+Run the dynamics of the network for a transient input on the encoding
+plane:
+
+#+begin_src jupyter-python
+# input-output function for all cells, as used previously (Brunel, Cereb Cortex 13:1151, 2003)
+def fI(x):
+    return x*x*(x>0)*(x<1) + np.sqrt(np.abs(4*x-3))*(x>=1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+dt=0.01
+time = np.arange(0,5,dt)
+Nt = len(time)
+
+I = 1*(1 - 0.1 + 0.1 * cs) # choose here whether to present stimulus A (cs) or stimulus B (-cs)
+
+rate = np.zeros((Nt,Nn))
+
+tau = 0.1
+
+for i in range(Nt-1):
+    if (i>100)&(i<125):
+        input=I #transient input at the beginning of the simulation
+    else:
+        input=0
+    network_inputs = np.dot(J, rate[i])/Nn
+    rate[i+1] = rate[i] + dt/tau * (-rate[i] + fI(network_inputs + input))
+#+end_src
+
+#+RESULTS:
+
+network population activity at the end of the simulation:
+
+#+begin_src jupyter-python
+plt.plot(rate[-1])
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+| <matplotlib.lines.Line2D | at | 0x7f62edf30760> |
+[[./.ob-jupyter/fdca9738a961c7abfcaa4e0953f2113b918de082.png]]
+:END:
+
+
+full network activity in the simulation:
+
+#+begin_src jupyter-python
+plt.imshow(rate.T, extent=[0,5,0,360], aspect="auto", origin="lower")
+plt.colorbar()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: <matplotlib.colorbar.Colorbar at 0x7f62edf8beb0>
+[[./.ob-jupyter/cdf51dbe8ff940fdbb9a11a418b7effc7eaaa14a.png]]
+:END:
+
+Now run a simulation where the pairing stimulus (C/D) is presented
+towards the end of the simulation, to check for activity rotation:
+
+#+begin_src jupyter-python
+dt=0.01
+time = np.arange(0,5,dt)
+Nt = len(time)
+
+I = 1.3*(1 - 0.1 - 0.1 * cs) # choose here whether to present stimulus A (cs) or stimulus B (-cs)
+
+rate = np.zeros((Nt,Nn))
+
+tau = 0.1
+
+for i in range(Nt-1):
+    if (i>100)&(i<125):
+        input=I
+    elif (i>400)&(i<450):
+        input = 2*mC # choose here whether to present stimulus C (mC) or stimulus D (mD)
+    else:
+        input=0
+    network_inputs = np.dot(J, rate[i])/Nn
+    noise = np.random.randn(Nn,1).flatten()  # add noise
+    rate[i+1] = rate[i] + dt/tau * (-rate[i] + fI(network_inputs + input + noise))
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+plt.imshow(rate.T, extent=[0,5,0,360], aspect="auto", origin="lower")
+plt.axhline(180, ls='--', color='k')
+plt.axhline(0, ls='--', color='k')
+plt.colorbar()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: <matplotlib.colorbar.Colorbar at 0x7f62e5ef2470>
+[[./.ob-jupyter/106ae13f577b9f760d5da5628d985c74bf769828.png]]
+:END:
+
+Now run a series of simulations, presenting A or B, and then C or D.
+Check performance of the network (colored stars in plots. Black dots are
+network code during the delay before odors C/D).
+
+#+begin_src jupyter-python
+fig, ax = plt.subplots(ncols=2)
+
+plt.axes(ax[0])
+plt.axvline(ls='--', color='k')
+plt.axhline(ls='--', color='k')
+ax[0].set_aspect('equal')
+ax[0].set_xlim([-1.1,1.1])
+ax[0].set_ylim([-1.1,1.1])
+plt.axes(ax[1])
+plt.axvline(ls='--', color='k')
+plt.axhline(ls='--', color='k')
+ax[1].set_aspect('equal')
+ax[1].set_xlim([-1.1,1.1])
+ax[1].set_ylim([-1.1,1.1])
+
+nsims=50
+
+# routine to extract population vectors from matrix of rates
+vecs = np.cos(x) + 1j*np.sin(x)
+vecs = np.outer(np.ones((1,Nt)),vecs)
+def decode(rate):
+    res = np.sum(vecs*rate, axis=1)
+    return np.angle(res)
+
+# run the simulation multiple times
+for n in range(nsims):
+
+    if n%2 == 0: # present odoer A or B in even/odd simulations alternatively
+        I = 1.3*(1 - 0.1 - 0.1 * cs)
+    else:
+        I = 1.3*(1 - 0.1 + 0.1 * cs)
+
+    rate = np.zeros((Nt,Nn))
+
+    tau = 0.1
+
+    for i in range(Nt-1):
+        if (i<25):
+            input=I
+        elif (i>400)&(i<450):
+            if n<nsims/2: # present odor C in the first half of simulations, and odor D in the last half
+                input = mC
+            else:
+                input = mD
+        else:
+            input=0
+        network_inputs = np.dot(J, rate[i])/Nn
+        noise = 0.5*np.random.randn(Nn,1).flatten()
+        rate[i+1] = rate[i] + dt/tau * (-rate[i] + fI(network_inputs + input + noise))
+
+    trace = decode(rate)
+
+    if n<nsims/2:
+        ax[0].plot(np.cos(trace[Nt//2]), np.sin(trace[Nt//2]), marker='.', color='k')
+        ax[0].plot(np.cos(trace[-1]), np.sin(trace[-1]), marker='*', color='b')
+    else:
+        ax[1].plot(np.cos(trace[Nt//2]), np.sin(trace[Nt//2]),  marker='.', color='k')
+        ax[1].plot(np.cos(trace[-1]), np.sin(trace[-1]),  marker='*', color='g')
+
+
+
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/6a678daa09346ffbebbac4305e2ccdf12421ac45.png]]
+
+
+Now add randomness in the connectivity:
+
+#+begin_src jupyter-python
+J0 = -5.2
+J2 = 11.119
+J = J0 + J2* (np.outer(cs,cs) + np.outer(sn, sn))
+
+J = J + 0.8*np.random.randn(Nn,Nn)
+plt.imshow(J)
+plt.colorbar()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: <matplotlib.colorbar.Colorbar at 0x7f62e5b4b400>
+[[./.ob-jupyter/b90aba392324a3c780df0213cb00e3180ac7b145.png]]
+:END:
+
+#+begin_src jupyter-python
+dt=0.01
+time = np.arange(0,5,dt)
+Nt = len(time)
+
+I = 1.4*(1 - 0.1 + 0.1 * cs) # choose here whether to present stimulus A (cs) or stimulus B (-cs)
+
+rate = np.zeros((Nt,Nn))
+
+tau = 0.1
+
+for i in range(Nt-1):
+    if (i>50)&(i<75):
+        input=I #transient input at the beginning of the simulation
+    else:
+        input=0
+    network_inputs = np.dot(J, rate[i])/Nn
+    noise = 1.35*np.random.randn(Nn,1).flatten()
+    rate[i+1] = rate[i] + dt/tau * (-rate[i] + fI(network_inputs + noise + input))
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+plt.imshow(rate.T, extent=[0,5,0,360], aspect="auto", origin="lower")
+plt.axhline(180, ls='--', color='k')
+plt.axhline(0, ls='--', color='k')
+plt.colorbar()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: <matplotlib.colorbar.Colorbar at 0x7f62e52562f0>
+[[./.ob-jupyter/1ad7b9470c7ef96c10fdeb1b6e0d29954d7c08eb.png]]
+:END:
+
+#+begin_src jupyter-python
+fig, ax = plt.subplots(ncols=2)
+
+plt.axes(ax[0])
+plt.axvline(ls='--', color='k')
+plt.axhline(ls='--', color='k')
+ax[0].set_aspect('equal')
+ax[0].set_xlim([-1.1,1.1])
+ax[0].set_ylim([-1.1,1.1])
+plt.axes(ax[1])
+plt.axvline(ls='--', color='k')
+plt.axhline(ls='--', color='k')
+ax[1].set_aspect('equal')
+ax[1].set_xlim([-1.1,1.1])
+ax[1].set_ylim([-1.1,1.1])
+
+nsims=50
+
+# routine to extract population vectors from matrix of rates
+vecs = np.cos(x) + 1j*np.sin(x)
+vecs = np.outer(np.ones((1,Nt)),vecs)
+def decode(rate):
+    res = np.sum(vecs*rate, axis=1)
+    return np.angle(res)
+
+# run the simulation multiple times
+for n in range(nsims):
+
+    if n%2 == 0: # present odoer A or B in even/odd simulations alternatively
+        I = 1.3*(1 - 0.1 - 0.1 * cs)
+    else:
+        I = 1.3*(1 - 0.1 + 0.1 * cs)
+
+    rate = np.zeros((Nt,Nn))
+
+    tau = 0.1
+
+    for i in range(Nt-1):
+        if (i<25):
+            input=I
+        elif (i>400)&(i<450):
+            if n<nsims/2: # present odor C in the first half of simulations, and odor D in the last half
+                input = mC
+            else:
+                input = mD
+        else:
+            input=0
+        network_inputs = np.dot(J, rate[i])/Nn
+        noise = 5*np.random.randn(Nn,1).flatten()
+        rate[i+1] = rate[i] + dt/tau * (-rate[i] + fI(network_inputs + input + noise))
+
+    trace = decode(rate)
+
+    if n<nsims/2:
+        ax[0].plot(np.cos(trace[Nt//2]), np.sin(trace[Nt//2]), marker='.', color='k')
+        ax[0].plot(np.cos(trace[-1]), np.sin(trace[-1]), marker='*', color='b')
+    else:
+        ax[1].plot(np.cos(trace[Nt//2]), np.sin(trace[Nt//2]),  marker='.', color='k')
+        ax[1].plot(np.cos(trace[-1]), np.sin(trace[-1]),  marker='*', color='g')
+
+
+
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/68e3931d8a1f7d3255f5a4e33e6c111cad3e7da0.png]]
+
+
+
+* A random network
+
+
+#+begin_src jupyter-python
+Nn = 1000
+R1 = np.random.randn(Nn)
+R2 = np.random.randn(Nn)
+ang = np.angle(R1+1j*R2)
+inds = np.argsort(ang)
+W = np.outer(R1[inds],R1[inds]) + np.outer(R2[inds],R2[inds])
+
+J0 = -5.2
+J2 = 11.119
+J = J0 + J2* W
+
+x = np.linspace(-np.pi, np.pi, Nn)
+cs = np.cos(x)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+dt=0.01
+time = np.arange(0,5,dt)
+Nt = len(time)
+
+I = 1*(1 - 0.1 + 0.1 * cs) # choose here whether to present stimulus A (cs) or stimulus B (-cs)
+
+rate = np.zeros((Nt,Nn))
+
+tau = 0.1
+
+for i in range(Nt-1):
+    if (i>100)&(i<125):
+        input=I #transient input at the beginning of the simulation
+    else:
+        input=0
+    network_inputs = np.dot(J, rate[i])/Nn
+    noise = 0.13*np.random.randn(Nn,1).flatten()
+    rate[i+1] = rate[i] + dt/tau * (-rate[i] + fI(network_inputs +  noise + input))
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+plt.plot(rate[-1])
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+| <matplotlib.lines.Line2D | at | 0x7fe3406753c0> |
+[[./.ob-jupyter/54de05f671ff1c6b50f70d084af2e8e04a5cfa6e.png]]
+:END:
+
+#+begin_src jupyter-python
+plt.imshow(rate.T, extent=[0,5,0,360], aspect="auto", origin="lower")
+plt.colorbar()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: <matplotlib.colorbar.Colorbar at 0x7fe3406dab60>
+[[./.ob-jupyter/5a9d052013392d875fb7a8ec40a2735d53e877ca.png]]
+:END:
+
+find fixed points:
+
+#+begin_src jupyter-python
+nsims=100
+dt=0.01
+time = np.arange(0,10,dt)
+Nt = len(time)
+
+# routine to extract population vectors from matrix of rates
+vecs = np.cos(ang[inds]) + 1j*np.sin(ang[inds])
+vecs = np.outer(np.ones((1,Nt)),vecs)
+def decode(rate):
+    res = np.sum(vecs*rate, axis=1)
+    return np.angle(res)
+
+endpoints = np.zeros((nsims,))
+
+# run the simulation multiple times
+for n in range(nsims):
+
+    phase = 2*np.pi*np.random.rand()
+    I = 1*(1 - 0.1 - 0.1 * np.cos(ang[inds]+phase))
+
+    rate = np.zeros((Nt,Nn))
+
+    tau = 0.1
+
+    for i in range(Nt-1):
+        if (i<25):
+            input=I
+        else:
+            input=0
+        network_inputs = np.dot(J, rate[i])/Nn
+        noise = 0.13*np.random.randn(Nn,1).flatten()
+        rate[i+1] = rate[i] + dt/tau * (-rate[i] + fI(network_inputs + input + noise))
+
+    trace = decode(rate)
+
+    plt.plot(time, trace)
+
+    endpoints[n] = trace[-1]
+
+
+
+
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/08d7eb803ec49f9672a700470bfb44e0c690d589.png]]
+
+#+begin_src jupyter-python
+plt.hist(endpoints,100);
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/2b03f1c8c6ba3bf31ff87a5011e6d40c9793a247.png]]
+
+
+define odors C and D relative to the mode of the fixed points:
+
+#+begin_src jupyter-python
+from statistics import mode
+ang0 = mode(endpoints)
+
+mD = np.sin(2*(ang[inds] - ang0))
+mC = np.sin(2*(ang[inds] - ang0) + np.pi)
+#+end_src
+
+#+RESULTS:
+
+now run the DPA task on this network:
+
+#+begin_src jupyter-python
+dt=0.01
+time = np.arange(0,5,dt)
+Nt = len(time)
+
+fig, ax = plt.subplots(ncols=2)
+
+plt.axes(ax[0])
+plt.axvline(ls='--', color='k')
+plt.axhline(ls='--', color='k')
+ax[0].set_aspect('equal')
+ax[0].set_xlim([-1.1,1.1])
+ax[0].set_ylim([-1.1,1.1])
+plt.axes(ax[1])
+plt.axvline(ls='--', color='k')
+plt.axhline(ls='--', color='k')
+ax[1].set_aspect('equal')
+ax[1].set_xlim([-1.1,1.1])
+ax[1].set_ylim([-1.1,1.1])
+
+nsims=50
+
+# routine to extract population vectors from matrix of rates
+vecs = np.cos(x) + 1j*np.sin(x)
+vecs = np.outer(np.ones((1,Nt)),vecs)
+def decode(rate):
+    res = np.sum(vecs*rate, axis=1)
+    return np.angle(res)
+
+# run the simulation multiple times
+for n in range(nsims):
+
+    if n%2 == 0: # present odoer A or B in even/odd simulations alternatively
+        I = 1*(1 - 0.1 - 0.1 * np.cos(x-ang0))
+    else:
+        I = 1*(1 - 0.1 + 0.1 * np.cos(x-ang0))
+
+    rate = np.zeros((Nt,Nn))
+
+    tau = 0.1
+
+    for i in range(Nt-1):
+        if (i<25):
+            input=I
+        elif (i>400)&(i<450):
+            if n<nsims/2: # present odor C in the first half of simulations, and odor D in the last half
+                input = 25*mC
+            else:
+                input = 25*mD
+        else:
+            input=0
+        network_inputs = np.dot(J, rate[i])/Nn
+        noise = 0.1*np.random.randn(Nn,1).flatten()
+        rate[i+1] = rate[i] + dt/tau * (-rate[i] + fI(network_inputs + input + noise))
+
+    trace = decode(rate)
+
+    if n<nsims/2:
+        if n%2 == 0:
+            col='b'
+        else: col='c'
+        ax[0].plot(np.cos(trace[Nt//2]), np.sin(trace[Nt//2]), marker='.', color='k')
+        ax[0].plot(np.cos(trace[-1]), np.sin(trace[-1]), marker='*', color=col, alpha=0.3)
+    else:
+        if n%2 == 0:
+            col='m'
+        else: col='r'
+        ax[1].plot(np.cos(trace[Nt//2]), np.sin(trace[Nt//2]),  marker='.', color='k')
+        ax[1].plot(np.cos(trace[-1]), np.sin(trace[-1]),  marker='*', color=col, alpha=0.3)
+
+
+
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/0a43b1dd400fbf5d4c19d529c19e93a9311e113c.png]]
+
+check network dynamics during simulations in the DPA task:
+
+#+begin_src jupyter-python
+dt=0.01
+time = np.arange(0,5,dt)
+Nt = len(time)
+
+I = 1*(1 - 0.1 + 0.1 * np.cos(x-ang0)) # choose here whether to present stimulus A (cs) or stimulus B (-cs)
+
+rate = np.zeros((Nt,Nn))
+
+tau = 0.1
+
+for i in range(Nt-1):
+    if (i>100)&(i<125):
+        input=I
+    elif (i>400)&(i<450):
+        input = 25*mC # choose here whether to present stimulus C (mC) or stimulus D (mD)
+    else:
+        input=0
+    network_inputs = np.dot(J, rate[i])/Nn
+    noise = 0.1*np.random.randn(Nn,1).flatten()  # add noise
+    rate[i+1] = rate[i] + dt/tau * (-rate[i] + fI(network_inputs + input + noise))
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+plt.imshow(rate.T, extent=[0,5,0,360], aspect="auto", origin="lower")
+plt.colorbar()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: <matplotlib.colorbar.Colorbar at 0x7fe340237a00>
+[[./.ob-jupyter/bfa46b168ececc2ece92f741dfb7285e08eeffc3.png]]
+:END:
+
+#+begin_src jupyter-python
+
+#+end_src
+
+#+RESULTS:

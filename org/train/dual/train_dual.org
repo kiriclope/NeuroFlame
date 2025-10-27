@@ -2,7 +2,6 @@
 #+TITLE: Training Low Rank RNNs
 #+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual :kernel torch :exports results :output-dir ./figures/dual :file (lc/org-babel-tangle-figure-filename)
 
-
 * Notebook Settings
 
 #+begin_src ipython :tangle no
@@ -715,7 +714,6 @@ def plot_avg_overlap(readout, n_batch, labels=['A', 'B'], figname='fig.svg'):
 #+end_src
 
 #+RESULTS:
-: 7a4a2956-9285-4505-acf4-efd66c48a490
 
 #+begin_src ipython
 def plot_m0_m1_phi(rates, idx, figname='fig.svg'):
@@ -882,6 +880,7 @@ model.to(device);
 #+end_src
 
 #+RESULTS:
+: EE post 0 pre 0 Jab tensor(0.0750, device='cuda:0') torch.Size([750, 750])
 
 #+begin_src ipython
 batch_size = 16
@@ -1014,7 +1013,7 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 #+begin_src ipython
 print('training DPA')
-num_epochs = 5
+num_epochs = 10
 
 start = perf_counter()
 
@@ -1029,13 +1028,17 @@ torch.save(model.state_dict(), '%s/dpa_%d.pth' % (model.SAVE_PATH, seed))
 
 #+RESULTS:
 : training DPA
+: Epoch 1/10, Training Loss: nan, Validation Loss: nan
+: Stopping training as loss is NaN.
+: Elapsed (with compilation) = 0h 1m 4s
 
 #+begin_src ipython
 print(model.J_STP)
 #+end_src
 
 #+RESULTS:
-: ca4bf7f6-6265-4d5b-a84e-60c7db816d4a
+: Parameter containing:
+: tensor(nan, device='cuda:0', requires_grad=True)
 
 ** Testing
 :PROPERTIES:
@@ -1049,7 +1052,6 @@ model.eval();
 #+end_src
 
 #+RESULTS:
-: 0127bf1a-6f0e-436c-935a-e587f8d6e1a7
 
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
 N_BATCH = 1
@@ -1084,7 +1086,7 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: 54847f19-278e-463d-9f37-2519b45d0e4d
+: ff_input torch.Size([4, 605, 1000]) labels torch.Size([2, 4])
 
 #+begin_src ipython :tangle ../../../src/train/test_dpa.py
 with torch.no_grad():
@@ -1093,7 +1095,7 @@ print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: 8a606c24-b09c-4503-a029-52e2b011d98a
+: (4, 101, 750)
 
 #+begin_src ipython
 def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fig.svg', title='first'):
@@ -1145,14 +1147,17 @@ def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fi
 #+end_src
 
 #+RESULTS:
-: d7c22aa7-485a-4318-aa53-3251ea65784c
 
 #+begin_src ipython
 plot_overlap_label(model.readout.cpu().detach().numpy(), labels.cpu().numpy(), task=0)
 #+end_src
 
 #+RESULTS:
-: 4933a93f-5b69-4758-bcab-5e0a8904ef3f
+:RESULTS:
+: (2, 4)
+: (4, 4)
+[[file:./figures/dual/figure_45.png]]
+:END:
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -1172,7 +1177,69 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: a97eea22-ce85-43b5-946f-2988a14e685c
+:RESULTS:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+Cell In[95], line 7
+      4 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+      5 # ax[0].hist(U[:, 0], histtype='step', bins='auto')
+      6 # ax[0].hist(U[:, 1], histtype='step', bins='auto')
+----> 7 ax[0].hist(V[:, 0], histtype='step', bins='auto')
+      8 ax[1].hist(V[:, 1], histtype='step', bins='auto')
+      9 ax[0].set_xlabel('$ n_{AB} $')
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/__init__.py:1465, in _preprocess_data.<locals>.inner(ax, data, *args, **kwargs)
+   1462 @functools.wraps(func)
+   1463 def inner(ax, *args, data=None, **kwargs):
+   1464     if data is None:
+-> 1465         return func(ax, *map(sanitize_sequence, args), **kwargs)
+   1467     bound = new_sig.bind(ax, *args, **kwargs)
+   1468     auto_label = (bound.arguments.get(label_namer)
+   1469                   or bound.kwargs.get(label_namer))
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_axes.py:6854, in Axes.hist(self, x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, **kwargs)
+   6850 # Loop through datasets
+   6851 for i in range(nx):
+   6852     # this will automatically overwrite bins,
+   6853     # so that each histogram uses the same bins
+-> 6854     m, bins = np.histogram(x[i], bins, weights=w[i], **hist_kwargs)
+   6855     tops.append(m)
+   6856 tops = np.array(tops, float)  # causes problems later if it's an int
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:780, in histogram(a, bins, range, density, weights)
+    680 r"""
+    681 Compute the histogram of a dataset.
+    682
+   (...)
+    776
+    777 """
+    778 a, weights = _ravel_and_check_weights(a, weights)
+--> 780 bin_edges, uniform_bins = _get_bin_edges(a, bins, range, weights)
+    782 # Histogram is an integer or a float array depending on the weights.
+    783 if weights is None:
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:396, in _get_bin_edges(a, bins, range, weights)
+    392 if weights is not None:
+    393     raise TypeError("Automated estimation of the number of "
+    394                     "bins is not supported for weighted data")
+--> 396 first_edge, last_edge = _get_outer_edges(a, range)
+    398 # truncate the range if needed
+    399 if range is not None:
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:323, in _get_outer_edges(a, range)
+    321     first_edge, last_edge = a.min(), a.max()
+    322     if not (np.isfinite(first_edge) and np.isfinite(last_edge)):
+--> 323         raise ValueError(
+    324             "autodetected range of [{}, {}] is not finite".format(first_edge, last_edge))
+    326 # expand empty range to avoid divide by zero
+    327 if first_edge == last_edge:
+
+ValueError: autodetected range of [nan, nan] is not finite
+#+end_example
+[[file:./figures/dual/figure_46.png]]
+:END:
 
 #+begin_src ipython
 odors = model.odors.cpu().numpy()
@@ -1188,7 +1255,6 @@ labels = ['$m_\\text{AB}$', '$n_\\text{AB}$', '$m_\\text{GnG}$', '$n_\\text{GnG}
 #+end_src
 
 #+RESULTS:
-: 1c3296d4-a5f2-4b24-80b0-921d90817207
 
 #+begin_src ipython
 import numpy as np
@@ -1208,7 +1274,26 @@ masked_cov_matrix = np.ma.masked_array(cov_matrix, mask=mask)
 #+end_src
 
 #+RESULTS:
-: 044f17d9-d014-4f05-83c6-57f10ebb2402
+:RESULTS:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+Cell In[97], line 10
+      8 for i in range(num_vectors):
+      9     for j in range(num_vectors):
+---> 10         cov_matrix[i][j] = angle_AB(vectors[i], vectors[j])
+     12 # Mask the upper triangle
+     13 mask = np.triu(np.ones_like(cov_matrix, dtype=bool))
+
+Cell In[14], line 5, in angle_AB(A, B)
+      2 A_norm = A / (np.linalg.norm(A) + 1e-5)
+      3 B_norm = B / (np.linalg.norm(B) + 1e-5)
+----> 5 return int(np.arccos(A_norm @ B_norm) * 180 / np.pi)
+
+ValueError: cannot convert float NaN to integer
+#+end_example
+:END:
 
 #+begin_src ipython
 fig, ax = plt.subplots(figsize=(8, 6))
@@ -1239,7 +1324,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 369835f1-5760-47fb-adcf-cf9b3fafb8fa
+[[file:./figures/dual/figure_49.png]]
 
 
 #+begin_src ipython
@@ -1247,7 +1332,6 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 18661712-e199-4eca-b25f-b498d9b822a8
 
 * Go/NoGo Task
 

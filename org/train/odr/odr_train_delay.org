@@ -356,6 +356,39 @@ def polar_loss(theta_batch, y_pred):
 #+begin_src ipython
 import torch
 import torch.nn as nn
+
+class CircularAngleLoss(nn.Module):
+    def __init__(self, mode='angular', reduction='mean'):
+        super().__init__()
+        self.mode = mode
+        self.reduction = reduction
+        self.mse = nn.MSELoss(reduction=reduction)
+
+    def forward(self, pred_angle, target_angle):
+        if self.mode == 'polar':
+            pred_sin, pred_cos = torch.sin(pred_angle), torch.cos(pred_angle)
+            target_sin, target_cos = torch.sin(target_angle), torch.cos(target_angle)
+            loss_sin = self.mse(pred_sin, target_sin)
+            loss_cos = self.mse(pred_cos, target_cos)
+            return (loss_sin + loss_cos) / 2
+
+        elif self.mode == 'angular':
+            error = 1 - torch.cos(pred_angle - target_angle)
+            if self.reduction == 'mean':
+                return error.mean()
+            elif self.reduction == 'sum':
+                return error.sum()
+            else:
+                return error
+        else:
+            raise ValueError(f"Unknown loss mode: {self.mode}")
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+import torch
+import torch.nn as nn
 import torch.distributions
 
 class VonMisesNLLLoss(nn.Module):
@@ -386,9 +419,12 @@ import torch.nn.functional as F
 class AngularErrorLoss(nn.Module):
     def __init__(self, thresh=1, reg_tuning=0.1, sigma_stimulus=30):
         super(AngularErrorLoss, self).__init__()
+
         self.loss = nn.MSELoss(reduction='none')
         # self.loss = nn.SmoothL1Loss(reduction='none')
-        self.polar_loss = VonMisesNLLLoss(reduction='none')
+
+        # self.polar_loss = VonMisesNLLLoss(reduction='none')
+        self.polar_loss = CircularAngleLoss(reduction='none')
 
         self.thresh = thresh
         self.reg_tuning = reg_tuning
@@ -419,7 +455,7 @@ class AngularErrorLoss(nn.Module):
 
         # imposing zero tuning in invalid mask
         loss_zero = self.loss(m1, 0.0 * m1) * invalid_mask
-        total_loss += (loss_zero.sum() / invalid_mask.sum())
+        total_loss += loss_zero.sum() / invalid_mask.sum()
 
         return total_loss
 #+end_src
@@ -457,19 +493,21 @@ class AngularErrorLoss(nn.Module):
 #+begin_src ipython
 kwargs = {
     'GAIN': 1.0,
-    'DURATION': 12.0,
+    'DURATION': 10.0,
     'T_STEADY': 4,
 
-    'T_STIM_ON': [1.0, 5.0],
-    'T_STIM_OFF': [2.0, 6.0],
+    'T_STIM_ON': [4.0, 6.0],
+    'T_STIM_OFF': [5.0, 7.0],
 
-    'I0': [0.25, -2.0],
+    'Jab': [1.0, -1.3, 1, -1],
+    'I0': [0.5, -2.0],
     'PHI0': [180.0, 180],
     'SIGMA0': [2.0, 0.0],
+    'M0': 1,
 
     'RANDOM_DELAY': 1,
     'MIN_DELAY': 0,
-    'MAX_DELAY': 6,
+    'MAX_DELAY': 3,
 
     'IF_FF_STP': 0,
     'FF_USE': 0.5,
@@ -477,10 +515,14 @@ kwargs = {
     'TAU_FF_REC': 0.5,
 
     'IS_STP': [1, 0, 0, 0],
-    'USE': [0.1, 0.03, 0.03, 0.1],
+    'USE': [0.05, 0.03, 0.03, 0.1],
     'TAU_FAC': [2.0, 2.0, 2.0, 0.0],
     'TAU_REC': [0.2, 0.2, 0.2, 0.1],
     'W_STP': [1.0, 3.0, 4.0, 1.0],
+
+    'IF_NMDA': 0,
+    'R_NMDA': 1.0,
+    'TAU_NMDA': [2.0, 2.0],
 
     'IF_FF_ADAPT': 0,
     'A_FF_ADAPT': 1.0,
@@ -522,16 +564,6 @@ model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BAT
 #+RESULTS:
 : EE post 0 pre 0 Jab tensor(0.0632, device='cuda:0') torch.Size([750, 750])
 
-#+begin_src ipython
-plt.hist(model.random_shifts.cpu().numpy() * model.DT)
-plt.xlabel('Delay (s)')
-plt.ylabel('Count')
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./figures/odr/figure_20.png]]
-
 * Training
 
 #+begin_src ipython
@@ -569,11 +601,10 @@ print(torch.where(rwd_mask[idx]==1)[0])
 #+end_src
 
 #+RESULTS:
-: rwd_mask torch.Size([1024, 181])
-: tensor([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
-:         28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-:         46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
-:         64, 65, 66, 67, 68], device='cuda:0')
+: rwd_mask torch.Size([1024, 131])
+: tensor([40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
+:         58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75],
+:        device='cuda:0')
 
 #+begin_src ipython
 
@@ -614,9 +645,10 @@ print(model.PHI0.shape, ff_input.shape, labels.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([1024, 2, 1]) torch.Size([1024, 1105, 1000]) torch.Size([1024, 181])
+: torch.Size([1024, 2, 1]) torch.Size([1024, 855, 1000]) torch.Size([1024, 131])
 
 #+begin_src ipython
+print(labels[labels==-999].shape)
 print(labels[labels!=-999].shape)
 plt.hist(labels[labels!=-999].cpu() * 180 / np.pi, bins=15)
 plt.xlabel('Target Loc. (°)')
@@ -625,7 +657,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: torch.Size([71863])
+: torch.Size([98378])
+: torch.Size([35766])
 [[file:./figures/odr/figure_27.png]]
 :END:
 
@@ -638,10 +671,9 @@ train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_si
 #+RESULTS:
 :RESULTS:
 [[file:./figures/odr/figure_28.png]]
-: torch.Size([819, 1105, 1000]) torch.Size([205, 1105, 1000])
-: torch.Size([819, 181]) torch.Size([205, 181])
+: torch.Size([819, 855, 1000]) torch.Size([205, 855, 1000])
+: torch.Size([819, 131]) torch.Size([205, 131])
 :END:
-
 
 #+begin_src ipython
 criterion = AngularErrorLoss(thresh=0.75, sigma_stimulus=30)
@@ -652,7 +684,7 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+RESULTS:
 
     #+begin_src ipython
-  num_epochs = 20
+  num_epochs = 5
   start = perf_counter()
   loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs, thresh=.005)
   end = perf_counter()
@@ -660,35 +692,12 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
 #+RESULTS:
-#+begin_example
-Epoch 1/20, Training Loss: 3.3794, Validation Loss: 3.4518
-Epoch 2/20, Training Loss: 3.2660, Validation Loss: 3.4328
-Epoch 3/20, Training Loss: 3.2289, Validation Loss: 3.3351
-Epoch 4/20, Training Loss: 3.1497, Validation Loss: 3.1914
-Epoch 5/20, Training Loss: 2.8972, Validation Loss: 2.6910
-Epoch 6/20, Training Loss: 1.9925, Validation Loss: 3.2557
-Epoch 7/20, Training Loss: 1.9967, Validation Loss: 1.8268
-Epoch 8/20, Training Loss: 1.7686, Validation Loss: 2.0035
-Epoch 9/20, Training Loss: 1.7791, Validation Loss: 1.8281
-Epoch 10/20, Training Loss: 1.5346, Validation Loss: 1.5284
-Epoch 11/20, Training Loss: 1.1846, Validation Loss: 1.0302
-Epoch 12/20, Training Loss: 0.8257, Validation Loss: 0.8002
-Epoch 13/20, Training Loss: 0.6592, Validation Loss: 0.5519
-Epoch 14/20, Training Loss: 0.4746, Validation Loss: 0.5029
-Epoch 15/20, Training Loss: 0.4762, Validation Loss: 0.4752
-Epoch 16/20, Training Loss: 0.4456, Validation Loss: 0.4515
-Epoch 17/20, Training Loss: 0.4376, Validation Loss: 0.4461
-Epoch 18/20, Training Loss: 0.4292, Validation Loss: 0.4499
-Epoch 19/20, Training Loss: 0.4266, Validation Loss: 0.4481
-Epoch 20/20, Training Loss: 0.4253, Validation Loss: 0.4435
-Elapsed (with compilation) = 0h 4m 55s
-#+end_example
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
+: Epoch 1/5, Training Loss: 0.4708, Validation Loss: 0.3339
+: Epoch 2/5, Training Loss: 0.1862, Validation Loss: 0.0784
+: Epoch 3/5, Training Loss: 0.0815, Validation Loss: 0.0697
+: Epoch 4/5, Training Loss: 0.0691, Validation Loss: 0.0781
+: Epoch 5/5, Training Loss: 0.0678, Validation Loss: 0.0684
+: Elapsed (with compilation) = 0h 1m 9s
 
 #+begin_src ipython
 torch.save(model.state_dict(), '../models/odr_%d.pth' % seed)
@@ -724,7 +733,7 @@ with torch.no_grad():
 #+end_src
 
 #+RESULTS:
-: torch.Size([1024, 2, 1]) torch.Size([1024, 1105, 1000]) torch.Size([1024, 1])
+: torch.Size([1024, 2, 1]) torch.Size([1024, 855, 1000]) torch.Size([1024, 1])
 
 #+begin_src ipython
 plt.hist(labels[:, 0].cpu() * 180 / np.pi, bins='auto', density=True)
@@ -736,7 +745,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr/figure_35.png]]
+[[file:./figures/odr/figure_34.png]]
 
 #+begin_src ipython
 with torch.no_grad():
@@ -745,14 +754,14 @@ print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rates (1024, 181, 750)
+: rates (1024, 131, 750)
 
  #+begin_src ipython
 plot_rates_selec(rates=ff_input.cpu().detach().numpy(), idx=20, thresh=.5)
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr/figure_37.png]]
+[[file:./figures/odr/figure_36.png]]
 
  #+begin_src ipython
 plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
@@ -760,8 +769,8 @@ plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
 
 #+RESULTS:
 :RESULTS:
-: (1024, 1105) (1024, 1105) (1024, 1105)
-[[file:./figures/odr/figure_38.png]]
+: (1024, 855) (1024, 855) (1024, 855)
+[[file:./figures/odr/figure_37.png]]
 :END:
 
  #+begin_src ipython
@@ -769,7 +778,7 @@ plot_rates_selec(rates=rates, idx=20, thresh=.5)
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr/figure_39.png]]
+[[file:./figures/odr/figure_38.png]]
 
    #+begin_src ipython
 plot_m0_m1_phi(model, rates, 4)
@@ -777,8 +786,8 @@ plot_m0_m1_phi(model, rates, 4)
 
 #+RESULTS:
 :RESULTS:
-: (1024, 181) (1024, 181) (1024, 181)
-[[file:./figures/odr/figure_40.png]]
+: (1024, 131) (1024, 131) (1024, 131)
+[[file:./figures/odr/figure_39.png]]
 :END:
 
 #+begin_src ipython
@@ -800,14 +809,12 @@ plot_m0_m1_phi(model, rates, 4)
 * Connectivity
 
  #+begin_src ipython
-print(seed)
-# model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed);
-# model.load_state_dict(model_state_dict);
+model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed);
+model.load_state_dict(model_state_dict);
 model.eval();
 #+end_src
 
 #+RESULTS:
-: 0
 
 #+begin_src ipython
 from src.lr_utils import LowRankWeights, clamp_tensor
@@ -858,7 +865,7 @@ Ki0 = pkl_load( 'Ki', path=".")
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr/figure_44.png]]
+[[file:./figures/odr/figure_43.png]]
 
 #+begin_src ipython
   fig, ax = plt.subplots(1, 2, figsize=[2*width, height], sharey=1)
@@ -885,7 +892,7 @@ Ki0 = pkl_load( 'Ki', path=".")
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr/figure_45.png]]
+[[file:./figures/odr/figure_44.png]]
 
 #+begin_src ipython
 

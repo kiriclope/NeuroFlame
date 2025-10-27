@@ -4,13 +4,13 @@ from torch.sparse import to_sparse_semi_structured, SparseSemiStructuredTensor
 
 SparseSemiStructuredTensor._FORCE_CUTLASS = True
 
-from src.configuration import Configuration, init_time_const
+from src.configuration import Configuration
 from src.connectivity import Connectivity
 from src.activation import Activation
 from src.plasticity import Plasticity
-from src.lr_utils import LowRankWeights, clamp_tensor, normalize_tensor
+from src.lr_utils import LowRankWeights, clamp_tensor
 
-from src.ff_input import live_ff_input, init_ff_input, rl_ff_udpdate
+from src.ff_input import live_ff_input, init_ff_input
 from src.utils import set_seed, clear_cache, print_activity
 
 import warnings
@@ -108,9 +108,6 @@ class Network(nn.Module):
                     ksi=self.PHI0,
                 )
 
-                if i_pop==0 and j_pop==0:
-                    self.sparse_mask = weights
-
                 self.Wab_T.data[self.slices[i_pop], self.slices[j_pop]] = (
                     self.Jab[i_pop][j_pop] * weights
                 )
@@ -143,7 +140,7 @@ class Network(nn.Module):
         for i in range(self.N_POP): # post
             for j in range(self.N_POP): # pre
                 if self.IS_STP[j+i*self.N_POP]:
-                    dum = self.Wab_T[self.slices[j], self.slices[i]].clone() / torch.abs(self.Jab[i, j])
+                    dum = self.Wab_T[self.slices[j], self.slices[i]].clone() / torch.abs(self.Jab[i, j]) / torch.sqrt(self.Ka[j])
                     print(label[j+i*self.N_POP], 'post', i, 'pre', j, 'Jab', self.Jab[i, j], dum.T.shape)
                     self.W_stp_T.append(dum)
 
@@ -203,10 +200,6 @@ class Network(nn.Module):
 
         # update stp variables
         if self.IF_STP:
-            # Aux = self.stp[0](rates[:, self.slices[0]])  # Aux is now u * x * rates
-            # hidden_stp = Aux @ W_stp_T[0]
-            # hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
-
             k=0
             for i in range(self.N_POP): # post
                 for j in range(self.N_POP): # pre
@@ -233,7 +226,6 @@ class Network(nn.Module):
             rec_input[0] = hidden
 
         if self.IF_FF_ADAPT:
-            # ff_input = ff_input / (1.0 + self.thresh_ff)
             ff_input = torch.sign(ff_input) * nn.ReLU()(ff_input - self.thresh_ff)
             self.thresh_ff = self.thresh_ff * self.EXP_FF_ADAPT + nn.ReLU()(ff_input) * self.A_FF_ADAPT * (1.0-self.EXP_FF_ADAPT)
 
@@ -261,8 +253,6 @@ class Network(nn.Module):
         else:
             rates = non_linear
 
-        # clear_cache()
-
         # adaptation
         if self.IF_ADAPT:
             thresh = thresh * self.EXP_ADAPT + rates.detach() * self.A_ADAPT * (1.0 - self.EXP_ADAPT)
@@ -284,6 +274,11 @@ class Network(nn.Module):
         # Initialization (if  ff_input is None, ff_input is generated)
         if IF_INIT:
             rates, ff_input, rec_input, thresh = self.initRates(ff_input)
+
+            # self.rates_last = torch.zeros_like(rates)
+            # self.rec_input_last = torch.zeros_like(rec_input)
+            # self.thresh_last = torch.zeros_like(thresh)
+
         else:
             rates, rec_input, thresh = self.rates_last, self.rec_input_last, self.thresh_last
 
@@ -296,12 +291,10 @@ class Network(nn.Module):
         if self.IF_STP:
             self.stp = []
             # Need this here otherwise autograd complains
-            # self.stp.append(Plasticity(self.USE[0], self.TAU_FAC[0], self.TAU_REC[0], self.DT,
-            #                            (self.N_BATCH, self.Na[0]),
-            #                            STP_TYPE=self.STP_TYPE,
-            #                            IF_INIT=IF_INIT,
-            #                            device=self.device,
-            #                            ))
+
+            if IF_INIT:
+                self.u_stp_last = []
+                self.x_stp_last = []
 
             k = 0
             for i in range(self.N_POP): # post
@@ -318,7 +311,11 @@ class Network(nn.Module):
                                                    ))
 
                         # previous state is loaded
-                        if IF_INIT == 0:
+                        # if IF_INIT:
+                        #     self.u_stp_last.append(torch.zeros_like(self.stp[k].u_stp))
+                        #     self.x_stp_last.append(torch.zeros_like(self.stp[k].x_stp))
+                        # else:
+                        if IF_INIT==0:
                             self.stp[k].u_stp = self.u_stp_last[k]
                             self.stp[k].x_stp = self.x_stp_last[k]
 
@@ -333,10 +330,14 @@ class Network(nn.Module):
                                      IF_INIT=IF_INIT,
                                      device=self.device,
                                      )
-            # previous state is loaded
-            if IF_INIT == 0:
-                self.ff_stp.u_stp = self.u_ff_stp_last
-                self.ff_stp.x_stp = self.x_ff_stp_last
+
+            # if IF_INIT:
+            #     self.u_ff_stp_last = torch.zeros_like(self.ff_stp.u_stp)
+            #     self.x_ff_stp_last = torch.zeros_like(self.ff_stp.x_stp)
+            # else:
+                # # previous state is loaded
+                # self.ff_stp.u_stp = self.u_ff_stp_last
+                # self.ff_stp.x_stp = self.x_ff_stp_last
 
         Wab_T = self.Wab_T
 
@@ -345,9 +346,9 @@ class Network(nn.Module):
 
         if self.IF_STP:
             # this for lr rnn
-            # W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train / self.Na[0])]
+            W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train / self.Na[0])]
             # need to keep the scale for odr rnn's
-            W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train) / torch.sqrt(self.Ka[0])]
+            # W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train) / torch.sqrt(self.Ka[0])]
             if self.CLAMP:
                 W_stp_T[0] = clamp_tensor(W_stp_T[0], 0, self.slices)
 
@@ -360,9 +361,6 @@ class Network(nn.Module):
 
 
         if self.IF_OPTO:
-            # rand_idx = torch.randperm(W_stp_T.size(0))[:self.N_OPTO]
-            # W_stp_T[:, rand_idx] = 0
-
             rand_idx = torch.randperm(W_stp_T[0].size(0))[:self.N_OPTO]
             W_stp_T[0][rand_idx] = 0
 
@@ -380,15 +378,32 @@ class Network(nn.Module):
                 rate_noise = torch.randn((self.N_BATCH, self.N_NEURON), device=self.device)
                 rates = rates + rate_noise * self.VAR_RATE
 
-            # create ff input at each time step
-            if self.LIVE_FF_UPDATE:
-                ff_input = live_ff_input(self, step, ff_input)
-                rates, rec_input, thresh = self.update_dynamics(rates, ff_input, rec_input, Wab_T, W_stp_T, thresh)
-            else:
-                rates, rec_input, thresh = self.update_dynamics(rates, ff_input[:, step], rec_input, Wab_T, W_stp_T, thresh)
+            ff_step = live_ff_input(self, step, ff_input) if self.LIVE_FF_UPDATE else ff_input[:, step]
+            rates, rec_input, thresh = self.update_dynamics(rates, ff_step, rec_input, Wab_T, W_stp_T, thresh)
+
+            # if torch.any(step==self.end_indices[-1]):
+            #     end_idx = torch.where(step==self.end_indices[-1])[0]
+
+            #     self.rates_last[end_idx] = rates[end_idx].detach()
+            #     self.rec_input_last[:, end_idx] = rec_input[:, end_idx].detach()
+            #     self.thresh_last[end_idx] = thresh[end_idx].detach()
+
+            #     if self.IF_STP:
+            #         k = 0
+            #         for i in range(self.N_POP):
+            #             for j in range(self.N_POP):
+            #                 if self.IS_STP[j+i*self.N_POP]:
+            #                     self.u_stp_last[k][end_idx] = self.stp[k].u_stp[end_idx].detach()
+            #                     self.x_stp_last[k][end_idx] = self.stp[k].x_stp[end_idx].detach()
+            #                     k = k + 1
+
+            #     if self.IF_FF_STP:
+            #         # self.u_ff_stp_last[end_idx] = self.ff_stp.u_stp[end_idx]
+            #         self.x_ff_stp_last[end_idx] = self.ff_stp.x_stp[end_idx].detach()
 
             # update moving average
             mv_rates += rates
+
             if self.LIVE_FF_UPDATE and RET_FF:
                 mv_ff += ff_input
 
@@ -426,8 +441,8 @@ class Network(nn.Module):
 
         # makes serialisation easier treating it as epochs
         # we save the network state and run 2 trials at a time
-        self.rates_last = rates
-        self.rec_input_last = rec_input
+        self.rates_last = rates.detach()
+        self.rec_input_last = rec_input.detach()
         self.thresh_last = thresh
 
         if self.IF_STP:
@@ -437,8 +452,8 @@ class Network(nn.Module):
             for i in range(self.N_POP):
                 for j in range(self.N_POP):
                     if self.IS_STP[j+i*self.N_POP]:
-                        self.u_stp_last.append(self.stp[k].u_stp)
-                        self.x_stp_last.append(self.stp[k].x_stp)
+                        self.u_stp_last.append(self.stp[k].u_stp.detach())
+                        self.x_stp_last.append(self.stp[k].x_stp.detach())
                         k = k + 1
 
         if self.IF_FF_STP:
