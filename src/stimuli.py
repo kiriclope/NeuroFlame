@@ -36,7 +36,7 @@ class Stimuli:
             theta = torch.linspace(0, 2.0 * torch.pi, self.size[-1] + 1, device=self.device)[:-1]
             theta = theta.unsqueeze(0).expand((1, self.size[-1]))
 
-        return strength * nn.ReLU()(1.0 + footprint * torch.cos(theta - phase))
+        return strength * nn.ReLU()(1.0 + footprint * torch.cos(theta - phase)) / (1.0 + footprint)
 
     def odrGaussStim(self, strength, footprint, phase, rnd_phase=0, theta=None):
         """

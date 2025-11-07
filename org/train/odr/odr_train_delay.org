@@ -173,8 +173,39 @@ def plot_rates_selec(rates, idx=0, thresh=0.5, figname='fig.svg'):
 
 ** Optimization
 
+#+begin_src ipython :tangle ~/home/leon/model/NeuroFlame/src/train/utils/optim.py
+def prune_and_grow_vectorized(W, mask, K):
+    new_mask = mask.clone()
+
+    # --- PRUNE ---
+    big_num = 1e9
+    # Set inactive weights to inf (so they're not selected for pruning)
+    to_prune = W.abs().clone()
+    to_prune[new_mask == 0] = big_num
+
+    # Find indices of K smallest per-column
+    prune_vals, prune_idx = torch.topk(-to_prune, K, dim=0)  # negative for smallest values
+
+    # Vectorized column/row indices for scatter
+    cols = torch.arange(N).view(1, -1).expand(K, -1)   # shape (K, N)
+    new_mask[prune_idx, cols] = 0.0
+
+    # --- GROW ---
+    # Regrow: randomly select K locations per column where mask == 0
+    # Make a mask for regrow-eligible entries
+    grow_candidates = (new_mask == 0).float()
+    # Random scores for each eligible position, -inf for non-candidates
+    grow_scores = torch.rand_like(W) * grow_candidates + (1 - grow_candidates) * (-big_num)
+    grow_vals, grow_idx = torch.topk(grow_scores, K, dim=0)
+    new_mask[grow_idx, cols] = 1.0
+
+    return new_mask
+#+end_src
+
+#+RESULTS:
+
 #+begin_src ipython
-def training_step(dataloader, model, loss_fn, optimizer, penalty=None, lbd=0.001, clip_grad=0, zero_grad=0):
+def training_step(dataloader, model, loss_fn, optimizer, SET=0):
     device = torch.device(DEVICE if torch.cuda.is_available() else "cpu")
 
     model.train()
@@ -189,28 +220,11 @@ def training_step(dataloader, model, loss_fn, optimizer, penalty=None, lbd=0.001
         rates = model(X)
         loss = loss_fn(rates, y)
 
-        # Initialize reg_loss as a scalar tensor
-        reg_loss = torch.tensor(0.0, device=device)
-
-        # Only apply the penalty once per step
-        if penalty is not None:
-            for param in model.parameters():
-                if penalty == 'l1':
-                    reg_loss += torch.sum(torch.abs(param))
-                elif penalty == 'l2':
-                    reg_loss += torch.sum(param ** 2)  # Better to use param ** 2
-
-        loss = loss + lbd * reg_loss
-
-        # Backpropagation
         loss.backward()
-
-        # Clip gradients
-        if clip_grad:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
-            #torch.nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
-
         optimizer.step()
+
+        if SET:
+            mask = prune_and_grow_vectorized(W, mask, model.Ka[0])
 
         total_loss += loss.item()
 
@@ -243,7 +257,7 @@ def validation_step(dataloader, model, loss_fn):
 #+RESULTS:
 
 #+begin_src ipython
-def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100, penalty=None, lbd=1, thresh=0.005, zero_grad=0, gamma=0.9):
+def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100, thresh=0.005, gamma=0.9):
 
     # Choose one scheduler
     scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
@@ -257,7 +271,7 @@ def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs
     val_loss_list = []
 
     for epoch in range(num_epochs):
-        loss = training_step(train_loader, model, loss_fn, optimizer, penalty, lbd, zero_grad=zero_grad)
+        loss = training_step(train_loader, model, loss_fn, optimizer)
         val_loss = validation_step(val_loader, model, loss_fn)
 
         if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
@@ -288,70 +302,6 @@ def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs
 #+RESULTS:
 
 ** Loss
-
-#+begin_src ipython
-import torch
-
-def skewed_gaussian_loss(theta_batch, y_pred, theta_bias, sigma=30, alpha=1.0):
-    """
-    Asymmetric likelihood loss with skew controlled by alpha.
-    - theta_batch: True stimulus angles (batch_size)
-    - y_pred: Network predictions (batch_size)
-    - sigma: Base noise level (degrees)
-    - alpha: Skew magnitude/direction (alpha > 0: skew away from theta_bias)
-    """
-    # Compute angular difference (handling circularity)
-    # delta = torch.remainder(theta_batch - theta_bias + torch.pi, 2.0 * torch.pi) - torch.pi
-    delta = theta_batch - theta_bias
-    delta = (delta + torch.pi) % (2 * torch.pi) - torch.pi
-
-    # Determine skew direction: alpha should be positive if stimulus > theta_bias
-    sign = torch.where(delta > 0, 1.0, -1.0)  # 1 if stimulus is clockwise from bias
-    alpha_scaled = alpha * sign  # Skew direction depends on stimulus location
-
-    # Skewed Gaussian likelihood
-    delta = theta_batch - y_pred
-    delta = (delta + torch.pi) % (2 * torch.pi) - torch.pi
-    z = delta / sigma
-    likelihood = torch.exp(-0.5 * z**2) * (1 + torch.erf(alpha_scaled * z / torch.sqrt(torch.tensor(2.0).to(y_pred.device))))
-
-    # Negative log-likelihood loss
-    loss = -torch.log(likelihood + 1e-6)
-    return loss
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-    def gaussian_loss(theta_batch, y_pred, sigma=30):
-        delta = y_pred - theta_batch
-        delta = (delta + torch.pi) % (2 * torch.pi) - torch.pi
-
-        likelihood = torch.exp(-0.5 * (delta / sigma)**2)
-
-        return -torch.log(likelihood + 1e-6)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-def polar_loss(theta_batch, y_pred):
-        loss = nn.MSELoss(reduction='none')
-        predicted_sin = torch.sin(y_pred)
-        predicted_cos = torch.cos(y_pred)
-
-        target_sin = torch.sin(theta_batch)
-        target_cos = torch.cos(theta_batch)
-
-        loss_sin = loss(predicted_sin, target_sin)
-        loss_cos = loss(predicted_cos, target_cos)
-
-        loss_angular = (loss_sin + loss_cos)
-
-        return loss_angular
-#+end_src
-
-#+RESULTS:
 
 #+begin_src ipython
 import torch
@@ -417,7 +367,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class AngularErrorLoss(nn.Module):
-    def __init__(self, thresh=1, reg_tuning=0.1, sigma_stimulus=30):
+    def __init__(self, thresh=1.0, reg_tuning=0.1):
         super(AngularErrorLoss, self).__init__()
 
         self.loss = nn.MSELoss(reduction='none')
@@ -428,7 +378,6 @@ class AngularErrorLoss(nn.Module):
 
         self.thresh = thresh
         self.reg_tuning = reg_tuning
-        self.sigma_stimulus = sigma_stimulus * torch.pi / 180.0
 
     def forward(self, readout, theta_batch):
         m0, m1, y_pred = decode_bump_torch(readout, axis=-1, device=readout.device)
@@ -440,15 +389,18 @@ class AngularErrorLoss(nn.Module):
         # angular loss (Dcos, Dsin)
         loss_polar = self.polar_loss(theta_batch, y_pred) * valid_mask
         loss_angular = loss_polar.sum()
-
-        # loss_gaussian = gaussian_loss(theta_batch, y_pred, sigma=self.sigma_stimulus) * valid_mask
-        # loss_angular = loss_gaussian.sum()
-
         total_loss += loss_angular
 
         # imposing tuning strength
-        regularization = F.relu(self.thresh * m0 - m1) * valid_mask
+        regularization = F.relu((self.thresh * m0 - m1)) * valid_mask
+        # regularization = F.relu((1.0 - m1 / (self.thresh * m0 + 1e-6))) * valid_mask
         total_loss += self.reg_tuning * regularization.sum()
+
+        regularization += F.relu((0.5 - m0)) * valid_mask
+        total_loss += regularization.sum()
+
+        regularization += F.relu((0.5 - m1)) * valid_mask
+        total_loss += regularization.sum()
 
         # normalize over batch and time points
         total_loss /= valid_mask.sum()
@@ -465,14 +417,14 @@ class AngularErrorLoss(nn.Module):
 ** Other
 
 #+begin_src ipython :tangle ../src/torch/utils.py
-  import pickle as pkl
+import pickle as pkl
 
-  def pkl_save(obj, name, path="."):
+def pkl_save(obj, name, path="."):
       pkl.dump(obj, open(path + "/" + name + ".pkl", "wb"))
 
 
-  def pkl_load(name, path="."):
-      return pkl.load(open(path + "/" + name + '.pkl', "rb"))
+def pkl_load(name, path="."):
+     return pkl.load(open(path + "/" + name + '.pkl', "rb"))
 
 #+end_src
 
@@ -492,43 +444,45 @@ class AngularErrorLoss(nn.Module):
 
 #+begin_src ipython
 kwargs = {
+    'LR_INI': 0.001,
+
     'GAIN': 1.0,
-    'DURATION': 10.0,
-    'T_STEADY': 4,
+    'DURATION': 13.0,
+    'T_STEADY': 10,
 
-    'T_STIM_ON': [4.0, 6.0],
-    'T_STIM_OFF': [5.0, 7.0],
+    'T_STIM_ON': [4.0, 8.0],
+    'T_STIM_OFF': [5.0, 9.0],
 
-    'Jab': [1.0, -1.3, 1, -1],
-    'I0': [0.5, -2.0],
+    'Jab': [1.0, -1.35, 1.0, -1],
+    'Ja0': [2.0, 1.0],
+
+    'I0': [1.0, -5.0],
     'PHI0': [180.0, 180],
-    'SIGMA0': [2.0, 0.0],
-    'M0': 1,
+    'SIGMA0': [4.0, 0.0],
+    'M0': 1.0,
 
     'RANDOM_DELAY': 1,
-    'MIN_DELAY': 0,
-    'MAX_DELAY': 3,
-
-    'IF_FF_STP': 0,
-    'FF_USE': 0.5,
-    'TAU_FF_FAC': 0.0,
-    'TAU_FF_REC': 0.5,
+    'MIN_DELAY': 1,
+    'MAX_DELAY': 6,
 
     'IS_STP': [1, 0, 0, 0],
     'USE': [0.05, 0.03, 0.03, 0.1],
-    'TAU_FAC': [2.0, 2.0, 2.0, 0.0],
+    'TAU_FAC': [3.0, 2.0, 2.0, 0.0],
     'TAU_REC': [0.2, 0.2, 0.2, 0.1],
     'W_STP': [1.0, 3.0, 4.0, 1.0],
 
-    'IF_NMDA': 0,
+    'DT': 0.02,
+    'RATE_DYN': 1,
+    'TAU': [0.2, 0.1],
+
+    'SYN_DYN': 0,
+    'TAU_SYN': [0.2, 0.1],
+
+    'IF_NMDA': 1,
     'R_NMDA': 1.0,
-    'TAU_NMDA': [2.0, 2.0],
+    'TAU_NMDA': [0.5, 0.5],
 
-    'IF_FF_ADAPT': 0,
-    'A_FF_ADAPT': 1.0,
-    'TAU_FF_ADAPT': 100.0,
-
-    'IF_ADAPT': 1,
+    'IF_ADAPT': 0,
     'A_ADAPT': 1.0,
     'TAU_ADAPT': 100.0,
 }
@@ -542,20 +496,21 @@ conf_name = "train_odr_EI.yml"
 DEVICE = 'cuda'
 
 total_batches = 128 * 8
-batch_size = 128
+batch_size = 32
+
 ratio = total_batches // batch_size
 
 N_BATCH = int(batch_size * ratio)
 print('N_BATCH', N_BATCH, 'batch_size', batch_size)
 
 seed = np.random.randint(0, 1e6)
-seed = 0
+seed = 1
 print('seed', seed)
 #+end_src
 
 #+RESULTS:
-: N_BATCH 1024 batch_size 128
-: seed 0
+: N_BATCH 1024 batch_size 32
+: seed 1
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=N_BATCH, **kwargs)
@@ -563,6 +518,12 @@ model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BAT
 
 #+RESULTS:
 : EE post 0 pre 0 Jab tensor(0.0632, device='cuda:0') torch.Size([750, 750])
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
 
 * Training
 
@@ -601,16 +562,11 @@ print(torch.where(rwd_mask[idx]==1)[0])
 #+end_src
 
 #+RESULTS:
-: rwd_mask torch.Size([1024, 131])
+: rwd_mask torch.Size([1024, 181])
 : tensor([40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
-:         58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75],
-:        device='cuda:0')
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
+:         58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75,
+:         76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93,
+:         94, 95, 96, 97, 98, 99], device='cuda:0')
 
 *** Inputs and Labels
 
@@ -629,7 +585,7 @@ print(labels.shape)
 #+end_src
 
 #+RESULTS:
-: total_batches 8
+: total_batches 32
 : torch.Size([1024, 1])
 
 #+begin_src ipython
@@ -645,7 +601,7 @@ print(model.PHI0.shape, ff_input.shape, labels.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([1024, 2, 1]) torch.Size([1024, 855, 1000]) torch.Size([1024, 131])
+: torch.Size([1024, 2, 1]) torch.Size([1024, 1405, 1000]) torch.Size([1024, 181])
 
 #+begin_src ipython
 print(labels[labels==-999].shape)
@@ -657,9 +613,9 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: torch.Size([98378])
-: torch.Size([35766])
-[[file:./figures/odr/figure_27.png]]
+: torch.Size([139788])
+: torch.Size([45556])
+[[file:./figures/odr/figure_25.png]]
 :END:
 
 *** Run
@@ -670,13 +626,13 @@ train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_si
 
 #+RESULTS:
 :RESULTS:
-[[file:./figures/odr/figure_28.png]]
-: torch.Size([819, 855, 1000]) torch.Size([205, 855, 1000])
-: torch.Size([819, 131]) torch.Size([205, 131])
+[[file:./figures/odr/figure_26.png]]
+: torch.Size([819, 1405, 1000]) torch.Size([205, 1405, 1000])
+: torch.Size([819, 181]) torch.Size([205, 181])
 :END:
 
 #+begin_src ipython
-criterion = AngularErrorLoss(thresh=0.75, sigma_stimulus=30)
+criterion = AngularErrorLoss(thresh=1.5)
 learning_rate = 0.1
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
@@ -684,23 +640,30 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+RESULTS:
 
     #+begin_src ipython
-  num_epochs = 5
-  start = perf_counter()
-  loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs, thresh=.005)
-  end = perf_counter()
-  print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
+num_epochs = 10
+start = perf_counter()
+loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs, thresh=.005)
+end = perf_counter()
+print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 #+end_src
 
 #+RESULTS:
-: Epoch 1/5, Training Loss: 0.4708, Validation Loss: 0.3339
-: Epoch 2/5, Training Loss: 0.1862, Validation Loss: 0.0784
-: Epoch 3/5, Training Loss: 0.0815, Validation Loss: 0.0697
-: Epoch 4/5, Training Loss: 0.0691, Validation Loss: 0.0781
-: Epoch 5/5, Training Loss: 0.0678, Validation Loss: 0.0684
-: Elapsed (with compilation) = 0h 1m 9s
+#+begin_example
+Epoch 1/10, Training Loss: 1.4097, Validation Loss: 0.6486
+Epoch 2/10, Training Loss: 0.4101, Validation Loss: 0.2892
+Epoch 3/10, Training Loss: 0.2434, Validation Loss: 0.1998
+Epoch 4/10, Training Loss: 0.1633, Validation Loss: 0.1458
+Epoch 5/10, Training Loss: 0.1358, Validation Loss: 0.1280
+Epoch 6/10, Training Loss: 0.1270, Validation Loss: 0.1228
+Epoch 7/10, Training Loss: 0.1230, Validation Loss: 0.1196
+Epoch 8/10, Training Loss: 0.1204, Validation Loss: 0.1175
+Epoch 9/10, Training Loss: 0.1183, Validation Loss: 0.1157
+Epoch 10/10, Training Loss: 0.1164, Validation Loss: 0.1140
+Elapsed (with compilation) = 0h 15m 15s
+#+end_example
 
 #+begin_src ipython
-torch.save(model.state_dict(), '../models/odr_%d.pth' % seed)
+torch.save(model.state_dict(), '../models/odr/odr_%d.pth' % seed)
 #+end_src
 
 #+RESULTS:
@@ -709,15 +672,18 @@ torch.save(model.state_dict(), '../models/odr_%d.pth' % seed)
 
  #+begin_src ipython
 model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed);
+print(model_state_dict.keys())
+print(torch.allclose(model.Wab_train, model_state_dict['Wab_train']))
 model.load_state_dict(model_state_dict);
 model.eval();
-
 print(model.J_STP)
 #+end_src
 
 #+RESULTS:
+: odict_keys(['Wab_train', 'J_STP'])
+: False
 : Parameter containing:
-: tensor(2.1821, device='cuda:0', requires_grad=True)
+: tensor(1.9578, device='cuda:0', requires_grad=True)
 
 #+begin_src ipython
 with torch.no_grad():
@@ -733,10 +699,12 @@ with torch.no_grad():
 #+end_src
 
 #+RESULTS:
-: torch.Size([1024, 2, 1]) torch.Size([1024, 855, 1000]) torch.Size([1024, 1])
+: torch.Size([1024, 2, 1]) torch.Size([1024, 1405, 1000]) torch.Size([1024, 1])
 
 #+begin_src ipython
-plt.hist(labels[:, 0].cpu() * 180 / np.pi, bins='auto', density=True)
+target_loc = labels[:, 0].cpu() * 180 / np.pi
+
+plt.hist(target_loc, bins='auto', density=True)
 plt.xlabel('Target Loc. (°)')
 plt.ylabel('Density')
 plt.xticks(np.linspace(0, 360, 5))
@@ -745,7 +713,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr/figure_34.png]]
+[[file:./figures/odr/figure_32.png]]
 
 #+begin_src ipython
 with torch.no_grad():
@@ -754,31 +722,14 @@ print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rates (1024, 131, 750)
+: rates (1024, 181, 750)
 
  #+begin_src ipython
-plot_rates_selec(rates=ff_input.cpu().detach().numpy(), idx=20, thresh=.5)
+plot_rates_selec(rates=rates, idx=20, thresh=20)
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr/figure_36.png]]
-
- #+begin_src ipython
-plot_m0_m1_phi(model, ff_input.cpu().numpy()[..., model.slices[0]], 10)
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-: (1024, 855) (1024, 855) (1024, 855)
-[[file:./figures/odr/figure_37.png]]
-:END:
-
- #+begin_src ipython
-plot_rates_selec(rates=rates, idx=20, thresh=.5)
-#+end_src
-
-#+RESULTS:
-[[file:./figures/odr/figure_38.png]]
+[[file:./figures/odr/figure_34.png]]
 
    #+begin_src ipython
 plot_m0_m1_phi(model, rates, 4)
@@ -786,11 +737,11 @@ plot_m0_m1_phi(model, rates, 4)
 
 #+RESULTS:
 :RESULTS:
-: (1024, 131) (1024, 131) (1024, 131)
-[[file:./figures/odr/figure_39.png]]
+: (1024, 181) (1024, 181) (1024, 181)
+[[file:./figures/odr/figure_35.png]]
 :END:
 
-#+begin_src ipython
+ #+begin_src ipython
 # targets = (target_loc + np.pi) % (2 * np.pi) - np.pi
 
 # fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -808,91 +759,104 @@ plot_m0_m1_phi(model, rates, 4)
 
 * Connectivity
 
- #+begin_src ipython
-model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed);
-model.load_state_dict(model_state_dict);
-model.eval();
-#+end_src
-
-#+RESULTS:
-
 #+begin_src ipython
-from src.lr_utils import LowRankWeights, clamp_tensor
-Cij = model.GAIN * ( model.W_stp_T[0]  + model.Wab_train[model.slices[0], model.slices[0]])
-# Cij = model.Wab_train / model.Na[0] * model.J_STP
-# Cij[Cij>0]= 1
+from src.lr_utils import clamp_tensor
+# Cij = model.GAIN * model.J_STP * (model.W_stp_T[0]  / torch.sqrt(model.Ka[0])
+#                                 + model.Wab_train[model.slices[0], model.slices[0]]
+#                                 * torch.sqrt(model.Ka[0]) / model.Na[0])
+
+Cij = model.GAIN * model.J_STP * model.W_stp_T[0] / torch.sqrt(model.Ka[0]) * (1.0 + model.Wab_train[model.slices[0], model.slices[0]])
+
+
+# Cij = model.GAIN * ( model.W_stp_T[0]  + model.Wab_train[model.slices[0], model.slices[0]])
 Cij = clamp_tensor(Cij, 0, model.slices).cpu().detach().numpy()
-
-Cij0 = pkl_load('matrix', path=".")
-Kj0 = pkl_load( 'Kj', path=".")
-Ki0 = pkl_load( 'Ki', path=".")
+# Cij = Cij>0
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-  plt.figure(figsize=(2.5*width, 1.5*height))  # Set the figure size (width, height) in inches
+from scipy.ndimage import gaussian_filter1d, uniform_filter1d
 
-  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
-  im = ax1.imshow(Cij, cmap='jet', aspect=1, vmin=0)
-  ax1.set_xlabel("Presynaptic")
-  ax1.set_ylabel("Postsynaptic")
+plt.figure(figsize=(2.5*width, 1.5*height))  # Set the figure size (width, height) in inches
 
-  # Second column, first row
-  ax2 = plt.subplot2grid((2, 3), (0, 1))
-  Kj = np.sum(Cij, axis=0)  # sum over pres
-  ax2.plot(circcvl(Kj-Kj0, windowSize=75))
-  # ax2.set_xticklabels([])
-  ax2.set_ylabel("$K_j$")
+ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+im = ax1.imshow(Cij, cmap='jet', aspect=1, vmin=0)
+ax1.set_xlabel("Presynaptic")
+ax1.set_ylabel("Postsynaptic")
 
-  # # Second column, second row
-  ax3 = plt.subplot2grid((2, 3), (1, 1))
-  Ki = np.sum(Cij, axis=1)  # sum over pres
-  ax3.plot(circcvl(Ki-Ki0, windowSize=75))
-  ax3.set_ylabel("$K_i$")
+# Second column, first row
+ax2 = plt.subplot2grid((2, 3), (0, 1))
+Kj = np.sum(Cij, axis=0)  # sum over pres
+ax2.plot(uniform_filter1d(Kj, size=75))
+# ax2.set_xticklabels([])
+ax2.set_ylabel("$K_j$")
 
-  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
-  diags = []
-  for i in range(int(Cij.shape[0] / 2)):
-      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
-  diags = np.array(diags)
-  ax4.plot(diags)
-  ax4.set_xlabel("Neuron #")
-  ax4.set_ylabel("$P_{ij}$")
+# # Second column, second row
+ax3 = plt.subplot2grid((2, 3), (1, 1))
+Ki = np.sum(Cij, axis=1)  # sum over pres
+ax3.plot(uniform_filter1d(Ki, size=75))
+ax3.set_ylabel("$K_i$")
 
-  plt.tight_layout()
-  plt.show()
+ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+diags = []
+for i in range(int(Cij.shape[0] / 2)):
+   diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
+diags = np.array(diags)
+ax4.plot(diags)
+ax4.set_xlabel("Neuron #")
+ax4.set_ylabel("$P_{ij}$")
+
+plt.tight_layout()
+plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr/figure_43.png]]
+[[file:./figures/odr/figure_38.png]]
 
 #+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height], sharey=1)
+Dij = Cij.flatten()
+np.random.shuffle(Dij)
+Dij = Dij.reshape(Cij.shape)
 
-  Dij = Cij.flatten()
-  np.random.shuffle(Dij)
-  Dij = Dij.reshape(Cij.shape)
+from scipy.ndimage import gaussian_filter1d, uniform_filter1d
 
-  im = ax[0].imshow(Dij, cmap='jet', aspect=1, vmin=0)
-  ax[0].set_xlabel("Presynaptic")
-  ax[0].set_ylabel("Postsynaptic")
-  ax[0].set_title('Naive')
-  # ax[0].set_xticks(np.linspace(0, 750, 4))
-  # ax[0].set_yticks(np.linspace(0, 750, 4))
+plt.figure(figsize=(2.5*width, 1.5*height))  # Set the figure size (width, height) in inches
 
-  im = ax[1].imshow(Cij, cmap='jet', aspect=1, vmin=0)
-  ax[1].set_xlabel("Presynaptic")
-  ax[1].set_ylabel("Postsynaptic")
-  ax[1].set_title('Trained')
-  # ax[1].set_xticks(np.linspace(0, 750, 4))
-  # ax[1].set_yticks(np.linspace(0, 750, 4))
-  plt.tight_layout()
-  plt.show()
+ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+im = ax1.imshow(Dij, cmap='jet', aspect=1, vmin=0)
+ax1.set_xlabel("Presynaptic")
+ax1.set_ylabel("Postsynaptic")
+
+# Second column, first row
+ax2 = plt.subplot2grid((2, 3), (0, 1))
+Kj = np.sum(Dij, axis=0)  # sum over pres
+ax2.plot(uniform_filter1d(Kj, size=75))
+# ax2.set_xticklabels([])
+ax2.set_ylabel("$K_j$")
+
+# # Second column, second row
+ax3 = plt.subplot2grid((2, 3), (1, 1))
+Ki = np.sum(Dij, axis=1)  # sum over pres
+ax3.plot(uniform_filter1d(Ki, size=75))
+ax3.set_ylabel("$K_i$")
+
+ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+diags = []
+for i in range(int(Dij.shape[0] / 2)):
+   diags.append(np.trace(Dij, offset=i) / Dij.shape[0])
+diags = np.array(diags)
+ax4.plot(diags)
+ax4.set_xlabel("Neuron #")
+ax4.set_ylabel("$P_{ij}$")
+
+plt.tight_layout()
+plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr/figure_44.png]]
+[[file:./figures/odr/figure_39.png]]
+
 
 #+begin_src ipython
 

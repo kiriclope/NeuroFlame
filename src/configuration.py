@@ -55,9 +55,11 @@ def init_time_const(model):
     model.N_STEADY = int(model.T_STEADY / model.DT)
 
     if model.RANDOM_ITI:
-        # N_MAX_ITI = model.MAX_ITI / model.DT
-        # N_MIN_ITI = model.MIN_ITI / model.DT
-        model.N_STEADY = int(torch.randint(low=int(model.MIN_ITI), high=int(model.MAX_ITI)+1, size=(1,)).item() / model.DT)
+        if model.ITI_LIST is not None:
+            idx_iti = torch.randint(low=0, high=len(model.ITI_LIST), size=(1,)).item()
+            model.N_STEADY = int(model.ITI_LIST[idx_iti] / model.DT)
+        else:
+            model.N_STEADY = int(torch.randint(low=int(model.MIN_ITI), high=int(model.MAX_ITI)+1, size=(1,)).item() / model.DT)
 
     model.N_WINDOW = int(model.T_WINDOW / model.DT)
     model.N_STEPS = int(model.DURATION / model.DT) + model.N_WINDOW + model.N_STEADY
@@ -74,6 +76,9 @@ def init_time_const(model):
     model.end_indices = (model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts)
 
     if model.RANDOM_DELAY:
+        model.N_STIM_ON[1] = model.N_STIM_OFF[0]
+        model.N_STIM_OFF[1] = model.N_STIM_ON[1] + int(1.0 / model.DT)
+
         N_MAX_DELAY = model.MAX_DELAY / model.DT
         N_MIN_DELAY = model.MIN_DELAY / model.DT
 
@@ -176,6 +181,8 @@ def init_const(model):
 
     # NMDA dynamics
     if model.IF_NMDA:
+        # model.R_NMDA = model.R_NMDA / torch.sqrt(model.Ka[0])
+
         model.TAU_NMDA = torch.tensor(model.TAU_NMDA, device=model.device)
         model.EXP_DT_TAU_NMDA = torch.ones(model.N_NEURON, device=model.device)
         model.DT_TAU_NMDA = torch.ones(model.N_NEURON, device=model.device)
@@ -185,6 +192,7 @@ def init_const(model):
                 -model.DT / model.TAU_NMDA[i_pop]
             )
             model.DT_TAU_NMDA[model.slices[i_pop]] = model.DT / model.TAU_NMDA[i_pop]
+
 
     ##########################################
     # defining models' Parameters

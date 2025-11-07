@@ -1,4 +1,7 @@
 from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
+from sklearn.model_selection import KFold, StratifiedKFold
+from torch.utils.data import Dataset, DataLoader, TensorDataset
+
 
 def split_data(X, Y, train_perc=0.8, batch_size=32):
 
@@ -25,8 +28,6 @@ def split_data(X, Y, train_perc=0.8, batch_size=32):
 
     return train_loader, val_loader
 
-from sklearn.model_selection import KFold, StratifiedKFold
-from torch.utils.data import Dataset, DataLoader, TensorDataset
 
 def cross_val_data(X, Y, n_splits=5, batch_size=32):
     kf = StratifiedKFold(n_splits=n_splits, shuffle=True)
@@ -46,7 +47,3 @@ def cross_val_data(X, Y, n_splits=5, batch_size=32):
         val_loader = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False)
 
         yield train_loader, val_loader
-
-# Example use case:
-# for train_loader, val_loader in cross_val_data(ff_input, labels, n_splits=5, batch_size=batch_size):
-#     train_model(train_loader, val_loader) # Implement your training process here

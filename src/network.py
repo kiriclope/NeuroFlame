@@ -8,7 +8,7 @@ from src.configuration import Configuration
 from src.connectivity import Connectivity
 from src.activation import Activation
 from src.plasticity import Plasticity
-from src.lr_utils import LowRankWeights, clamp_tensor
+from src.lr_utils import LowRankWeights, clamp_tensor, normalize_tensor
 
 from src.ff_input import live_ff_input, init_ff_input
 from src.utils import set_seed, clear_cache, print_activity
@@ -77,10 +77,10 @@ class Network(nn.Module):
         if self.ODR_TRAIN:
             if self.TRAIN_EI==0:
                 self.Wab_train = nn.Parameter(torch.randn((self.Na[0], self.Na[0]),
-                                                          device=self.device)* 0.001)
+                                                          device=self.device) * self.LR_INI)
             else:
                 self.Wab_train = nn.Parameter(torch.randn((self.N_NEURON, self.N_NEURON),
-                                                          device=self.device)* 0.001)
+                                                          device=self.device) * self.LR_INI)
 
                 self.train_mask = torch.zeros((self.N_NEURON, self.N_NEURON), device=self.device)
 
@@ -234,7 +234,7 @@ class Network(nn.Module):
         net_input = ff_input + rec_input[0]
 
         if self.IF_NMDA:
-            hidden = rates[:, self.slices[0]] @ Wab_T[self.slices[0]]
+            hidden = (rates[:, self.slices[0]] @ Wab_T[self.slices[0]])
 
             if self.IF_STP:
                 hidden[:, self.slices[0]] = hidden[:, self.slices[0]] + hidden_stp
@@ -256,7 +256,7 @@ class Network(nn.Module):
 
         # adaptation
         if self.IF_ADAPT:
-            thresh = thresh * self.EXP_ADAPT + rates.detach() * self.A_ADAPT * (1.0 - self.EXP_ADAPT)
+            thresh[:, self.slices[0]] = thresh[:, self.slices[0]] * self.EXP_ADAPT + rates[:, self.slices[0]].detach() * self.A_ADAPT * (1.0 - self.EXP_ADAPT)
 
         return rates, rec_input, thresh
 
@@ -336,9 +336,10 @@ class Network(nn.Module):
             #     self.u_ff_stp_last = torch.zeros_like(self.ff_stp.u_stp)
             #     self.x_ff_stp_last = torch.zeros_like(self.ff_stp.x_stp)
             # else:
+            if IF_INIT==0:
                 # # previous state is loaded
-                # self.ff_stp.u_stp = self.u_ff_stp_last
-                # self.ff_stp.x_stp = self.x_ff_stp_last
+                self.ff_stp.u_stp = self.u_ff_stp_last
+                self.ff_stp.x_stp = self.x_ff_stp_last
 
         Wab_T = self.Wab_T
 
@@ -349,7 +350,18 @@ class Network(nn.Module):
             # this for lr rnn
             # W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train / self.Na[0])]
             # need to keep the scale for odr rnn's
-            W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0] + self.Wab_train) / torch.sqrt(self.Ka[0])]
+            # W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0]
+            #                                      + self.Wab_train[self.slices[0], self.slices[0]]) / torch.sqrt(self.Ka[0])]
+
+            # W_stp_T = [self.GAIN * self.J_STP * (self.W_stp_T[0]  / torch.sqrt(self.Ka[0])
+            #                                      + self.Wab_train[self.slices[0], self.slices[0]]
+            #                                      * torch.sqrt(self.Ka[0]) / self.Na[0])]
+
+            # W_stp_T = [self.GAIN * self.J_STP * self.W_stp_T[0] / torch.sqrt(self.Ka[0])
+            #            * (1.0 + 5.0 * self.Wab_train[self.slices[0], self.slices[0]])]
+
+            W_stp_T = [self.GAIN * self.J_STP * self.Wab_train[self.slices[0], self.slices[0]] / torch.sqrt(self.Ka[0])]
+
             if self.CLAMP:
                 W_stp_T[0] = clamp_tensor(W_stp_T[0], 0, self.slices)
 
@@ -357,9 +369,23 @@ class Network(nn.Module):
             for i in range(self.N_POP): # post
                 for j in range(self.N_POP): # pre
                     if (self.IS_STP[j+i*self.N_POP]) and ((i+j)!=0):
-                        W_stp_T.append(self.GAIN * self.W_STP[j+i*self.N_POP] * self.J_STP * self.W_stp_T[k] / torch.sqrt(self.Ka[j]))
+                        W_stp_T.append(self.GAIN * self.W_STP[j+i*self.N_POP]
+                                       * self.J_STP * self.W_stp_T[k] / torch.sqrt(self.Ka[j]))
                         k = k + 1
 
+        if self.TRAIN_EI:
+            Wab_train = normalize_tensor(self.Wab_train, 0, self.slices, self.Na)
+            Wab_train = normalize_tensor(Wab_train, 1, self.slices, self.Na)
+
+            # Wab_train = normalize_tensor(self.Wab_train, 0, self.slices, torch.sqrt(self.Ka))
+            # Wab_train = normalize_tensor(Wab_train, 1, self.slices, torch.sqrt(self.Ka))
+
+            Wab_T = self.GAIN * (self.Wab_T + self.train_mask * Wab_train)
+
+            if self.CLAMP:
+                # Check indices Think need some transpose
+                Wab_T = clamp_tensor(Wab_T.T, 0, self.slices).T
+                Wab_T = clamp_tensor(Wab_T.T, 1, self.slices).T
 
         if self.IF_OPTO:
             rand_idx = torch.randperm(W_stp_T[0].size(0))[:self.N_OPTO]
