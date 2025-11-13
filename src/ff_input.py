@@ -190,7 +190,7 @@ def init_ff_seq(model):
                 if stimulus.ndim!=3:
                     stimulus = stimulus.unsqueeze(1)
 
-            # print(stimulus.shape)
+            # print('stimulus', stimulus.shape)
 
             if model.N_STIM_ON[i] < model.N_STEPS:
                 if model.RANDOM_DELAY:

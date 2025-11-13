@@ -76,7 +76,7 @@ def init_time_const(model):
     model.end_indices = (model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts)
 
     if model.RANDOM_DELAY:
-        model.N_STIM_ON[1] = model.N_STIM_OFF[0]
+        model.N_STIM_ON[1] = model.N_STIM_OFF[0] + 1
         model.N_STIM_OFF[1] = model.N_STIM_ON[1] + int(1.0 / model.DT)
 
         N_MAX_DELAY = model.MAX_DELAY / model.DT
@@ -84,7 +84,12 @@ def init_time_const(model):
 
         model.N_STEPS += int(N_MAX_DELAY - N_MIN_DELAY)
 
-        model.random_shifts = torch.randint(low=int(N_MIN_DELAY), high=int(N_MAX_DELAY), size=(model.N_BATCH,)).to(model.device)
+        if model.DELAY_LIST is not None:
+            idx_delay = torch.randint(low=0, high=len(model.DELAY_LIST), size=(model.N_BATCH,)).to(model.device)
+            chosen_delays = torch.tensor(model.DELAY_LIST, device=model.device)[idx_delay]
+            model.random_shifts = (chosen_delays / model.DT).to(int)
+        else:
+            model.random_shifts = torch.randint(low=int(N_MIN_DELAY), high=int(N_MAX_DELAY), size=(model.N_BATCH,)).to(model.device)
 
         model.start_indices = (model.N_STIM_ON.unsqueeze(-1) + model.random_shifts)
         model.end_indices = (model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts)
@@ -97,6 +102,10 @@ def init_time_const(model):
             # random DPA delay
             model.start_indices[:-1] = model.N_STIM_ON[:-1]
             model.end_indices[:-1] = model.N_STIM_OFF[:-1]
+
+    # used in sequential serial bias with random iti
+    model.start_idx = ((model.start_indices - model.N_STEADY) / model.N_WINDOW).to(int)
+    model.end_idx = ((model.end_indices - model.N_STEADY) / model.N_WINDOW).to(int)
 
 
 
@@ -151,6 +160,10 @@ def init_const(model):
 
     for i_pop in range(model.N_POP):
         model.thresh[:, model.slices[i_pop]] = model.THRESH[i_pop]
+
+    if model.IF_FF_DYN:
+        model.TAU_FF = torch.tensor(model.TAU_FF, device=model.device)
+        model.EXP_FF = torch.exp(-model.DT / model.TAU_FF)
 
     if model.IF_FF_ADAPT:
         model.TAU_FF_ADAPT = torch.tensor(model.TAU_FF_ADAPT, device=model.device)

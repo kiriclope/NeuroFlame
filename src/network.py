@@ -188,7 +188,7 @@ class Network(nn.Module):
         return rates, ff_input, rec_input, thresh
 
 
-    def update_dynamics(self, rates, ff_input, rec_input, Wab_T, W_stp_T, thresh):
+    def update_dynamics(self, rates, ff_input, ff_prev, rec_input, Wab_T, W_stp_T, thresh):
         """Updates the dynamics of the model at each timestep"""
 
         # update hidden state
@@ -214,6 +214,10 @@ class Network(nn.Module):
             hidden_ff_stp = torch.sign(ff_input) * (self.ff_stp(torch.abs(ff_input) / torch.sqrt(self.Ka[0]))
                                                     * torch.sqrt(self.Ka[0]))
             ff_input = ff_input + hidden_ff_stp
+
+        if self.IF_FF_DYN:
+            ff_input = ff_prev * self.EXP_FF + ff_input * (1.0 - self.EXP_FF)
+            ff_prev = ff_input
 
         # update batched EtoE
         if self.IF_BATCH_J:
@@ -258,7 +262,7 @@ class Network(nn.Module):
         if self.IF_ADAPT:
             thresh[:, self.slices[0]] = thresh[:, self.slices[0]] * self.EXP_ADAPT + rates[:, self.slices[0]].detach() * self.A_ADAPT * (1.0 - self.EXP_ADAPT)
 
-        return rates, rec_input, thresh
+        return rates, ff_prev, rec_input, thresh
 
 
     def forward(self, ff_input=None, REC_LAST_ONLY=0, RET_FF=0, RET_STP=0, RET_REC=0, IF_INIT=1):
@@ -276,9 +280,9 @@ class Network(nn.Module):
         if IF_INIT:
             rates, ff_input, rec_input, thresh = self.initRates(ff_input)
 
-            # self.rates_last = torch.zeros_like(rates)
-            # self.rec_input_last = torch.zeros_like(rec_input)
-            # self.thresh_last = torch.zeros_like(thresh)
+            self.rates_last = torch.zeros_like(rates.detach())
+            self.rec_input_last = torch.zeros_like(rec_input.detach())
+            self.thresh_last = torch.zeros_like(thresh.detach())
 
         else:
             rates, rec_input, thresh = self.rates_last, self.rec_input_last, self.thresh_last
@@ -312,11 +316,11 @@ class Network(nn.Module):
                                                    ))
 
                         # previous state is loaded
-                        # if IF_INIT:
-                        #     self.u_stp_last.append(torch.zeros_like(self.stp[k].u_stp))
-                        #     self.x_stp_last.append(torch.zeros_like(self.stp[k].x_stp))
-                        # else:
-                        if IF_INIT==0:
+                        if IF_INIT:
+                            self.u_stp_last.append(torch.zeros_like(self.stp[k].u_stp.detach()))
+                            self.x_stp_last.append(torch.zeros_like(self.stp[k].x_stp.detach()))
+                        else:
+                        # if IF_INIT==0:
                             self.stp[k].u_stp = self.u_stp_last[k]
                             self.stp[k].x_stp = self.x_stp_last[k]
 
@@ -332,11 +336,11 @@ class Network(nn.Module):
                                      device=self.device,
                                      )
 
-            # if IF_INIT:
-            #     self.u_ff_stp_last = torch.zeros_like(self.ff_stp.u_stp)
-            #     self.x_ff_stp_last = torch.zeros_like(self.ff_stp.x_stp)
-            # else:
-            if IF_INIT==0:
+            if IF_INIT:
+                self.u_ff_stp_last = torch.zeros_like(self.ff_stp.u_stp)
+                self.x_ff_stp_last = torch.zeros_like(self.ff_stp.x_stp)
+            else:
+                # if IF_INIT==0:
                 # # previous state is loaded
                 self.ff_stp.u_stp = self.u_ff_stp_last
                 self.ff_stp.x_stp = self.x_ff_stp_last
@@ -398,6 +402,7 @@ class Network(nn.Module):
         mv_rates, mv_ff, mv_rec = 0, 0, 0
         rates_list, ff_list, rec_list = [], [], []
 
+        ff_prev = 0
         # Temporal loop
         for step in range(self.N_STEPS):
             # add noise to the rates
@@ -406,27 +411,27 @@ class Network(nn.Module):
                 rates = rates + rate_noise * self.VAR_RATE
 
             ff_step = live_ff_input(self, step, ff_input) if self.LIVE_FF_UPDATE else ff_input[:, step]
-            rates, rec_input, thresh = self.update_dynamics(rates, ff_step, rec_input, Wab_T, W_stp_T, thresh)
+            rates, ff_prev, rec_input, thresh = self.update_dynamics(rates, ff_step, ff_prev, rec_input, Wab_T, W_stp_T, thresh)
 
-            # if torch.any(step==self.end_indices[-1]):
-            #     end_idx = torch.where(step==self.end_indices[-1])[0]
+            if torch.any(step==self.end_indices[-1]):
+                end_idx = torch.where(step==self.end_indices[-1])[0]
 
-            #     self.rates_last[end_idx] = rates[end_idx].detach()
-            #     self.rec_input_last[:, end_idx] = rec_input[:, end_idx].detach()
-            #     self.thresh_last[end_idx] = thresh[end_idx].detach()
+                self.rates_last[end_idx] = rates[end_idx].detach()
+                self.rec_input_last[:, end_idx] = rec_input[:, end_idx].detach()
+                self.thresh_last[end_idx] = thresh[end_idx].detach()
 
-            #     if self.IF_STP:
-            #         k = 0
-            #         for i in range(self.N_POP):
-            #             for j in range(self.N_POP):
-            #                 if self.IS_STP[j+i*self.N_POP]:
-            #                     self.u_stp_last[k][end_idx] = self.stp[k].u_stp[end_idx].detach()
-            #                     self.x_stp_last[k][end_idx] = self.stp[k].x_stp[end_idx].detach()
-            #                     k = k + 1
+                if self.IF_STP:
+                    k = 0
+                    for i in range(self.N_POP):
+                        for j in range(self.N_POP):
+                            if self.IS_STP[j+i*self.N_POP]:
+                                self.u_stp_last[k][end_idx] = self.stp[k].u_stp[end_idx].detach()
+                                self.x_stp_last[k][end_idx] = self.stp[k].x_stp[end_idx].detach()
+                                k = k + 1
 
-            #     if self.IF_FF_STP:
-            #         # self.u_ff_stp_last[end_idx] = self.ff_stp.u_stp[end_idx]
-            #         self.x_ff_stp_last[end_idx] = self.ff_stp.x_stp[end_idx].detach()
+                if self.IF_FF_STP:
+                    # self.u_ff_stp_last[end_idx] = self.ff_stp.u_stp[end_idx]
+                    self.x_ff_stp_last[end_idx] = self.ff_stp.x_stp[end_idx].detach()
 
             # update moving average
             mv_rates += rates
@@ -468,24 +473,24 @@ class Network(nn.Module):
 
         # makes serialisation easier treating it as epochs
         # we save the network state and run a trial at a time
-        self.rates_last = rates.detach()
-        self.rec_input_last = rec_input.detach()
-        self.thresh_last = thresh
+        # self.rates_last = rates.detach()
+        # self.rec_input_last = rec_input.detach()
+        # self.thresh_last = thresh
 
-        if self.IF_STP:
-            k = 0
-            self.u_stp_last = []
-            self.x_stp_last = []
-            for i in range(self.N_POP):
-                for j in range(self.N_POP):
-                    if self.IS_STP[j+i*self.N_POP]:
-                        self.u_stp_last.append(self.stp[k].u_stp.detach())
-                        self.x_stp_last.append(self.stp[k].x_stp.detach())
-                        k = k + 1
+        # if self.IF_STP:
+        #     k = 0
+        #     self.u_stp_last = []
+        #     self.x_stp_last = []
+        #     for i in range(self.N_POP):
+        #         for j in range(self.N_POP):
+        #             if self.IS_STP[j+i*self.N_POP]:
+        #                 self.u_stp_last.append(self.stp[k].u_stp.detach())
+        #                 self.x_stp_last.append(self.stp[k].x_stp.detach())
+        #                 k = k + 1
 
-        if self.IF_FF_STP:
-            self.u_ff_stp_last = self.ff_stp.u_stp
-            self.x_ff_stp_last = self.ff_stp.x_stp
+        # if self.IF_FF_STP:
+        #     self.u_ff_stp_last = self.ff_stp.u_stp
+        #     self.x_ff_stp_last = self.ff_stp.x_stp
 
         # returns full sequence
         if REC_LAST_ONLY == 0:
@@ -507,7 +512,6 @@ class Network(nn.Module):
             if self.LR_READOUT==1:
                 linear = self.low_rank.linear(self.dropout(rates)) / self.Na[0]
                 self.readout = torch.cat((self.readout, linear), dim=-1)
-
         if self.LIVE_FF_UPDATE == 0 and RET_FF:
             self.ff_input = ff_input[..., self.slices[0]]
 
