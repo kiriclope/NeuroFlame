@@ -184,11 +184,15 @@ def init_ff_seq(model):
                     stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[2*i+1])
             else:
                 stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[:, i])
+                stimulusI = StimulusI(model.I0[i], model.SIGMA0[i], model.PHI0[:, i])
 
             # reshape stimulus to be (N_BATCH, 1, NE) adding dummy time dimension
             if model.ODR_TRAIN:
                 if stimulus.ndim!=3:
                     stimulus = stimulus.unsqueeze(1)
+
+                if stimulusI.ndim!=3:
+                    stimulusI = stimulusI.unsqueeze(1)
 
             # print('stimulus', stimulus.shape)
 
@@ -208,14 +212,11 @@ def init_ff_seq(model):
                         else:
                             ff_input[j, mask, model.slices[0]].add_(stimulus[j])
                 else:
-                    # if model.I0[i]<0:
-                    #     stimulusI = StimulusI(-model.I0[i], model.SIGMA0[i], model.PHI0[:, i]).unsqueeze(1)
-                    #     ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[1]].add_(stimulusI)
-                    #     del stimulusI
-                    # else:
                     ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[0]].add_(stimulus)
+                    if model.STIM_EI:
+                        ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[1]].add_(stimulusI)
 
-            del stimulus
+            del stimulus, stimulusI
 
         if "flow" in model.TASK:
             del grid_inputs

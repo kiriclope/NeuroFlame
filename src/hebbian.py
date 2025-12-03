@@ -7,21 +7,20 @@ class Hebbian:
     A Hebbian learning class
     """
 
-    def __init__(self, ETA, DT, HEBB_TYPE="bcm", frac=0.1):
+    def __init__(self, ETA, DT, HEBB_TYPE="bcm", CORR_FRAC=0.1):
         self.DT = DT
         self.HEBB_TYPE = HEBB_TYPE
         self.ETA_DT = ETA * DT
-        self.frac = frac
+        self.CORR_FRAC = CORR_FRAC
 
 
     def spatial_sum(self, rates):
-        neighborhood = int(rates.shape[-1] * self.frac)
+        neighborhood = int(rates.shape[-1] * self.CORR_FRAC)
         kernel = torch.ones(1, 1, neighborhood) / neighborhood
         # rates: [N_BATCH, N_NEURONS]
-        pad = neighborhood // 2
         rates_unsq = rates.unsqueeze(1)  # [N_BATCH, 1, N_NEURONS]
         # Apply moving average (sum)
-        summed = F.conv1d(rates_unsq, kernel.to(rates.device), padding=pad)
+        summed = F.conv1d(rates_unsq, kernel.to(rates.device), padding='same')
         # summed.shape: [N_BATCH, 1, N_NEURONS]
         return summed.squeeze(1)  # [N_BATCH, N_NEURONS]
 

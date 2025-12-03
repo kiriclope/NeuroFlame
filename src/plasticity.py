@@ -7,16 +7,17 @@ class Plasticity:
     Hansel methods for Short-Term Plasticity in synapses.
     """
 
-    def __init__(self, USE, TAU_FAC, TAU_REC, DT, size, STP_TYPE="markram", IF_INIT=1, device="cuda"):
+    def __init__(self, USE, TAU_FAC, TAU_REC, DT, size, device, STP_TYPE="markram", IF_INIT=1):
         N_BATCH = size[0]
         N_NEURON = size[1]
 
-        self.stp_type = STP_TYPE
         self.DT = DT
-        self.TAU_FAC = TAU_FAC
+        self.stp_type = STP_TYPE
 
+        # markram tsodyks
+        self.TAU_FAC = TAU_FAC
+        self.TAU_REC = TAU_REC
         self.USE = torch.tensor(USE, device=device).unsqueeze(-1)
-        # print('USE', self.USE.shape)
 
         if TAU_FAC>0:
             self.DT_TAU_FAC = torch.tensor(DT / TAU_FAC, device=device).unsqueeze(-1)
@@ -24,8 +25,10 @@ class Plasticity:
             self.DT_TAU_FAC = torch.tensor(0.0, device=device).unsqueeze(-1)
 
         # print('DT_TAU_FAC', self.DT_TAU_FAC.shape)
-
-        self.DT_TAU_REC = torch.tensor(DT / TAU_REC, device=device).unsqueeze(-1)
+        if TAU_REC>0:
+            self.DT_TAU_REC = torch.tensor(DT / TAU_REC, device=device).unsqueeze(-1)
+        else:
+            self.DT_TAU_REC = torch.tensor(0.0, device=device).unsqueeze(-1)
         # print('DT_TAU_REC', self.DT_TAU_REC.shape)
 
         self.EXP_REC = torch.exp(-self.DT_TAU_REC)
@@ -37,23 +40,6 @@ class Plasticity:
 
             self.x_stp = torch.ones((N_BATCH, N_NEURON), device=device)
             # print('x', self.x_stp.shape)
-
-    def markram_stp_old(self, rates):
-        u_plus = self.u_stp + self.USE * (1.0 - self.u_stp)
-
-        self.x_stp = (
-            self.x_stp
-            + (1.0 - self.x_stp) * self.DT_TAU_REC
-            - self.DT * u_plus * self.x_stp * rates
-        )
-
-        self.u_stp = (
-            self.u_stp
-            - self.DT_TAU_FAC * self.u_stp
-            + self.DT * self.USE * (1.0 - self.u_stp) * rates
-        )
-
-        return (u_plus * self.x_stp) * rates
 
     def markram_stp(self, rates):
         # Compute the effect of the incoming spike
@@ -81,11 +67,12 @@ class Plasticity:
             self.u_stp = self.USE
 
         # Exact solution for decay toward equilibrium (1 for x, USE for u)
-        self.x_stp = (
-            1.0
-            + (self.x_stp - 1.0) * self.EXP_REC
-            - self.DT * self.u_stp * self.x_stp * rates
-        )
+        if self.TAU_REC!=0:
+            self.x_stp = (
+                1.0
+                + (self.x_stp - 1.0) * self.EXP_REC
+                - self.DT * self.u_stp * self.x_stp * rates
+            )
 
         if self.TAU_FAC!=0.0:
             self.u_stp = (
@@ -96,18 +83,6 @@ class Plasticity:
 
         return (self.u_stp * self.x_stp) * rates  # Synaptic output
 
-    def hansel_stp(self, rates):
-        self.x_stp = (
-            self.x_stp
-            - (self.x_stp - 1.0) * self.DT_TAU_REC
-            - self.DT * self.x_stp * self.u_stp * rates
-        )
-        self.u_stp = (
-            self.u_stp
-            - (self.u_stp - self.USE) * self.DT_TAU_FAC
-            + self.DT * self.USE * (1.0 - self.u_stp) * rates
-        )
-        return self.u_stp * self.x_stp
 
     def mato_stp(self, isi):
         self.u_stp = self.u_stp * torch.exp(-isi / self.TAU_FAC) + self.USE * (
@@ -120,10 +95,8 @@ class Plasticity:
         )
         return self.u_stp * self.x_stp
 
-    def forward(self, rates):
-        if self.stp_type == "hansel":
-            return self.hansel_stp(rates)
 
+    def forward(self, rates):
         if self.stp_type == "mato":
             return self.mato_stp(rates)
 

@@ -15,7 +15,7 @@ def circular_gaussian(degrees, mu=0, sigma=30, dim=-1):
     return gauss # / gauss.sum(dim=dim, keepdim=True)
 
 class Stimuli:
-    def __init__(self, task, size, device="cuda"):
+    def __init__(self, task, size, device):
         self.task = task
         self.size = size
         self.device = device

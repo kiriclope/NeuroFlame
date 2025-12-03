@@ -444,6 +444,7 @@ def pkl_load(name, path="."):
 
 #+begin_src ipython
 kwargs = {
+    'TRAINING': 1,
     'LR_INI': 0.001,
 
     'GAIN': 1.0,
@@ -453,10 +454,11 @@ kwargs = {
     'T_STIM_ON': [4.0, 8.0],
     'T_STIM_OFF': [5.0, 9.0],
 
-    'Jab': [1.0, -1.35, 1.0, -1],
+    'Jab': [1.0, -1.4, 1.0, -1],
     'Ja0': [2.0, 1.0],
 
-    'I0': [1.0, -5.0],
+    'STIM_EI': 1,
+    'I0': [1.0, -10.0],
     'PHI0': [180.0, 180],
     'SIGMA0': [4.0, 0.0],
     'M0': 1.0,
@@ -465,10 +467,11 @@ kwargs = {
     'MIN_DELAY': 1,
     'MAX_DELAY': 6,
 
+    'IF_STP': 0,
     'IS_STP': [1, 0, 0, 0],
-    'USE': [0.05, 0.03, 0.03, 0.1],
+    'USE': [0.03, 0.03, 0.03, 0.1],
     'TAU_FAC': [3.0, 2.0, 2.0, 0.0],
-    'TAU_REC': [0.2, 0.2, 0.2, 0.1],
+    'TAU_REC': [0.1, 0.2, 0.2, 0.1],
     'W_STP': [1.0, 3.0, 4.0, 1.0],
 
     'DT': 0.02,
@@ -492,11 +495,12 @@ kwargs = {
 
 #+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
-conf_name = "train_odr_EI.yml"
+# conf_name = "train_odr_EI.yml"
+conf_name = "train_vanilla.yml"
 DEVICE = 'cuda'
 
 total_batches = 128 * 8
-batch_size = 32
+batch_size = 128
 
 ratio = total_batches // batch_size
 
@@ -504,20 +508,21 @@ N_BATCH = int(batch_size * ratio)
 print('N_BATCH', N_BATCH, 'batch_size', batch_size)
 
 seed = np.random.randint(0, 1e6)
-seed = 1
+seed = 0
 print('seed', seed)
 #+end_src
 
 #+RESULTS:
-: N_BATCH 1024 batch_size 32
-: seed 1
+: N_BATCH 1024 batch_size 128
+: seed 0
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=N_BATCH, **kwargs)
 #+end_src
 
 #+RESULTS:
-: EE post 0 pre 0 Jab tensor(0.0632, device='cuda:0') torch.Size([750, 750])
+: 750
+: 250
 
 #+begin_src ipython
 
@@ -528,7 +533,7 @@ model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BAT
 * Training
 
 #+begin_src ipython
-model.J_STP.requires_grad = True
+# model.J_STP.requires_grad = True
     #+end_src
 
 #+RESULTS:
@@ -542,8 +547,7 @@ model.J_STP.requires_grad = True
 #+end_src
 
 #+RESULTS:
-: Wab_train torch.Size([750, 750])
-: J_STP torch.Size([])
+: Wab_train torch.Size([1000, 1000])
 
 #+begin_src ipython
 model.N_BATCH = N_BATCH
@@ -563,10 +567,13 @@ print(torch.where(rwd_mask[idx]==1)[0])
 
 #+RESULTS:
 : rwd_mask torch.Size([1024, 181])
-: tensor([40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
-:         58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75,
-:         76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93,
-:         94, 95, 96, 97, 98, 99], device='cuda:0')
+: tensor([ 40,  41,  42,  43,  44,  45,  46,  47,  48,  49,  50,  51,  52,  53,
+:          54,  55,  56,  57,  58,  59,  60,  61,  62,  63,  64,  65,  66,  67,
+:          68,  69,  70,  71,  72,  73,  74,  75,  76,  77,  78,  79,  80,  81,
+:          82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,
+:          96,  97,  98,  99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
+:         110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123,
+:         124, 125, 126, 127, 128, 129, 130], device='cuda:0')
 
 *** Inputs and Labels
 
@@ -585,7 +592,7 @@ print(labels.shape)
 #+end_src
 
 #+RESULTS:
-: total_batches 32
+: total_batches 8
 : torch.Size([1024, 1])
 
 #+begin_src ipython
@@ -604,19 +611,13 @@ print(model.PHI0.shape, ff_input.shape, labels.shape)
 : torch.Size([1024, 2, 1]) torch.Size([1024, 1405, 1000]) torch.Size([1024, 181])
 
 #+begin_src ipython
-print(labels[labels==-999].shape)
-print(labels[labels!=-999].shape)
 plt.hist(labels[labels!=-999].cpu() * 180 / np.pi, bins=15)
 plt.xlabel('Target Loc. (°)')
 plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: torch.Size([139788])
-: torch.Size([45556])
 [[file:./figures/odr/figure_25.png]]
-:END:
 
 *** Run
 
@@ -648,19 +649,9 @@ print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 #+end_src
 
 #+RESULTS:
-#+begin_example
-Epoch 1/10, Training Loss: 1.4097, Validation Loss: 0.6486
-Epoch 2/10, Training Loss: 0.4101, Validation Loss: 0.2892
-Epoch 3/10, Training Loss: 0.2434, Validation Loss: 0.1998
-Epoch 4/10, Training Loss: 0.1633, Validation Loss: 0.1458
-Epoch 5/10, Training Loss: 0.1358, Validation Loss: 0.1280
-Epoch 6/10, Training Loss: 0.1270, Validation Loss: 0.1228
-Epoch 7/10, Training Loss: 0.1230, Validation Loss: 0.1196
-Epoch 8/10, Training Loss: 0.1204, Validation Loss: 0.1175
-Epoch 9/10, Training Loss: 0.1183, Validation Loss: 0.1157
-Epoch 10/10, Training Loss: 0.1164, Validation Loss: 0.1140
-Elapsed (with compilation) = 0h 15m 15s
-#+end_example
+: Epoch 1/10, Training Loss: nan, Validation Loss: nan
+: Stopping training as loss is NaN.
+: Elapsed (with compilation) = 0h 0m 12s
 
 #+begin_src ipython
 torch.save(model.state_dict(), '../models/odr/odr_%d.pth' % seed)
@@ -680,10 +671,9 @@ print(model.J_STP)
 #+end_src
 
 #+RESULTS:
-: odict_keys(['Wab_train', 'J_STP'])
+: odict_keys(['Wab_train'])
 : False
-: Parameter containing:
-: tensor(1.9578, device='cuda:0', requires_grad=True)
+: 1.0
 
 #+begin_src ipython
 with torch.no_grad():
@@ -699,7 +689,34 @@ with torch.no_grad():
 #+end_src
 
 #+RESULTS:
-: torch.Size([1024, 2, 1]) torch.Size([1024, 1405, 1000]) torch.Size([1024, 1])
+:RESULTS:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+OutOfMemoryError                          Traceback (most recent call last)
+Cell In[31], line 9
+      5 model.PHI0 = torch.ones((N_BATCH, 2, 1), device=DEVICE, dtype=torch.float)
+      6 model.PHI0[:, 0] = labels
+----> 9 ff_input = model.init_ff_input()
+     10 print(model.PHI0.shape, ff_input.shape, labels.shape)
+
+File ~/models/NeuroFlame/org/train/odr/../../../src/network.py:174, in Network.init_ff_input(self)
+    173 def init_ff_input(self):
+--> 174     return init_ff_input(self)
+
+File ~/models/NeuroFlame/org/train/odr/../../../src/ff_input.py:275, in init_ff_input(model)
+    272     model.VAR_FF.mul_(torch.sqrt(model.Ka[0]))
+    273     return init_ff_live(model)
+--> 275 return init_ff_seq(model)
+
+File ~/models/NeuroFlame/org/train/odr/../../../src/ff_input.py:224, in init_ff_seq(model)
+    221     if "flow" in model.TASK:
+    222         del grid_inputs
+--> 224 return ff_input * torch.sqrt(model.Ka[0]) * model.M0
+
+OutOfMemoryError: CUDA out of memory. Tried to allocate 5.36 GiB. GPU 0 has a total capacity of 23.60 GiB of which 1.82 GiB is free. Including non-PyTorch memory, this process has 21.76 GiB memory in use. Of the allocated memory 16.13 GiB is allocated by PyTorch, and 5.36 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+#+end_example
+:END:
 
 #+begin_src ipython
 target_loc = labels[:, 0].cpu() * 180 / np.pi
@@ -774,6 +791,28 @@ Cij = clamp_tensor(Cij, 0, model.slices).cpu().detach().numpy()
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+AttributeError                            Traceback (most recent call last)
+Cell In[37], line 6
+      1 from src.lr_utils import clamp_tensor
+      2 # Cij = model.GAIN * model.J_STP * (model.W_stp_T[0]  / torch.sqrt(model.Ka[0])
+      3 #                                 + model.Wab_train[model.slices[0], model.slices[0]]
+      4 #                                 * torch.sqrt(model.Ka[0]) / model.Na[0])
+----> 6 Cij = model.GAIN * model.J_STP * model.W_stp_T[0] / torch.sqrt(model.Ka[0]) * (1.0 + model.Wab_train[model.slices[0], model.slices[0]])
+      9 # Cij = model.GAIN * ( model.W_stp_T[0]  + model.Wab_train[model.slices[0], model.slices[0]])
+     10 Cij = clamp_tensor(Cij, 0, model.slices).cpu().detach().numpy()
+
+File ~/mambaforge/envs/torch/lib/python3.10/site-packages/torch/nn/modules/module.py:1688, in Module.__getattr__(self, name)
+   1686     if name in modules:
+   1687         return modules[name]
+-> 1688 raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+AttributeError: 'Network' object has no attribute 'W_stp_T'
+#+end_example
+:END:
 
 #+begin_src ipython
 from scipy.ndimage import gaussian_filter1d, uniform_filter1d
@@ -812,7 +851,20 @@ plt.show()
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[38], line 6
+:       3 plt.figure(figsize=(2.5*width, 1.5*height))  # Set the figure size (width, height) in inches
+:       5 ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+: ----> 6 im = ax1.imshow(Cij, cmap='jet', aspect=1, vmin=0)
+:       7 ax1.set_xlabel("Presynaptic")
+:       8 ax1.set_ylabel("Postsynaptic")
+:
+: NameError: name 'Cij' is not defined
 [[file:./figures/odr/figure_38.png]]
+:END:
 
 #+begin_src ipython
 Dij = Cij.flatten()
@@ -855,7 +907,17 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr/figure_39.png]]
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: NameError                                 Traceback (most recent call last)
+: Cell In[39], line 1
+: ----> 1 Dij = Cij.flatten()
+:       2 np.random.shuffle(Dij)
+:       3 Dij = Dij.reshape(Cij.shape)
+:
+: NameError: name 'Cij' is not defined
+:END:
 
 
 #+begin_src ipython

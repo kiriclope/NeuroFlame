@@ -52,6 +52,9 @@ def init_time_const(model):
     ##########################################
     # creating time steps from continuous time
     ##########################################
+
+    model.N_HEBB = int(model.T_HEBB / model.DT)
+
     model.N_STEADY = int(model.T_STEADY / model.DT)
 
     if model.RANDOM_ITI:
@@ -62,10 +65,10 @@ def init_time_const(model):
             model.N_STEADY = int(torch.randint(low=int(model.MIN_ITI), high=int(model.MAX_ITI)+1, size=(1,)).item() / model.DT)
 
     model.N_WINDOW = int(model.T_WINDOW / model.DT)
-    model.N_STEPS = int(model.DURATION / model.DT) + model.N_WINDOW + model.N_STEADY
+    model.N_STEPS = int(model.DURATION / model.DT) + model.N_WINDOW + model.N_STEADY + model.N_HEBB
 
-    model.N_STIM_ON = torch.tensor([int(i / model.DT) + model.N_STEADY for i in model.T_STIM_ON]).to(model.device)
-    model.N_STIM_OFF = torch.tensor([int(i / model.DT) + model.N_STEADY for i in model.T_STIM_OFF]).to(model.device)
+    model.N_STIM_ON = torch.tensor([int(i / model.DT) + model.N_STEADY + model.N_HEBB for i in model.T_STIM_ON]).to(model.device)
+    model.N_STIM_OFF = torch.tensor([int(i / model.DT) + model.N_STEADY + model.N_HEBB for i in model.T_STIM_OFF]).to(model.device)
 
     # if 'odr' in model.TASK:
     #     model.N_STIM_ON[2:] += int(model.ITI / model.DT)
@@ -104,8 +107,8 @@ def init_time_const(model):
             model.end_indices[:-1] = model.N_STIM_OFF[:-1]
 
     # used in sequential serial bias with random iti
-    model.start_idx = ((model.start_indices - model.N_STEADY) / model.N_WINDOW).to(int)
-    model.end_idx = ((model.end_indices - model.N_STEADY) / model.N_WINDOW).to(int)
+    model.start_idx = ((model.start_indices - model.N_STEADY - model.N_HEBB) / model.N_WINDOW).to(int)
+    model.end_idx = ((model.end_indices - model.N_STEADY - model.N_HEBB) / model.N_WINDOW).to(int)
 
 
 
@@ -121,7 +124,10 @@ def init_const(model):
         model.K = 1.0
 
     for i_pop in range(model.N_POP):
-        model.Na.append(int(model.N_NEURON * model.frac[i_pop]))
+        dum = int(model.N_NEURON * model.frac[i_pop])
+        print(dum)
+        model.Na.append(dum)
+
         if model.FRAC_K:
             model.Ka.append(model.K * model.frac[i_pop])
         else:
@@ -160,6 +166,10 @@ def init_const(model):
 
     for i_pop in range(model.N_POP):
         model.thresh[:, model.slices[i_pop]] = model.THRESH[i_pop]
+
+    if model.IF_HEBB:
+        model.TAU_HEBB = torch.tensor(model.TAU_HEBB, device=model.device)
+        model.EXP_HEBB = torch.exp(-model.DT / model.TAU_HEBB)
 
     if model.IF_FF_DYN:
         model.TAU_FF = torch.tensor(model.TAU_FF, device=model.device)

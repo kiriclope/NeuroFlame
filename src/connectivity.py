@@ -3,7 +3,7 @@ from torch.distributions import MultivariateNormal
 
 
 class Connectivity:
-    def __init__(self, Na, Nb, Kb, device="cuda", verbose=0):
+    def __init__(self, Na, Nb, Kb, device, verbose=0):
         """
         Class: Connectivity
         Creates a connectivity matrix. The connectivity can be sparse are all to all.
@@ -153,7 +153,7 @@ class Connectivity:
         if "sparse" in con_type:
             if self.verbose:
                 print("Sparse random connectivity")
-                            
+
             Cij = torch.rand(self.Na, self.Nb, device=self.device) <= (
                 self.Kb / float(self.Nb) * Pij
             ).clamp_(min=0, max=1)

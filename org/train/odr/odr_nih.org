@@ -1,6 +1,6 @@
 #+STARTUP: fold
 #+TITLE: ODR Sequential Serial Bias
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_seq_sb :kernel torch :exports results :output-dir ./figures/odr_seq_sb :file (lc/org-babel-tangle-figure-filename)
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session odr_nih :kernel torch :exports results :output-dir ./figures/odr_seq_sb :file (lc/org-babel-tangle-figure-filename)
 
 * Imports
 
@@ -119,38 +119,41 @@ def add_vlines(model, ax=None):
 
 #+begin_src ipython
 IF_LOAD = 0
-IF_SAVE = 0
+IF_SAVE = 1
 IF_SAVE_POPT = 0
 
 IF_ITI = 0
-name = 'patients_C'
-# name = 'patients_A'
+name = 'controls'
+# name = 'patients_B'
 if IF_LOAD:
-    groups = ['controls_long', 'patients_A_long', 'patients_B_long']
+    groups = ['controls', 'patients_A', 'patients_B']
 else:
     groups = [name]
 
 #if IF_ITI:
-name+='_rand'
-# name+='_iti_rand'
+# name+='_rand'
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython :tangle ./figures/NIH/patients.py
 kwargs = {
-    'GAIN_SZ': [2.0, 1.0],
+    'N_TRIALS': 10,
+    'GAIN_NMDA': [1.0, 1.0],
+    'GAIN_SZ': [1., 1.],
+
     'GAIN': 1.2,
     'DURATION': 9.0,
-    'T_STEADY': 2.0,
+    'T_STEADY': 1.0,
 
     'T_STIM_ON': [1.0, 8.0],
     'T_STIM_OFF': [2.0, 9.0],
 
-    'I0': [1.0, -5.0],
+    'I0': [1.0, -10.0],
     'PHI0': [180.0, 180],
     'SIGMA0': [4.0, 0.0],
     'M0': 1.0,
+    'VAR_FF': [0.3, 0.3],
 
     'RANDOM_DELAY': 0,
     'MIN_DELAY': 0,
@@ -161,11 +164,13 @@ kwargs = {
     'MIN_ITI': 0,
     'ITI_LIST': [0, 2, 4, 6, 8],
 
+    'TAU': [0.2, 0.1],
+
     'SYN_DYN': 0,
 
     'IF_NMDA': 1,
     'R_NMDA': 1.0,
-    'TAU_NMDA': [1.5, 1.5],
+    'TAU_NMDA': [0.5, 0.5],
 
     'IF_FF_STP': 0,
     'FF_USE': 0.5,
@@ -175,23 +180,83 @@ kwargs = {
     'Jab': [1.0, -1.4, 1.0, -1],
 
     'IS_STP': [1, 0, 0, 0],
-    'USE': [0.055, 0.03, 0.03, 0.1],
+    'USE': [0.05, 0.03, 0.03, 0.1],
     'TAU_FAC': [3.0, 2.0, 2.0, 0.0],
-    'TAU_REC': [0.2, 0.2, 0.2, 0.1],
+    'TAU_REC': [0.1, 0.2, 0.2, 0.1],
     'W_STP': [1.0, 3.0, 4.0, 1.0],
 
     'IF_FF_ADAPT': 0,
     'A_FF_ADAPT': 1.0,
     'TAU_FF_ADAPT': 150.0,
 
-    'IF_ADAPT': 1,
-    'A_ADAPT': 0.5, # 4 or 0.5
-    'TAU_ADAPT': 100.0,
+    'IF_ADAPT': 0,
+    'A_ADAPT': 0.15, # 4 or 0.5 0.15 or 1.5
+    'TAU_ADAPT': 10.0,
 
-    'REP_BIAS': 1.25,
-    'REP_VAR': 1.5,
-    'REP_SIG': 60,
+    'REP_BIAS': 1.25, # 1.25
+    'REP_VAR': 0.0,
+    'REP_SIG': 90,
 }
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython :tangle ./figures/NIH/patients.py
+kwargs = {
+    'N_BATCH': 10,
+    'N_TRIALS': 50,
+    'GAIN_NMDA': [1.0, 1.0],
+    'GAIN_SZ': [1., 1.],
+
+    'REP_BIAS': 0.0, # 1.25
+    'REP_VAR': 0.0,
+    'REP_SIG': 90,
+
+    'GAIN': 1.0,
+    'DURATION': 6.0,
+    'T_STEADY': 1.0,
+
+    'T_STIM_ON': [1.0, 5.0],
+    'T_STIM_OFF': [2.0, 6.0],
+
+    'I0': [0.5, -10.0],
+    'PHI0': [180.0, 180],
+    'SIGMA0': [1.0, 0.0],
+    'M0': 1.0,
+    'VAR_FF': [0.2, 0.2],
+
+    'RANDOM_DELAY': 0,
+    'TAU': [0.2, 0.1],
+
+    'SYN_DYN': 0,
+
+    'IF_NMDA': 1,
+    'R_NMDA': 1.0,
+    'TAU_NMDA': [1.0, 1.0],
+
+    'Jab': [1.0, -1.4, 1.0, -1],
+
+    'IF_STP': 0,
+
+    'IF_ADAPT': 0,
+    'A_ADAPT': 0.15, # 4 or 0.5 0.15 or 1.5
+    'TAU_ADAPT': 10.0,
+
+    'STIM_EI': 0,
+    'IF_HEBB': 1,
+    'IS_HEBB': [1, 1, 1, 1],
+    'TAU_HEBB': 0.5,
+    'T_HEBB': 0,
+    'ETA': 2.0,
+    'HEBB_TYPE': 'corr',
+    'HEBB_FRAC': 0.3,
+}
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+
 #+end_src
 
 #+RESULTS:
@@ -199,7 +264,7 @@ kwargs = {
 #+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "train_odr_EI.yml"
-DEVICE = 'cuda:1'
+DEVICE = 'cuda'
 seed = np.random.randint(0, 1e6)
 
 seed = 1
@@ -210,32 +275,33 @@ print('seed', seed)
 : seed 1
 
 #+begin_src ipython
-N_BATCH = 768
-model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=N_BATCH, **kwargs)
+N_BATCH = kwargs['N_BATCH']
+model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, **kwargs)
 #+end_src
 
 #+RESULTS:
-: EE post 0 pre 0 Jab tensor(0.0759, device='cuda:1') torch.Size([750, 750])
+: 1050
+: 450
 
 #+begin_src ipython
-model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed)
-model.load_state_dict(model_state_dict);
+# model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed)
+# model.load_state_dict(model_state_dict);
+model = model.to(DEVICE)
 model.eval();
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
-model.J_STP = torch.nn.Parameter(model.J_STP.detach() / kwargs['GAIN_SZ'][0])
-model.USE[0] = model.USE[0] * kwargs['GAIN_SZ'][0]
-# model.J_STP = torch.nn.Parameter(kwargs['GAIN_SZ'][0] * model.J_STP.detach())
-# model.Wab_T[model.slices[0], model.slices[1]] *= kwargs['GAIN_SZ'][1]
-print(model.J_STP)
+# model.J_STP = torch.nn.Parameter(model.J_STP.detach() / kwargs['GAIN_SZ'][0])
+# model.USE[0] = model.USE[0] * kwargs['GAIN_SZ'][0]
+
+# model.J_STP = torch.nn.Parameter(kwargs['GAIN_NMDA'][0] * model.J_STP.detach())
+# model.Wab_T[model.slices[0], model.slices[1]] *= kwargs['GAIN_NMDA'][1]
+#print(model.J_STP)
 #+end_src
 
 #+RESULTS:
-: Parameter containing:
-: tensor(0.9789, device='cuda:1', requires_grad=True)
 
 #+begin_src ipython
 import torch
@@ -255,7 +321,6 @@ def shifted_phase(phase1, phase2, bias_strength, bias_var, direction='repulsive'
     sign = -1 if direction == 'repulsive' else 1
 
     if popt is not None:
-
            kernel = torch_dog(delta, popt[0], popt[1], popt[2], popt[3])
     else:
            kernel = torch.sin(torch.deg2rad(delta)) * torch.exp(-torch.abs(delta)**order / sigma**order / order)
@@ -275,8 +340,8 @@ if IF_SAVE_POPT:
     model.REP_BIAS=0
     popt = None
 else:
-     model.REP_BIAS = 1.25
-     popt = pkl_load('popt_%s' % 'controls', './models/nih/')
+     model.REP_BIAS = kwargs['REP_BIAS']
+     popt = pkl_load('popt_%s' % name, './models/nih/')
 
 
 phase1 = torch.randint(low=0, high=360, size=(100,), device=DEVICE, dtype=torch.float)
@@ -293,10 +358,11 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_14.png]]
+[[file:./figures/odr_seq_sb/figure_16.png]]
 
 #+begin_src ipython
-
+# if kwargs['RANDOM_ITI']:
+#    name += '_iti_rand'
 #+end_src
 
 #+RESULTS:
@@ -304,6 +370,13 @@ plt.show()
 * Simulating Consecutive Trials
 
 #+begin_src ipython
+from src.configuration import init_time_const
+
+model.T_STEADY = 5
+model.T_HEBB = 5
+
+init_time_const(model)
+
 model.N_BATCH = N_BATCH
 # runing a baseline trial with no task
 model.TASK: 'None'
@@ -314,17 +387,20 @@ with torch.no_grad():
     ff_input = model.init_ff_input()
     rates_tensor = model.forward(ff_input=ff_input)
     clear_cache()
-print(ff_input.shape, rates_tensor.shape)
+# print(ff_input.shape, rates_tensor.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([768, 1110, 1000]) torch.Size([768, 91, 750])
-
 
 #+begin_src ipython
 model.N_BATCH = N_BATCH
 
 model.I0 = kwargs['I0']
+
+model.T_STEADY = kwargs['T_STEADY']
+model.T_HEBB = kwargs['T_HEBB']
+
+init_time_const(model)
 
 model.TASK: 'odr'
 model.RANDOM_DELAY = kwargs['RANDOM_DELAY']
@@ -332,19 +408,17 @@ model.PHI0 = torch.randint(low=0, high=360, size=(N_BATCH, len(model.I0), 1), de
 
 with torch.no_grad():
     ff_input = model.init_ff_input()
-    rates_tensor = model.forward(ff_input=ff_input, IF_INIT=0)
+    rates_tensor = model.forward(ff_input=ff_input, IF_INIT =0)
     # del ff_input
     clear_cache()
 print(ff_input.shape, rates_tensor.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([768, 1110, 1000]) torch.Size([768, 91, 750])
+: torch.Size([10, 710, 1500]) torch.Size([10, 61, 1050])
 
 #+begin_src ipython
-from src.configuration import init_time_const
-
-N_TRIALS = 100
+N_TRIALS = kwargs['N_TRIALS']
 
 rates_list = []
 prev_list = [model.PHI0[:, 0].cpu().detach()]
@@ -354,17 +428,17 @@ iti_list = torch.ones((N_TRIALS, model.N_BATCH))
 min_iti = model.DURATION - model.T_STIM_OFF[-1]
 interval = N_TRIALS // len(model.ITI_LIST)
 
-for epoch in tqdm(range(N_TRIALS)):
+for trial in tqdm(range(N_TRIALS)):
     with torch.no_grad():
 
         # if IF_ITI:
-        #     if epoch % interval == 0:
-        #         model.T_STEADY = model.ITI_LIST[epoch // interval]
+        #     if trial % interval == 0:
+        #         model.T_STEADY = model.ITI_LIST[trial // interval]
 
         if model.RANDOM_ITI or model.RANDOM_DELAY:
             init_time_const(model)
 
-        iti_list[epoch] = model.N_STEADY * model.DT + min_iti
+        iti_list[trial] = model.N_STEADY * model.DT + min_iti
 
         model.PHI0 = torch.randint(low=0, high=360, size=(N_BATCH, len(model.I0), 1), device=DEVICE, dtype=torch.float)
         model.PHI0_UNBIASED = torch.deg2rad(model.PHI0.clone())
@@ -372,9 +446,7 @@ for epoch in tqdm(range(N_TRIALS)):
         if model.REP_BIAS>0:
             model.PHI0[:, 0] = shifted_phase(prev_list[-1].to(DEVICE)*180.0 / torch.pi, model.PHI0[:, 0], model.REP_BIAS, model.REP_VAR, popt=popt)
 
-
         ff_input = model.init_ff_input()
-
         rates = model.forward(ff_input=ff_input, IF_INIT=0)
 
         curr_list.append(model.PHI0_UNBIASED[:, 0].cpu().detach())
@@ -382,7 +454,7 @@ for epoch in tqdm(range(N_TRIALS)):
 
         rates_list.append(rates.cpu().detach())
 
-        del ff_input, model.PHI0, rates
+        del ff_input, rates
         clear_cache()
 
 rates_list = torch.stack(rates_list).cpu().numpy()
@@ -395,43 +467,26 @@ print('curr', curr_list.shape, 'prev', prev_list.shape, 'iti', iti_list.shape)
 #+end_src
 
 #+RESULTS:
-: 100% 100/100 [04:09<00:00,  2.49s/it]
-: rates (100, 768, 91, 750)
-: curr (100, 768, 1) prev (100, 768, 1) iti (76800,)
+: 100% 50/50 [03:38<00:00,  4.38s/it]rates (50, 10, 61, 1050)
+: curr (50, 10, 1) prev (50, 10, 1) iti (500,)
+:
 
 #+begin_src ipython
-start_idx = model.start_idx.cpu().numpy()
-end_idx = model.end_idx.cpu().numpy()
+start_idx = model.start_idx.cpu().numpy() - 1
+end_idx = model.end_idx.cpu().numpy() + 1
 print(start_idx.shape, end_idx.shape)
 #+end_src
 
 #+RESULTS:
-: (2, 768) (2, 768)
-
-#+begin_src ipython
-if IF_SAVE:
-    pkl_save(rates_list, 'rates_list_%s' % name, './models/nih/')
-
-    pkl_save(curr_list, 'curr_list_%s' % name, './models/nih/')
-    pkl_save(prev_list, 'prev_list_%s' % name, './models/nih/')
-
-    pkl_save(iti_list, 'iti_list_%s' % name, './models/nih/')
-
-    pkl_save(start_idx, 'start_idx_%s' % name, './models/nih/')
-    pkl_save(end_idx, 'end_idx_%s' % name, './models/nih/')
-#+end_src
-
-#+RESULTS:
+: (2, 10) (2, 10)
 
 #+begin_src ipython
 m0_list, m1_list, phi_list = decode_bump_torch(rates_list, axis=-1, RET_TENSOR=0)
-pkl_save(phi_list, 'phi_list_%s' % name, './models/nih/')
 print(phi_list.shape)
 #+end_src
 
 #+RESULTS:
-: saving to ./models/nih//phi_list_patients_C_rand.pkl
-: (100, 768, 91)
+: (50, 10, 61)
 
 #+begin_src ipython
 DURATION = rates_list.shape[2] / 10
@@ -442,14 +497,14 @@ N_SESSION = rates_list.shape[1]
 #+RESULTS:
 
 #+begin_src ipython
+n_trials = 5
 fig, ax = plt.subplots(1, 1, figsize=[3*width, height])
 
-n_trials = 4
-idx = np.random.randint(0, 100)
-rates = np.vstack(rates_list[:n_trials, idx]).T
+idx = np.random.randint(0, n_trials)
+rates = np.vstack(rates_list[-n_trials:, idx]).T
 vmin, vmax = np.percentile(rates.reshape(-1), [5, 95])
 print(vmax)
-plt.imshow(rates, aspect='auto', cmap='jet', vmin=vmin, vmax=vmax, origin='lower', extent=[0, n_trials * DURATION, 0, N_NEURONS])
+plt.imshow(rates, aspect='auto', cmap='jet', vmin=vmin, vmax=vmax, origin='lower', extent=[0, n_trials * DURATION, 0, N_NEURONS], rasterized=1)
 plt.ylabel('Pref. Location (°)')
 plt.yticks(np.linspace(0, N_NEURONS, 5), np.linspace(0, 360, 5).astype(int))
 plt.xlabel('Time (s)')
@@ -459,14 +514,14 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: 0.9310203313827513
-[[file:./figures/odr_seq_sb/figure_23.png]]
+: 4.894893836975095
+[[file:./figures/odr_seq_sb/figure_24.png]]
 :END:
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
 
-idx = np.random.randint(0, 100)
+idx = np.random.randint(0, n_trials)
 
 m0 = np.hstack(m0_list[:n_trials, idx]).T
 m1 = np.hstack(m1_list[:n_trials, idx]).T
@@ -495,7 +550,59 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_24.png]]
+[[file:./figures/odr_seq_sb/figure_25.png]]
+
+#+begin_src ipython
+if IF_SAVE:
+    pkl_save(rates_list, 'rates_list_%s' % name, './models/nih/')
+
+    pkl_save(curr_list, 'curr_list_%s' % name, './models/nih/')
+    pkl_save(prev_list, 'prev_list_%s' % name, './models/nih/')
+
+    pkl_save(iti_list, 'iti_list_%s' % name, './models/nih/')
+
+    pkl_save(start_idx, 'start_idx_%s' % name, './models/nih/')
+    pkl_save(end_idx, 'end_idx_%s' % name, './models/nih/')
+
+    pkl_save(phi_list, 'phi_list_%s' % name, './models/nih/')
+#+end_src
+
+#+RESULTS:
+: saving to ./models/nih//rates_list_controls.pkl
+: saving to ./models/nih//curr_list_controls.pkl
+: saving to ./models/nih//prev_list_controls.pkl
+: saving to ./models/nih//iti_list_controls.pkl
+: saving to ./models/nih//start_idx_controls.pkl
+: saving to ./models/nih//end_idx_controls.pkl
+: saving to ./models/nih//phi_list_controls.pkl
+
+#+begin_src ipython
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+idx = np.random.randint(N_BATCH)
+
+fig, ax = plt.subplots(1, 4, figsize=(4 * 0.75 * width, 0.75 * width), constrained_layout=True)
+
+for i in range(2):
+    for j in range(2):
+        W = model.Wab_T[model.slices[j], model.slices[i]].cpu()
+
+        if model.IS_HEBB[i+j*model.N_POP] and model.IF_HEBB:
+            W = model.W_hebb_T[idx, model.slices[j], model.slices[i]].cpu()
+            # print(W.shape)
+
+        vmin, vmax = np.percentile(W.reshape(-1), [5, 95])
+        im = ax[j+i*model.N_POP].imshow(W, aspect='equal', origin='lower', cmap='jet', vmin=vmin, vmax=vmax, rasterized=1)
+
+# divider = make_axes_locatable(ax[-1])
+# cax = divider.append_axes("right", size="5%", pad=0.05)
+# cbar = fig.colorbar(im, cax=cax)
+# cbar.set_label('Weights')
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/odr_seq_sb/figure_27.png]]
 
 #+begin_src ipython
 
@@ -507,9 +614,11 @@ plt.show()
 
 #+begin_src ipython
 n_half = N_TRIALS // 2
+print(n_half)
 #+end_src
 
 #+RESULTS:
+: 25
 
 #+begin_src ipython
 curr_ini =  curr_list[:n_half]
@@ -521,7 +630,7 @@ print(curr_ini.shape, prev_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (50, 768, 1) (50, 768, 1)
+: (25, 10, 1) (25, 10, 1)
 
 #+begin_src ipython
 phi_ini = phi_list[:n_half]
@@ -531,11 +640,11 @@ phi_last = phi_list[n_half:]
 #+RESULTS:
 
 #+begin_src ipython
-print(phi_ini.shape, prev_ini.shape)
+print('phi', phi_ini.shape, 'prev', prev_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (50, 768, 91) (50, 768, 1)
+: phi (25, 10, 61) prev (25, 10, 1)
 
 #+begin_src ipython
 def get_error_curr_prev(phi, curr, prev):
@@ -562,7 +671,7 @@ def get_end_point(start_idx, errors):
     end_point = []
 
     for k in range(errors.shape[1]): # sessions
-            idx = start_idx[1][k]-1
+            idx = start_idx[1][k]
             end_point.append(errors[:, k, idx])
 
     return np.array(end_point).T.reshape(-1, 1)
@@ -573,11 +682,16 @@ def get_end_point(start_idx, errors):
 #+begin_src ipython
 targ_ini, rel_ini, errors_ini = get_error_curr_prev(phi_ini, curr_ini, prev_ini)
 targ_last, rel_last, errors_last = get_error_curr_prev(phi_last, curr_last, prev_last)
-print(targ_ini.shape, rel_ini.shape, errors_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (38400, 1) (38400, 1) (50, 768, 91)
+
+#+begin_src ipython
+print('targ', targ_ini.shape, 'rel', rel_ini.shape, 'errors', errors_ini.shape, 'idx', 'start_idx', start_idx.shape)
+#+end_src
+
+#+RESULTS:
+: targ (250, 1) rel (250, 1) errors (25, 10, 61) idx start_idx (2, 10)
 
 #+begin_src ipython
 
@@ -599,7 +713,8 @@ print(end_point_ini.shape, end_point_last.shape)
 #+end_src
 
 #+RESULTS:
-: (38400, 1) (38400, 1)
+: (250, 1) (250, 1)
+
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -609,7 +724,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_35.png]]
+[[file:./figures/odr_seq_sb/figure_39.png]]
 
 
 #+begin_src ipython
@@ -632,7 +747,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_36.png]]
+[[file:./figures/odr_seq_sb/figure_40.png]]
 
 #+begin_src ipython
 
@@ -647,10 +762,10 @@ print(targ_ini.shape, rel_ini.shape, end_point_ini.shape)
 #+end_src
 
 #+RESULTS:
-: (38400, 1) (38400, 1) (38400, 1)
+: (250, 1) (250, 1) (250, 1)
 
 #+begin_src ipython
-n_bins = 32
+n_bins = 8
 data_ini = pd.DataFrame({'target_loc': targ_ini[:, -1], 'rel_loc': rel_ini[:, -1], 'errors': end_point_ini[:, 0]})
 data_last = pd.DataFrame({'target_loc': targ_last[:, -1], 'rel_loc': rel_last[:, -1], 'errors': end_point_last[:, 0]})
 #+end_src
@@ -734,13 +849,13 @@ ax[1].legend(fontsize=12)
 
 plt.tight_layout()
 
-plt.savefig('./figures/NIH/10_25/sb_half_%s.svg' % name)
+plt.savefig('./figures/NIH/sb_half_%s.svg' % name)
 
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_42.png]]
+[[file:./figures/odr_seq_sb/figure_46.png]]
 
 #+begin_src ipython
 
@@ -788,11 +903,15 @@ fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
 for i_name, name in enumerate(groups):
 
+    if model.RANDOM_ITI:
+        name = name + '_iti_rand'
+
     if IF_LOAD:
         phi_list = pkl_load('phi_list_%s' % name, './models/nih/')
         curr_list = pkl_load('curr_list_%s' % name, './models/nih/')
         prev_list = pkl_load('prev_list_%s' % name, './models/nih/')
         start_idx = pkl_load('start_idx_%s' % name, './models/nih/')
+        end_idx = pkl_load('end_idx_%s' % name, './models/nih/')
 
     accuracy_list = []
     precision_list = []
@@ -821,21 +940,29 @@ ax[0].legend(fontsize=14, frameon=0)
 ax[1].axhline(0, ls='--', color='k')
 ax[0].axhline(0.5, ls='--', color = 'k')
 
-plt.savefig('./figures/NIH/10_25/acc_delay_%s.svg' % name)
+if IF_LOAD:
+    plt.savefig('./figures/NIH/acc_delay_all.svg')
+else:
+    plt.savefig('./figures/NIH/acc_delay_%s.svg' % name)
+
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_45.png]]
+[[file:./figures/odr_seq_sb/figure_49.png]]
 
 #+begin_src ipython
-n_bins = 16
+n_bins = 8
 
 cmap = plt.get_cmap('Blues')
 
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
 for i_name, name in enumerate(groups):
+
+    if model.RANDOM_ITI:
+        name = name + '_iti_rand'
+
 
     if IF_LOAD:
         phi_list = pkl_load('phi_list_%s' % name, './models/nih/')
@@ -884,14 +1011,18 @@ ax[1].axhline(0, ls='--', color='k')
 ax[0].axhline(0, ls='--', color = 'k')
 ax[0].set_xticks(np.linspace(0, 180, 5))
 
-plt.savefig('./figures/NIH/10_25/sb_delay_%s.svg' % name)
+if IF_LOAD:
+    plt.savefig('./figures/NIH/sb_delay_all.svg' )
+else:
+    plt.savefig('./figures/NIH/sb_delay_%s.svg' % name)
+
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_46.png]]
+[[file:./figures/odr_seq_sb/figure_50.png]]
 
-   #+begin_src ipython
+  #+begin_src ipython
 import numpy as np
 from scipy.optimize import curve_fit
 
@@ -934,7 +1065,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_48.png]]
+[[file:./figures/odr_seq_sb/figure_52.png]]
 
 #+begin_src ipython
 
@@ -945,17 +1076,20 @@ plt.show()
 * History Effects
 
 #+begin_src ipython
-n_shifts = 10
+n_shifts = 5
 cmap = plt.get_cmap('Blues')
 
 colors = [cmap( (i+1) / n_shifts) for i in range(n_shifts)]
 
-n_bins = 8
+n_bins = 16
 
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
 for i_name, name in enumerate(groups):
     serial_list = []
+
+    if model.RANDOM_ITI:
+        name = name + '_iti_rand'
 
     if IF_LOAD:
         phi_list = pkl_load('phi_list_%s' % name, './models/nih/')
@@ -1003,23 +1137,28 @@ for i_name, name in enumerate(groups):
                        alpha=0.2, color=pal[i_name])
 
 ax[1].axhline(0, ls='--', color='k')
+ax[1].set_xticks(np.arange(1, n_shifts+1, 2), np.arange(-2, -n_shifts-2, -2, dtype=int))
 
 ax[1].set_xlabel('Stimulus #')
 ax[1].set_ylabel('Serial Bias (°)')
 
-plt.savefig('./figures/NIH/10_25/sb_stim_hist_%s.svg' % name)
+if IF_LOAD:
+    plt.savefig('./figures/NIH/sb_stim_hist_all.svg')
+else:
+    plt.savefig('./figures/NIH/sb_stim_hist_%s.svg' % name)
 
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_50.png]]
+: 19292ba6-def9-4b47-b36f-a42c192d787b
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
+: 6aff6f49-4e5e-4e69-bd78-4ff4a3a5d65b
 
 * Trial Dependency
 
@@ -1072,13 +1211,13 @@ ax[1].axhline(0, ls='--', color='k')
 ax[1].set_xlabel('Trial #')
 ax[1].set_ylabel('Serial Bias (°)')
 
-plt.savefig('./figures/NIH/10_25/sb_trial_%s.svg' % name)
+plt.savefig('./figures/NIH/sb_trial_%s.svg' % name)
 
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_52.png]]
+[[file:./figures/odr_seq_sb/figure_53.png]]
 
 #+begin_src ipython
 
@@ -1097,7 +1236,9 @@ fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
 for i_name, name in enumerate(groups):
     serial_list = []
-    name = name #+ '_iti_rand'
+
+    if model.RANDOM_ITI:
+        name = name + '_iti_rand'
 
     if IF_LOAD:
         phi_list = pkl_load('phi_list_%s' % name, './models/nih/')
@@ -1145,14 +1286,18 @@ ax[1].set_ylabel('Serial Bias (°)')
 ax[1].axhline(0, ls='--', color='k')
 ax[1].set_xticks(model.ITI_LIST)
 
-plt.savefig('./figures/NIH/10_25/sb_iti_%s.svg' % name)
+if IF_LOAD:
+    plt.savefig('./figures/NIH/sb_iti_all.svg')
+else:
+    plt.savefig('./figures/NIH/sb_iti_%s.svg' % name)
+
 plt.show()
 #+end_src
 
 #+RESULTS:
 :RESULTS:
-: [2.] 76800
-[[file:./figures/odr_seq_sb/figure_54.png]]
+: [1.] 7680
+[[file:./figures/odr_seq_sb/figure_53.png]]
 :END:
 
 #+begin_src ipython
