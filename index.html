@@ -7,221 +7,16 @@
 <title>NeuroFlame: Fast Learning And Modeling Engine</title>
 <meta name="generator" content="Org mode">
 <meta name="author" content="Alexandre Mahrach">
-<style type="text/css">
- <!--/*--><![CDATA[/*><!--*/
-  .title  { text-align: center;
-             margin-bottom: .2em; }
-  .subtitle { text-align: center;
-              font-size: medium;
-              font-weight: bold;
-              margin-top:0; }
-  .todo   { font-family: monospace; color: red; }
-  .done   { font-family: monospace; color: green; }
-  .priority { font-family: monospace; color: orange; }
-  .tag    { background-color: #eee; font-family: monospace;
-            padding: 2px; font-size: 80%; font-weight: normal; }
-  .timestamp { color: #bebebe; }
-  .timestamp-kwd { color: #5f9ea0; }
-  .org-right  { margin-left: auto; margin-right: 0px;  text-align: right; }
-  .org-left   { margin-left: 0px;  margin-right: auto; text-align: left; }
-  .org-center { margin-left: auto; margin-right: auto; text-align: center; }
-  .underline { text-decoration: underline; }
-  #postamble p, #preamble p { font-size: 90%; margin: .2em; }
-  p.verse { margin-left: 3%; }
-  pre {
-    border: 1px solid #ccc;
-    box-shadow: 3px 3px 3px #eee;
-    padding: 8pt;
-    font-family: monospace;
-    overflow: auto;
-    margin: 1.2em;
-  }
-  pre.src {
-    position: relative;
-    overflow: auto;
-    padding-top: 1.2em;
-  }
-  pre.src:before {
-    display: none;
-    position: absolute;
-    background-color: white;
-    top: -10px;
-    right: 10px;
-    padding: 3px;
-    border: 1px solid black;
-  }
-  pre.src:hover:before { display: inline; margin-top: 14px;}
-  /* Languages per Org manual */
-  pre.src-asymptote:before { content: 'Asymptote'; }
-  pre.src-awk:before { content: 'Awk'; }
-  pre.src-C:before { content: 'C'; }
-  /* pre.src-C++ doesn't work in CSS */
-  pre.src-clojure:before { content: 'Clojure'; }
-  pre.src-css:before { content: 'CSS'; }
-  pre.src-D:before { content: 'D'; }
-  pre.src-ditaa:before { content: 'ditaa'; }
-  pre.src-dot:before { content: 'Graphviz'; }
-  pre.src-calc:before { content: 'Emacs Calc'; }
-  pre.src-emacs-lisp:before { content: 'Emacs Lisp'; }
-  pre.src-fortran:before { content: 'Fortran'; }
-  pre.src-gnuplot:before { content: 'gnuplot'; }
-  pre.src-haskell:before { content: 'Haskell'; }
-  pre.src-hledger:before { content: 'hledger'; }
-  pre.src-java:before { content: 'Java'; }
-  pre.src-js:before { content: 'Javascript'; }
-  pre.src-latex:before { content: 'LaTeX'; }
-  pre.src-ledger:before { content: 'Ledger'; }
-  pre.src-lisp:before { content: 'Lisp'; }
-  pre.src-lilypond:before { content: 'Lilypond'; }
-  pre.src-lua:before { content: 'Lua'; }
-  pre.src-matlab:before { content: 'MATLAB'; }
-  pre.src-mscgen:before { content: 'Mscgen'; }
-  pre.src-ocaml:before { content: 'Objective Caml'; }
-  pre.src-octave:before { content: 'Octave'; }
-  pre.src-org:before { content: 'Org mode'; }
-  pre.src-oz:before { content: 'OZ'; }
-  pre.src-plantuml:before { content: 'Plantuml'; }
-  pre.src-processing:before { content: 'Processing.js'; }
-  pre.src-python:before { content: 'Python'; }
-  pre.src-R:before { content: 'R'; }
-  pre.src-ruby:before { content: 'Ruby'; }
-  pre.src-sass:before { content: 'Sass'; }
-  pre.src-scheme:before { content: 'Scheme'; }
-  pre.src-screen:before { content: 'Gnu Screen'; }
-  pre.src-sed:before { content: 'Sed'; }
-  pre.src-sh:before { content: 'shell'; }
-  pre.src-sql:before { content: 'SQL'; }
-  pre.src-sqlite:before { content: 'SQLite'; }
-  /* additional languages in org.el's org-babel-load-languages alist */
-  pre.src-forth:before { content: 'Forth'; }
-  pre.src-io:before { content: 'IO'; }
-  pre.src-J:before { content: 'J'; }
-  pre.src-makefile:before { content: 'Makefile'; }
-  pre.src-maxima:before { content: 'Maxima'; }
-  pre.src-perl:before { content: 'Perl'; }
-  pre.src-picolisp:before { content: 'Pico Lisp'; }
-  pre.src-scala:before { content: 'Scala'; }
-  pre.src-shell:before { content: 'Shell Script'; }
-  pre.src-ebnf2ps:before { content: 'ebfn2ps'; }
-  /* additional language identifiers per "defun org-babel-execute"
-       in ob-*.el */
-  pre.src-cpp:before  { content: 'C++'; }
-  pre.src-abc:before  { content: 'ABC'; }
-  pre.src-coq:before  { content: 'Coq'; }
-  pre.src-groovy:before  { content: 'Groovy'; }
-  /* additional language identifiers from org-babel-shell-names in
-     ob-shell.el: ob-shell is the only babel language using a lambda to put
-     the execution function name together. */
-  pre.src-bash:before  { content: 'bash'; }
-  pre.src-csh:before  { content: 'csh'; }
-  pre.src-ash:before  { content: 'ash'; }
-  pre.src-dash:before  { content: 'dash'; }
-  pre.src-ksh:before  { content: 'ksh'; }
-  pre.src-mksh:before  { content: 'mksh'; }
-  pre.src-posh:before  { content: 'posh'; }
-  /* Additional Emacs modes also supported by the LaTeX listings package */
-  pre.src-ada:before { content: 'Ada'; }
-  pre.src-asm:before { content: 'Assembler'; }
-  pre.src-caml:before { content: 'Caml'; }
-  pre.src-delphi:before { content: 'Delphi'; }
-  pre.src-html:before { content: 'HTML'; }
-  pre.src-idl:before { content: 'IDL'; }
-  pre.src-mercury:before { content: 'Mercury'; }
-  pre.src-metapost:before { content: 'MetaPost'; }
-  pre.src-modula-2:before { content: 'Modula-2'; }
-  pre.src-pascal:before { content: 'Pascal'; }
-  pre.src-ps:before { content: 'PostScript'; }
-  pre.src-prolog:before { content: 'Prolog'; }
-  pre.src-simula:before { content: 'Simula'; }
-  pre.src-tcl:before { content: 'tcl'; }
-  pre.src-tex:before { content: 'TeX'; }
-  pre.src-plain-tex:before { content: 'Plain TeX'; }
-  pre.src-verilog:before { content: 'Verilog'; }
-  pre.src-vhdl:before { content: 'VHDL'; }
-  pre.src-xml:before { content: 'XML'; }
-  pre.src-nxml:before { content: 'XML'; }
-  /* add a generic configuration mode; LaTeX export needs an additional
-     (add-to-list 'org-latex-listings-langs '(conf " ")) in .emacs */
-  pre.src-conf:before { content: 'Configuration File'; }
-
-  table { border-collapse:collapse; }
-  caption.t-above { caption-side: top; }
-  caption.t-bottom { caption-side: bottom; }
-  td, th { vertical-align:top;  }
-  th.org-right  { text-align: center;  }
-  th.org-left   { text-align: center;   }
-  th.org-center { text-align: center; }
-  td.org-right  { text-align: right;  }
-  td.org-left   { text-align: left;   }
-  td.org-center { text-align: center; }
-  dt { font-weight: bold; }
-  .footpara { display: inline; }
-  .footdef  { margin-bottom: 1em; }
-  .figure { padding: 1em; }
-  .figure p { text-align: center; }
-  .equation-container {
-    display: table;
-    text-align: center;
-    width: 100%;
-  }
-  .equation {
-    vertical-align: middle;
-  }
-  .equation-label {
-    display: table-cell;
-    text-align: right;
-    vertical-align: middle;
-  }
-  .inlinetask {
-    padding: 10px;
-    border: 2px solid gray;
-    margin: 10px;
-    background: #ffffcc;
-  }
-  #org-div-home-and-up
-   { text-align: right; font-size: 70%; white-space: nowrap; }
-  textarea { overflow-x: auto; }
-  .linenr { font-size: smaller }
-  .code-highlighted { background-color: #ffff00; }
-  .org-info-js_info-navigation { border-style: none; }
-  #org-info-js_console-label
-    { font-size: 10px; font-weight: bold; white-space: nowrap; }
-  .org-info-js_search-highlight
-    { background-color: #ffff00; color: #000000; font-weight: bold; }
-  .org-svg { width: 90%; }
-  /*]]>*/-->
-</style>
-<script type="text/javascript">
-(function () {
-var msg = "[Org export] Deprecated SETUPFILE: theme-readtheorg.setup. Update to: html-theme-readtheorg.setup";
-if (typeof console !== "undefined" && console.warn) console.warn(msg);
-
-function addBanner() {
-var d = document;
-if (!d || !d.body) return;
-if (d.getElementById("org-setupfile-deprecated-banner")) return;
-
-var div = d.createElement("div");
-div.id = "org-setupfile-deprecated-banner";
-div.setAttribute("style",
-"border:2px solid #d33; padding:0.8em; margin:0.8em 0; background:#fee; color:#600;" +
-"font-family:sans-serif; font-size:90%;"
-);
-div.innerHTML =
-"<strong>Deprecated:</strong> <code>theme-readtheorg.setup</code> has been renamed to " +
-"<code>html-theme-readtheorg.setup</code>. " +
-"Please update your Org file.";
-
-d.body.insertBefore(div, d.body.firstChild);
-}
-
-if (document.readyState === "loading") {
-document.addEventListener("DOMContentLoaded", addBanner);
-} else {
-addBanner();
-}
-})();
-</script>
+<link rel="stylesheet" type="text/css" href="https://fniessen.github.io/org-html-themes/src/readtheorg_theme/css/htmlize.css"/>
+<link rel="stylesheet" type="text/css" href="https://fniessen.github.io/org-html-themes/src/readtheorg_theme/css/readtheorg.css"/>
+<link rel="stylesheet" type="text/css" href="https://fniessen.github.io/org-html-themes/src/readtheorg_theme/css/code-copy.css"/>
+<link rel="stylesheet" type="text/css" href="src/readtheorg_theme/css/search.css"/>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="https://fniessen.github.io/org-html-themes/src/lib/js/jquery.stickytableheaders.min.js"></script>
+<script type="text/javascript" src="https://fniessen.github.io/org-html-themes/src/readtheorg_theme/js/search.js"></script>
+<script type="text/javascript" src="https://fniessen.github.io/org-html-themes/src/readtheorg_theme/js/readtheorg.js"></script>
+<script type="text/javascript" src="https://fniessen.github.io/org-html-themes/src/readtheorg_theme/js/code-copy.js"></script>
 <script type="text/javascript">
 // @license magnet:?xt=urn:btih:e95b018ef3580986a04669f1b5879592219e2a7a&dn=public-domain.txt Public Domain
 <!--/*--><![CDATA[/*><!--*/
@@ -275,41 +70,41 @@ addBanner();
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#org4383c16">Introduction</a></li>
-<li><a href="#orgbf97724">Installation</a></li>
-<li><a href="#org7836f5c">Project Structure</a></li>
-<li><a href="#org3603d8f">Network Dynamics</a>
+<li><a href="#orgff2ba49">Introduction</a></li>
+<li><a href="#org7d86e2c">Installation</a></li>
+<li><a href="#orgf35bf4e">Project Structure</a></li>
+<li><a href="#org1bbfb7b">Network Dynamics</a>
 <ul>
 <li>
 <ul>
-<li><a href="#org46b3346">Dynamics</a></li>
-<li><a href="#org8c38b3a">Connectivity</a></li>
+<li><a href="#org1565c27">Dynamics</a></li>
+<li><a href="#orga12e907">Connectivity</a></li>
 </ul>
 </li>
 </ul>
 </li>
-<li><a href="#org5a5bbc2">Network Simulations</a>
+<li><a href="#orgec3da25">Network Simulations</a>
 <ul>
-<li><a href="#org1d8bb08">Basic Usage</a></li>
-<li><a href="#org539838d">Parallel Network Simulations</a></li>
+<li><a href="#orgd4004dc">Basic Usage</a></li>
+<li><a href="#orgd76d5f8">Parallel Network Simulations</a></li>
 </ul>
 </li>
-<li><a href="#orgcb591ff">Network Training</a></li>
-<li><a href="#org19942a6">Tutorials</a>
+<li><a href="#orga748cfe">Network Training</a></li>
+<li><a href="#org220530b">Tutorials</a>
 <ul>
-<li><a href="#orgacc3774">Balanced Networks</a></li>
-<li><a href="#orge692601">Multistability</a></li>
-<li><a href="#org6581bad">Short Term Plasticity</a></li>
-<li><a href="#org1c6b31a">Behavioral Tasks</a></li>
-<li><a href="#org536804a">Serial Bias</a></li>
+<li><a href="#orgc59fc7e">Balanced Networks</a></li>
+<li><a href="#org32df13c">Multistability</a></li>
+<li><a href="#org1210067">Short Term Plasticity</a></li>
+<li><a href="#orgfc0c83c">Behavioral Tasks</a></li>
+<li><a href="#org30bd481">Serial Bias</a></li>
 </ul>
 </li>
-<li><a href="#org98a1e88">Contributing</a></li>
+<li><a href="#org76f281c">Contributing</a></li>
 </ul>
 </div>
 </nav>
 
-<figure id="org602f71e">
+<figure id="org6f65482">
 <img src="./neuroflame.jpeg" alt="neuroflame.jpeg" width="400px">
 
 </figure>
@@ -318,9 +113,9 @@ addBanner();
 Copyright © 2024 by Melanie Tschiersch. All rights reserved.
 </p>
 
-<section id="outline-container-org4383c16" class="outline-2">
-<h2 id="org4383c16">Introduction</h2>
-<div class="outline-text-2" id="text-org4383c16">
+<section id="outline-container-orgff2ba49" class="outline-2">
+<h2 id="orgff2ba49">Introduction</h2>
+<div class="outline-text-2" id="text-orgff2ba49">
 <p>
 This package provides an implementation of a recurrent neural network trainer and simulator with Pytorch.
 Networks can have multiple neural populations with different connectivity types (all-to-all, sparse) and structures (feature selective, spatially tuned, low rank).
@@ -332,9 +127,9 @@ Networks models can be trained in a unsupervised or supervised manner just as va
 </div>
 </section>
 
-<section id="outline-container-orgbf97724" class="outline-2">
-<h2 id="orgbf97724">Installation</h2>
-<div class="outline-text-2" id="text-orgbf97724">
+<section id="outline-container-org7d86e2c" class="outline-2">
+<h2 id="org7d86e2c">Installation</h2>
+<div class="outline-text-2" id="text-org7d86e2c">
 <div class="org-src-container">
 <pre class="src src-sh">pip install -r requirements.txt
 </pre>
@@ -351,9 +146,9 @@ or alternatively using conda (I recommend using mamba&rsquo;s <a href="https://g
 </div>
 </section>
 
-<section id="outline-container-org7836f5c" class="outline-2">
-<h2 id="org7836f5c">Project Structure</h2>
-<div class="outline-text-2" id="text-org7836f5c">
+<section id="outline-container-orgf35bf4e" class="outline-2">
+<h2 id="orgf35bf4e">Project Structure</h2>
+<div class="outline-text-2" id="text-orgf35bf4e">
 <div class="org-src-container">
 <pre class="src src-sh">.
 &#9500;&#9472;&#9472; conf  <span class="org-comment-delimiter"># </span><span class="org-comment">contains configuration files in yaml format.
@@ -383,17 +178,17 @@ or alternatively using conda (I recommend using mamba&rsquo;s <a href="https://g
 </div>
 </section>
 
-<section id="outline-container-org3603d8f" class="outline-2">
-<h2 id="org3603d8f"><a href="file:///org/doc/dynamics.html">Network Dynamics</a></h2>
-<div class="outline-text-2" id="text-org3603d8f">
+<section id="outline-container-org1bbfb7b" class="outline-2">
+<h2 id="org1bbfb7b"><a href="file:///org/doc/dynamics.html">Network Dynamics</a></h2>
+<div class="outline-text-2" id="text-org1bbfb7b">
 </div>
-<div id="outline-container-org46b3346" class="outline-4">
-<h4 id="org46b3346">Dynamics</h4>
-<div class="outline-text-4" id="text-org46b3346">
+<div id="outline-container-org1565c27" class="outline-4">
+<h4 id="org1565c27">Dynamics</h4>
+<div class="outline-text-4" id="text-org1565c27">
 </div>
 <ul class="org-ul">
-<li><a id="org59faa9d"></a>Currents<br>
-<div class="outline-text-5" id="text-org59faa9d">
+<li><a id="org4142d9c"></a>Currents<br>
+<div class="outline-text-5" id="text-org4142d9c">
 <p>
 Neuron \(i\) in population \(A\) has a reccurent input \(h^A_i\),
 </p>
@@ -412,8 +207,8 @@ or not
 </div>
 </li>
 
-<li><a id="orga39de04"></a>Rates<br>
-<div class="outline-text-5" id="text-orga39de04">
+<li><a id="orgb1af557"></a>Rates<br>
+<div class="outline-text-5" id="text-orgb1af557">
 <p>
 The models can have rate dynamics (setting <b>RATE_DYN</b> to 1 in the configuration file):
 </p>
@@ -442,9 +237,9 @@ Here \(\Phi\) is the transfer function defined in <b>src/activation.py</b> and c
 </ul>
 </div>
 
-<div id="outline-container-org8c38b3a" class="outline-4">
-<h4 id="org8c38b3a">Connectivity</h4>
-<div class="outline-text-4" id="text-org8c38b3a">
+<div id="outline-container-orga12e907" class="outline-4">
+<h4 id="orga12e907">Connectivity</h4>
+<div class="outline-text-4" id="text-orga12e907">
 <p>
 The connectivities available in NeuroFlame are described <a href="file:///org/tests/connectivity.html">here</a>.
 </p>
@@ -455,8 +250,8 @@ Probability of connection from population B to A:
 </div>
 
 <ul class="org-ul">
-<li><a id="org2f532f4"></a>Sparse Nets<br>
-<div class="outline-text-5" id="text-org2f532f4">
+<li><a id="org2ad4f4e"></a>Sparse Nets<br>
+<div class="outline-text-5" id="text-org2ad4f4e">
 <p>
 by default it is a sparse net
 </p>
@@ -485,8 +280,8 @@ and also low rank
 </div>
 </li>
 
-<li><a id="org9d7b0de"></a>All to all<br>
-<div class="outline-text-5" id="text-org9d7b0de">
+<li><a id="orgd5b4811"></a>All to all<br>
+<div class="outline-text-5" id="text-orgd5b4811">
 <p>
 \[ J_{ij}^{AB} =  \frac{J_{AB}}{N_B} P_{ij}^{AB} \]
 </p>
@@ -500,13 +295,13 @@ where Pij can be as above.
 </div>
 </section>
 
-<section id="outline-container-org5a5bbc2" class="outline-2">
-<h2 id="org5a5bbc2">Network Simulations</h2>
-<div class="outline-text-2" id="text-org5a5bbc2">
+<section id="outline-container-orgec3da25" class="outline-2">
+<h2 id="orgec3da25">Network Simulations</h2>
+<div class="outline-text-2" id="text-orgec3da25">
 </div>
-<div id="outline-container-org1d8bb08" class="outline-3">
-<h3 id="org1d8bb08">Basic Usage</h3>
-<div class="outline-text-3" id="text-org1d8bb08">
+<div id="outline-container-orgd4004dc" class="outline-3">
+<h3 id="orgd4004dc">Basic Usage</h3>
+<div class="outline-text-3" id="text-orgd4004dc">
 <p>
 Here is how to run a simulation
 </p>
@@ -534,9 +329,9 @@ rates = model()
 </div>
 </div>
 
-<div id="outline-container-org539838d" class="outline-3">
-<h3 id="org539838d"><a href="file:///org/doc/neurotorch.html">Parallel Network Simulations</a></h3>
-<div class="outline-text-3" id="text-org539838d">
+<div id="outline-container-orgd76d5f8" class="outline-3">
+<h3 id="orgd76d5f8"><a href="file:///org/doc/neurotorch.html">Parallel Network Simulations</a></h3>
+<div class="outline-text-3" id="text-orgd76d5f8">
 <p>
 I describe in detail how to run a network simulation and use NeuroFlame to effectively run parallel simulations for different parameters <a href="file:///org/doc/neurotorch.html">here</a>.
 </p>
@@ -544,40 +339,40 @@ I describe in detail how to run a network simulation and use NeuroFlame to effec
 </div>
 </section>
 
-<section id="outline-container-orgcb591ff" class="outline-2">
-<h2 id="orgcb591ff"><a href="file:///org/train.html">Network Training</a></h2>
-<div class="outline-text-2" id="text-orgcb591ff">
+<section id="outline-container-orga748cfe" class="outline-2">
+<h2 id="orga748cfe"><a href="file:///org/train.html">Network Training</a></h2>
+<div class="outline-text-2" id="text-orga748cfe">
 <p>
 <a href="file:///org/train.html">Here</a>, I show how to train networks.
 </p>
 </div>
 </section>
-<section id="outline-container-org19942a6" class="outline-2">
-<h2 id="org19942a6">Tutorials</h2>
-<div class="outline-text-2" id="text-org19942a6">
+<section id="outline-container-org220530b" class="outline-2">
+<h2 id="org220530b">Tutorials</h2>
+<div class="outline-text-2" id="text-org220530b">
 </div>
-<div id="outline-container-orgacc3774" class="outline-3">
-<h3 id="orgacc3774"><a href="file:///org/tests/balance.html">Balanced Networks</a></h3>
-<div class="outline-text-3" id="text-orgacc3774">
+<div id="outline-container-orgc59fc7e" class="outline-3">
+<h3 id="orgc59fc7e"><a href="file:///org/tests/balance.html">Balanced Networks</a></h3>
+<div class="outline-text-3" id="text-orgc59fc7e">
 <p>
 <a href="file:///org/tests/balance.html">Here</a>, a tutorial on balanced networks.
 </p>
 </div>
 </div>
-<div id="outline-container-orge692601" class="outline-3">
-<h3 id="orge692601"><a href="file:///org/search/multi_stable.html">Multistability</a></h3>
-<div class="outline-text-3" id="text-orge692601">
+<div id="outline-container-org32df13c" class="outline-3">
+<h3 id="org32df13c"><a href="file:///org/search/multi_stable.html">Multistability</a></h3>
+<div class="outline-text-3" id="text-org32df13c">
 </div>
 <ul class="org-ul">
-<li><a id="orge4b105d"></a>Fully connected<br>
-<div class="outline-text-5" id="text-orge4b105d">
+<li><a id="orgb1e3814"></a>Fully connected<br>
+<div class="outline-text-5" id="text-orgb1e3814">
 <p>
 <a href="file:///org/search/ring_attractor.html">Here</a>, a notebook that shows how to use NeuroFlame to locate ring attractors in parameter space.
 </p>
 </div>
 </li>
-<li><a id="org1ff6516"></a>Sparse<br>
-<div class="outline-text-5" id="text-org1ff6516">
+<li><a id="org4376fbc"></a>Sparse<br>
+<div class="outline-text-5" id="text-org4376fbc">
 <p>
 <a href="file:///org/search/multi_stable.html">Here</a>, a notebook that shows how to use NeuroFlame to locate multistable balance states in parameter space.
 </p>
@@ -586,25 +381,25 @@ I describe in detail how to run a network simulation and use NeuroFlame to effec
 </ul>
 </div>
 
-<div id="outline-container-org6581bad" class="outline-3">
-<h3 id="org6581bad"><a href="file:///org/tests/stp.html">Short Term Plasticity</a></h3>
-<div class="outline-text-3" id="text-org6581bad">
+<div id="outline-container-org1210067" class="outline-3">
+<h3 id="org1210067"><a href="file:///org/tests/stp.html">Short Term Plasticity</a></h3>
+<div class="outline-text-3" id="text-org1210067">
 <p>
 <a href="file:///org/tests/stp.html">Here</a>, a tutorial on STP with NeuroFlame.
 </p>
 </div>
 </div>
-<div id="outline-container-org1c6b31a" class="outline-3">
-<h3 id="org1c6b31a"><a href="file:///org/tests/stimuli.html">Behavioral Tasks</a></h3>
-<div class="outline-text-3" id="text-org1c6b31a">
+<div id="outline-container-orgfc0c83c" class="outline-3">
+<h3 id="orgfc0c83c"><a href="file:///org/tests/stimuli.html">Behavioral Tasks</a></h3>
+<div class="outline-text-3" id="text-orgfc0c83c">
 <p>
 <a href="file:///org/tests/stimuli.html">Here</a>, a tutorial on how to use different stimuli to get the model to perform different behavioral tasks.
 </p>
 </div>
 </div>
-<div id="outline-container-org536804a" class="outline-3">
-<h3 id="org536804a"><a href="file:///org/serial_bias.html">Serial Bias</a></h3>
-<div class="outline-text-3" id="text-org536804a">
+<div id="outline-container-org30bd481" class="outline-3">
+<h3 id="org30bd481"><a href="file:///org/serial_bias.html">Serial Bias</a></h3>
+<div class="outline-text-3" id="text-org30bd481">
 <p>
 <a href="file:///org/serial_bias.html">Here</a>, a tutorial on how to get serial bias in a balanced network model.
 </p>
@@ -612,14 +407,14 @@ I describe in detail how to run a network simulation and use NeuroFlame to effec
 </div>
 </section>
 
-<section id="outline-container-org98a1e88" class="outline-2">
-<h2 id="org98a1e88">Contributing</h2>
-<div class="outline-text-2" id="text-org98a1e88">
+<section id="outline-container-org76f281c" class="outline-2">
+<h2 id="org76f281c">Contributing</h2>
+<div class="outline-text-2" id="text-org76f281c">
 <p>
 Feel free to contribute.
 </p>
 
-<pre class="example" id="org5782719">
+<pre class="example" id="org185e475">
 MIT License
 Copyright (c) [2023] [A. Mahrach]
 </pre>
