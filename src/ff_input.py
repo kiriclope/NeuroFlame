@@ -218,8 +218,8 @@ def init_ff_seq(model):
 
             del stimulus, stimulusI
 
-        if "flow" in model.TASK:
-            del grid_inputs
+        # if "flow" in model.TASK:
+        #     del grid_inputs
 
     return ff_input * torch.sqrt(model.Ka[0]) * model.M0
 

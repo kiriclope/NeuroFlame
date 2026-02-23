@@ -454,13 +454,13 @@ kwargs = {
     'T_STIM_ON': [4.0, 8.0],
     'T_STIM_OFF': [5.0, 9.0],
 
-    'Jab': [1.0, -1.4, 1.0, -1],
+    'Jab': [1.0, -1.5, 1.0, -1],
     'Ja0': [2.0, 1.0],
 
     'STIM_EI': 0,
     'I0': [1.0, -10.0],
     'PHI0': [180.0, 180],
-    'SIGMA0': [4.0, 0.0],
+    'SIGMA0': [1.0, 0.0],
     'M0': 1.0,
 
     'RANDOM_DELAY': 1,
@@ -469,9 +469,10 @@ kwargs = {
 
     'IF_STP': 1,
     'IS_STP': [1, 0, 0, 0],
+    'J_STP': 1.0,
     'USE': [0.03, 0.03, 0.03, 0.1],
-    'TAU_FAC': [0.5, 2.0, 2.0, 0.0],
-    'TAU_REC': [0.1, 0.2, 0.2, 0.1],
+    'TAU_FAC': [2.0, 2.0, 2.0, 0.0],
+    'TAU_REC': [0.2, 0.2, 0.2, 0.1],
     'W_STP': [1.0, 3.0, 4.0, 1.0],
 
     'DT': 0.02,
@@ -497,9 +498,9 @@ kwargs = {
 REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "train_odr_EI.yml"
 # conf_name = "train_vanilla.yml"
-DEVICE = 'cuda'
+DEVICE = 'cuda:1'
 
-total_batches = 128 * 4
+total_batches = 128 * 5
 batch_size = 128
 
 ratio = total_batches // batch_size
@@ -513,7 +514,7 @@ print('seed', seed)
 #+end_src
 
 #+RESULTS:
-: N_BATCH 512 batch_size 128
+: N_BATCH 640 batch_size 128
 : seed 0
 
 #+begin_src ipython
@@ -521,20 +522,13 @@ model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BAT
 #+end_src
 
 #+RESULTS:
-: 1050
-: 450
-: EE post 0 pre 0 Jab tensor(0.0632, device='cuda:0') torch.Size([1050, 1050])
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
+: 750
+: 250
 
 * Training
 
 #+begin_src ipython
-# model.J_STP.requires_grad = True
+model.J_STP.requires_grad = True
     #+end_src
 
 #+RESULTS:
@@ -548,7 +542,7 @@ model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BAT
 #+end_src
 
 #+RESULTS:
-: Wab_train torch.Size([1050, 1050])
+: Wab_train torch.Size([750, 750])
 : J_STP torch.Size([])
 
 #+begin_src ipython
@@ -568,11 +562,13 @@ print(torch.where(rwd_mask[idx]==1)[0])
 #+end_src
 
 #+RESULTS:
-: rwd_mask torch.Size([512, 181])
-: tensor([40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
-:         58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75,
-:         76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90],
-:        device='cuda:0')
+: rwd_mask torch.Size([640, 181])
+: tensor([ 40,  41,  42,  43,  44,  45,  46,  47,  48,  49,  50,  51,  52,  53,
+:          54,  55,  56,  57,  58,  59,  60,  61,  62,  63,  64,  65,  66,  67,
+:          68,  69,  70,  71,  72,  73,  74,  75,  76,  77,  78,  79,  80,  81,
+:          82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,
+:          96,  97,  98,  99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
+:         110], device='cuda:1')
 
 *** Inputs and Labels
 
@@ -591,8 +587,8 @@ print(labels.shape)
 #+end_src
 
 #+RESULTS:
-: total_batches 4
-: torch.Size([512, 1])
+: total_batches 5
+: torch.Size([640, 1])
 
 #+begin_src ipython
 model.PHI0 = torch.ones((N_BATCH, 2, 1), device=DEVICE, dtype=torch.float)
@@ -607,7 +603,7 @@ print(model.PHI0.shape, ff_input.shape, labels.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([512, 2, 1]) torch.Size([512, 1405, 1500]) torch.Size([512, 181])
+: torch.Size([640, 2, 1]) torch.Size([640, 1405, 1000]) torch.Size([640, 181])
 
 #+begin_src ipython
 plt.hist(labels[labels!=-999].cpu() * 180 / np.pi, bins=15)
@@ -616,7 +612,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr/figure_25.png]]
+[[file:./figures/odr/figure_24.png]]
 
 *** Run
 
@@ -626,9 +622,9 @@ train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_si
 
 #+RESULTS:
 :RESULTS:
-[[file:./figures/odr/figure_26.png]]
-: torch.Size([409, 1405, 1500]) torch.Size([103, 1405, 1500])
-: torch.Size([409, 181]) torch.Size([103, 181])
+[[file:./figures/odr/figure_25.png]]
+: torch.Size([512, 1405, 1000]) torch.Size([128, 1405, 1000])
+: torch.Size([512, 181]) torch.Size([128, 181])
 :END:
 
 #+begin_src ipython
@@ -640,7 +636,7 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+RESULTS:
 
     #+begin_src ipython
-num_epochs = 10
+num_epochs = 20
 start = perf_counter()
 loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs, thresh=.005)
 end = perf_counter()
@@ -649,17 +645,18 @@ print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
 #+RESULTS:
 #+begin_example
-Epoch 1/10, Training Loss: 0.9868, Validation Loss: 1.1922
-Epoch 2/10, Training Loss: 0.9820, Validation Loss: 1.1873
-Epoch 3/10, Training Loss: 0.9773, Validation Loss: 1.1824
-Epoch 4/10, Training Loss: 0.9727, Validation Loss: 1.1794
-Epoch 5/10, Training Loss: 0.9696, Validation Loss: 1.1765
-Epoch 6/10, Training Loss: 0.9668, Validation Loss: 1.1738
-Epoch 7/10, Training Loss: 0.9643, Validation Loss: 1.1714
-Epoch 8/10, Training Loss: 0.9620, Validation Loss: 1.1693
-Epoch 9/10, Training Loss: 0.9599, Validation Loss: 1.1673
-Epoch 10/10, Training Loss: 0.9580, Validation Loss: 1.1656
-Elapsed (with compilation) = 0h 2m 36s
+Epoch 1/20, Training Loss: 1.9362, Validation Loss: 1.8577
+Epoch 2/20, Training Loss: 1.9144, Validation Loss: 1.8396
+Epoch 3/20, Training Loss: 1.8935, Validation Loss: 1.8229
+Epoch 4/20, Training Loss: 1.8740, Validation Loss: 1.8064
+Epoch 5/20, Training Loss: 1.8561, Validation Loss: 1.7894
+Epoch 6/20, Training Loss: 1.8391, Validation Loss: 1.7742
+Epoch 7/20, Training Loss: 1.8226, Validation Loss: 1.7600
+Epoch 8/20, Training Loss: 1.8071, Validation Loss: 1.7463
+Epoch 9/20, Training Loss: 1.7929, Validation Loss: 1.7334
+Epoch 10/20, Training Loss: 1.7800, Validation Loss: 1.7216
+Epoch 11/20, Training Loss: 1.7676, Validation Loss: 1.7104
+Epoch 12/20, Training Loss: 1.7560, Validation Loss: 1.6998
 #+end_example
 
 #+begin_src ipython
@@ -667,6 +664,15 @@ torch.save(model.state_dict(), '../models/odr/odr_%d.pth' % seed)
 #+end_src
 
 #+RESULTS:
+: 90967c3e-2877-487a-ba0a-9067eb278dc5
+
+#+begin_src ipython
+from src.utils import clear_cache
+clear_cache()
+#+end_src
+
+#+RESULTS:
+: 867b045c-6b3c-4b8b-8295-21c551349ee5
 
 * Testing
 
@@ -681,9 +687,9 @@ print(model.J_STP)
 
 #+RESULTS:
 : odict_keys(['Wab_train', 'J_STP'])
-: False
+: True
 : Parameter containing:
-: tensor(2.7004, device='cuda:0', requires_grad=True)
+: tensor(4.2802, device='cuda:1', requires_grad=True)
 
 #+begin_src ipython
 with torch.no_grad():
@@ -699,34 +705,7 @@ with torch.no_grad():
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-#+begin_example
----------------------------------------------------------------------------
-OutOfMemoryError                          Traceback (most recent call last)
-Cell In[44], line 9
-      5 model.PHI0 = torch.ones((N_BATCH, 2, 1), device=DEVICE, dtype=torch.float)
-      6 model.PHI0[:, 0] = labels
-----> 9 ff_input = model.init_ff_input()
-     10 print(model.PHI0.shape, ff_input.shape, labels.shape)
-
-File ~/models/NeuroFlame/org/train/odr/../../../src/network.py:174, in Network.init_ff_input(self)
-    173 def init_ff_input(self):
---> 174     return init_ff_input(self)
-
-File ~/models/NeuroFlame/org/train/odr/../../../src/ff_input.py:275, in init_ff_input(model)
-    272     model.VAR_FF.mul_(torch.sqrt(model.Ka[0]))
-    273     return init_ff_live(model)
---> 275 return init_ff_seq(model)
-
-File ~/models/NeuroFlame/org/train/odr/../../../src/ff_input.py:224, in init_ff_seq(model)
-    221     if "flow" in model.TASK:
-    222         del grid_inputs
---> 224 return ff_input * torch.sqrt(model.Ka[0]) * model.M0
-
-OutOfMemoryError: CUDA out of memory. Tried to allocate 4.02 GiB. GPU 0 has a total capacity of 23.60 GiB of which 3.13 GiB is free. Including non-PyTorch memory, this process has 20.45 GiB memory in use. Of the allocated memory 16.13 GiB is allocated by PyTorch, and 4.04 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
-#+end_example
-:END:
+: torch.Size([640, 2, 1]) torch.Size([640, 1405, 1000]) torch.Size([640, 1])
 
 #+begin_src ipython
 target_loc = labels[:, 0].cpu() * 180 / np.pi
@@ -749,7 +728,7 @@ print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rates (512, 181, 1050)
+: rates (640, 181, 750)
 
  #+begin_src ipython
 plot_rates_selec(rates=rates, idx=20, thresh=20)
@@ -764,7 +743,7 @@ plot_m0_m1_phi(model, rates, 4)
 
 #+RESULTS:
 :RESULTS:
-: (512, 181) (512, 181) (512, 181)
+: (640, 181) (640, 181) (640, 181)
 [[file:./figures/odr/figure_35.png]]
 :END:
 
@@ -801,7 +780,6 @@ Cij = clamp_tensor(Cij, 0, model.slices).cpu().detach().numpy()
 #+end_src
 
 #+RESULTS:
-: 8dc2f663-b9cc-4fbc-98f5-0beea92a531a
 
 #+begin_src ipython
 from scipy.ndimage import gaussian_filter1d, uniform_filter1d
@@ -840,7 +818,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 9a9a1489-31ef-427a-96ad-64fc696c56e5
+[[file:./figures/odr/figure_38.png]]
 
 #+begin_src ipython
 Dij = Cij.flatten()
@@ -883,7 +861,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: a8745ae3-c630-4162-8a8c-17b4ba5e9a96
+[[file:./figures/odr/figure_39.png]]
 
 
 #+begin_src ipython
@@ -891,4 +869,3 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 6e191617-ec42-4ce9-b709-725510608640
