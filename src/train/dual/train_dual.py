@@ -46,7 +46,7 @@ def create_dual_masks(model):
 
     steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
 
-    mask_rwd = (steps >= (model.N_STIM_ON[-1].cpu().numpy() - model.N_STEADY))
+    mask_rwd = (steps >= (model.N_STIM_ON[-1].cpu().numpy() - model.N_STEADY)) &  (steps >= (model.N_STIM_OFF[-1].cpu().numpy() - model.N_STEADY + 1))
     rwd_idx = np.where(mask_rwd)[0]
 
     mask_cue = (steps >= (model.N_STIM_OFF[2].cpu().numpy() - model.N_STEADY)) & (steps <= (model.N_STIM_OFF[3].cpu().numpy() - model.N_STEADY))

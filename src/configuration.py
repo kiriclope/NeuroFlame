@@ -125,7 +125,7 @@ def init_const(model):
 
     for i_pop in range(model.N_POP):
         dum = int(model.N_NEURON * model.frac[i_pop])
-        print(dum)
+        # print(dum)
         model.Na.append(dum)
 
         if model.FRAC_K:

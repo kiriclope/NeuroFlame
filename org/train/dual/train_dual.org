@@ -25,7 +25,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchmetrics
+
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 
 REPO_ROOT = "/home/leon/models/NeuroFlame"
@@ -460,6 +460,7 @@ def angle_AB(A, B):
 #+end_src
 
 #+RESULTS:
+: 9da230b7-84e6-47df-8b6d-e76b0a7900d6
 
 #+begin_src ipython
 def get_theta(a, b, GM=0, IF_NORM=0):
@@ -853,7 +854,7 @@ def plot_overlap(readout, labels=['pair', 'unpair'], figname='fig.svg'):
 * Model
 
 #+begin_src ipython
-kwargs = {}
+kwargs = {'TRAINING': 1,}
 #+end_src
 
 #+RESULTS:
@@ -880,7 +881,8 @@ model.to(device);
 #+end_src
 
 #+RESULTS:
-: EE post 0 pre 0 Jab tensor(0.0750, device='cuda:0') torch.Size([750, 750])
+: 750
+: 250
 
 #+begin_src ipython
 batch_size = 16
@@ -1028,9 +1030,12 @@ torch.save(model.state_dict(), '%s/dpa_%d.pth' % (model.SAVE_PATH, seed))
 
 #+RESULTS:
 : training DPA
-: Epoch 1/10, Training Loss: nan, Validation Loss: nan
-: Stopping training as loss is NaN.
-: Elapsed (with compilation) = 0h 1m 4s
+: Epoch 1/10, Training Loss: 3.3027, Validation Loss: 1.9586
+: Epoch 2/10, Training Loss: 0.9351, Validation Loss: 0.3765
+: Epoch 3/10, Training Loss: 0.1537, Validation Loss: 0.1225
+: Epoch 4/10, Training Loss: 0.1224, Validation Loss: 0.1201
+: Stopping training as loss has fallen below the threshold: 0.12236989633395122, 0.12014837352240958
+: Elapsed (with compilation) = 0h 3m 51s
 
 #+begin_src ipython
 print(model.J_STP)
@@ -1038,7 +1043,7 @@ print(model.J_STP)
 
 #+RESULTS:
 : Parameter containing:
-: tensor(nan, device='cuda:0', requires_grad=True)
+: tensor(5.3901, device='cuda:0', requires_grad=True)
 
 ** Testing
 :PROPERTIES:
@@ -1177,69 +1182,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-#+begin_example
----------------------------------------------------------------------------
-ValueError                                Traceback (most recent call last)
-Cell In[95], line 7
-      4 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-      5 # ax[0].hist(U[:, 0], histtype='step', bins='auto')
-      6 # ax[0].hist(U[:, 1], histtype='step', bins='auto')
-----> 7 ax[0].hist(V[:, 0], histtype='step', bins='auto')
-      8 ax[1].hist(V[:, 1], histtype='step', bins='auto')
-      9 ax[0].set_xlabel('$ n_{AB} $')
-
-File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/__init__.py:1465, in _preprocess_data.<locals>.inner(ax, data, *args, **kwargs)
-   1462 @functools.wraps(func)
-   1463 def inner(ax, *args, data=None, **kwargs):
-   1464     if data is None:
--> 1465         return func(ax, *map(sanitize_sequence, args), **kwargs)
-   1467     bound = new_sig.bind(ax, *args, **kwargs)
-   1468     auto_label = (bound.arguments.get(label_namer)
-   1469                   or bound.kwargs.get(label_namer))
-
-File ~/mambaforge/envs/torch/lib/python3.10/site-packages/matplotlib/axes/_axes.py:6854, in Axes.hist(self, x, bins, range, density, weights, cumulative, bottom, histtype, align, orientation, rwidth, log, color, label, stacked, **kwargs)
-   6850 # Loop through datasets
-   6851 for i in range(nx):
-   6852     # this will automatically overwrite bins,
-   6853     # so that each histogram uses the same bins
--> 6854     m, bins = np.histogram(x[i], bins, weights=w[i], **hist_kwargs)
-   6855     tops.append(m)
-   6856 tops = np.array(tops, float)  # causes problems later if it's an int
-
-File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:780, in histogram(a, bins, range, density, weights)
-    680 r"""
-    681 Compute the histogram of a dataset.
-    682
-   (...)
-    776
-    777 """
-    778 a, weights = _ravel_and_check_weights(a, weights)
---> 780 bin_edges, uniform_bins = _get_bin_edges(a, bins, range, weights)
-    782 # Histogram is an integer or a float array depending on the weights.
-    783 if weights is None:
-
-File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:396, in _get_bin_edges(a, bins, range, weights)
-    392 if weights is not None:
-    393     raise TypeError("Automated estimation of the number of "
-    394                     "bins is not supported for weighted data")
---> 396 first_edge, last_edge = _get_outer_edges(a, range)
-    398 # truncate the range if needed
-    399 if range is not None:
-
-File ~/mambaforge/envs/torch/lib/python3.10/site-packages/numpy/lib/histograms.py:323, in _get_outer_edges(a, range)
-    321     first_edge, last_edge = a.min(), a.max()
-    322     if not (np.isfinite(first_edge) and np.isfinite(last_edge)):
---> 323         raise ValueError(
-    324             "autodetected range of [{}, {}] is not finite".format(first_edge, last_edge))
-    326 # expand empty range to avoid divide by zero
-    327 if first_edge == last_edge:
-
-ValueError: autodetected range of [nan, nan] is not finite
-#+end_example
 [[file:./figures/dual/figure_46.png]]
-:END:
 
 #+begin_src ipython
 odors = model.odors.cpu().numpy()
@@ -1274,26 +1217,6 @@ masked_cov_matrix = np.ma.masked_array(cov_matrix, mask=mask)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-#+begin_example
----------------------------------------------------------------------------
-ValueError                                Traceback (most recent call last)
-Cell In[97], line 10
-      8 for i in range(num_vectors):
-      9     for j in range(num_vectors):
----> 10         cov_matrix[i][j] = angle_AB(vectors[i], vectors[j])
-     12 # Mask the upper triangle
-     13 mask = np.triu(np.ones_like(cov_matrix, dtype=bool))
-
-Cell In[14], line 5, in angle_AB(A, B)
-      2 A_norm = A / (np.linalg.norm(A) + 1e-5)
-      3 B_norm = B / (np.linalg.norm(B) + 1e-5)
-----> 5 return int(np.arccos(A_norm @ B_norm) * 180 / np.pi)
-
-ValueError: cannot convert float NaN to integer
-#+end_example
-:END:
 
 #+begin_src ipython
 fig, ax = plt.subplots(figsize=(8, 6))
@@ -1341,7 +1264,7 @@ model.load_state_dict(model_state_dict)
 #+end_src
 
 #+RESULTS:
-: cb47856d-fd47-425b-89c6-b9526de53117
+: <All keys matched successfully>
 
 ** Training
 
@@ -1350,7 +1273,6 @@ model.J_STP.requires_grad = False
 #+end_src
 
 #+RESULTS:
-: 5b443baf-0255-4146-9bd9-e2ea5e831f9b
 
 #+begin_src ipython
 for name, param in model.named_parameters():
@@ -1359,7 +1281,8 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-: 599229d3-bc88-4119-9f13-bc11c7484772
+: low_rank.V torch.Size([750, 2])
+: low_rank.U torch.Size([750, 2])
 
 #+begin_src ipython
 steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
@@ -1383,7 +1306,10 @@ model.lr_eval_win = np.max( (rwd_idx.shape[0], stim_idx.shape[0]))
 #+end_src
 
 #+RESULTS:
-: 9dacba89-bb30-47a7-8c6d-315eb45abf3d
+: rwd [50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69]
+: stim [30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49]
+: zero [ 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23
+:  24 25 26 27 28 29]
 
 #+begin_src ipython
 model.N_BATCH = 512
@@ -1409,7 +1335,7 @@ print(ff_input.shape)
 #+end_src
 
 #+RESULTS:
-: 1ebc1abf-c47c-4b02-966c-50683bc6d954
+: torch.Size([1024, 605, 1000])
 
 #+begin_src ipython
 labels_Go = torch.ones((model.N_BATCH, model.lr_eval_win))
@@ -1422,7 +1348,8 @@ print('labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: 51e17953-b90a-43d2-baa7-5ddaa0b4a0e1
+: torch.Size([1024, 20])
+: labels torch.Size([1024, 2, 20])
 
 *** Run
 
@@ -1433,7 +1360,8 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
 #+RESULTS:
-: 0b01beda-6cbe-4c93-84fc-dd13edbb5c1c
+: torch.Size([819, 605, 1000]) torch.Size([205, 605, 1000])
+: torch.Size([819, 2, 20]) torch.Size([205, 2, 20])
 
 #+begin_src ipython
 print('training DRT')
@@ -1447,14 +1375,19 @@ print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 #+end_src
 
 #+RESULTS:
-: 501544d8-937b-441a-9dda-010b94061685
+: training DRT
+: Epoch 1/5, Training Loss: 0.5759, Validation Loss: 0.1904
+: Epoch 2/5, Training Loss: 0.1770, Validation Loss: 0.1674
+: Epoch 3/5, Training Loss: 0.1585, Validation Loss: 0.1486
+: Epoch 4/5, Training Loss: 0.1435, Validation Loss: 0.1397
+: Stopping training as loss has fallen below the threshold: 0.143535022265636, 0.13973183210303144
+: Elapsed (with compilation) = 0h 3m 7s
 
  #+begin_src ipython
 torch.save(model.state_dict(), '%s/dual_naive_%d.pth' % (model.SAVE_PATH, seed))
 #+end_src
 
 #+RESULTS:
-: 61c9deeb-fae6-4fe8-b6c9-fc65077ddb65
 
 ** Test
 :PROPERTIES:
@@ -1468,7 +1401,6 @@ model.eval();
 #+end_src
 
 #+RESULTS:
-: 16dfd8b0-4c00-4d43-b9f9-bca29a17b9e4
 
    #+begin_src ipython
 model.N_BATCH = 1
@@ -1494,7 +1426,7 @@ print('ff_input', ff_input.shape)
   #+end_src
 
   #+RESULTS:
-  : 672340e2-1a3a-44e8-97f7-1bce6b5ea086
+  : ff_input torch.Size([2, 605, 1000])
 
   #+begin_src ipython
 with torch.no_grad():
@@ -1503,14 +1435,14 @@ print(rates.shape)
   #+end_src
 
 #+RESULTS:
-: 9b6c1b18-7b21-4603-a4e5-86840ec7e050
+: (2, 101, 750)
 
   #+begin_src ipython
 plot_overlap(model.readout.cpu().detach().numpy(), labels=['Go', 'NoGo'], figname='../figures/dual/GoNoGo_overlaps_%d.svg' % seed)
  #+end_src
 
 #+RESULTS:
-: 239e1108-6089-4424-a0b7-563166fa1774
+[[file:./figures/dual/figure_63.png]]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -1530,7 +1462,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 0934781e-36f1-4d10-84ca-eaa91908f9ea
+[[file:./figures/dual/figure_64.png]]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
@@ -1583,14 +1515,13 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: a282bce4-1ba9-42d8-9bf8-50f29483fe64
+[[file:./figures/dual/figure_65.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 13417628-ad98-449a-8038-6d0b1da0f8eb
 
 * Dual Task
 ** Testing
@@ -1606,7 +1537,6 @@ model.eval();
 #+end_src
 
 #+RESULTS:
-: 4cd4a259-4b8e-4521-a06c-a01b65130fa7
 
 #+begin_src ipython
 steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
@@ -1633,7 +1563,14 @@ print('zero', zero_idx)
 #+end_src
 
 #+RESULTS:
-: 05ae7f74-f29f-408d-a404-8d020143cc58
+: rwd [ 70  71  72  73  74  75  76  77  78  79  80  81  82  83  84  85  86  87
+:   88  89  90  91  92  93  94  95  96  97  98  99 100]
+: cue [50 51 52 53 54 55 56 57 58 59 60]
+: GnG [40 41 42 43 44 45 46 47 48 49 50]
+: stim [10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33
+:  34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57
+:  58 59 60 61 62 63 64 65 66 67 68 69 70]
+: zero [0 1 2 3 4 5 6 7 8 9]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
@@ -1688,7 +1625,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: c9b6a366-5a83-4b6c-93a8-979844ca1b7d
+[[file:./figures/dual/figure_69.png]]
 
 #+begin_src ipython
 N_BATCH = 10
@@ -1739,7 +1676,7 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: 8e5368c8-a811-4b8c-8389-6247a6cb4bdd
+: ff_input torch.Size([120, 605, 1000]) labels torch.Size([120, 3, 31])
 
 #+begin_src ipython
 with torch.no_grad():
@@ -1748,7 +1685,7 @@ print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: 675d7e7e-7663-4ba8-80f2-cb40c36e5d7c
+: (120, 101, 750)
 
 
 #+RESULTS:
@@ -1762,7 +1699,7 @@ print(readout.shape, y_labels.shape)
 #+end_src
 
 #+RESULTS:
-: 52f8bf99-aa5c-4f54-9f8d-9d7632d8aa6b
+: (120, 101, 2) (3, 120)
 
 #+begin_src ipython
 def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fig.svg', title='first'):
@@ -1814,35 +1751,45 @@ def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fi
 #+end_src
 
 #+RESULTS:
-: 095f894b-7136-4be8-8f7c-1d1eb0d9cf24
 
 #+begin_src ipython
 plot_overlap_label(readout, y_labels, task=0, figname='sample_overlaps_naive.svg')
 #+end_src
 
 #+RESULTS:
-: 27ffc4bc-19d4-43dc-a95f-791189e0d18a
+:RESULTS:
+: (3, 120)
+: (3, 120)
+[[file:./figures/dual/figure_74.png]]
+:END:
 
 #+begin_src ipython
 plot_overlap_label(readout, y_labels, task=1, figname='sample_overlaps_naive.svg')
 #+end_src
 
 #+RESULTS:
-: e704ea29-d4ab-4251-9f17-567a6da9f3d7
+:RESULTS:
+: (3, 120)
+: (3, 120)
+[[file:./figures/dual/figure_75.png]]
+:END:
 
 #+begin_src ipython
 plot_overlap_label(readout, y_labels, task=-1, figname='sample_overlaps_naive.svg')
 #+end_src
 
 #+RESULTS:
-: 5595bed7-da39-4f61-9ea5-60cb2455d5d1
+:RESULTS:
+: (3, 120)
+: (3, 120)
+[[file:./figures/dual/figure_76.png]]
+:END:
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 7e01fdfe-41f6-42da-bb40-92d09ce93483
 
 *** Perf
 
@@ -1852,7 +1799,6 @@ dpa_perf, drt_perf = criterion(model.readout, labels.clone())
 #+end_src
 
 #+RESULTS:
-: b52b33e1-145c-47ef-ba5b-d76d26d2b61c
 
 #+begin_src ipython
 dpa_mean = []
@@ -1869,14 +1815,12 @@ dpa_sem = np.stack(dpa_sem)
 #+end_src
 
 #+RESULTS:
-: 690a2aba-d8e6-4812-b0fe-07568ed564f1
 
 #+begin_src ipython
 drt_mean, drt_sem = calculate_mean_accuracy_and_sem(drt_perf)
 #+end_src
 
 #+RESULTS:
-: 904aacbf-7b54-4b38-9f42-0db95d7f500c
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[1.5*width, height])
@@ -1909,14 +1853,13 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 0f9b6ca9-fe73-4b85-88f6-19f6332f6613
+[[file:./figures/dual/figure_81.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 8bc52497-bb2c-49ab-94af-67681bb8cb96
 
 ** Training
 
@@ -1945,7 +1888,14 @@ print('zero', zero_idx)
 #+end_src
 
 #+RESULTS:
-: 30995ebf-f722-4a99-8332-3e69cd23e627
+: rwd [ 70  71  72  73  74  75  76  77  78  79  80  81  82  83  84  85  86  87
+:   88  89  90  91  92  93  94  95  96  97  98  99 100]
+: cue [50 51 52 53 54 55 56 57 58 59 60]
+: GnG [30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50]
+: stim [10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33
+:  34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57
+:  58 59 60 61 62 63 64 65 66 67 68 69 70]
+: zero [0 1 2 3 4 5 6 7 8 9]
 
 #+begin_src ipython
 model.N_BATCH = 64
@@ -1994,7 +1944,7 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: 06feec35-26e6-4229-903c-fc91f1a91e2f
+: ff_input torch.Size([768, 605, 1000]) labels torch.Size([768, 3, 61])
 
 #+begin_src ipython
 train_loader, val_loader = split_data(ff_input, labels, train_perc=0.8, batch_size=batch_size)
@@ -2008,7 +1958,8 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
 #+RESULTS:
-: 4871945b-f706-48cb-8bad-02d112639f90
+: torch.Size([614, 605, 1000]) torch.Size([154, 605, 1000])
+: torch.Size([614, 3, 61]) torch.Size([154, 3, 61])
 
 #+begin_src ipython
 print('training Dual')
@@ -2021,21 +1972,25 @@ print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 #+end_src
 
 #+RESULTS:
-: f058cd18-0d8b-4187-8945-5237de3650c2
+: training Dual
+: Epoch 1/5, Training Loss: 0.9068, Validation Loss: 0.4788
+: Epoch 2/5, Training Loss: 0.4489, Validation Loss: 0.4155
+: Epoch 3/5, Training Loss: 0.4221, Validation Loss: 0.3909
+: Epoch 4/5, Training Loss: 0.4100, Validation Loss: 0.4346
+: Epoch 5/5, Training Loss: 0.4524, Validation Loss: 0.3923
+: Elapsed (with compilation) = 0h 2m 57s
 
 #+begin_src ipython
 torch.save(model.state_dict(), '%s/dual_train_%d.pth' % (model.SAVE_PATH, seed))
 #+end_src
 
 #+RESULTS:
-: 09e3bf5f-6e61-4e82-86f6-358e8a5bb0ad
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: c3488018-a32f-481a-97dc-c23f5ca606da
 
 ** Re-Testing
 :PROPERTIES:
@@ -2051,7 +2006,6 @@ model.eval();
 #+end_src
 
 #+RESULTS:
-: 6e0fa754-b5a4-4744-9f71-54e151f4dd92
 
 
 #+begin_src ipython
@@ -2079,7 +2033,14 @@ print('zero', zero_idx)
 #+end_src
 
 #+RESULTS:
-: d7a50008-d16e-425c-a451-5f1f00bfb360
+: rwd [ 70  71  72  73  74  75  76  77  78  79  80  81  82  83  84  85  86  87
+:   88  89  90  91  92  93  94  95  96  97  98  99 100]
+: cue [50 51 52 53 54 55 56 57 58 59 60]
+: GnG [40 41 42 43 44 45 46 47 48 49 50]
+: stim [10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33
+:  34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57
+:  58 59 60 61 62 63 64 65 66 67 68 69 70]
+: zero [0 1 2 3 4 5 6 7 8 9]
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()[model.slices[0], 0]
@@ -2131,7 +2092,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: c6153095-333c-43aa-a5c8-79a759577c2b
+[[file:./figures/dual/figure_91.png]]
 
 #+begin_src ipython
 N_BATCH = 10
@@ -2182,7 +2143,7 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: 7c4cd0e7-a2a8-483a-8719-cb6776ffadba
+: ff_input torch.Size([120, 605, 1000]) labels torch.Size([120, 3, 31])
 
 #+begin_src ipython
 with torch.no_grad():
@@ -2191,7 +2152,7 @@ print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: 3666e592-0fd0-4361-bea9-ab2cb227ea9c
+: (120, 101, 750)
 
 *** Overlaps
 
@@ -2202,7 +2163,7 @@ print(readout.shape, y_labels.shape)
 #+end_src
 
 #+RESULTS:
-: ed035d80-c345-4fd6-bc5c-3762d3e4ea5b
+: (120, 101, 2) (3, 120)
 
 #+begin_src ipython
 def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fig.svg', title='first'):
@@ -2254,35 +2215,45 @@ def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fi
 #+end_src
 
 #+RESULTS:
-: d6a0a6f6-c1a1-442e-b76e-ab6e0a5f7e9e
 
 #+begin_src ipython
 plot_overlap_label(readout, y_labels, task=0, figname='sample_overlaps_naive.svg')
 #+end_src
 
 #+RESULTS:
-: 703118fc-aa72-4cbc-8e67-536a8cbb0094
+:RESULTS:
+: (3, 120)
+: (3, 120)
+[[file:./figures/dual/figure_96.png]]
+:END:
 
 #+begin_src ipython
 plot_overlap_label(readout, y_labels, task=1, figname='sample_overlaps_naive.svg')
 #+end_src
 
 #+RESULTS:
-: 218a09b9-14e4-4e69-8135-6ada33d8c61d
+:RESULTS:
+: (3, 120)
+: (3, 120)
+[[file:./figures/dual/figure_97.png]]
+:END:
 
 #+begin_src ipython
 plot_overlap_label(readout, y_labels, task=-1, figname='sample_overlaps_naive.svg')
 #+end_src
 
 #+RESULTS:
-: 17fd84de-7b30-4e9e-887b-b8f78270f564
+:RESULTS:
+: (3, 120)
+: (3, 120)
+[[file:./figures/dual/figure_98.png]]
+:END:
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 4cfe67ff-3bdd-4d44-95e1-442a0c95f311
 
 *** Perf
 
@@ -2292,7 +2263,6 @@ dpa_perf, drt_perf = criterion(model.readout, labels.clone())
 #+end_src
 
 #+RESULTS:
-: 2c33abce-a813-4d12-a373-a47fb4bfeb45
 
 #+begin_src ipython
 dpa_mean2 = []
@@ -2309,14 +2279,12 @@ dpa_sem2 = np.stack(dpa_sem2)
 #+end_src
 
 #+RESULTS:
-: 01bd0e25-4a7b-4c1f-abb4-4414b91817e2
 
 #+begin_src ipython
 drt_mean2, drt_sem2 = calculate_mean_accuracy_and_sem(drt_perf)
 #+end_src
 
 #+RESULTS:
-: 1d5a1a50-76e7-4666-b1c3-9ead822d7d6d
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[1.5*width, height])
@@ -2354,7 +2322,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 3f82fe17-b77a-4130-ae74-93e1b0b01de8
+[[file:./figures/dual/figure_103.png]]
 
 
 #+begin_src ipython
@@ -2375,7 +2343,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 1dfeec49-e2d4-4277-a293-a93321b66593
+[[file:./figures/dual/figure_104.png]]
 
  #+begin_src ipython
 plt.scatter(V[:, 0], V[:, 1])
@@ -2385,11 +2353,10 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: defe1b3b-18a9-4e5b-b686-40e8936beb7f
+[[file:./figures/dual/figure_105.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 6de13dbf-61de-4463-8504-0316412ed721

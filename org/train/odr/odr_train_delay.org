@@ -485,10 +485,6 @@ kwargs = {
     'IF_NMDA': 1,
     'R_NMDA': 1.0,
     'TAU_NMDA': [0.5, 0.5],
-
-    'IF_ADAPT': 0,
-    'A_ADAPT': 1.0,
-    'TAU_ADAPT': 100.0,
 }
 #+end_src
 
@@ -522,8 +518,6 @@ model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BAT
 #+end_src
 
 #+RESULTS:
-: 750
-: 250
 
 * Training
 
@@ -563,12 +557,10 @@ print(torch.where(rwd_mask[idx]==1)[0])
 
 #+RESULTS:
 : rwd_mask torch.Size([640, 181])
-: tensor([ 40,  41,  42,  43,  44,  45,  46,  47,  48,  49,  50,  51,  52,  53,
-:          54,  55,  56,  57,  58,  59,  60,  61,  62,  63,  64,  65,  66,  67,
-:          68,  69,  70,  71,  72,  73,  74,  75,  76,  77,  78,  79,  80,  81,
-:          82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,
-:          96,  97,  98,  99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
-:         110], device='cuda:1')
+: tensor([40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
+:         58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75,
+:         76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90],
+:        device='cuda:1')
 
 *** Inputs and Labels
 
@@ -645,18 +637,27 @@ print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 
 #+RESULTS:
 #+begin_example
-Epoch 1/20, Training Loss: 1.9362, Validation Loss: 1.8577
-Epoch 2/20, Training Loss: 1.9144, Validation Loss: 1.8396
-Epoch 3/20, Training Loss: 1.8935, Validation Loss: 1.8229
-Epoch 4/20, Training Loss: 1.8740, Validation Loss: 1.8064
-Epoch 5/20, Training Loss: 1.8561, Validation Loss: 1.7894
-Epoch 6/20, Training Loss: 1.8391, Validation Loss: 1.7742
-Epoch 7/20, Training Loss: 1.8226, Validation Loss: 1.7600
-Epoch 8/20, Training Loss: 1.8071, Validation Loss: 1.7463
-Epoch 9/20, Training Loss: 1.7929, Validation Loss: 1.7334
-Epoch 10/20, Training Loss: 1.7800, Validation Loss: 1.7216
-Epoch 11/20, Training Loss: 1.7676, Validation Loss: 1.7104
-Epoch 12/20, Training Loss: 1.7560, Validation Loss: 1.6998
+Epoch 1/20, Training Loss: 2.0259, Validation Loss: 2.0156
+Epoch 2/20, Training Loss: 2.0180, Validation Loss: 2.0090
+Epoch 3/20, Training Loss: 2.0075, Validation Loss: 2.0002
+Epoch 4/20, Training Loss: 1.9955, Validation Loss: 1.9917
+Epoch 5/20, Training Loss: 1.9846, Validation Loss: 1.9852
+Epoch 6/20, Training Loss: 1.9754, Validation Loss: 1.9774
+Epoch 7/20, Training Loss: 1.9666, Validation Loss: 1.9695
+Epoch 8/20, Training Loss: 1.9580, Validation Loss: 1.9624
+Epoch 9/20, Training Loss: 1.9497, Validation Loss: 1.9556
+Epoch 10/20, Training Loss: 1.9419, Validation Loss: 1.9495
+Epoch 11/20, Training Loss: 1.9350, Validation Loss: 1.9436
+Epoch 12/20, Training Loss: 1.9287, Validation Loss: 1.9379
+Epoch 13/20, Training Loss: 1.9228, Validation Loss: 1.9329
+Epoch 14/20, Training Loss: 1.9175, Validation Loss: 1.9285
+Epoch 15/20, Training Loss: 1.9128, Validation Loss: 1.9243
+Epoch 16/20, Training Loss: 1.9085, Validation Loss: 1.9205
+Epoch 17/20, Training Loss: 1.9045, Validation Loss: 1.9170
+Epoch 18/20, Training Loss: 1.9007, Validation Loss: 1.9137
+Epoch 19/20, Training Loss: 1.8972, Validation Loss: 1.9105
+Epoch 20/20, Training Loss: 1.8939, Validation Loss: 1.9076
+Elapsed (with compilation) = 0h 4m 12s
 #+end_example
 
 #+begin_src ipython
@@ -664,7 +665,6 @@ torch.save(model.state_dict(), '../models/odr/odr_%d.pth' % seed)
 #+end_src
 
 #+RESULTS:
-: 90967c3e-2877-487a-ba0a-9067eb278dc5
 
 #+begin_src ipython
 from src.utils import clear_cache
@@ -672,7 +672,6 @@ clear_cache()
 #+end_src
 
 #+RESULTS:
-: 867b045c-6b3c-4b8b-8295-21c551349ee5
 
 * Testing
 

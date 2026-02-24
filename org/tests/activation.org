@@ -1,29 +1,28 @@
 #+STARTUP: fold
 #+TITLE: Activation  Test
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session stim :kernel dual
-
+#+PROPERTY: header-args:jupyter-python :results both :exports both :async yes :session activation :kernel torch
 
 * Notebook Settings
 
-#+begin_src ipython
+#+begin_src jupyter-python
   %load_ext autoreload
   %autoreload 2
   %reload_ext autoreload
 
   %run ../../notebooks/setup.py
   %matplotlib inline
-  %config InlineBackend.figure_format = 'png'
+  # %config InlineBackend.figure_format = 'png'
 #+end_src
 
 #+RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
-: /home/leon/mambaforge/envs/dual/bin/python
+: /home/leon/mambaforge/envs/torch/bin/python
 
 * Imports
 
-#+begin_src ipython
+#+begin_src jupyter-python
   import sys
   sys.path.insert(0, '../../')
 
@@ -36,24 +35,11 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-: ---------------------------------------------------------------------------
-: ModuleNotFoundError                       Traceback (most recent call last)
-: Cell In[2], line 4
-:       1 import sys
-:       2 sys.path.insert(0, '../../')
-: ----> 4 import torch
-:       5 import pandas as pd
-:       6 from time import perf_counter
-:
-: ModuleNotFoundError: No module named 'torch'
-:END:
 
 * Activation
 ** ReLU
 
-#+begin_src ipython
+#+begin_src jupyter-python
   x = torch.linspace(-10, 10, 100)
   tf = Activation()(x, 'relu')
   plt.plot(x, tf)
@@ -63,14 +49,12 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-[[file:./.ob-jupyter/c9138d43a5cb149bbeb2b59e0e8ce82b04b7e196.png]]
-:END:
+[[file:./.ob-jupyter/d07519adf0f78f6c32d2e4b52c0fb762b36fa7af.png]]
 
 ** Sigmoid
 
-#+begin_src ipython
-  x = torch.linspace(-10, 10, 100)
+#+begin_src jupyter-python
+  x = torch.linspace(-10, 10, 1000)
   tf = Activation()(x, 'erf')
   plt.plot(x, tf)
   plt.xlabel('Input')
@@ -79,13 +63,11 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-[[file:./.ob-jupyter/70ba9db6280772e63187afebf22fa93a1aa7c07f.png]]
-:END:
+[[file:./.ob-jupyter/b720ad576f9b5df99dada3ef016f62a943c13bf7.png]]
 
 ** Brunel's non linear TF
 
-#+begin_src ipython
+#+begin_src jupyter-python
   x = torch.linspace(-10, 10, 100)
   tf = Activation()(x, 'sqrt')
   plt.plot(x, tf)
@@ -95,10 +77,8 @@
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-[[file:./.ob-jupyter/8aaf2791347f6b571c72d154e70dc93a7c157a0e.png]]
-:END:
+[[file:./.ob-jupyter/465da4797e3ecca68bd0766ec3c30592456a2545.png]]
 
-#+begin_src ipython
+#+begin_src jupyter-python
 
 #+end_src

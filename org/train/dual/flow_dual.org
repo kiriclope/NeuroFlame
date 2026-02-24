@@ -2,14 +2,13 @@
 #+TITLE: Training Low Rank RNNs
 #+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual_flow :kernel torch :exports results :output-dir ./figures/flow :file (lc/org-babel-tangle-figure-filename)
 
-
 * Imports
 
 #+begin_src ipython
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchmetrics
+
 import gc
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 
@@ -86,13 +85,6 @@ def add_vlines(model, ax=None):
 #+end_src
 
 #+RESULTS:
-: The autoreload extension is already loaded. To reload it, use:
-:   %reload_ext autoreload
-: Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
-
-#+RESULTS:
-
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
@@ -330,7 +322,7 @@ def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0, IF_CBAR=0):
     vmin, vmax = np.nanpercentile(speed, [5, 95])
     norm = mpl.colors.Normalize(vmin, vmax)
 
-    heatmap = ax.streamplot(xi, yi, ui, vi, density=0.5, arrowsize=1.25, norm=norm, color=('w', 0.5))
+    # heatmap = ax.streamplot(xi, yi, ui, vi, density=0.5, arrowsize=1.25, norm=norm, color=('w', 0.5))
     heatmap = ax.pcolormesh(xi, yi, speed, cmap='coolwarm', shading='gouraud', norm=norm)
     # heatmap = ax.imshow(speed, extent=(yi.min(), yi.max(), yi.min(), yi.max()), cmap='jet', norm=norm, origin='lower', aspect='auto')
 
@@ -434,13 +426,13 @@ DEVICE = 'cuda:1'
 
 #+begin_src ipython
 kwargs = {
-    'DURATION': 40.0,
+    'DURATION': 20.0,
     'TASK': 'dual_flow',
     'T_STIM_ON': [1.0, 2.0],
     'T_STIM_OFF': [2.0, 300.0],
     'I0': [1.0, 1.0],
     'GRID_SIZE': 10,
-    'GRID_TEST': 0, # here
+    'GRID_TEST': None, # here
     'GRID_INPUT': 0,
     'IF_OPTO': 0
 }
@@ -452,13 +444,13 @@ kwargs = {
 tasks = ['dpa']
 tasks = ['dpa', 'dual_naive', 'dual_train']
 seed = np.random.randint(100)
-seed = 3
+seed = 1
 print(seed)
 GRID_RANGE = 0.4
 #+end_src
 
 #+RESULTS:
-: 3
+: 1
 
 * Flow
 
@@ -470,43 +462,32 @@ rates = np.array(rates)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: EE post 0 pre 0 Jab tensor(0.0750, device='cuda:1') torch.Size([750, 750])
-: EE post 0 pre 0 Jab tensor(0.0750, device='cuda:1') torch.Size([750, 750])
-# [goto error]
 #+begin_example
----------------------------------------------------------------------------
-OutOfMemoryError                          Traceback (most recent call last)
-Cell In[19], line 3
-      1 rates = []
-      2 for task in tasks:
-----> 3         rates.append(run_grid(GRID_RANGE, seed, task, **kwargs))
-      4 rates = np.array(rates)
-
-Cell In[8], line 17, in run_grid(GRID_RANGE, seed, task, **kwargs)
-     14 model.N_BATCH = int(model.GRID_SIZE * model.GRID_SIZE)
-     16 with torch.no_grad():
----> 17     ff_input = model.init_ff_input()
-     18     # print(ff_input.shape, model.N_BATCH)
-     20     rates = model(ff_input, RET_REC=0).cpu().detach().numpy()
-
-File ~/models/NeuroFlame/org/train/dual/../../../src/network.py:160, in Network.init_ff_input(self)
-    159 def init_ff_input(self):
---> 160     return init_ff_input(self)
-
-File ~/models/NeuroFlame/org/train/dual/../../../src/ff_input.py:274, in init_ff_input(model)
-    271     model.VAR_FF.mul_(torch.sqrt(model.Ka[0]))
-    272     return init_ff_live(model)
---> 274 return init_ff_seq(model)
-
-File ~/models/NeuroFlame/org/train/dual/../../../src/ff_input.py:223, in init_ff_seq(model)
-    220     if "flow" in model.TASK:
-    221         del grid_inputs
---> 223 return ff_input * torch.sqrt(model.Ka[0]) * model.M0
-
-OutOfMemoryError: CUDA out of memory. Tried to allocate 804.00 MiB. GPU 1 has a total capacity of 23.60 GiB of which 62.94 MiB is free. Process 71692 has 4.41 GiB memory in use. Process 1273146 has 226.00 MiB memory in use. Process 570398 has 4.11 GiB memory in use. Process 81338 has 4.11 GiB memory in use. Process 528681 has 7.94 GiB memory in use. Including non-PyTorch memory, this process has 2.70 GiB memory in use. Of the allocated memory 2.37 GiB is allocated by PyTorch, and 32.85 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
 #+end_example
-:END:
 
 #+begin_src ipython
 rates_tensor = torch.tensor(rates).to(DEVICE)
@@ -514,7 +495,7 @@ print(rates_tensor.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([0])
+: torch.Size([3, 400, 201, 750])
 
 #+begin_src ipython
 model = init_model(task, seed, **kwargs)
@@ -529,29 +510,9 @@ window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: EE post 0 pre 0 Jab tensor(0.0750, device='cuda:1') torch.Size([750, 750])
-# [goto error]
-#+begin_example
----------------------------------------------------------------------------
-RuntimeError                              Traceback (most recent call last)
-Cell In[21], line 2
-      1 model = init_model(task, seed, **kwargs)
-----> 2 overlaps, vec = get_low_rank(rates_tensor, model, IF_REC=0)
-      3 print(overlaps.shape)
-      5 window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
-
-Cell In[9], line 12, in get_low_rank(rates, model, IF_REC)
-      8     # vec1 = vec1 / torch.linalg.norm(vec1)
-      9     # vec2 = vec2 / torch.linalg.norm(vec2)
-     11     vec = torch.stack((vec1, vec2))
----> 12     overlaps = rates @ vec.T / model.Na[0]
-     13 else:
-     14     vec1 = model.low_rank.U.T[0]
-
-RuntimeError: mat1 and mat2 shapes cannot be multiplied (1x0 and 750x2)
-#+end_example
-:END:
+: 750
+: 250
+: (3, 400, 201, 2)
 
 * Field
 
@@ -589,7 +550,7 @@ def get_fp(overlaps, window, task, GRID_TEST=None, x=None, y=None):
 
 #+begin_src  ipython
 # fig, ax = plt.subplots(1, 1, figsize=[width, width])
-# aplot_field(overlaps[0], ax, window, IF_FP=1, task=0, GRID_TEST=model.GRID_TEST, IF_CBAR=1);
+# plot_field(overlaps[0], ax, window, IF_FP=1, task=0, GRID_TEST=model.GRID_TEST, IF_CBAR=1);
 # save_fig('flow_field_cbar_seed_%d' % (seed), GRID_TEST=model.GRID_TEST)
 #+end_src
 
@@ -608,16 +569,8 @@ for i in range(len(tasks)):
 
 #+RESULTS:
 :RESULTS:
-# [goto error]
-: ---------------------------------------------------------------------------
-: NameError                                 Traceback (most recent call last)
-: Cell In[24], line 7
-:       5     save_fig('flow_field_cbar_seed_%d' % (seed), GRID_TEST=model.GRID_TEST)
-:       6 else:
-: ----> 7     plot_field(overlaps[i], ax, window, IF_FP=1, task=i, GRID_TEST=model.GRID_TEST, IF_CBAR=0);
-:       8     save_fig('flow_field_task_%s_seed_%d' % (tasks[i], seed), GRID_TEST=model.GRID_TEST)
-:
-: NameError: name 'overlaps' is not defined
+[[file:./figures/flow/figure_23.png]]
+[[file:./figures/flow/figure_23.png]]
 [[file:./figures/flow/figure_23.png]]
 :END:
 
@@ -632,20 +585,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-# [goto error]
-: ---------------------------------------------------------------------------
-: NameError                                 Traceback (most recent call last)
-: Cell In[25], line 4
-:       1 fig, ax = plt.subplots(1, len(tasks), figsize=[len(tasks) * width, width])
-:       3 for i in range(len(tasks)):
-: ----> 4     plot_field(overlaps[i], ax[i], window, IF_FP=1, task=i, GRID_TEST=model.GRID_TEST)
-:       6 save_fig('flow_field_seed_%d' % seed, GRID_TEST=model.GRID_TEST)
-:       7 plt.show()
-:
-: NameError: name 'overlaps' is not defined
 [[file:./figures/flow/figure_24.png]]
-:END:
 
 #+begin_src ipython
 

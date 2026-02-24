@@ -86,7 +86,8 @@ class Network(nn.Module):
             shape = (self.N_NEURON, self.N_NEURON)
             self.train_mask = torch.zeros(shape, device=self.device)
 
-        self.Wab_train = nn.Parameter(torch.randn(shape, device=self.device) * self.LR_INI)
+        if self.LR_TRAIN==0:
+            self.Wab_train = nn.Parameter(torch.randn(shape, device=self.device) * self.LR_INI)
 
         if self.TRAIN_EI:
             self.train_mask = torch.zeros(shape, device=self.device)

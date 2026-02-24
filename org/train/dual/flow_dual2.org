@@ -14,17 +14,13 @@
 #+end_src
 
 #+RESULTS:
+:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/envs/torch/bin/python
-
-#+RESULTS:
-
-: The autoreload extension is already loaded. To reload it, use:
-:   %reload_ext autoreload
-: Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
+: <Figure size 600x370.82 with 0 Axes>
+:END:
 
 * Imports
 
@@ -47,6 +43,19 @@ DEVICE = 'cuda:1'
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+# [goto error]
+: ---------------------------------------------------------------------------
+: ModuleNotFoundError                       Traceback (most recent call last)
+: Cell In[39], line 4
+:       2 import torch.nn as nn
+:       3 import torch.optim as optim
+: ----> 4 import torchmetrics
+:       5 import gc
+:       6 from torch.utils.data import Dataset, TensorDataset, DataLoader
+:
+: ModuleNotFoundError: No module named 'torchmetrics'
+:END:
 
 #+begin_src ipython
 import sys
@@ -66,8 +75,6 @@ from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
 #+end_src
 
 #+RESULTS:
-: Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
 
 #+begin_src ipython :tangle ../src/torch/utils.py
 import pickle as pkl
@@ -332,7 +339,7 @@ def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0):
     vmin, vmax = np.nanpercentile(speed, [5, 95])
     norm = mpl.colors.Normalize(vmin, vmax)
 
-    heatmap = ax.streamplot(xi, yi, ui, vi, density=0.5, arrowsize=1.5, norm=norm, color='w')
+    # heatmap = ax.streamplot(xi, yi, ui, vi, density=0.5, arrowsize=1.5, norm=norm, color='w')
     heatmap = ax.pcolormesh(xi, yi, speed, cmap='coolwarm', shading='gouraud', norm=norm)
     # heatmap = ax.imshow(speed, extent=(yi.min(), yi.max(), yi.min(), yi.max()), cmap='jet', norm=norm, origin='lower', aspect='auto')
 
@@ -445,7 +452,7 @@ kwargs = {
 #+begin_src ipython
 tasks = ['dpa']
 tasks = ['dpa', 'dual_naive', 'dual_train']
-seed = 1
+seed = 0
 GRID_RANGE = 0.4
 #+end_src
 
@@ -461,6 +468,32 @@ rates = np.array(rates)
 #+end_src
 
 #+RESULTS:
+#+begin_example
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+750
+250
+#+end_example
 
 #+begin_src ipython
 rates_tensor = torch.tensor(rates).to(DEVICE)
@@ -483,6 +516,8 @@ window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
 #+end_src
 
 #+RESULTS:
+: 750
+: 250
 : (3, 400, 201, 2)
 
 * Field
@@ -526,7 +561,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[./figures/flow/figure_22.png]]
+[[file:./figures/flow/figure_22.png]]
 
 #+begin_src ipython
 

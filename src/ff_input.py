@@ -216,8 +216,6 @@ def init_ff_seq(model):
                     if model.STIM_EI:
                         ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[1]].add_(stimulusI)
 
-            del stimulus, stimulusI
-
         # if "flow" in model.TASK:
         #     del grid_inputs
 

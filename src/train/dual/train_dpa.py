@@ -33,7 +33,7 @@ def create_model(REPO_ROOT, conf_name, seed, DEVICE, **kwargs):
 
 def create_dpa_masks(model):
     steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
-    mask = (steps >= (model.N_STIM_ON[4].cpu().numpy() - model.N_STEADY)) # & (steps <= (model.N_STEPS - model.N_STEADY))
+    mask = (steps >= (model.N_STIM_ON[4].cpu().numpy() - model.N_STEADY)) & (steps <= (model.N_STIM_OFF[-1].cpu().numpy() - model.N_STEADY + 1))
     rwd_idx = np.where(mask)[0]
     # print('rwd', rwd_idx)
 
