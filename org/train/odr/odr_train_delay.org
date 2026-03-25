@@ -21,7 +21,7 @@ pal = sns.color_palette("tab10")
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
+: /home/leon/mambaforge/bin/python
 
 * Imports
 
@@ -103,7 +103,7 @@ def plot_rates_selec(rates, idx=0, thresh=0.5, figname='fig.svg'):
       fig, ax = plt.subplots(1, 3, figsize=[2*width, height])
 
       xtime = np.linspace(0, model.DURATION, m0.shape[-1])
-      idx = np.random.randint(0, 96, 16)
+      idx = np.random.randint(0, 10, 16)
 
       ax[0].plot(xtime, m0[idx].T)
       #ax[0].set_ylim([0, 360])
@@ -255,6 +255,7 @@ def validation_step(dataloader, model, loss_fn):
 #+end_src
 
 #+RESULTS:
+: 37a8e807-3e62-45ae-a2bb-b25418d13f6d
 
 #+begin_src ipython
 def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100, thresh=0.005, gamma=0.9):
@@ -557,10 +558,7 @@ print(torch.where(rwd_mask[idx]==1)[0])
 
 #+RESULTS:
 : rwd_mask torch.Size([640, 181])
-: tensor([40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
-:         58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75,
-:         76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90],
-:        device='cuda:1')
+: tensor([40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50], device='cuda:1')
 
 *** Inputs and Labels
 
@@ -628,7 +626,7 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+RESULTS:
 
     #+begin_src ipython
-num_epochs = 20
+num_epochs = 5
 start = perf_counter()
 loss = optimization(model, train_loader, val_loader, criterion, optimizer, num_epochs, thresh=.005)
 end = perf_counter()
@@ -636,29 +634,12 @@ print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 #+end_src
 
 #+RESULTS:
-#+begin_example
-Epoch 1/20, Training Loss: 2.0259, Validation Loss: 2.0156
-Epoch 2/20, Training Loss: 2.0180, Validation Loss: 2.0090
-Epoch 3/20, Training Loss: 2.0075, Validation Loss: 2.0002
-Epoch 4/20, Training Loss: 1.9955, Validation Loss: 1.9917
-Epoch 5/20, Training Loss: 1.9846, Validation Loss: 1.9852
-Epoch 6/20, Training Loss: 1.9754, Validation Loss: 1.9774
-Epoch 7/20, Training Loss: 1.9666, Validation Loss: 1.9695
-Epoch 8/20, Training Loss: 1.9580, Validation Loss: 1.9624
-Epoch 9/20, Training Loss: 1.9497, Validation Loss: 1.9556
-Epoch 10/20, Training Loss: 1.9419, Validation Loss: 1.9495
-Epoch 11/20, Training Loss: 1.9350, Validation Loss: 1.9436
-Epoch 12/20, Training Loss: 1.9287, Validation Loss: 1.9379
-Epoch 13/20, Training Loss: 1.9228, Validation Loss: 1.9329
-Epoch 14/20, Training Loss: 1.9175, Validation Loss: 1.9285
-Epoch 15/20, Training Loss: 1.9128, Validation Loss: 1.9243
-Epoch 16/20, Training Loss: 1.9085, Validation Loss: 1.9205
-Epoch 17/20, Training Loss: 1.9045, Validation Loss: 1.9170
-Epoch 18/20, Training Loss: 1.9007, Validation Loss: 1.9137
-Epoch 19/20, Training Loss: 1.8972, Validation Loss: 1.9105
-Epoch 20/20, Training Loss: 1.8939, Validation Loss: 1.9076
-Elapsed (with compilation) = 0h 4m 12s
-#+end_example
+: Epoch 1/5, Training Loss: 0.6336, Validation Loss: 0.8359
+: Epoch 2/5, Training Loss: 0.6847, Validation Loss: 0.6004
+: Epoch 3/5, Training Loss: 0.6597, Validation Loss: 0.6539
+: Epoch 4/5, Training Loss: 0.6834, Validation Loss: 0.6685
+: Epoch 5/5, Training Loss: 0.6656, Validation Loss: 0.6373
+: Elapsed (with compilation) = 0h 2m 17s
 
 #+begin_src ipython
 torch.save(model.state_dict(), '../models/odr/odr_%d.pth' % seed)
@@ -688,9 +669,10 @@ print(model.J_STP)
 : odict_keys(['Wab_train', 'J_STP'])
 : True
 : Parameter containing:
-: tensor(4.2802, device='cuda:1', requires_grad=True)
+: tensor(2.8353, device='cuda:1', requires_grad=True)
 
 #+begin_src ipython
+N_BATCH = 10
 with torch.no_grad():
     model.N_BATCH = N_BATCH
 
@@ -704,7 +686,7 @@ with torch.no_grad():
 #+end_src
 
 #+RESULTS:
-: torch.Size([640, 2, 1]) torch.Size([640, 1405, 1000]) torch.Size([640, 1])
+: torch.Size([10, 2, 1]) torch.Size([10, 1405, 1000]) torch.Size([10, 1])
 
 #+begin_src ipython
 target_loc = labels[:, 0].cpu() * 180 / np.pi
@@ -727,22 +709,40 @@ print('rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rates (640, 181, 750)
+: rates (10, 181, 750)
 
  #+begin_src ipython
-plot_rates_selec(rates=rates, idx=20, thresh=20)
-#+end_src
-
-#+RESULTS:
-[[file:./figures/odr/figure_34.png]]
-
-   #+begin_src ipython
-plot_m0_m1_phi(model, rates, 4)
+plot_rates_selec(rates=rates, idx=2, thresh=2)
 #+end_src
 
 #+RESULTS:
 :RESULTS:
-: (640, 181) (640, 181) (640, 181)
+# [goto error]
+#+begin_example
+---------------------------------------------------------------------------
+IndexError                                Traceback (most recent call last)
+Cell In[43], line 1
+----> 1 plot_rates_selec(rates=rates, idx=2, thresh=2)
+
+Cell In[5], line 6, in plot_rates_selec(rates, idx, thresh, figname)
+      3 r_max = thresh * np.max(rates[idx])
+      5 idx = np.random.randint(0, 96)
+----> 6 vmin, vmax = np.percentile(rates[idx].reshape(-1), [5, 95])
+      8 ax[0].imshow(rates[idx].T, aspect='auto', cmap='jet', vmin=vmin, vmax=vmax)
+      9 ax[0].set_ylabel('Neuron #')
+
+IndexError: index 81 is out of bounds for axis 0 with size 10
+#+end_example
+[[file:./figures/odr/figure_34.png]]
+:END:
+
+   #+begin_src ipython
+plot_m0_m1_phi(model, rates, 2)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: (10, 181) (10, 181) (10, 181)
 [[file:./figures/odr/figure_35.png]]
 :END:
 
@@ -770,7 +770,7 @@ from src.lr_utils import clamp_tensor
 #                                 + model.Wab_train[model.slices[0], model.slices[0]]
 #                                 * torch.sqrt(model.Ka[0]) / model.Na[0])
 
-Cij = model.GAIN * model.J_STP * model.W_stp_T[0] / torch.sqrt(model.Ka[0]) * (1.0 + model.Wab_train[model.slices[0], model.slices[0]])
+Cij = model.J_STP * (model.W_stp_T[0] *  (1.0 + model.Wab_train[model.slices[0], model.slices[0]]) / model.train_scale)
 
 
 # Cij = model.GAIN * ( model.W_stp_T[0]  + model.Wab_train[model.slices[0], model.slices[0]])

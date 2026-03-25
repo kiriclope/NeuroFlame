@@ -44,14 +44,14 @@ SIGMA0: [1.0, 1.0, 1.0, 1.0, 1.0]
 # Network parameters
 ##########################################
 # number of populations
-N_POP: 2
+N_POP: 1
 # number of neurons
 N_NEURON: 1000
 # number of average presynaptic input (set to 1 if all to all)
 K: 100.0
 FRAC_K: 0
 # fraction of neuron in each population (must sum to 1)
-frac: [0.75, 0.25]
+frac: [1.0]
 
 ##########################################
 # Transfert Function for rate model
@@ -59,7 +59,7 @@ frac: [0.75, 0.25]
 # set to 0 for threshold linear, 1 for sigmoid
 TF_TYPE: 'relu'
 # threshold
-THRESH: [0.0, 0.0]
+THRESH: [0.0]
 
 ##########################################
 # Dynamics of the rates
@@ -67,7 +67,7 @@ THRESH: [0.0, 0.0]
 # set to 0 if instantaneous rates, 1 if exponentially decaying
 RATE_DYN: 1
 # rate time constants
-TAU: [0.2, 0.1]
+TAU: [0.4]
 
 # adding rate noise for diffusion
 RATE_NOISE: 0
@@ -77,21 +77,21 @@ VAR_RATE: 0.0
 # Dynamics of the recurrent inputs
 ##########################################
 # set to 0 if instantaneous, 1 if exponentially decaying
-SYN_DYN: 0
+SYN_DYN: 1
 # Synaptic time constants for each population
-TAU_SYN: [0.2, 0.1]
+TAU_SYN: [0.2]
 
 ##########################################
 # NMDA currents
 #########################################
 IF_NMDA: 0
 R_NMDA: 1.0
-TAU_NMDA: [0.80, 0.40]
+TAU_NMDA: [0.80]
 
 ####################
 # Plasticity
 ####################
-IF_STP: 1
+IF_STP: 0
 USE: [0.05]
 TAU_FAC: [0.5]
 TAU_REC: [0.2]
@@ -102,7 +102,7 @@ STP_TYPE: 'markram'
 # Feedforward inputs
 ##########################################
 # External inputs strengths
-Ja0: [2.0, 1.0]
+Ja0: [1.0]
 # External rate
 M0: 1.0
 # Variance of the noise
@@ -112,9 +112,9 @@ VAR_FF: [.1, .1]
 # Synaptic strengths
 ##########################################
 # Network's gain
-GAIN: 0.75
+GAIN: 1.0
 # Synaptic strengths
-Jab: [1.0, -1.5, 1, -1]
+Jab: [1.0]
 
 ##############
 # Connectivity
@@ -124,9 +124,9 @@ SPARSE: 0
 # seed for connectivity None or float
 SEED: 1
 # CON_TYPE can be 'all2all' or 'sparse'
-CON_TYPE: 'sparse'
+CON_TYPE: 'all2all'
 # PROBA_TYPE can be 'cosine', 'cosine_spec' or 'lr'
-PROBA_TYPE: ['None', 'None', 'None', 'None']
+PROBA_TYPE: ['gaussian_dense']
 
 ##########
 # Low rank
@@ -135,10 +135,11 @@ LR_TRAIN: 1
 LR_TYPE: 'rand'
 TRAIN_SCALE: 'all'
 TRAINING: 1
-CLAMP: 1
+CLAMP: 0
+TRAIN_EI: 1
 
 LR_MN: 1
-LR_INI: 1.0
+LR_INI: 0.001
 LR_UeqV: 1
 
 RANK: 2
@@ -150,3 +151,11 @@ SAVE_PATH: '../models/dual/last'
 # SAVE_PATH: '../models/dual/'
 # SAVE_PATH: '../models/dual/full_UeqV'
 # SAVE_PATH: '../models/dual/rand_UeqV'
+
+
+# strength of the asymmetries if all to all
+SIGMA: [0.0]
+# tuning of the recurrent connections
+KAPPA: [0.0]
+
+IS_TRAIN: [1]

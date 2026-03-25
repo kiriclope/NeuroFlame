@@ -138,8 +138,9 @@ def init_ff_seq(model):
         size = (model.N_BATCH, model.Na[0])
         Stimulus = Stimuli(model.TASK, size, device=model.device)
 
-        sizeI = (model.N_BATCH, model.Na[1])
-        StimulusI = Stimuli(model.TASK, sizeI, device=model.device)
+        if model.N_POP==2:
+            sizeI = (model.N_BATCH, model.Na[1])
+            StimulusI = Stimuli(model.TASK, sizeI, device=model.device)
 
         if "flow" in model.TASK:
             grid_inputs = get_grid_inputs(model)
@@ -184,15 +185,15 @@ def init_ff_seq(model):
                     stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[2*i+1])
             else:
                 stimulus = Stimulus(model.I0[i], model.SIGMA0[i], model.PHI0[:, i])
-                stimulusI = StimulusI(model.I0[i], model.SIGMA0[i], model.PHI0[:, i])
+                # stimulusI = StimulusI(model.I0[i], model.SIGMA0[i], model.PHI0[:, i])
 
             # reshape stimulus to be (N_BATCH, 1, NE) adding dummy time dimension
             if model.ODR_TRAIN:
                 if stimulus.ndim!=3:
                     stimulus = stimulus.unsqueeze(1)
 
-                if stimulusI.ndim!=3:
-                    stimulusI = stimulusI.unsqueeze(1)
+                # if stimulusI.ndim!=3:
+                #     stimulusI = stimulusI.unsqueeze(1)
 
             # print('stimulus', stimulus.shape)
 
@@ -213,13 +214,13 @@ def init_ff_seq(model):
                             ff_input[j, mask, model.slices[0]].add_(stimulus[j])
                 else:
                     ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[0]].add_(stimulus)
-                    if model.STIM_EI:
-                        ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[1]].add_(stimulusI)
+                    # if model.STIM_EI:
+                    #     ff_input[:, model.N_STIM_ON[i]:model.N_STIM_OFF[i], model.slices[1]].add_(stimulusI)
 
         # if "flow" in model.TASK:
         #     del grid_inputs
 
-    return ff_input * torch.sqrt(model.Ka[0]) * model.M0
+    return model.GAIN * (ff_input * torch.sqrt(model.Ka[0]) * model.M0)
 
 
 def rl_ff_udpdate(model, ff_input, rates, step, rwd):

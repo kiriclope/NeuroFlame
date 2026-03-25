@@ -9,7 +9,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchmetrics
+
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 
 REPO_ROOT = "/home/leon/models/NeuroFlame"
@@ -43,7 +43,7 @@ from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
 
 #+RESULTS:
 : Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
+: /home/leon/mambaforge/bin/python
 
 * Notebook Settings
 
@@ -60,7 +60,7 @@ from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
+: /home/leon/mambaforge/bin/python
 
 * Helpers
 ** Other
@@ -520,14 +520,14 @@ conf_name = "train_dual.yml"
 DEVICE = 'cuda:1'
 
 seed = np.random.randint(0, 100)
-# seed = 3
+seed = 1
 print(seed)
 
 
 #+end_src
 
 #+RESULTS:
-: 81
+: 1
 
 #+begin_src ipython
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs);
@@ -546,7 +546,7 @@ print(seed)
 #+end_src
 
 #+RESULTS:
-: 81
+: 1
 
 #+begin_src ipython
 import gc
@@ -580,7 +580,7 @@ print(model.J_STP)
 
 #+RESULTS:
 : Parameter containing:
-: tensor(4.9657, device='cuda:1', requires_grad=True)
+: tensor(1.3964, device='cuda:1', requires_grad=True)
 
 #+begin_src ipython
 steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
@@ -793,7 +793,6 @@ plot_overlap_label(model.readout.cpu().detach().numpy(), y_labels.cpu().numpy()[
 : (2, 2, 2, 101)
 [[file:./figures/dual/test/figure_37.png]]
 :END:
-
 #+RESULTS:
 
 #+begin_src ipython
@@ -968,8 +967,8 @@ print(Wab[0,: 10])
 
 #+RESULTS:
 : (750, 750)
-: [0.00426002 0.         0.         0.         0.         0.
-:  0.00134406 0.07813778 0.01087242 0.06960063]
+: [0.00460721 0.00384529 0.00844966 0.00050916 0.00355934 0.
+:  0.         0.00012298 0.00462146 0.00243993]
 
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
@@ -1086,26 +1085,30 @@ plt.show()
 
 #+begin_src ipython
 from scipy.ndimage import gaussian_filter1d, uniform_filter1d
-fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
 
-w = model.odors[0].cpu().numpy() + model.odors[1].cpu().numpy()
+w = model.odors[0].cpu().numpy() + model.odors[5].cpu().numpy()
 ax[0].plot(np.linspace(0, 360, 750), uniform_filter1d(w[idx], size=75))
 ax[0].set_ylabel("Weights A/B")
 # ax[0].axvline(180, ls='--', color='k')
 
+w = model.odors[2].cpu().numpy() + model.odors[7].cpu().numpy()
+ax[1].plot(np.linspace(0, 360, 750), uniform_filter1d(w[idx], size=75))
+ax[1].set_ylabel("Weights Go/NoGo")
+
 w = model.odors[4].cpu().numpy() + model.odors[9].cpu().numpy()
 
-ax[1].plot(np.linspace(0, 360, 750), uniform_filter1d(w[idx], size=75))
-ax[1].set_ylabel("Weights C/D")
+ax[2].plot(np.linspace(0, 360, 750), uniform_filter1d(w[idx], size=75))
+ax[2].set_ylabel("Weights C/D")
 
 # ax[1].axvline(45, ls='--', color='k')
 # ax[1].axvline(225, ls='--', color='k')
 
-for i in range(2):
+for i in range(3):
     ax[i].set_xticks(np.linspace(0, 360, 5))
     ax[i].axhline(0, ls='--', color='k')
     ax[i].set_xlabel("Pref. Location (°)")
-    ax[i].set_ylim([-1.25, 1.25])
+    ax[i].set_ylim([-1.5, 1.5])
 
 plt.savefig('./figures/bernstein/test_weights.svg', dpi=300)
 plt.show()
@@ -1972,7 +1975,68 @@ plt.show()
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+#+begin_example
+Unexpected exception formatting exception. Falling back to standard exception
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 3508, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/tmp/ipykernel_3933265/3566526214.py", line 3, in <module>
+    idxPair = (naive_labels[:, 0, 0]==1) & (naive_labels[:, 2, 0]==0)
+               ^^^^^^^^^^^^
+NameError: name 'naive_labels' is not defined. Did you mean: 'train_labels'?
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 2105, in showtraceback
+    stb = self.InteractiveTB.structured_traceback(
+        etype, value, tb, tb_offset=tb_offset
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1428, in structured_traceback
+    return FormattedTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, evalue, etb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1319, in structured_traceback
+    return VerboseTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, value, tb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1172, in structured_traceback
+    formatted_exception = self.format_exception_as_a_whole(etype, evalue, etb, number_of_lines_of_context,
+                                                           tb_offset)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1062, in format_exception_as_a_whole
+    self.get_records(etb, number_of_lines_of_context, tb_offset) if etb else []
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1159, in get_records
+    res = list(stack_data.FrameInfo.stack_data(etb, options=options))[tb_offset:]
+          ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 597, in stack_data
+    yield from collapse_repeated(
+    ...<4 lines>...
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/utils.py", line 83, in collapse_repeated
+    yield from map(mapper, original_group)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 587, in mapper
+    return cls(f, options)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 551, in __init__
+    self.executing = Source.executing(frame_or_tb)
+                     ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 378, in executing
+    assert_(new_stmts <= stmts)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 154, in assert_
+    raise AssertionError(str(message))
+AssertionError
+#+end_example
 [[file:./figures/dual/test/figure_93.png]]
+:END:
 
 #+begin_src ipython
 U = model.low_rank.U.cpu().detach().numpy()
@@ -2010,6 +2074,40 @@ plt.show()
 
 #+RESULTS:
 [[file:./figures/dual/test/figure_95.png]]
+
+#+begin_src ipython
+from scipy.ndimage import gaussian_filter1d, uniform_filter1d
+fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
+
+w = model.odors[0].cpu().numpy() + model.odors[5].cpu().numpy()
+ax[0].plot(np.linspace(0, 360, 750), uniform_filter1d(w[idx], size=75))
+ax[0].set_ylabel("Weights A/B")
+# ax[0].axvline(180, ls='--', color='k')
+
+w = model.odors[1].cpu().numpy() + model.odors[6].cpu().numpy()
+ax[1].plot(np.linspace(0, 360, 750), uniform_filter1d(w[idx], size=75))
+ax[1].set_ylabel("Weights Go/NoGo")
+
+w = model.odors[4].cpu().numpy() + model.odors[9].cpu().numpy()
+
+ax[2].plot(np.linspace(0, 360, 750), uniform_filter1d(w[idx], size=75))
+ax[2].set_ylabel("Weights C/D")
+
+# ax[1].axvline(45, ls='--', color='k')
+# ax[1].axvline(225, ls='--', color='k')
+
+for i in range(3):
+    ax[i].set_xticks(np.linspace(0, 360, 5))
+    ax[i].axhline(0, ls='--', color='k')
+    ax[i].set_xlabel("Pref. Location (°)")
+    ax[i].set_ylim([-1.5, 1.5])
+
+plt.savefig('./figures/bernstein/test_weights.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/dual/test/figure_96.png]]
 
 *** Overlaps
 

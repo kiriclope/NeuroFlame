@@ -1,10 +1,10 @@
 #+Startup: fold
 #+TITLE: Training Low Rank RNNs
-#+PROPERTY: header-args:ipython :results both :exports both :async yes :session dual_flow :kernel torch :exports results :output-dir ./figures/flow :file (lc/org-babel-tangle-figure-filename)
+#+PROPERTY: header-args:jupyter-python :session dual_flow :kernel torch :output-dir ./figures/flow :file (lc/org-babel-tangle-figure-filename)
 
 * Imports
 
-#+begin_src ipython
+#+begin_src jupyter-python
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -24,7 +24,7 @@ DEVICE = 'cuda:1'
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src jupyter-python
 import sys
 sys.path.insert(0, '../../../')
 
@@ -43,9 +43,9 @@ from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
 
 #+RESULTS:
 : Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
+: /home/leon/mambaforge/bin/python
 
-#+begin_src ipython :tangle ../src/torch/utils.py
+#+begin_src jupyter-python :tangle ../src/torch/utils.py
 import pickle as pkl
 
 def pkl_save(obj, name, path="."):
@@ -59,7 +59,7 @@ def pkl_load(name, path="."):
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src jupyter-python
 def add_vlines(model, ax=None):
 
     if ax is None:
@@ -75,7 +75,7 @@ def add_vlines(model, ax=None):
 
 * Notebook Settings
 
-#+begin_src ipython :tangle no
+#+begin_src jupyter-python :tangle no
 %load_ext autoreload
 %autoreload 2
 %reload_ext autoreload
@@ -88,11 +88,11 @@ def add_vlines(model, ax=None):
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
+: /home/leon/mambaforge/bin/python
 
 * Utils
 
-#+begin_src ipython
+#+begin_src jupyter-python
 def init_model(task, seed, **kwargs):
     model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
     path = model.SAVE_PATH
@@ -105,7 +105,7 @@ def init_model(task, seed, **kwargs):
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src jupyter-python
 def del_tensor(tensor):
     DEVICE = tensor.device
     del tensor
@@ -119,7 +119,7 @@ def del_tensor(tensor):
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src jupyter-python
 def run_grid(GRID_RANGE, seed, task, **kwargs):
 
     GRID_LIST = [[-GRID_RANGE, 0], [0, GRID_RANGE]]
@@ -151,7 +151,7 @@ def run_grid(GRID_RANGE, seed, task, **kwargs):
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src jupyter-python
 def get_low_rank(rates, model, IF_REC=0):
     if IF_REC==0:
         vec1 = model.low_rank.V.T[0]
@@ -159,11 +159,18 @@ def get_low_rank(rates, model, IF_REC=0):
 
         vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
 
+        try:
+            vec3 = model.low_rank.V.T[2]
+        except:
+            vec3 = model.odors[4] + model.odors[9]
+
+        vec3 = vec3 - (vec3 @ vec2) * vec2 / (vec2 @ vec2)
         # vec1 = vec1 / torch.linalg.norm(vec1)
         # vec2 = vec2 / torch.linalg.norm(vec2)
 
-        vec = torch.stack((vec1, vec2))
+        vec = torch.stack((vec1, vec2, vec3))
         overlaps = rates @ vec.T / model.Na[0]
+
     else:
         vec1 = model.low_rank.U.T[0]
         vec2 = model.low_rank.U.T[1]
@@ -179,7 +186,7 @@ def get_low_rank(rates, model, IF_REC=0):
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src jupyter-python
 import numpy as np
 
 def get_bissec(point1, point2, length=100):
@@ -204,7 +211,7 @@ def get_bissec(point1, point2, length=100):
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src jupyter-python
 from scipy.interpolate import griddata
 
 def create_mesh(x, y, size=100):
@@ -233,7 +240,7 @@ def create_mesh(x, y, size=100):
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src jupyter-python
 import numpy as np
 from scipy.interpolate import griddata
 from scipy.ndimage import gaussian_filter
@@ -306,7 +313,7 @@ def create_mesh(x, y, size=100, sigma=0, interp_method='nearest', mask_radius=10
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src jupyter-python
 import matplotlib as mpl
 
 def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0, IF_CBAR=0):
@@ -322,7 +329,7 @@ def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0, IF_CBAR=0):
     vmin, vmax = np.nanpercentile(speed, [5, 95])
     norm = mpl.colors.Normalize(vmin, vmax)
 
-    # heatmap = ax.streamplot(xi, yi, ui, vi, density=0.5, arrowsize=1.25, norm=norm, color=('w', 0.5))
+    heatmap = ax.streamplot(xi.ravel(), yi.ravel(), ui, vi, density=0.5, arrowsize=1.25, norm=norm, color=('w', 0.5))
     heatmap = ax.pcolormesh(xi, yi, speed, cmap='coolwarm', shading='gouraud', norm=norm)
     # heatmap = ax.imshow(speed, extent=(yi.min(), yi.max(), yi.min(), yi.max()), cmap='jet', norm=norm, origin='lower', aspect='auto')
 
@@ -341,13 +348,13 @@ def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0, IF_CBAR=0):
         cbar.set_label('Norm. Speed')
         # cbar.set_clim(-1.5, 1.5)
 
-    ax.set_xlabel('A/B Overlap')
+    ax.set_xlabel('Sample Overlap')
     ax.set_ylabel('Choice Overlap')
 #+end_src
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src jupyter-python
 def save_fig(figname, GRID_TEST, format='png'):
 
     if GRID_TEST==4:
@@ -369,7 +376,7 @@ def save_fig(figname, GRID_TEST, format='png'):
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src jupyter-python
 from scipy.ndimage import map_coordinates
 
 def integrate_to_attractor(xi, yi, ui, vi, attractors, n_steps=500, dt=0.05, tol=1e-2):
@@ -414,9 +421,72 @@ def integrate_to_attractor(xi, yi, ui, vi, attractors, n_steps=500, dt=0.05, tol
 
 #+RESULTS:
 
+#+begin_src jupyter-python
+from scipy.interpolate import griddata
+
+def create_mesh(x, y, size=100):
+    x_min, x_max = np.min((x, y)) - 1, np.max((x, y)) + 1
+    y_min, y_max = np.min((x, y)) - 1, np.max((x, y)) + 1
+
+    dx = np.gradient(x, axis=1)
+    dy = np.gradient(y, axis=1)
+
+    xg = np.linspace(x_min, x_max, size)
+    yg = np.linspace(y_min, y_max, size)
+    xi, yi = np.meshgrid(xg, yg)
+
+    points = np.vstack((x.flatten(), y.flatten())).T
+    dx_flat = dx.flatten()
+    dy_flat = dy.flatten()
+
+    ui = griddata(points, dx_flat, (xi, yi), method='linear', fill_value=np.nan)
+    vi = griddata(points, dy_flat, (xi, yi), method='linear', fill_value=np.nan)
+
+    return xg, yg, xi, yi, ui, vi
+#+end_src
+
+#+RESULTS:
+
+
+#+begin_src jupyter-python
+def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0, IF_CBAR=0, IF_STREAM=0):
+    x = overlaps[:, window:, 0]
+    y = overlaps[:, window:, 1]
+
+    xg, yg, xi, yi, ui, vi = create_mesh(x, y, size=300)
+    speed = np.sqrt(ui**2 + vi**2)
+    speed = (speed - np.nanmean(speed)) / (np.nanstd(speed) + 1e-6)
+
+    center, center_ = get_fp(overlaps, window, task, GRID_TEST=GRID_TEST)
+
+    vmin, vmax = np.nanpercentile(speed, [5, 95])
+    norm = mpl.colors.Normalize(vmin, vmax)
+
+    print("xg", xg.shape, "yg", yg.shape, "ui", ui.shape, "vi", vi.shape)
+    print("equal x spacing:", np.allclose(np.diff(xg), np.diff(xg)[0]))
+    print("equal y spacing:", np.allclose(np.diff(yg), np.diff(yg)[0]))
+
+    if IF_STREAM:
+        ax.streamplot(xg.ravel(), yg.ravel(), ui, vi, density=0.5, arrowsize=1.25, color=(1, 1, 1, 0.5))
+    heatmap = ax.pcolormesh(xi, yi, speed, cmap='coolwarm', shading='auto', norm=norm)
+
+    ax.plot(center.T[0], center.T[1], 'o', color='w', ms=18)
+    ax.set_yticks([-10, 0, 10])
+    heatmap.set_clim(-1.5, 1.5)
+
+    if IF_CBAR:
+        cbar = plt.colorbar(heatmap, ax=ax)
+        cbar.set_label('Norm. Speed')
+
+    ax.set_xlabel('Sample Overlap')
+    ax.set_ylabel('Choice Overlap')
+#+end_src
+
+#+RESULTS:
+
 * Model
 
-#+begin_src ipython
+#+begin_src jupyter-python
 REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "train_dual.yml"
 DEVICE = 'cuda:1'
@@ -424,29 +494,32 @@ DEVICE = 'cuda:1'
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src jupyter-python
 kwargs = {
-    'DURATION': 20.0,
+    'RANK':3,
+    'DURATION': 10.0,
     'TASK': 'dual_flow',
     'T_STIM_ON': [1.0, 2.0],
     'T_STIM_OFF': [2.0, 300.0],
     'I0': [1.0, 1.0],
-    'GRID_SIZE': 10,
+    'GRID_SIZE': 20,
     'GRID_TEST': None, # here
     'GRID_INPUT': 0,
-    'IF_OPTO': 0
+    'IF_OPTO': 0,
+    'VAR_FF': [0.1],
+    'TRAIN_SCALE': 'dense',
 }
 #+end_src
 
 #+RESULTS:
 
-#+begin_src ipython
+#+begin_src jupyter-python
 tasks = ['dpa']
-tasks = ['dpa', 'dual_naive', 'dual_train']
+# tasks = ['dpa', 'dual_naive', 'dual_train']
 seed = np.random.randint(100)
 seed = 1
 print(seed)
-GRID_RANGE = 0.4
+GRID_RANGE = .4
 #+end_src
 
 #+RESULTS:
@@ -454,50 +527,20 @@ GRID_RANGE = 0.4
 
 * Flow
 
-#+begin_src ipython
+#+begin_src jupyter-python
 rates = []
 for task in tasks:
         rates.append(run_grid(GRID_RANGE, seed, task, **kwargs))
 rates = np.array(rates)
-#+end_src
 
-#+RESULTS:
-#+begin_example
-750
-250
-750
-250
-750
-250
-750
-250
-750
-250
-750
-250
-750
-250
-750
-250
-750
-250
-750
-250
-750
-250
-750
-250
-#+end_example
-
-#+begin_src ipython
 rates_tensor = torch.tensor(rates).to(DEVICE)
 print(rates_tensor.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([3, 400, 201, 750])
+: torch.Size([1, 1600, 101, 1000])
 
-#+begin_src ipython
+#+begin_src jupyter-python
 model = init_model(task, seed, **kwargs)
 overlaps, vec = get_low_rank(rates_tensor, model, IF_REC=0)
 print(overlaps.shape)
@@ -510,13 +553,11 @@ window = int((model.N_STIM_OFF[0] - model.N_STEADY) / model.N_WINDOW) + 1
 #+end_src
 
 #+RESULTS:
-: 750
-: 250
-: (3, 400, 201, 2)
+: (1, 1600, 101, 3)
 
 * Field
 
-#+begin_src ipython
+#+begin_src jupyter-python
 from sklearn.cluster import KMeans
 def get_fp(overlaps, window, task, GRID_TEST=None, x=None, y=None):
     kmeans = KMeans(n_clusters=5, random_state=None)
@@ -548,33 +589,70 @@ def get_fp(overlaps, window, task, GRID_TEST=None, x=None, y=None):
 
 #+RESULTS:
 
-#+begin_src  ipython
-# fig, ax = plt.subplots(1, 1, figsize=[width, width])
-# plot_field(overlaps[0], ax, window, IF_FP=1, task=0, GRID_TEST=model.GRID_TEST, IF_CBAR=1);
+#+begin_src jupyter-python
+def plot_field(overlaps, ax, window, IF_FP=0, task=0, GRID_TEST=0, IF_CBAR=0, IF_STREAM=0):
+    x = overlaps[:, window:, 0]
+    y = overlaps[:, window:, 1]
+
+    xg, yg, xi, yi, ui, vi = create_mesh(x, y, size=300)
+
+    speed = np.sqrt(ui**2 + vi**2)
+    speed = (speed - np.nanmean(speed)) / (np.nanstd(speed) + 1e-6)
+
+    center, center_ = get_fp(overlaps, window, task, GRID_TEST=GRID_TEST)
+
+    vmin, vmax = np.nanpercentile(speed, [5, 95])
+    norm = mpl.colors.Normalize(vmin, vmax)
+
+    heatmap = ax.pcolormesh(xi, yi, speed, cmap='coolwarm', shading='auto', norm=norm)
+
+    # Downsample for quiver so the plot is not overcrowded
+    step = 10
+    Xq = xi[::step, ::step]
+    Yq = yi[::step, ::step]
+    Uq = ui[::step, ::step]
+    Vq = vi[::step, ::step]
+
+    # Remove invalid arrows
+    mask = np.isfinite(Uq) & np.isfinite(Vq)
+    if IF_STREAM:
+        ax.quiver(
+            Xq[mask], Yq[mask], Uq[mask], Vq[mask],
+            color=(1, 1, 1, 0.7),
+            angles='xy',
+            scale_units='xy',
+            scale=None,
+            width=0.003
+        )
+
+    # ax.plot(center.T[0], center.T[1], 'o', color='w', ms=18)
+
+    # ax.set_yticks([-10, 0, 10])
+    # heatmap.set_clim(-1.5, 1.5)
+
+    if IF_CBAR:
+        cbar = plt.colorbar(heatmap, ax=ax)
+        cbar.set_label('Norm. Speed')
+
+    ax.set_xlabel('Sample Overlap')
+    ax.set_ylabel('Choice Overlap')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src  jupyter-python
+fig, ax = plt.subplots(1, 1, figsize=[1.5 * height, 1.5 * height])
+plot_field(overlaps[0], ax, window, IF_FP=0, task=-1, GRID_TEST=model.GRID_TEST, IF_CBAR=0, IF_STREAM=0);
+# ax.set_xlim([-.5, .5]);
+# ax.set_ylim([-.5, .5]);
+plt.show()
 # save_fig('flow_field_cbar_seed_%d' % (seed), GRID_TEST=model.GRID_TEST)
 #+end_src
 
 #+RESULTS:
+[[file:./figures/flow/figure_24.png]]
 
-#+begin_src  ipython
-for i in range(len(tasks)):
-    fig, ax = plt.subplots(1, 1, figsize=[width, width])
-    if i==3:
-        plot_field(overlaps[0], ax, window, IF_FP=1, task=0, GRID_TEST=model.GRID_TEST, IF_CBAR=1)
-        save_fig('flow_field_cbar_seed_%d' % (seed), GRID_TEST=model.GRID_TEST)
-    else:
-        plot_field(overlaps[i], ax, window, IF_FP=1, task=i, GRID_TEST=model.GRID_TEST, IF_CBAR=0);
-        save_fig('flow_field_task_%s_seed_%d' % (tasks[i], seed), GRID_TEST=model.GRID_TEST)
-#+end_src
-
-#+RESULTS:
-:RESULTS:
-[[file:./figures/flow/figure_23.png]]
-[[file:./figures/flow/figure_23.png]]
-[[file:./figures/flow/figure_23.png]]
-:END:
-
-#+begin_src  ipython
+#+begin_src  jupyter-python
 fig, ax = plt.subplots(1, len(tasks), figsize=[len(tasks) * width, width])
 
 for i in range(len(tasks)):
@@ -585,9 +663,8 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/flow/figure_24.png]]
 
-#+begin_src ipython
+#+begin_src jupyter-python
 
 #+end_src
 

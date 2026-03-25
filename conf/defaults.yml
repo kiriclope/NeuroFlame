@@ -1,233 +1,250 @@
 ###############################################
-# Parameters
+# General
 ###############################################
-# output different prompts for debugging purpose
 VERBOSE: 0
-# device to be used cuda or cpu
 DEVICE: 'cuda:1'
-# float precision
 FLOAT_PRECISION: 32
 
-######################################
-# Simulation Parameters
-#####################################
-# Number of batches (ie initializations)
+###############################################
+# Simulation
+###############################################
 N_BATCH: 1
-# Time step in s
 DT: 0.01
-# total simulation time in s
-DURATION: 6
-# time to start saving simulation files
+DURATION: 6.0
 T_STEADY: 1.0
-# Saving to files every T_WINDOW
 T_WINDOW: 0.1
+TRAINING: 0
 
-##########################################
-# Parameters for the stimulus presentation
-##########################################
-# stimulus as a cosine shape
+###############################################
+# Task / stimulus
+###############################################
 TASK: 'dual'
-# # time for stimuli onset in s
+
 T_STIM_ON: [1.0, 3.0, 5.0]
-# # time for stimuli offset in s
 T_STIM_OFF: [2.0, 4.0, 6.0]
-# stimuli strengths
+
 I0: [0.2, 0.0, 0.0]
-# stimuli phases
-PHI0: [180.0, 90.0, 0.0]
-# stimuli phases
-PHI1: [180.0, 90.0, 0.0]
-# stimuli tuning
 SIGMA0: [1.0, 1.0, 1.0]
 
-##########################################
-# Network parameters
-##########################################
-# number of populations
+PHI0: [180.0, 90.0, 0.0]
+PHI1: [180.0, 90.0, 0.0]
+
+ODR_TRAIN: 0
+STIM_EI: 0
+
+REP_BIAS: 0.0
+REP_VAR: 1.0
+
+###############################################
+# Random task timing
+###############################################
+RANDOM_DELAY: 0
+DELAY_LIST: [0, 1, 2]
+MIN_DELAY: 1
+MAX_DELAY: 2
+
+RANDOM_ITI: 0
+ITI_LIST: [0, 1, 2]
+MIN_ITI: 1
+MAX_ITI: 2
+
+###############################################
+# Network architecture
+###############################################
 N_POP: 2
-# number of neurons
 N_NEURON: 2000
-# number of average presynaptic input (set to 1 if all to all)
-K: 200.0
-FRAC_K: 0
-# fraction of neuron in each population (must sum to 1)
 frac: [0.8, 0.2]
 
-##########################################
-# Voltage Dynamics for LIF model
-##########################################
-# Threshold in mV
+# number of average presynaptic inputs
+# set to 1 for all-to-all networks
+K: 200.0
+FRAC_K: 0
+
+###############################################
+# LIF-like placeholders / voltage params
+###############################################
 V_THRESH: -50.0
-# Resting potential in mV
 V_REST: -70.0
 
-##########################################
-# Transfert Function for rate model
-##########################################
-# set to 0 for threshold linear, 1 for sigmoid
+###############################################
+# Rate transfer function
+###############################################
 TF_TYPE: 'relu'
-# threshold
 THRESH: [1.0, 1.0]
 
-##########################################
-# Dynamics of the rates
-##########################################
-# set to 0 if instantaneous rates, 1 if exponentially decaying
+###############################################
+# Rate dynamics
+###############################################
 RATE_DYN: 0
-# rate time constants
 TAU: [0.04, 0.04]
+
 RATE_NOISE: 0
-VAR_RATE: 1
-##########################################
-# Dynamics of the recurrent inputs
-##########################################
-# set to 0 if instantaneous, 1 if exponentially decaying
+VAR_RATE: 1.0
+
+###############################################
+# Recurrent synaptic dynamics
+###############################################
 SYN_DYN: 1
-# Synaptic time constants for each population
 TAU_SYN: [0.2, 0.1]
 
-##########################################
-# NMDA currents
-##########################################
+###############################################
+# NMDA
+###############################################
 IF_NMDA: 1
 R_NMDA: 1.0
 TAU_NMDA: [0.40, 0.40]
 
-##########################################
-# Adaptation currents
-##########################################
+###############################################
+# Adaptation
+###############################################
 IF_ADAPT: 0
 A_ADAPT: 0.01
 TAU_ADAPT: 50.0
 
+###############################################
+# Feedforward input
+###############################################
+LIVE_FF_UPDATE: 0
 
-####################
-# Plasticity
-####################
+Ja0: [2.0, 1.0]
+M0: 2.0
+VAR_FF: [0.0, 0.0]
+
+# If BUMP_SWITCH[i] == 1, set Iext[i] to zero before stimulus onset
+BUMP_SWITCH: [0, 0]
+
+###############################################
+# Feedforward adaptation / dynamics
+###############################################
+IF_FF_ADAPT: 0
+A_FF_ADAPT: 0.1
+TAU_FF_ADAPT: 150.0
+
+IF_FF_DYN: 0
+TAU_FF: 0.2
+
+###############################################
+# Connectivity
+###############################################
+SEED: 1
+SPARSE: None
+
+# 'all2all' or 'sparse'
+CON_TYPE: 'sparse'
+
+# each block: 'None', 'cosine', 'cosine_spec', 'lr', ...
+PROBA_TYPE: ['None', 'None', 'None', 'None']
+
+SIGMA: [0.0, 0.0, 0.0, 0.0]
+KAPPA: [0.0, 0.0, 0.0, 0.0]
+PHASE: 0.0
+
+###############################################
+# Synaptic strengths
+###############################################
+GAIN: 0.5
+Jab: [1.0, -1.5, 1.0, -1.0]
+
+# batch-dependent recurrent coupling
+IF_BATCH_J: 0
+
+###############################################
+# Short-term plasticity
+###############################################
 IF_STP: 0
 IS_STP: [1, 0, 0, 0]
+
 USE: 0.03
 TAU_FAC: 1.0
 TAU_REC: 0.2
 J_STP: 10.0
 STP_TYPE: 'markram'
 
+TEST_I_STP: 0
+
+###############################################
+# Feedforward short-term plasticity
+###############################################
 IF_FF_STP: 0
 FF_USE: 0.3
 TAU_FF_FAC: 0.2
 TAU_FF_REC: 1.0
 
-TEST_I_STP: 0
-##########################################
-# Feedforward inputs
-##########################################
-LIVE_FF_UPDATE: 0
-# External inputs strengths
-Ja0: [2.0, 1.0]
-# External rate
-M0: 2.0
-# Variance of the noise
-VAR_FF: [0.0, 0.0]
-# To add an attentional switch
-# if BUMP_SWITCH[i] == 1 it sets Iext[i] to zero before stimulus presentation
-BUMP_SWITCH: [0, 0]
+###############################################
+# Hebbian plasticity
+###############################################
+IF_HEBB: 0
+IS_HEBB: [1, 1, 1, 1]
 
-# FF ADAPTATION
-IF_FF_ADAPT: 0
-A_FF_ADAPT: 0.1
-TAU_FF_ADAPT: 150.0
+HEBB_FRAC: 0.3
+TAU_HEBB: 1.0
+T_HEBB: 0.0
+ETA: 0.1
+HEBB_TYPE: 'bcm'
 
-##########################################
-# Synaptic strengths
-##########################################
-# Network's gain
-GAIN: 0.5
-# Synaptic strengths
-Jab: [1.0, -1.5, 1, -1]
-# Batching Jab
-IF_BATCH_J: 0
-
-##############
-# Connectivity
-##############
-SPARSE: None
-# seed for connectivity None or float
-SEED: 1
-# CON_TYPE can be 'all2all' or 'sparse'
-CON_TYPE: 'sparse'
-# PROBA_TYPE can be 'cosine', 'cosine_spec' or 'lr'
-PROBA_TYPE: ['None', 'None', 'None', 'None']
-# strength of the asymmetries if all to all
-SIGMA: [0.0, 0.0, 0.0, 0.0]
-# tuning of the recurrent connections
-KAPPA: [0.0, 0.0, 0.0, 0.0]
-# phase of the connectivity
-PHASE: 0.0
-
-##########
-# Low rank
-##########
+###############################################
+# Built-in low-rank structured connectivity
+# used when PROBA_TYPE includes 'lr'
+###############################################
 RANK: 2
 LR_MEAN: [0.0, 0.0, 0.0, 0.0]
-LR_COV: [[1.0, 0.9, 0.0, 0.0],[0.9, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.9], [0.0, 0.0, 0.9, 1.0]]
+LR_COV:
+  - [1.0, 0.9, 0.0, 0.0]
+  - [0.9, 1.0, 0.0, 0.0]
+  - [0.0, 0.0, 1.0, 0.9]
+  - [0.0, 0.0, 0.9, 1.0]
 
-##########
-# Training
-##########
+###############################################
+# Trainable low-rank perturbation
+# used by network.py / lr_utils.py
+###############################################
 LR_TRAIN: 0
-LR_READOUT: 0
-LR_TYPE: 'rand_full'
 
+# 'standard' | 'support' | 'gaussian_mixture' | 'gmm'
+LR_TYPE: 'standard'
+
+LR_INI: 0.001
+LR_MN: 1
+LR_UeqV: 1
+LR_NORM: 0
+LR_MASK: 0
+
+# readout from low-rank vectors
+LR_READOUT: 0
+LR_READOUT_DIM: 1
+
+# support / gaussian-mixture parametrization
+LR_N_SUPPORTS: 1
+LR_SUPPORT_WEIGHTS: null
+LR_BASIS_DIM: null
+LR_TRAIN_BIASES: False
+LR_INIT_GAUSSIAN_BASIS: null
+LR_RESAMPLE_BASIS: 0
+
+###############################################
+# Training / constrained recurrent training
+###############################################
+TRAIN_SCALE: 'all'
+CLAMP: 0
+
+TRAIN_EI: 0
+IS_TRAIN: [0, 0, 0, 0]
+
+###############################################
+# Reinforcement / reward
+###############################################
+IF_RL: 0
+RWD: -1
+
+###############################################
+# Flow / grid probing
+###############################################
 GRID_SIZE: 30
 GRID_RANGE: 5
 GRID_TEST: 0
 GRID_INPUT: 0
 
-LR_GAUSS: 0
-LR_INI: 1.0
-LR_MASK: 0
-LR_KAPPA: 0
-LR_CLASS: 1
-LR_CLAMP: 0
-LR_BIAS: 1
-LR_NORM: 0
-LR_FIX_READ: 0
-LR_UeqV: 1
-DROP_RATE: 0.0
-
-IF_RL: 0
-RWD: -1
-
-TRAIN_SCALE: 'all'
-ODR_TRAIN: 0
-CLAMP: 0
-TRAIN_EI: 0
-IS_TRAIN: [0, 0, 0, 0]
-
-RANDOM_DELAY: 0
-DELAY_LIST: 'rand'
-MAX_DELAY: 2
-MIN_DELAY: 1
+###############################################
+# Optogenetics
+###############################################
 IF_OPTO: 0
-
-RANDOM_ITI: 0
-ITI_LIST: 'rand'
-MAX_ITI: 2
-MIN_ITI: 1
-
-REP_BIAS: 0.0
-REP_VAR: 1.0
-
-IF_FF_DYN: 0
-TAU_FF: 0.2
-
-TRAINING: 0
-
-IF_HEBB: 0
-IS_HEBB: [1, 1, 1, 1]
-HEBB_FRAC: 0.3
-TAU_HEBB: 1.0
-T_HEBB: 0
-ETA: 0.1
-HEBB_TYPE: 'bcm'
-STIM_EI: 0

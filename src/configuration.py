@@ -144,6 +144,15 @@ def init_const(model):
     for i_pop in range(model.N_POP):
         model.slices.append(slice(model.csumNa[i_pop], model.csumNa[i_pop + 1]))
 
+    if model.TRAIN_SCALE=='all':
+        model.train_scale = model.Na
+
+    if model.TRAIN_SCALE=='sparse':
+        model.train_scale = torch.sqrt(model.Ka)
+
+    if model.TRAIN_SCALE=='dense':
+        model.train_scale = torch.sqrt(model.Na)
+
     if model.VERBOSE:
         print("Na", model.Na, "Ka", model.Ka, "csumNa", model.csumNa)
 

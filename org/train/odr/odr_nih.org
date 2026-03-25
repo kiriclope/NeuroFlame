@@ -119,8 +119,8 @@ def add_vlines(model, ax=None):
 
 #+begin_src ipython
 IF_LOAD = 0
-IF_SAVE = 1
-IF_SAVE_POPT = 0
+IF_SAVE = 0
+IF_SAVE_POPT = 1
 
 IF_ITI = 0
 name = 'controls'
@@ -136,9 +136,77 @@ else:
 
 #+RESULTS:
 
+#+begin_src ipython
+kwargs = {
+    'N_BATCH': 10,
+    'N_TRIALS': 50,
+
+    'GAIN_NMDA': [1.0, 1.0],
+    'GAIN_SZ': [1., 1.],
+
+    'TRAINING': 0,
+    'LR_INI': 0.001,
+
+    'GAIN': 1.0,
+    'DURATION': 13.0,
+    'T_STEADY': 4,
+
+    'T_STIM_ON': [4.0, 8.0],
+    'T_STIM_OFF': [5.0, 9.0],
+
+    'Jab': [1.0, -1.5, 1.0, -1],
+    'Ja0': [2.0, 1.0],
+
+    'STIM_EI': 0,
+    'I0': [1.0, -10.0],
+    'PHI0': [180.0, 180],
+    'SIGMA0': [1.0, 0.0],
+    'M0': 1.0,
+
+    'RANDOM_DELAY': 0,
+    'MIN_DELAY': 1,
+    'MAX_DELAY': 6,
+
+    'IF_STP': 1,
+    'IS_STP': [1, 0, 0, 0],
+    'J_STP': 1.0,
+    'USE': [0.03, 0.03, 0.03, 0.1],
+    'TAU_FAC': [2.0, 2.0, 2.0, 0.0],
+    'TAU_REC': [0.2, 0.2, 0.2, 0.1],
+    'W_STP': [1.0, 3.0, 4.0, 1.0],
+
+    'DT': 0.02,
+    'RATE_DYN': 1,
+    'TAU': [0.2, 0.1],
+
+    'SYN_DYN': 0,
+    'TAU_SYN': [0.2, 0.1],
+
+    'IF_NMDA': 1,
+    'R_NMDA': 1.0,
+    'TAU_NMDA': [0.5, 0.5],
+
+    'REP_BIAS': 1.25, # 1.25
+    'REP_VAR': 0.0,
+    'REP_SIG': 90,
+
+    'IF_HEBB': 0,
+    'IS_HEBB': [1, 1, 1, 1],
+    'TAU_HEBB': 0.5,
+    'T_HEBB': 0,
+    'ETA': 2.0,
+    'HEBB_TYPE': 'corr',
+    'HEBB_FRAC': 0.3,
+}
+#+end_src
+
+#+RESULTS:
+
 #+begin_src ipython :tangle ./figures/NIH/patients.py
 kwargs = {
-    'N_TRIALS': 10,
+    'N_BATCH': 10,
+    'N_TRIALS': 50,
+
     'GAIN_NMDA': [1.0, 1.0],
     'GAIN_SZ': [1., 1.],
 
@@ -153,7 +221,6 @@ kwargs = {
     'PHI0': [180.0, 180],
     'SIGMA0': [4.0, 0.0],
     'M0': 1.0,
-    'VAR_FF': [0.3, 0.3],
 
     'RANDOM_DELAY': 0,
     'MIN_DELAY': 0,
@@ -177,12 +244,10 @@ kwargs = {
     'TAU_FF_FAC': 0.0,
     'TAU_FF_REC': 0.5,
 
-    'Jab': [1.0, -1.4, 1.0, -1],
-
     'IS_STP': [1, 0, 0, 0],
-    'USE': [0.05, 0.03, 0.03, 0.1],
-    'TAU_FAC': [3.0, 2.0, 2.0, 0.0],
-    'TAU_REC': [0.1, 0.2, 0.2, 0.1],
+    'USE': [0.03, 0.03, 0.03, 0.1],
+    'TAU_FAC': [2.0, 2.0, 2.0, 0.0],
+    'TAU_REC': [0.2, 0.2, 0.2, 0.1],
     'W_STP': [1.0, 3.0, 4.0, 1.0],
 
     'IF_FF_ADAPT': 0,
@@ -196,6 +261,14 @@ kwargs = {
     'REP_BIAS': 1.25, # 1.25
     'REP_VAR': 0.0,
     'REP_SIG': 90,
+
+    'IF_HEBB': 0,
+    'IS_HEBB': [1, 1, 1, 1],
+    'TAU_HEBB': 0.5,
+    'T_HEBB': 0,
+    'ETA': 2.0,
+    'HEBB_TYPE': 'corr',
+    'HEBB_FRAC': 0.3,
 }
 #+end_src
 
@@ -256,23 +329,25 @@ kwargs = {
 #+RESULTS:
 
 #+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "train_odr_EI.yml"
 DEVICE = 'cuda'
 seed = np.random.randint(0, 1e6)
 
-seed = 1
+seed = 0
 print('seed', seed)
 #+end_src
 
 #+RESULTS:
-: seed 1
+: seed 0
+
+#+begin_src ipython
+print(model.J_STP)
+#+end_src
+
+#+RESULTS:
+: Parameter containing:
+: tensor(2.8353, device='cuda:0', requires_grad=True)
 
 #+begin_src ipython
 N_BATCH = kwargs['N_BATCH']
@@ -280,12 +355,10 @@ model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, **kwa
 #+end_src
 
 #+RESULTS:
-: 1050
-: 450
 
 #+begin_src ipython
-# model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed)
-# model.load_state_dict(model_state_dict);
+model_state_dict = torch.load('../models/odr/odr_%d.pth' % seed)
+model.load_state_dict(model_state_dict);
 model = model.to(DEVICE)
 model.eval();
 #+end_src
@@ -358,7 +431,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_16.png]]
+[[file:./figures/odr_seq_sb/figure_17.png]]
 
 #+begin_src ipython
 # if kwargs['RANDOM_ITI']:
@@ -415,7 +488,7 @@ print(ff_input.shape, rates_tensor.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([10, 710, 1500]) torch.Size([10, 61, 1050])
+: torch.Size([10, 855, 1000]) torch.Size([10, 131, 750])
 
 #+begin_src ipython
 N_TRIALS = kwargs['N_TRIALS']
@@ -467,7 +540,7 @@ print('curr', curr_list.shape, 'prev', prev_list.shape, 'iti', iti_list.shape)
 #+end_src
 
 #+RESULTS:
-: 100% 50/50 [03:38<00:00,  4.38s/it]rates (50, 10, 61, 1050)
+: 100% 50/50 [00:50<00:00,  1.01s/it]rates (50, 10, 131, 750)
 : curr (50, 10, 1) prev (50, 10, 1) iti (500,)
 :
 
@@ -486,7 +559,7 @@ print(phi_list.shape)
 #+end_src
 
 #+RESULTS:
-: (50, 10, 61)
+: (50, 10, 131)
 
 #+begin_src ipython
 DURATION = rates_list.shape[2] / 10
@@ -514,8 +587,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: 4.894893836975095
-[[file:./figures/odr_seq_sb/figure_24.png]]
+: 1.13160405755043
+[[file:./figures/odr_seq_sb/figure_25.png]]
 :END:
 
 #+begin_src ipython
@@ -550,7 +623,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_25.png]]
+[[file:./figures/odr_seq_sb/figure_26.png]]
 
 #+begin_src ipython
 if IF_SAVE:
@@ -568,13 +641,6 @@ if IF_SAVE:
 #+end_src
 
 #+RESULTS:
-: saving to ./models/nih//rates_list_controls.pkl
-: saving to ./models/nih//curr_list_controls.pkl
-: saving to ./models/nih//prev_list_controls.pkl
-: saving to ./models/nih//iti_list_controls.pkl
-: saving to ./models/nih//start_idx_controls.pkl
-: saving to ./models/nih//end_idx_controls.pkl
-: saving to ./models/nih//phi_list_controls.pkl
 
 #+begin_src ipython
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -602,7 +668,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_27.png]]
+[[file:./figures/odr_seq_sb/figure_28.png]]
 
 #+begin_src ipython
 
@@ -644,7 +710,7 @@ print('phi', phi_ini.shape, 'prev', prev_ini.shape)
 #+end_src
 
 #+RESULTS:
-: phi (25, 10, 61) prev (25, 10, 1)
+: phi (25, 10, 131) prev (25, 10, 1)
 
 #+begin_src ipython
 def get_error_curr_prev(phi, curr, prev):
@@ -691,7 +757,7 @@ print('targ', targ_ini.shape, 'rel', rel_ini.shape, 'errors', errors_ini.shape, 
 #+end_src
 
 #+RESULTS:
-: targ (250, 1) rel (250, 1) errors (25, 10, 61) idx start_idx (2, 10)
+: targ (250, 1) rel (250, 1) errors (25, 10, 131) idx start_idx (2, 10)
 
 #+begin_src ipython
 
@@ -724,7 +790,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_39.png]]
+[[file:./figures/odr_seq_sb/figure_40.png]]
 
 
 #+begin_src ipython
@@ -747,7 +813,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_40.png]]
+[[file:./figures/odr_seq_sb/figure_41.png]]
 
 #+begin_src ipython
 
@@ -855,7 +921,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_46.png]]
+[[file:./figures/odr_seq_sb/figure_47.png]]
 
 #+begin_src ipython
 
@@ -949,7 +1015,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_49.png]]
+[[file:./figures/odr_seq_sb/figure_50.png]]
 
 #+begin_src ipython
 n_bins = 8
@@ -1020,7 +1086,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_50.png]]
+[[file:./figures/odr_seq_sb/figure_51.png]]
 
   #+begin_src ipython
 import numpy as np
@@ -1041,6 +1107,8 @@ if IF_SAVE_POPT:
    #+end_src
 
 #+RESULTS:
+: save
+: saving to ./models/nih//popt_controls.pkl
 
 #+begin_src ipython
 import matplotlib.pyplot as plt
@@ -1065,7 +1133,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/odr_seq_sb/figure_52.png]]
+[[file:./figures/odr_seq_sb/figure_53.png]]
 
 #+begin_src ipython
 
@@ -1151,14 +1219,13 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-: 19292ba6-def9-4b47-b36f-a42c192d787b
+[[file:./figures/odr_seq_sb/figure_55.png]]
 
 #+begin_src ipython
 
 #+end_src
 
 #+RESULTS:
-: 6aff6f49-4e5e-4e69-bd78-4ff4a3a5d65b
 
 * Trial Dependency
 
@@ -1296,8 +1363,8 @@ plt.show()
 
 #+RESULTS:
 :RESULTS:
-: [1.] 7680
-[[file:./figures/odr_seq_sb/figure_53.png]]
+: [8.] 500
+[[file:./figures/odr_seq_sb/figure_59.png]]
 :END:
 
 #+begin_src ipython

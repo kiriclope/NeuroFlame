@@ -51,6 +51,6 @@ class DualScore(nn.Module):
             return DPA_score
 
         DPA_score = self.score(readout[:, self.rwd_idx, self.read_idx[0]], targets[:, 0, :self.rwd_idx.shape[0]])
-        DRT_score = self.score(readout[:, self.cue_idx, self.read_idx[1]], targets[:, -1, :self.cue_idx.shape[0]], class_bal=0)
+        DRT_score = self.score(readout[:, self.cue_idx, self.read_idx[1]], targets[:, 2, :self.cue_idx.shape[0]], class_bal=0)
 
         return DPA_score, DRT_score

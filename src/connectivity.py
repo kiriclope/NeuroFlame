@@ -159,7 +159,7 @@ class Connectivity:
             ).clamp_(min=0, max=1)
 
         # fully connected network that scales as 1/Nb
-        if "all2all" in con_type:
+        else:
             if self.verbose:
                 print("All to all connectivity")
 
