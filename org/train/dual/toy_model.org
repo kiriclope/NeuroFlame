@@ -1,0 +1,267 @@
+#+Startup: fold
+#+TITLE: Dual task toy model
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session test_dual_multi :kernel torch :exports results :output-dir ./figures/toy :file (lc/org-babel-tangle-figure-filename)
+
+
+* Notebook Settings
+
+#+begin_src ipython :tangle no
+%load_ext autoreload
+%autoreload 2
+%reload_ext autoreload
+%run ../../../notebooks/setup.py
+%matplotlib inline
+%config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/envs/torch/bin/python
+
+* toy model
+
+#+begin_src ipython
+import numpy as np
+import matplotlib.pyplot as plt
+
+#-------------- PARAMETERS --------------
+n_locations = 500    # Number of distinct locations on each side of the ring.
+n_trials = 500   # Number of trials per location.
+noise_std = np.deg2rad(10)  # Noise level in radians (5° standard deviation).
+rotation_nominal = np.pi/4   # Nominal rotation angle (45°).
+
+#-------------- SIMULATION: RIGHT SIDE --------------
+#* Right side: angles between -pi/2 and pi/2.
+initial_angles_right = np.linspace(-np.pi/2, np.pi/2, n_locations)
+#* We wilnl store initial y and responses for each trial.
+initial_y_all = []
+responses_all = []
+
+for theta in initial_angles_right:
+    # Each location has the same initial y (sin(theta)). Create n_trials copies.
+    initial_y = np.full(n_trials, np.sin(theta))
+    # Rotation: add nominal rotation plus noise.
+    noise = np.random.normal(loc=0, scale=noise_std, size=n_trials)
+    rotated_angles = theta + rotation_nominal + noise
+    y_rotated = np.sin(rotated_angles)
+    # For right side: response = 1 if rotated y > 0, 0 otherwise.
+    responses = (y_rotated > 0).astype(int)
+
+    initial_y_all.append(initial_y)
+    responses_all.append(responses)
+
+#-------------- SIMULATION: LEFT SIDE --------------
+#* Left side: angles between pi/2 and 3*pi/2.
+initial_angles_left = np.linspace(np.pi/2, 3*np.pi/2, n_locations)
+
+for theta in initial_angles_left:
+    # Each location has its initial y (sin(theta)). Create n_trials copies.
+    initial_y = np.full(n_trials, np.sin(theta))
+    noise = np.random.normal(loc=0, scale=noise_std, size=n_trials)
+    rotated_angles = theta + rotation_nominal + noise
+    y_rotated = np.sin(rotated_angles)
+    # For left side: response rule is reversed.
+    # response = 1 if rotated y <= 0, otherwise 0.
+    responses = (y_rotated <= 0).astype(int)
+
+    initial_y_all.append(initial_y)
+    responses_all.append(responses)
+
+#* Convert the lists into single flat arrays.
+initial_y_all = np.concatenate(initial_y_all)
+responses_all   = np.concatenate(responses_all)
+
+#-------------- BINNING THE DATA --------------
+#* Define bins over the range of initial y.
+n_bins = 50
+bins = np.linspace(-1, 1, n_bins+1)
+bin_centers = (bins[:-1] + bins[1:]) / 2
+
+#* Compute the mean response in each bin.
+bin_means = np.zeros(n_bins)
+for i in range(n_bins):
+    # Find indices that fall in the i-th bin.
+    idx = (initial_y_all >= bins[i]) & (initial_y_all < bins[i+1])
+    # To avoid division by zero if no data points fall in the bin.
+    if np.any(idx):
+        bin_means[i] = np.mean(responses_all[idx])
+    else:
+        bin_means[i] = np.nan
+
+#-------------- PLOTTING --------------
+# plt.figure(figsize=(8, 5))
+plt.plot(bin_centers, bin_means, 'ro-', label='Mean Response (Accuracy)')
+plt.axhline(0.5, ls='--', color='k')
+plt.axvline(0.0, ls='--', color='k')
+plt.xlabel('Choice Overlap')
+plt.ylabel('DPA Performance')
+#plt.title('Accuracy vs Initial y Projection (All Trials Combined)')
+plt.ylim(0.45, 1.05)
+plt.xlim([-0.75, 0.75])
+# plt.grid(True)
+# plt.legend()
+plt.savefig('toy_dpa.svg', dpi=300)
+plt.show()
+
+bin_means_dpa = bin_means
+#+end_src
+
+#+RESULTS:
+[[file:./figures/toy/figure_1.png]]
+
+#+begin_src ipython
+import numpy as np
+import matplotlib.pyplot as plt
+
+# -------------- PARAMETERS --------------
+n_locations = 500     # Number of distinct initial positions on each side.
+n_trials    = 500     # Number of trials per location.
+noise_std   = np.deg2rad(30)  # Noise standard deviation (15° in radians).
+
+# Nominal rotations for each trial type:
+rotation_typeA_right = 2*np.pi/4   # +45° for right side in Type A.
+rotation_typeA_left  = -2*np.pi/4  # -45° for left side in Type A.
+rotation_typeB_right = 0 # -np.pi/6  # -45° for right side in Type B.
+rotation_typeB_left  = 0  # np.pi/6  # +45° for left side in Type B.
+
+# -------------- PREPARE CONTAINERS --------------
+# These lists will collect the initial y locations and the performance (correctness) for each trial,
+# regardless of trial type.
+initial_y_all  = []
+performance_all = []   # performance: 1 means "correct" and 0 means "incorrect"
+
+# -------------- SIMULATE TYPE A TRIALS --------------
+# In Type A, the correct outcome is achieved when the final y coordinate is positive.
+
+# For points on the RIGHT side: θ ∈ [ -pi/2, pi/2 ]
+initial_angles_right = np.linspace(-np.pi/2, np.pi/2, n_locations)
+for theta in initial_angles_right:
+    # Each trial has the same initial y = sin(theta)
+    init_y = np.full(n_trials, np.sin(theta))
+    noise = np.random.normal(loc=0, scale=noise_std, size=n_trials)
+    # For right side in Type A, apply a noisy +45° rotation.
+    rotated_angles = theta + rotation_typeA_right + noise
+    y_rotated = np.sin(rotated_angles)
+    # Performance: correct (performance=1) if the final y > 0, else 0.
+    performance = (y_rotated > 0).astype(int)
+
+    initial_y_all.append(init_y)
+    performance_all.append(performance)
+
+# For points on the LEFT side: θ ∈ [ pi/2, 3*pi/2 ]
+initial_angles_left = np.linspace(np.pi/2, 3*np.pi/2, n_locations)
+for theta in initial_angles_left:
+    init_y = np.full(n_trials, np.sin(theta))
+    noise = np.random.normal(loc=0, scale=noise_std, size=n_trials)
+    # For left side in Type A, apply a noisy -45° rotation.
+    rotated_angles = theta + rotation_typeA_left + noise
+    y_rotated = np.sin(rotated_angles)
+    performance = (y_rotated > 0).astype(int)
+
+    initial_y_all.append(init_y)
+    performance_all.append(performance)
+
+# -------------- SIMULATE TYPE B TRIALS --------------
+# In Type B the rule is reversed: the trial yields a response of 0 if the final y is positive
+# and 1 otherwise. We treat a "correct" trial as one where the response is the opposite of what you
+#’d get if just applying (y_rotated > 0). In other words, performance is:
+#   performance = 1 - (y_rotated > 0)
+# (Thus a trial with y_rotated > 0 yields (1-1)=0 which is correct in Type B.)
+
+# For points on the RIGHT side:
+for theta in initial_angles_right:
+    init_y = np.full(n_trials, np.sin(theta))
+    noise = np.random.normal(loc=0, scale=noise_std, size=n_trials)
+    # For right side in Type B, apply a noisy -45° rotation.
+    rotated_angles = theta + rotation_typeB_right + noise
+    y_rotated = np.sin(rotated_angles)
+    # The simulation rule gives a response: normally one would do:
+    #   response = (y_rotated > 0)
+    # However, because the rule is reversed, we define performance as:
+    performance = 1 - (y_rotated > 0).astype(int)
+
+    initial_y_all.append(init_y)
+    performance_all.append(performance)
+
+# For points on the LEFT side:
+for theta in initial_angles_left:
+    init_y = np.full(n_trials, np.sin(theta))
+    noise = np.random.normal(loc=0, scale=noise_std, size=n_trials)
+    # For left side in Type B, apply a noisy +45° rotation.
+    rotated_angles = theta + rotation_typeB_left + noise
+    y_rotated = np.sin(rotated_angles)
+    performance = 1 - (y_rotated > 0).astype(int)
+
+    initial_y_all.append(init_y)
+    performance_all.append(performance)
+
+# -------------- COLLECT ALL TRIAL DATA --------------
+initial_y_all  = np.concatenate(initial_y_all)
+performance_all = np.concatenate(performance_all)
+
+# -------------- BIN THE DATA --------------
+n_bins = 50
+bins = np.linspace(-1, 1, n_bins+1)
+bin_centers = (bins[:-1] + bins[1:]) / 2
+
+bin_performance = np.zeros(n_bins)
+for i in range(n_bins):
+    idx = (initial_y_all >= bins[i]) & (initial_y_all < bins[i+1])
+    if np.any(idx):
+        bin_performance[i] = np.mean(performance_all[idx])
+    else:
+        bin_performance[i] = np.nan
+
+# -------------- PLOTTING --------------
+# plt.figure(figsize=(8, 5))
+plt.plot(bin_centers, bin_performance, 'bo-', label='Mean Performance')
+plt.axhline(0.5, ls='--', color='k')
+plt.axvline(0., ls='--', color='k')
+plt.xlabel('Choice Overlap')
+plt.ylabel('GoNoGo Performance')
+# plt.title('Performance vs Initial y Projection\n(Combined over both trial types)')
+plt.ylim(0.45, 1.05)
+plt.xlim([-0.75, 0.75])
+# plt.grid(True)
+# plt.legend()
+plt.savefig('toy_gng.svg', dpi=300)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/toy/figure_2.png]]
+
+#+begin_src ipython
+optim = (bin_performance+bin_means_dpa)/2
+max= np.argmax(optim)
+print(max)
+
+plt.plot(bin_centers, optim,'o-', label='Mean Performance')
+plt.axhline(0.5, ls='--', color='k')
+plt.axvline(0., ls='--', color='grey')
+plt.axvline(bin_centers[max], ls='--', color='k')
+
+plt.plot(bin_centers, bin_performance, '-', label='Mean Performance', alpha=.2, color='b')
+plt.plot(bin_centers, bin_means, '-', label='Mean Response (Accuracy)', alpha=.2, color='r')
+plt.xlabel('Choice Overlap')
+plt.ylabel('Optimal Performance')
+
+plt.xlim([-0.75, 0.75])
+plt.ylim(0.45, 1.05)
+
+plt.savefig('toy_optim.svg', dpi=300)
+plt.show()
+
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: 15
+[[./figures/toy/figure_2.png]]
+:END:
+
+#+begin_src ipython
+
+#+end_src
