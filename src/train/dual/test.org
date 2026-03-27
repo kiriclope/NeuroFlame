@@ -1,0 +1,199 @@
+:PROPERTIES:
+:GPTEL_MODEL: gpt-5.4
+:GPTEL_BACKEND: OpenAI
+:GPTEL_SYSTEM: You are a large language model living in Emacs and a helpful assistant. Respond concisely.
+:GPTEL_TOOLS:
+:GPTEL_BOUNDS: ((response (534 5956)))
+:END:
+
+*** I have this pipeline to plot the results of rnns simulations. I would like to add similar overlaps than plot_overlap_by_task(result, task=0, outpath=None).
+
+Instead of averaging trials over pair of odors, I want to average trials over sample/first odors, choice (pair/unpair), test/second odor or task
+
+
+
+Add a more general overlap plot that groups trials by any label axis instead of the 4 pair conditions.
+
+Given your label logic in =_condition_masks=:
+
+- =y[0]= = choice / pair-vs-unpair
+- =y[1]= = test / second odor
+- =y[2]= = task
+- =y[3]= = sample / first odor
+
+you can add a generic grouper plus a plotting function.
+
+**** Suggested code
+
+Append this to =plots.py=:
+
+#+begin_src python
+def _group_masks(y, by, task=None):
+    """
+    Returns an ordered dict-like mapping:
+        group_name -> boolean mask over trials
+
+    Label convention:
+        y[0] = choice (0/1; unpair/pair)
+        y[1] = test   (0/1; second odor)
+        y[2] = task   (0/1/-1)
+        y[3] = sample (0/1; first odor)
+    """
+    by = by.lower()
+
+    if by == "condition":
+        if task is None:
+            raise ValueError("task must be provided when by='condition'")
+        return _condition_masks(y, task)
+
+    masks = {}
+
+    base = np.ones(y.shape[1], dtype=bool)
+    if task is not None:
+        base = base & (y[2] == task)
+
+    if by in ("sample", "first", "sample_odor", "first_odor"):
+        for v, name in zip([0, 1], ["A", "B"]):
+            masks[name] = base & (y[3] == v)
+
+    elif by in ("choice", "pairing", "paired"):
+        for v, name in zip([0, 1], ["unpair", "pair"]):
+            masks[name] = base & (y[0] == v)
+
+    elif by in ("test", "second", "test_odor", "second_odor"):
+        for v, name in zip([0, 1], ["C", "D"]):
+            masks[name] = base & (y[1] == v)
+
+    elif by == "task":
+        for v in [0, 1, -1]:
+            masks[str(v)] = (y[2] == v)
+
+    else:
+        raise ValueError(f"Unknown grouping: {by}")
+
+    return masks
+
+
+def _group_palette(by, labels):
+    by = by.lower()
+
+    if by in ("sample", "first", "sample_odor", "first_odor"):
+        palette = {"A": "#4C72B0", "B": "#DD8452"}
+    elif by in ("choice", "pairing", "paired"):
+        palette = {"unpair": "#C44E52", "pair": "#55A868"}
+    elif by in ("test", "second", "test_odor", "second_odor"):
+        palette = {"C": "#8172B2", "D": "#937860"}
+    elif by == "task":
+        palette = {k: TASK_PALETTE[k] for k in ["0", "1", "-1"] if k in TASK_PALETTE}
+    elif by == "condition":
+        palette = {k: DUAL_PALETTE[k] for k in labels}
+    else:
+        palette = {lab: None for lab in labels}
+
+    return [palette.get(lab, None) for lab in labels]
+
+
+def plot_overlap_by_group(result, by="sample", task=None, outpath=None):
+    """
+    Plot overlap traces averaged by a chosen grouping.
+
+    Parameters
+    ----------
+    by : str
+        One of:
+            'sample'   : average by first odor
+            'choice'   : average by pair vs unpair
+            'test'     : average by second odor
+            'task'     : average by task
+            'condition': original AD/AC/BD/BC grouping, requires task
+    task : int or None
+        If provided for sample/choice/test, restrict trials to that task.
+        For by='condition', this is required.
+    """
+    readout = _get_plot_readout(result)
+    y = _get_labels_matrix(result)
+
+    n_panels = readout.shape[2]
+    panel_names = _panel_names(n_panels)
+    time = _get_time_axis(result, readout.shape[1])
+
+    groups = _group_masks(y, by=by, task=task)
+    labels = list(groups.keys())
+    colors = _group_palette(by, labels)
+
+    fig, ax = plt.subplots(
+        1,
+        n_panels,
+        figsize=(DOUBLE_COL, 2.3),
+        sharey=True,
+        constrained_layout=True,
+    )
+    if n_panels == 1:
+        ax = [ax]
+
+    global_absmax = np.nanmax(np.abs(readout))
+    if not np.isfinite(global_absmax) or global_absmax == 0:
+        global_absmax = 1.0
+
+    for k in range(n_panels):
+        for label, color in zip(labels, colors):
+            mask = groups[label]
+            data = readout[mask, :, k]
+            if data.shape[0] == 0:
+                continue
+
+            mean, ci = mean_ci(data)
+            ax[k].plot(time, mean, color=color, label=label, lw=1.5)
+            ax[k].fill_between(
+                time,
+                mean - ci,
+                mean + ci,
+                color=color,
+                alpha=0.15,
+                linewidth=0,
+            )
+
+        add_vlines(ax[k])
+        ax[k].axhline(0, color="k", ls="--", lw=0.8)
+        ax[k].set_xlabel("Time (s)")
+        ax[k].set_title(panel_names[k])
+        ax[k].set_ylim(-1.05 * global_absmax, 1.05 * global_absmax)
+
+    ax[0].set_ylabel("Overlap")
+
+    title = by if task is None else f"{by}, task={task}"
+    ax[0].legend(frameon=False, fontsize=7, loc="best", title=title)
+
+    if outpath is not None:
+        save_figure(fig, outpath)
+        plt.close(fig)
+    return fig
+#+end_src
+
+**** Usage
+
+Equivalent to your current plot:
+
+#+begin_src python
+plot_overlap_by_group(result, by="condition", task=0)
+#+end_src
+
+What you want:
+
+#+begin_src python
+plot_overlap_by_group(result, by="sample", task=0)   # average over first odor
+plot_overlap_by_group(result, by="choice", task=0)   # pair vs unpair
+plot_overlap_by_group(result, by="test", task=0)     # second odor
+plot_overlap_by_group(result, by="task")             # average over task
+#+end_src
+
+**** Notes
+
+If your odor naming is not really =A/B= for sample and =C/D= for test, just rename:
+
+- sample labels =["A", "B"]=
+- test labels =["C", "D"]=
+
+If you want, I can also refactor =plot_overlap_by_task= to become a thin wrapper around =plot_overlap_by_group(..., by="condition")= so there is no duplicated plotting code.
+
+***

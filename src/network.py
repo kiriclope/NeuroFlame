@@ -423,12 +423,12 @@ class Network(nn.Module):
         W_stp_T = None
         if self.IF_STP:
 
-            W_stp_T = [self.GAIN * self.J_STP * self.fix_scale * (1.0 + self.Wab_train[self.slices[0], self.slices[0]]) / self.train_scale[0]]
+            # W_stp_T = [self.GAIN * self.J_STP * self.fix_scale * (1.0 + self.Wab_train[self.slices[0], self.slices[0]]) / self.train_scale[0]]
 
-            # W_stp_T = [self.GAIN * self.J_STP *
-            #            (self.W_stp_T[0] / self.fix_scale
-            #             * (1.0 + self.Wab_train[self.slices[0], self.slices[0]] / self.train_scale[0]))
-            #            ]
+            W_stp_T = [self.GAIN * self.J_STP *
+                       (self.W_stp_T[0] / self.fix_scale
+                        * (1.0 + self.Wab_train[self.slices[0], self.slices[0]] / self.train_scale[0]))
+                       ]
 
             if self.CLAMP:
                 W_stp_T[0] = clamp_tensor(W_stp_T[0], 0, self.slices)

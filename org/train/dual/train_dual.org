@@ -124,6 +124,7 @@ def cross_val_data(X, Y, n_splits=5, batch_size=32):
 #+end_src
 
 #+RESULTS:
+: 7b9e6756-4ad4-4635-8c85-ec2e7cea3a3f
 
 ** Optimization
 
@@ -209,6 +210,7 @@ def validation_step(dataloader, model, loss_fn):
 #+end_src
 
 #+RESULTS:
+: f876953f-cc76-4dfb-958c-c15fae3e2e7f
 
 #+begin_src jupyter-python
 def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100, thresh=0.15, zero_grad=None):
@@ -446,6 +448,44 @@ class DualLoss(nn.Module):
 ** Other
 
 #+begin_src jupyter-python
+import gc
+def free_gpu_memory(model=None):
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.ipc_collect()
+    torch.cuda.synchronize()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+def del_tensor(obj):
+    try:
+        if hasattr(obj, "device"):
+            device = obj.device
+        elif hasattr(obj, "parameters"):
+            params = list(obj.parameters())
+            device = params[0].device if len(params) > 0 else None
+        else:
+            device = None
+    except Exception:
+        device = None
+
+    del obj
+    gc.collect()
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        if device is not None and "cuda" in str(device):
+            try:
+                torch.cuda.synchronize(device)
+            except Exception:
+                pass
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
 def calculate_mean_accuracy_and_sem(accuracies):
     mean_accuracy = accuracies.mean()
     std_dev = accuracies.std(unbiased=True).item()
@@ -482,7 +522,6 @@ def get_theta(a, b, GM=0, IF_NORM=0):
 #+end_src
 
 #+RESULTS:
-: 13fdf0e7-82bf-4bc7-9a0b-a2451e8f62a7
 
 #+begin_src jupyter-python
 def get_idx(model, rank=1):
@@ -529,7 +568,6 @@ def plot_smooth(data, ax, color):
 #+end_src
 
 #+RESULTS:
-: fa70f5d8-9276-4ecd-a5d4-fdfc9fae9b55
 
 #+begin_src jupyter-python
 def convert_seconds(seconds):
@@ -540,7 +578,6 @@ def convert_seconds(seconds):
 #+end_src
 
 #+RESULTS:
-: e1b6fb47-34b7-4207-b6f3-49c7c2913690
 
 ** plots
 
@@ -562,7 +599,6 @@ def pkl_load(name, path="."):
 #+end_src
 
 #+RESULTS:
-: 56fb13b1-ade8-4078-833d-df74c2ac2862
 
 #+begin_src jupyter-python
 def add_vlines(ax=None, mouse=""):
@@ -621,7 +657,7 @@ def mean_ci(data):
 #+begin_src jupyter-python
 REPO_ROOT = "/home/leon/models/NeuroFlame"
 conf_name = "train_dual_EI.yml"
-DEVICE = 'cuda:0'
+DEVICE = 'cuda:1'
 
 # kwargs = {'TRAINING': 1,
 #           'LR_INI': 0.1,
@@ -635,12 +671,15 @@ DEVICE = 'cuda:0'
 #           'LR_RESAMPLE_BASIS': 0,
 # }
 
-kwargs = {'TRAINING': 1,
-          'LR_INI': 1.0,
-          'RANK': 2,
-          'VAR_FF': [0.1, 0.1],
-          'TRAIN_SCALE': 'all',
-          'LR_TYPE': 'standard',
+kwargs = {
+    'TRAINING': 1,
+    'GAIN': 1.0,
+    'LR_INI': 1.0,
+    'RANK': 2,
+    'VAR_FF': [0.25, 0.25],
+    'TRAIN_SCALE': 'all',
+    'LR_TYPE': 'standard',
+    'K': 250,
 }
 
 # seed = np.random.randint(0, 1e6)
@@ -652,12 +691,23 @@ print(seed)
 : 1
 
 #+begin_src jupyter-python
-model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
-device = torch.device(DEVICE if torch.cuda.is_available() else 'cpu')
-model.to(device);
+batch_size = 32
+learning_rate = 0.1
+bce_alpha = 1.0
+thresh = 1.0
 #+end_src
 
 #+RESULTS:
+
+#+begin_src jupyter-python
+model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
+device = torch.device(DEVICE if torch.cuda.is_available() else 'cpu')
+model.to(device);
+print(model.SAVE_PATH)
+#+end_src
+
+#+RESULTS:
+: /home/leon/models/NeuroFlame/src/train/runs/dual
 
 #+begin_src jupyter-python
 from src.lr_utils import clamp_tensor
@@ -666,7 +716,6 @@ print(Cij.shape)
 #+end_src
 
 #+RESULTS:
-: (1000, 1000)
 
 #+begin_src jupyter-python
 from scipy.ndimage import gaussian_filter1d, uniform_filter1d
@@ -705,14 +754,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/dual/figure_25.png]]
-
-#+begin_src jupyter-python
-batch_size = 32
-learning_rate = 0.01
-bce_alpha = 1.0
-thresh = 1.0
-#+end_src
+[[file:./figures/dual/figure_26.png]]
 
 #+RESULTS:
 
@@ -733,7 +775,7 @@ torch.cuda.reset_accumulated_memory_stats(DEVICE)
 *** Parameters
 
 #+begin_src jupyter-python
-model.J_STP.requires_grad = True
+# model.J_STP.requires_grad = True
 
 if model.LR_READOUT:
     for param in model.low_rank.linear.parameters():
@@ -743,6 +785,7 @@ if model.LR_READOUT:
 
 #+RESULTS:
 
+
 #+begin_src jupyter-python
 for name, param in model.named_parameters():
     if param.requires_grad:
@@ -750,9 +793,8 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-: J_STP torch.Size([])
-: low_rank.V torch.Size([750, 2])
-: low_rank.U torch.Size([750, 2])
+: weight_builder.low_rank.V torch.Size([1500, 2])
+: weight_builder.low_rank.U torch.Size([1500, 2])
 
 #+begin_src jupyter-python
 steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
@@ -825,7 +867,7 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([2048, 605, 1000]) labels torch.Size([2048, 3, 60])
+: ff_input torch.Size([2048, 605, 2000]) labels torch.Size([2048, 3, 60])
 
 *** Run
 
@@ -841,7 +883,7 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
 #+RESULTS:
-: torch.Size([1638, 605, 1000]) torch.Size([410, 605, 1000])
+: torch.Size([1638, 605, 2000]) torch.Size([410, 605, 2000])
 : torch.Size([1638, 3, 60]) torch.Size([410, 3, 60])
 
 #+begin_src jupyter-python
@@ -861,25 +903,33 @@ torch.save(model.state_dict(), '%s/dpa_%d.pth' % (model.SAVE_PATH, seed))
 
 #+RESULTS:
 : training DPA
-: Epoch 1/10, Training Loss: 1.9752, Validation Loss: 1.9158
-: Epoch 2/10, Training Loss: 1.7538, Validation Loss: 1.2338
-: Epoch 3/10, Training Loss: 0.5896, Validation Loss: 0.1015
-: Epoch 4/10, Training Loss: 0.0985, Validation Loss: 0.0914
-: Stopping training as loss has fallen below the threshold: 0.09849306754767895, 0.09138645268068081
-: Elapsed (with compilation) = 0h 3m 6s
+: Epoch 1/10, Training Loss: nan, Validation Loss: nan
+: Stopping training as loss is NaN.
+: Elapsed (with compilation) = 0h 1m 14s
 
 #+begin_src jupyter-python
-print(model.J_STP)
+del model, ff_inputs, labels, splits, optimizer, criterion, loss, val_loss
+gc.collect()
+torch.cuda.empty_cache()
+torch.cuda.ipc_collect()
+torch.cuda.synchronize()
+
+print(torch.cuda.memory_allocated() / 1024**2, "MB allocated")
+print(torch.cuda.memory_reserved() / 1024**2, "MB reserved")
 #+end_src
 
 #+RESULTS:
+: 11886.88232421875 MB allocated
+: 19012.0 MB reserved
 
 ** Testing
 :PROPERTIES:
 :tangle no
 :END:
 
-#+begin_src jupyter-python :tangle ../../../src/train/test_dpa.py
+#+begin_src jupyter-python
+model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
+
 model_state_dict = torch.load('%s/dpa_%d.pth' % (model.SAVE_PATH, seed))
 model.load_state_dict(model_state_dict)
 model.eval();
@@ -888,7 +938,7 @@ model.eval();
 #+RESULTS:
 
 #+begin_src jupyter-python :tangle ../../../src/train/test_dpa.py
-N_BATCH = 8
+N_BATCH = 512
 model.N_BATCH = N_BATCH
 
 ff_input = []
@@ -923,7 +973,7 @@ print('ff_input', ff_input.shape, 'labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: ff_input torch.Size([32, 605, 1000]) labels torch.Size([3, 32])
+: ff_input torch.Size([2048, 605, 2000]) labels torch.Size([3, 2048])
 
 #+begin_src jupyter-python :tangle ../../../src/train/test_dpa.py
 with torch.no_grad():
@@ -932,7 +982,7 @@ print(rates.shape)
 #+end_src
 
 #+RESULTS:
-: (32, 101, 750)
+: (32, 101, 1500)
 
 #+begin_src jupyter-python
 def plot_overlap_label(readout, y, task=0, label=['pair', 'unpair'], figname='fig.svg', title='first'):
@@ -996,8 +1046,6 @@ plot_overlap_label(readout, labels.cpu().detach().numpy(), task=0)
 U = model.low_rank.U.cpu().detach().numpy()
 V = model.low_rank.V.cpu().detach().numpy()
 
-print(U.shape, V.shape)
-
 fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
 
 for i in range(V.shape[-1]):
@@ -1013,24 +1061,21 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: (750, 2) (750, 2)
 [[file:./figures/dual/figure_41.png]]
-:END:
-#+begin_src jupyter-python
-
-#+end_src
-#+RESULTS:
 
 * Go/NoGo Task
 
 #+begin_src jupyter-python
+del_tensor(model)
+model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
+
 model_state_dict = torch.load('%s/dpa_%d.pth' % (model.SAVE_PATH, seed))
 model.load_state_dict(model_state_dict)
 #+end_src
 
 #+RESULTS:
 : <All keys matched successfully>
+
 
 ** Training
 
@@ -1047,8 +1092,8 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
-: low_rank.V torch.Size([750, 3])
-: low_rank.U torch.Size([750, 3])
+: low_rank.V torch.Size([1500, 2])
+: low_rank.U torch.Size([1500, 2])
 
 #+begin_src jupyter-python
 steps = np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
@@ -1077,7 +1122,7 @@ model.lr_eval_win = np.max( (rwd_idx.shape[0], stim_idx.shape[0]))
 :  24 25 26 27 28 29]
 
 #+begin_src jupyter-python
-model.N_BATCH = 512
+model.N_BATCH = 1024
 
 model.I0[0] = 0
 model.I0[1] = 1
@@ -1100,7 +1145,7 @@ print(ff_input.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([1024, 605, 1000])
+
 
 #+begin_src jupyter-python
 labels_Go = torch.ones((model.N_BATCH, model.lr_eval_win))
@@ -1113,8 +1158,8 @@ print('labels', labels.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([1024, 20])
-: labels torch.Size([1024, 2, 20])
+: torch.Size([512, 20])
+: labels torch.Size([512, 2, 20])
 
 *** Run
 
@@ -1125,8 +1170,8 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 #+end_src
 
 #+RESULTS:
-: torch.Size([819, 605, 1000]) torch.Size([205, 605, 1000])
-: torch.Size([819, 2, 20]) torch.Size([205, 2, 20])
+: torch.Size([409, 605, 2000]) torch.Size([103, 605, 2000])
+: torch.Size([409, 2, 20]) torch.Size([103, 2, 20])
 
 #+begin_src jupyter-python
 print('training DRT')
@@ -1140,21 +1185,9 @@ print("Elapsed (with compilation) = %dh %dm %ds" % convert_seconds(end - start))
 #+end_src
 
 #+RESULTS:
-#+begin_example
-training DRT
-Epoch 1/10, Training Loss: 0.7707, Validation Loss: 0.2921
-Epoch 2/10, Training Loss: 0.2693, Validation Loss: 0.2531
-Epoch 3/10, Training Loss: 0.2439, Validation Loss: 0.2330
-Epoch 4/10, Training Loss: 0.2213, Validation Loss: 0.2106
-Epoch 5/10, Training Loss: 0.2064, Validation Loss: 0.2008
-Epoch 6/10, Training Loss: 0.1922, Validation Loss: 0.1859
-Epoch 7/10, Training Loss: 0.1760, Validation Loss: 0.1691
-Epoch 8/10, Training Loss: 0.1711, Validation Loss: 0.1655
-Epoch 9/10, Training Loss: 0.1663, Validation Loss: 0.1656
-Epoch 10/10, Training Loss: 0.1619, Validation Loss: 0.1634
-Elapsed (with compilation) = 0h 7m 32s
-#+end_example
- #+begin_src jupyter-python
+
+
+#+begin_src jupyter-python
 torch.save(model.state_dict(), '%s/dual_naive_%d.pth' % (model.SAVE_PATH, seed))
 #+end_src
 

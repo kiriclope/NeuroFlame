@@ -16,3 +16,13 @@ height = width * golden_ratio
 
 matplotlib.rcParams['figure.figsize'] = [width, height]
 matplotlib.rcParams['lines.markersize'] = 5
+matplotlib.rcParams['axes.titlesize'] = 24
+matplotlib.rcParams['axes.labelsize'] = 19
+matplotlib.rcParams['xtick.labelsize'] = 16
+matplotlib.rcParams['ytick.labelsize'] = 16
+matplotlib.rcParams['figure.figsize'] = (width, height)
+matplotlib.rcParams['axes.titlepad'] = 24
+matplotlib.rcParams['axes.labelpad'] = 10
+matplotlib.rcParams['axes.spines.top'] = False
+matplotlib.rcParams['axes.spines.right'] = False
+matplotlib.rcParams['font.size'] = 14

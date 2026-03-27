@@ -1,3 +1,10 @@
+:PROPERTIES:
+:GPTEL_MODEL: gpt-5.4
+:GPTEL_BACKEND: OpenAI
+:GPTEL_SYSTEM: You are a large language model living in Emacs and a helpful assistant.\nYou are a machine learning expert.\nThink in steps and avoid repetitions.\nRespond precisely and concisely.
+:GPTEL_TOOLS:
+:GPTEL_BOUNDS: ((response (23703 28945) (28963 40236)))
+:END:
 #+STARTUP: fold
 #+TITLE: Training Low Rank RNNs
 #+PROPERTY: header-args:jupyter-python :session dual_flow :kernel torch :output-dir ./figures/flow :file (lc/org-babel-tangle-figure-filename)
@@ -37,8 +44,9 @@ pal = sns.color_palette("tab10")
 #+begin_src jupyter-python
 sys.path.insert(0, '../../../')
 
-from notebooks.setup import *
-
+# from notebooks.setup import *
+from notebooks.plot_style import apply_plot_style
+apply_plot_style()
 from src.network import Network
 from src.plot_utils import plot_con
 from src.decode import decode_bump, circcvl
@@ -59,13 +67,11 @@ from src.lr_utils import masked_normalize, clamp_tensor, normalize_tensor
 #+end_src
 
 #+RESULTS:
-:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/bin/python
-: <Figure size 600x370.82 with 0 Axes>
-:END:
+
 **** Small utils
 
 #+begin_src jupyter-python :tangle ../src/torch/utils.py
@@ -79,7 +85,6 @@ def pkl_load(name, path="."):
 #+end_src
 
 #+RESULTS:
-: e478a520-5d8e-4505-b047-8b573c8234a7
 
 #+begin_src jupyter-python
 def add_vlines(model, ax=None):
@@ -150,8 +155,8 @@ def init_model(task, seed, **kwargs):
         **kwargs
     )
     path = model.SAVE_PATH
-    model_state_dict = torch.load(f"{path}/{task}_{seed}.pth", map_location=DEVICE)
-    model.load_state_dict(model_state_dict)
+    model_state_dict = torch.load(f"{path}/seed{seed}/{task}_seed{seed}.pth", map_location=DEVICE)
+    model.load_state_dict(model_state_dict["model_state_dict"])
     return model
 #+end_src
 
@@ -242,114 +247,9 @@ def get_low_rank(rates, model, IF_REC=0):
     return overlaps.detach().cpu().numpy(), vec.detach().cpu().numpy()
 #+end_src
 
-
-
 #+RESULTS:
 
 **** Flow field utils
-
-#+begin_src jupyter-python
-def compute_flow_field(overlaps, window, size=220, sigma=1.0, method='linear', q_bounds=(1, 99)):
-    """
-    Compute 2D empirical flow field from low-rank trajectories.
-
-    Parameters
-    ----------
-    overlaps : ndarray, shape (n_traj, n_time, >=2)
-    window : int
-        Discard times before this index.
-    size : int
-        Grid resolution.
-    sigma : float
-        Gaussian smoothing on interpolated vector field.
-    method : str
-        scipy.interpolate.griddata method.
-    q_bounds : tuple
-        Percentile bounds for robust grid limits.
-
-    Returns
-    -------
-    dict
-        Contains grid, vector field, speed, and raw trajectories.
-    """
-    traj = np.asarray(overlaps)
-    assert traj.ndim == 3, f"Expected (n_traj, n_time, n_dim), got {traj.shape}"
-    assert traj.shape[-1] >= 2, f"Need at least 2 dims, got {traj.shape}"
-
-    x = traj[:, window:, 0]
-    y = traj[:, window:, 1]
-
-    dx = np.diff(x, axis=1)
-    dy = np.diff(y, axis=1)
-
-    x0 = x[:, :-1]
-    y0 = y[:, :-1]
-
-    x_flat = x0.ravel()
-    y_flat = y0.ravel()
-    dx_flat = dx.ravel()
-    dy_flat = dy.ravel()
-
-    valid = (
-        np.isfinite(x_flat) &
-        np.isfinite(y_flat) &
-        np.isfinite(dx_flat) &
-        np.isfinite(dy_flat)
-    )
-
-    x_flat = x_flat[valid]
-    y_flat = y_flat[valid]
-    dx_flat = dx_flat[valid]
-    dy_flat = dy_flat[valid]
-
-    if len(x_flat) == 0:
-        raise ValueError("No valid trajectory points found.")
-
-    q0, q1 = q_bounds
-    x_lo, x_hi = np.percentile(x_flat, [q0, q1])
-    y_lo, y_hi = np.percentile(y_flat, [q0, q1])
-
-    x_pad = 0.10 * (x_hi - x_lo + 1e-8)
-    y_pad = 0.10 * (y_hi - y_lo + 1e-8)
-
-    xg = np.linspace(x_lo - x_pad, x_hi + x_pad, size)
-    yg = np.linspace(y_lo - y_pad, y_hi + y_pad, size)
-    xi, yi = np.meshgrid(xg, yg)
-
-    points = np.column_stack([x_flat, y_flat])
-
-    ui = griddata(points, dx_flat, (xi, yi), method=method, fill_value=np.nan)
-    vi = griddata(points, dy_flat, (xi, yi), method=method, fill_value=np.nan)
-
-    nanmask = ~np.isfinite(ui) | ~np.isfinite(vi)
-    if np.any(nanmask):
-        ui_near = griddata(points, dx_flat, (xi, yi), method='nearest')
-        vi_near = griddata(points, dy_flat, (xi, yi), method='nearest')
-        ui[nanmask] = ui_near[nanmask]
-        vi[nanmask] = vi_near[nanmask]
-
-    if sigma is not None and sigma > 0:
-        ui = gaussian_filter(ui, sigma=sigma)
-        vi = gaussian_filter(vi, sigma=sigma)
-
-    speed = np.sqrt(ui**2 + vi**2)
-
-    return {
-        "xg": xg,
-        "yg": yg,
-        "xi": xi,
-        "yi": yi,
-        "ui": ui,
-        "vi": vi,
-        "speed": speed,
-        "x": x,
-        "y": y,
-        "dx": dx,
-        "dy": dy,
-    }
-#+end_src
-
-#+RESULTS:
 
 #+begin_src jupyter-python
 def compute_flow_field(
@@ -805,7 +705,7 @@ def plot_binned_field(
     show_quiver=False,
     show_traj=False,
     show_fp=True,
-    n_clusters=5,
+    n_clusters=3,
     cbar=False,
     cmap='coolwarm',
     title=None,
@@ -923,15 +823,13 @@ def plot_binned_field(
 
 #+begin_src jupyter-python
 REPO_ROOT = "/home/leon/models/NeuroFlame"
-conf_name = "train_dual.yml"
+conf_name = "train_dual_EI.yml"
 DEVICE = "cuda:1"
 #+end_src
 
 #+RESULTS:
 
 #+begin_src jupyter-python
-conf_name = "train_dual_EI.yml"
-
 kwargs = {
     'RANK': 2,
     'DURATION': 10.0,
@@ -940,28 +838,26 @@ kwargs = {
     'T_STIM_OFF': [2.0, 300.0],
     'I0': [1.0, 1.0],
     'GRID_SIZE': 20,
-    'GRID_TEST': 4,
+    'GRID_TEST': None,
     'GRID_INPUT': 0,
     'IF_OPTO': 0,
-    'VAR_FF': [0.1, 0.1],
-    'TRAIN_SCALE': 'all',
 }
 #+end_src
 
 #+RESULTS:
 
 #+begin_src jupyter-python
-tasks = ['dpa']
+tasks = ['dpa', 'gonogo', 'dual']
 # tasks = ['dpa', 'dual_naive', 'dual_train']
 
-seed = 1
-GRID_RANGE = .3
+seed = 2
+GRID_RANGE = 1
 
 print("seed", seed)
 #+end_src
 
 #+RESULTS:
-: seed 1
+: seed 2
 
 **** Compute rates and overlaps
 
@@ -977,7 +873,6 @@ print("rates_tensor.shape", rates_tensor.shape)
 #+end_src
 
 #+RESULTS:
-: rates_tensor.shape torch.Size([1, 1600, 101, 750])
 
 #+begin_src jupyter-python
 task = tasks[0]
@@ -991,7 +886,7 @@ print("window", window)
 #+end_src
 
 #+RESULTS:
-: overlaps.shape (1, 1600, 101, 2)
+: overlaps.shape (2, 1600, 101, 2)
 : window 21
 
 **** Plot single task
@@ -1003,7 +898,7 @@ field_out = plot_field(
     overlaps[0],
     ax=ax,
     window=window,
-    size=220,
+    size=100,
     sigma=1.0,
     method='linear',
     q_bounds=(1, 99),
@@ -1025,16 +920,16 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/bd1e3d247c264fdc63120ae97b674e2884e77c8c.png]]
+[[file:./figures/flow/figure_21.png]]
 
  #+begin_src jupyter-python
-fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+fig, ax = plt.subplots(1, 1, figsize=(6,6))
 
 out_binned = plot_binned_field(
     overlaps[0],
     ax=ax,
     window=window,
-    size=55,
+    size=64,
     sigma=1.0,
     q_bounds=(1, 99),
     min_count=1,
@@ -1054,8 +949,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/57240a2d76c26af77ff20cba8945a04990be530a.png]]
-
+[[file:./figures/flow/figure_22.png]]
 
 **** Plot all tasks
 
@@ -1088,6 +982,41 @@ plt.show()
 # save_fig(f'flow_field_seed_{seed}', GRID_TEST=model.GRID_TEST, seed=seed)
 #+end_src
 
+#+RESULTS:
+[[file:./figures/flow/figure_23.png]]
+
+#+begin_src jupyter-python
+fig, axes = plt.subplots(1, len(tasks), figsize=(6 * len(tasks), 5), squeeze=False)
+
+for i, task in enumerate(tasks):
+    plot_binned_field(
+        overlaps[i],
+        ax=axes[0, i],
+        window=window,
+        size=32,
+        sigma=0.5,
+        q_bounds=(1, 99),
+        min_count=1,
+        show_stream=True,
+        show_quiver=False,
+        show_traj=False,
+        show_fp=True,
+        n_clusters=5,
+        cbar=(i == len(tasks) - 1),
+        title=task,
+        symmetric=True,
+        equal_axes=True,
+    )
+
+plt.tight_layout()
+plt.show()
+
+# save_fig(f'flow_field_seed_{seed}', GRID_TEST=model.GRID_TEST, seed=seed)
+#+end_src
+
+#+RESULTS:
+[[file:./figures/flow/figure_24.png]]
+
 **** Debug
 
 #+begin_src jupyter-python
@@ -1108,6 +1037,12 @@ print("y symmetric:", np.allclose(out["ylim"][0], -out["ylim"][1]))
 print("same span:", np.allclose(out["xlim"], out["ylim"]))
 #+end_src
 
+#+RESULTS:
+: xlim: (np.float64(-0.12157693140953779), np.float64(0.12157693140953779))
+: ylim: (np.float64(-0.12157693140953779), np.float64(0.12157693140953779))
+: x symmetric: True
+: y symmetric: True
+: same span: True
 
 #+begin_src jupyter-python
 

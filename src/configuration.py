@@ -147,11 +147,14 @@ def init_const(model):
     if model.TRAIN_SCALE=='all':
         model.train_scale = model.Na
 
-    if model.TRAIN_SCALE=='sparse':
+    elif model.TRAIN_SCALE=='sparse':
         model.train_scale = torch.sqrt(model.Ka)
 
-    if model.TRAIN_SCALE=='dense':
+    elif model.TRAIN_SCALE=='dense':
         model.train_scale = torch.sqrt(model.Na)
+
+    else:
+        model.train_scale = torch.ones_like(model.Na)
 
     if model.VERBOSE:
         print("Na", model.Na, "Ka", model.Ka, "csumNa", model.csumNa)

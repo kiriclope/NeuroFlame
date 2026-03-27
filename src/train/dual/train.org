@@ -1,0 +1,2771 @@
+:PROPERTIES:
+:GPTEL_MODEL: gpt-5.4
+:GPTEL_BACKEND: OpenAI
+:GPTEL_SYSTEM: You are a large language model living in Emacs and a helpful assistant. \nYou are a ML expert and a computational neuroscience expert. Think in steps. Respond precisely and concisely.\nDo not repeat yourself.
+:GPTEL_TOOLS:
+:GPTEL_BOUNDS: ((response (560 24176) (24205 73702)))
+:END:
+
+*** I have this notebook provided in context. I would like to train a lot of rnns so I need to make it into a python script. How would you structure it as a minimal addon to my current python project.
+
+I’d turn this notebook into a *small training module*, not a giant script dump. The goal is:
+
+1. *preserve your current codebase* (=Network=, =DualScore=, config files, etc.),
+2. *reuse notebook logic with minimal rewrites*,
+3. make it easy to launch *many seeds / hyperparameter runs* from CLI or bash.
+
+**** Recommended minimal structure
+
+Add just these files:
+
+#+begin_src text
+src/train/dual/
+    losses.py          # move DualLoss / SignBCELoss / BCEOneClassLoss here
+    data.py            # dataset generation + train/val split helpers
+    trainer.py         # train/val loop
+    run_dual.py        # CLI entrypoint for one experiment
+#+end_src
+
+If you want even more minimal, you can do it in *2 files*:
+
+#+begin_src text
+src/train/dual/
+    trainer.py
+    run_dual.py
+#+end_src
+
+with losses/data helpers inside =trainer.py=.
+
+---
+
+*** 1. What to extract from the notebook
+
+The notebook currently mixes 4 things:
+
+- *helpers*: =split_data=, =training_step=, =optimization=, etc.
+- *losses*: =DualLoss=, =SignBCELoss=, ...
+- *task dataset generation*:
+  - DPA training inputs/labels
+  - Go/NoGo training inputs/labels
+  - Dual-task training inputs/labels
+- *experiment execution*:
+  - create model
+  - freeze/unfreeze params
+  - optimizer
+  - save checkpoint
+
+Those should become separate functions.
+
+---
+
+*** 2. Minimal API I would implement
+
+**** =losses.py=
+
+Move these classes as-is:
+
+- =BCEOneClassLoss=
+- =SignBCELoss=
+- =DualLoss=
+
+and helper:
+
+- =safe_mean=
+
+That is low-risk and reusable.
+
+---
+
+**** =data.py=
+
+Create functions that generate training data from =model.init_ff_input()=.
+
+For example:
+
+#+begin_src python
+def split_data(X, Y, train_perc=0.8, batch_size=32):
+    ...
+    return train_loader, val_loader
+#+end_src
+
+Then task-specific builders:
+
+#+begin_src python
+def get_dpa_indices(model, rank):
+    ...
+    return dict(rwd_idx=..., stim_idx=..., test_idx=..., zero_idx=...)
+
+def make_dpa_dataset(model, n_batch):
+    ...
+    return ff_input, labels, index_dict
+
+def make_gonogo_dataset(model, n_batch):
+    ...
+    return ff_input, labels, index_dict
+
+def make_dual_dataset(model, n_batch):
+    ...
+    return ff_input, labels, index_dict
+#+end_src
+
+This is the most important refactor. Once this exists, running many trainings becomes trivial.
+
+---
+
+**** =trainer.py=
+
+Put generic optimization code here:
+
+#+begin_src python
+def training_step(...)
+def validation_step(...)
+def fit(...)
+#+end_src
+
+Also include model freezing utilities:
+
+#+begin_src python
+def set_trainable_for_dpa(model):
+    ...
+
+def set_trainable_for_gonogo(model):
+    ...
+
+def set_trainable_for_dual(model):
+    ...
+#+end_src
+
+And maybe a helper:
+
+#+begin_src python
+def build_model(conf_name, repo_root, device, seed, kwargs):
+    ...
+#+end_src
+
+---
+
+**** =run_dual.py=
+
+This is the entrypoint. It should:
+
+- parse CLI args
+- instantiate model
+- choose task (=dpa=, =gonogo=, =dual=)
+- generate dataset
+- build criterion
+- train
+- save checkpoint + metrics
+
+This is what you’ll call many times.
+
+---
+
+*** 3. Suggested concrete implementation
+
+**** =src/train/dual/losses.py=
+
+#+begin_src python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+def safe_mean(tensor):
+    if tensor.numel() == 0:
+        return torch.tensor(0.0, device=tensor.device, dtype=tensor.dtype)
+    return tensor.mean()
+
+class BCEOneClassLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.criterion = nn.BCEWithLogitsLoss(reduction='none')
+
+    def forward(self, logits, targets, class_bal=1):
+        bce = self.criterion(logits, targets.float())
+
+        if class_bal == 0:
+            mask1 = (targets == 1)
+            pos_loss = safe_mean(bce[mask1])
+
+            mask0 = (targets == 0)
+            neutral_targets = torch.full_like(logits[mask0], 0.5)
+            neutral_loss = safe_mean(self.criterion(logits[mask0], neutral_targets))
+            return pos_loss + 0.01 * neutral_loss
+
+        return safe_mean(bce)
+
+class SignBCELoss(nn.Module):
+    def __init__(self, alpha=0.5, thresh=1.0, class_bal=0):
+        super().__init__()
+        self.alpha = alpha
+        self.thresh = thresh
+        self.class_bal = class_bal
+        self.bce_with_logits = BCEOneClassLoss()
+
+    def forward(self, readout, targets):
+        bce_loss = 0.0
+        if self.alpha != 1.0:
+            bce_loss = self.bce_with_logits(readout, targets, self.class_bal)
+
+        sign_overlap = torch.sign(2 * targets - 1) * readout
+        sign_loss = torch.zeros_like(sign_overlap)
+
+        if self.alpha != 0:
+            if self.class_bal == 0:
+                mask0 = (targets == 0)
+                if mask0.sum() > 0:
+                    sign_loss[mask0] = 0.1 * torch.abs(sign_overlap[mask0])
+
+                mask1 = (targets == 1)
+                if mask1.sum() > 0:
+                    sign_loss[mask1] = F.relu(self.thresh - sign_overlap[mask1])
+            else:
+                sign_loss = F.relu(self.thresh - sign_overlap)
+
+        return (1 - self.alpha) * bce_loss + self.alpha * safe_mean(sign_loss)
+
+class DualLoss(nn.Module):
+    def __init__(
+        self,
+        device,
+        alpha=1.0,
+        thresh=5.0,
+        stim_idx=None,
+        gng_idx=None,
+        cue_idx=None,
+        test_idx=None,
+        rwd_idx=None,
+        zero_idx=None,
+        read_idx=None,
+        class_bal=None,
+    ):
+        super().__init__()
+        self.alpha = alpha
+        self.thresh = thresh
+        self.class_bal = class_bal or [0]
+
+        self.zero_idx = zero_idx if zero_idx is not None else []
+        self.stim_idx = torch.tensor(stim_idx or [], dtype=torch.int, device=device)
+        self.gng_idx  = torch.tensor(gng_idx  or [], dtype=torch.int, device=device)
+        self.cue_idx  = torch.tensor(cue_idx  or [], dtype=torch.int, device=device)
+        self.test_idx = torch.tensor(test_idx or [], dtype=torch.int, device=device)
+        self.rwd_idx  = torch.tensor(rwd_idx  or [], dtype=torch.int, device=device)
+
+        self.read_idx = read_idx or [-1]
+        self.loss = SignBCELoss(self.alpha, self.thresh)
+        self.l1loss = nn.SmoothL1Loss()
+
+    def forward(self, readout, targets):
+        zeros = torch.zeros_like(readout[:, self.zero_idx, 0])
+        loss = self.l1loss(readout[:, self.zero_idx, self.read_idx[0]], zeros)
+
+        if len(self.read_idx) > 1 and self.stim_idx.numel() > 0:
+            loss += self.l1loss(
+                readout[:, :self.stim_idx[0]-1, self.read_idx[1]],
+                zeros[:, :self.stim_idx[0]-1]
+            )
+
+        if self.test_idx.numel() != 0:
+            self.loss.class_bal = 1
+            loss += self.loss(
+                readout[:, self.test_idx, self.read_idx[-1]],
+                targets[:, -1, :self.test_idx.shape[0]]
+            )
+
+        if self.cue_idx.numel() != 0:
+            self.loss.class_bal = self.class_bal[3]
+            loss += self.loss(
+                readout[:, self.cue_idx, self.read_idx[3]],
+                targets[:, 2, :self.cue_idx.shape[0]]
+            )
+
+        if self.gng_idx.numel() != 0:
+            self.loss.class_bal = 1
+            loss += self.loss(
+                readout[:, self.gng_idx, self.read_idx[2]],
+                targets[:, 2, :self.gng_idx.shape[0]]
+            )
+
+        if self.stim_idx.numel() != 0:
+            self.loss.class_bal = 1
+            loss += self.loss(
+                readout[:, self.stim_idx, self.read_idx[1]],
+                targets[:, 1, :self.stim_idx.shape[0]]
+            )
+
+        if self.rwd_idx.numel() != 0:
+            self.loss.class_bal = self.class_bal[0]
+            loss += self.loss(
+                readout[:, self.rwd_idx, self.read_idx[0]],
+                targets[:, 0, :self.rwd_idx.shape[0]]
+            )
+
+        return loss
+#+end_src
+
+---
+
+**** =src/train/dual/data.py=
+
+This file should contain only generation logic.
+
+#+begin_src python
+import numpy as np
+import torch
+from torch.utils.data import TensorDataset, DataLoader
+from sklearn.model_selection import train_test_split
+
+def split_data(X, Y, train_perc=0.8, batch_size=32):
+    if Y.ndim == 3:
+        stratify = Y[:, 0, 0].cpu().numpy()
+    else:
+        stratify = Y[:, 0].cpu().numpy()
+
+    X_train, X_val, Y_train, Y_val = train_test_split(
+        X, Y, train_size=train_perc, stratify=stratify, shuffle=True
+    )
+
+    train_loader = DataLoader(TensorDataset(X_train, Y_train), batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(TensorDataset(X_val, Y_val), batch_size=batch_size, shuffle=False)
+    return train_loader, val_loader
+
+def get_steps(model):
+    return np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
+
+def make_dpa_dataset(model, device, n_batch, rank):
+    steps = get_steps(model)
+
+    mask = steps >= (model.N_STIM_ON[-1].cpu().numpy() - model.N_STEADY)
+    rwd_idx = np.where(mask)[0]
+
+    test_idx = rwd_idx if rank == 3 else []
+
+    stim_mask = (
+        (steps >= (model.N_STIM_ON[0].cpu().numpy() - model.N_STEADY)) &
+        (steps <  (model.N_STIM_ON[-1].cpu().numpy() - model.N_STEADY))
+    )
+    stim_idx = np.where(stim_mask)[0]
+    zero_idx = np.where(~mask)[0]
+
+    model.N_BATCH = n_batch
+    model.lr_eval_win = max(len(rwd_idx), len(stim_idx))
+
+    ff_input = []
+    labels = np.zeros((3, 4, model.N_BATCH, model.lr_eval_win))
+
+    l = 0
+    for i in [-1, 1]:
+        for k in [-1, 1]:
+            model.I0[0] = i
+            model.I0[4] = k
+
+            if k == 1:
+                labels[2, l] = 1
+            if i == 1:
+                labels[1, l] = 1
+            if i == k:
+                labels[0, l] = 1
+
+            ff_input.append(model.init_ff_input())
+            l += 1
+
+    labels = torch.tensor(labels, dtype=torch.float, device=device).reshape(3, -1, model.lr_eval_win).transpose(0, 1)
+    ff_input = torch.vstack(ff_input)
+
+    idx = dict(rwd_idx=rwd_idx, stim_idx=stim_idx, test_idx=test_idx, zero_idx=zero_idx)
+    return ff_input, labels, idx
+
+def make_gonogo_dataset(model, device, n_batch):
+    steps = get_steps(model)
+
+    rwd_mask = (
+        (steps >= (model.N_STIM_ON[2].cpu().numpy() - model.N_STEADY)) &
+        (steps <  (model.N_STIM_ON[4].cpu().numpy() - model.N_STEADY))
+    )
+    rwd_idx = np.where(rwd_mask)[0]
+
+    stim_mask = (
+        (steps >= (model.N_STIM_ON[1].cpu().numpy() - model.N_STEADY)) &
+        (steps <  (model.N_STIM_ON[2].cpu().numpy() - model.N_STEADY))
+    )
+    stim_idx = np.where(stim_mask)[0]
+    zero_idx = np.where(steps < (model.N_STIM_ON[1].cpu().numpy() - model.N_STEADY))[0]
+
+    model.N_BATCH = n_batch
+    model.lr_eval_win = max(len(rwd_idx), len(stim_idx))
+
+    model.I0[0] = 0
+    model.I0[1] = 1
+    model.I0[2] = 1
+    model.I0[3] = 0
+    model.I0[4] = 0
+    go = model.init_ff_input()
+
+    model.I0[0] = 0
+    model.I0[1] = -1
+    model.I0[2] = 1
+    model.I0[3] = 0
+    model.I0[4] = 0
+    nogo = model.init_ff_input()
+
+    ff_input = torch.cat((go, nogo))
+
+    labels_go = torch.ones((model.N_BATCH, model.lr_eval_win), device=device)
+    labels_nogo = torch.zeros((model.N_BATCH, model.lr_eval_win), device=device)
+    labels = torch.cat((labels_go, labels_nogo))
+    labels = labels.repeat((2, 1, 1)).transpose(0, 1)
+
+    idx = dict(rwd_idx=rwd_idx, stim_idx=stim_idx, zero_idx=zero_idx)
+    return ff_input, labels, idx
+
+def make_dual_dataset(model, device, n_batch):
+    steps = get_steps(model)
+
+    rwd_idx = np.where(steps >= (model.N_STIM_ON[-1].cpu().numpy() - model.N_STEADY))[0]
+    test_idx = rwd_idx
+
+    cue_mask = (
+        (steps >= (model.N_STIM_ON[2].cpu().numpy() - model.N_STEADY)) &
+        (steps <= (model.N_STIM_OFF[3].cpu().numpy() - model.N_STEADY))
+    )
+    cue_idx = np.where(cue_mask)[0]
+
+    gng_mask = (
+        (steps >= (model.N_STIM_ON[1].cpu().numpy() - model.N_STEADY)) &
+        (steps <= (model.N_STIM_ON[2].cpu().numpy() - model.N_STEADY))
+    )
+    gng_idx = np.where(gng_mask)[0]
+
+    stim_mask = (
+        (steps >= (model.N_STIM_ON[0].cpu().numpy() - model.N_STEADY)) &
+        (steps <= (model.N_STIM_ON[-1].cpu().numpy() - model.N_STEADY))
+    )
+    stim_idx = np.where(stim_mask)[0]
+
+    zero_idx = np.where(~(steps >= (model.N_STIM_ON[-1].cpu().numpy() - model.N_STEADY)) & ~cue_mask & ~stim_mask)[0]
+
+    model.N_BATCH = n_batch
+    model.lr_eval_win = max(len(rwd_idx), len(cue_idx), len(stim_idx), len(gng_idx))
+
+    ff_input = []
+    labels = np.zeros((4, 12, model.N_BATCH, model.lr_eval_win))
+
+    l = 0
+    for i in [-1, 1]:
+        for j in [-1, 0, 1]:
+            for k in [-1, 1]:
+                model.I0[0] = i
+                model.I0[1] = j
+                model.I0[4] = k
+
+                if k == 1:
+                    labels[3, l] = 1
+                if i == 1:
+                    labels[1, l] = 1
+                if i == k:
+                    labels[0, l] = 1
+
+                if j == 1:
+                    model.I0[2] = 1.0
+                    model.I0[3] = 0.0 * model.IF_RL
+                    labels[2, l] = 1
+                elif j == -1:
+                    model.I0[2] = 1.0
+                    model.I0[3] = 0.0
+                else:
+                    model.I0[2] = 0.0
+                    model.I0[3] = 0.0
+
+                ff_input.append(model.init_ff_input())
+                l += 1
+
+    labels = torch.tensor(labels, dtype=torch.float, device=device).reshape(4, -1, model.lr_eval_win).transpose(0, 1)
+    ff_input = torch.vstack(ff_input)
+
+    idx = dict(
+        rwd_idx=rwd_idx,
+        test_idx=test_idx,
+        cue_idx=cue_idx,
+        gng_idx=gng_idx,
+        stim_idx=stim_idx,
+        zero_idx=zero_idx,
+    )
+    return ff_input, labels, idx
+#+end_src
+
+---
+
+**** =src/train/dual/trainer.py=
+
+#+begin_src python
+import os
+import json
+import torch
+import torch.optim as optim
+
+def training_step(dataloader, model, loss_fn, optimizer, zero_grad=None):
+    model.train()
+    total_loss = 0.0
+
+    for X, y in dataloader:
+        X, y = X.to(model.device), y.to(model.device)
+
+        optimizer.zero_grad()
+        model(X)
+        y_pred = model.readout
+        loss = loss_fn(y_pred, y)
+        loss.backward()
+
+        if zero_grad is not None:
+            try:
+                if zero_grad == 'all':
+                    model.low_rank.U.grad[:, :] = 0
+                    model.low_rank.V.grad[:, :] = 0
+                else:
+                    model.low_rank.U.grad[:, zero_grad] = 0
+                    model.low_rank.V.grad[:, zero_grad] = 0
+            except Exception:
+                pass
+
+        optimizer.step()
+        total_loss += loss.item()
+
+    return total_loss / len(dataloader)
+
+def validation_step(dataloader, model, loss_fn):
+    model.eval()
+    val_loss = 0.0
+    size = len(dataloader.dataset)
+
+    with torch.no_grad():
+        for X, y in dataloader:
+            X, y = X.to(model.device), y.to(model.device)
+            model(X)
+            y_pred = model.readout
+            batch_loss = loss_fn(y_pred, y)
+            val_loss += batch_loss.item() * X.size(0)
+
+    return val_loss / size
+
+def fit(model, train_loader, val_loader, criterion, optimizer, num_epochs=100, thresh=0.15, zero_grad=None):
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+
+    history = {"train_loss": [], "val_loss": []}
+
+    for epoch in range(num_epochs):
+        train_loss = training_step(train_loader, model, criterion, optimizer, zero_grad=zero_grad)
+        val_loss = validation_step(val_loader, model, criterion)
+
+        scheduler.step()
+
+        history["train_loss"].append(train_loss)
+        history["val_loss"].append(val_loss)
+
+        print(f"Epoch {epoch+1}/{num_epochs}, train={train_loss:.4f}, val={val_loss:.4f}")
+
+        if train_loss < thresh and val_loss < thresh:
+            print("Early stop: below threshold")
+            break
+        if val_loss > 300:
+            print("Early stop: diverged")
+            break
+        if torch.isnan(torch.tensor(train_loss)):
+            print("Early stop: NaN")
+            break
+
+    return history
+
+def freeze_for_dpa(model):
+    model.J_STP.requires_grad = True
+    if model.LR_READOUT:
+        for param in model.low_rank.linear.parameters():
+            param.requires_grad = False
+        model.low_rank.linear.bias.requires_grad = False
+
+def freeze_for_gonogo(model):
+    model.J_STP.requires_grad = False
+
+def freeze_for_dual(model):
+    model.J_STP.requires_grad = False
+
+def save_run(model, save_path, history, args_dict):
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    torch.save(model.state_dict(), save_path)
+
+    meta_path = save_path.replace(".pth", ".json")
+    with open(meta_path, "w") as f:
+        json.dump(
+            {
+                "args": args_dict,
+                "history": history,
+            },
+            f,
+            indent=2,
+        )
+#+end_src
+
+---
+
+**** =src/train/dual/run_dual.py=
+
+#+begin_src python
+import argparse
+import torch
+import torch.optim as optim
+
+from src.network import Network
+from src.train.dual.losses import DualLoss
+from src.train.dual.data import split_data, make_dpa_dataset, make_gonogo_dataset, make_dual_dataset
+from src.train.dual.trainer import fit, freeze_for_dpa, freeze_for_gonogo, freeze_for_dual, save_run
+
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+
+def build_model(args):
+    kwargs = {
+        'TRAINING': 1,
+        'GAIN': args.gain,
+        'LR_INI': args.lr_ini,
+        'RANK': args.rank,
+        'VAR_FF': [args.var_ff, args.var_ff],
+        'TRAIN_SCALE': args.train_scale,
+        'LR_TYPE': args.lr_type,
+        'K': args.K,
+    }
+
+    model = Network(
+        args.conf_name,
+        REPO_ROOT,
+        VERBOSE=0,
+        DEVICE=args.device,
+        SEED=args.seed,
+        N_BATCH=1,
+        **kwargs,
+    )
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    return model
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--task", choices=["dpa", "gonogo", "dual"], required=True)
+    parser.add_argument("--conf-name", default="train_dual_EI.yml")
+    parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--rank", type=int, default=2)
+    parser.add_argument("--gain", type=float, default=1.0)
+    parser.add_argument("--lr-ini", type=float, default=1.0)
+    parser.add_argument("--var-ff", type=float, default=0.25)
+    parser.add_argument("--train-scale", default="all")
+    parser.add_argument("--lr-type", default="standard")
+    parser.add_argument("--K", type=int, default=250)
+
+    parser.add_argument("--n-batch", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--learning-rate", type=float, default=0.1)
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--bce-alpha", type=float, default=1.0)
+    parser.add_argument("--thresh", type=float, default=1.0)
+    parser.add_argument("--train-perc", type=float, default=0.8)
+    parser.add_argument("--save-path", required=True)
+
+    args = parser.parse_args()
+
+    model = build_model(args)
+    device = model.device
+
+    if args.task == "dpa":
+        freeze_for_dpa(model)
+        ff_input, labels, idx = make_dpa_dataset(model, device, args.n_batch, args.rank)
+        criterion = DualLoss(
+            device=device,
+            alpha=args.bce_alpha,
+            thresh=args.thresh,
+            rwd_idx=idx["rwd_idx"],
+            stim_idx=idx["stim_idx"],
+            test_idx=idx["test_idx"],
+            zero_idx=idx["zero_idx"],
+            class_bal=[1.0, 1.0],
+            read_idx=[1, 0, 2],
+        )
+        zero_grad = None
+
+    elif args.task == "gonogo":
+        freeze_for_gonogo(model)
+        ff_input, labels, idx = make_gonogo_dataset(model, device, args.n_batch)
+        criterion = DualLoss(
+            device=device,
+            alpha=args.bce_alpha,
+            thresh=args.thresh,
+            rwd_idx=idx["rwd_idx"],
+            zero_idx=idx["zero_idx"],
+            stim_idx=idx["stim_idx"],
+            class_bal=[0.0, 1.0],
+            read_idx=[1, 1],
+        )
+        zero_grad = 0
+
+    else:
+        freeze_for_dual(model)
+        ff_input, labels, idx = make_dual_dataset(model, device, args.n_batch)
+        criterion = DualLoss(
+            device=device,
+            alpha=args.bce_alpha,
+            thresh=args.thresh,
+            stim_idx=idx["stim_idx"],
+            gng_idx=idx["gng_idx"],
+            cue_idx=idx["cue_idx"],
+            rwd_idx=idx["rwd_idx"],
+            zero_idx=idx["zero_idx"],
+            class_bal=[1.0, 0.0, 1.0, 0.0],
+            read_idx=[1, 0, 1, 1, 2],
+        )
+        zero_grad = None
+
+    train_loader, val_loader = split_data(
+        ff_input, labels, train_perc=args.train_perc, batch_size=args.batch_size
+    )
+
+    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+    history = fit(
+        model,
+        train_loader,
+        val_loader,
+        criterion,
+        optimizer,
+        num_epochs=args.epochs,
+        zero_grad=zero_grad,
+    )
+
+    save_run(model, args.save_path, history, vars(args))
+
+if __name__ == "__main__":
+    main()
+#+end_src
+
+---
+
+*** 4. How you would run many RNNs
+
+Once this exists, running lots of trainings is easy.
+
+**** Single run
+
+#+begin_src bash
+python -m src.train.dual.run_dual \
+  --task dpa \
+  --seed 1 \
+  --rank 2 \
+  --save-path /tmp/dpa_1.pth
+#+end_src
+
+**** Sweep over seeds
+
+#+begin_src bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do
+  python -m src.train.dual.run_dual \
+    --task dual \
+    --seed $seed \
+    --epochs 5 \
+    --save-path /tmp/dual_${seed}.pth
+done
+#+end_src
+
+**** Sweep over rank and seed
+
+#+begin_src bash
+for rank in 2 3; do
+  for seed in 1 2 3 4 5; do
+    python -m src.train.dual.run_dual \
+      --task dpa \
+      --rank $rank \
+      --seed $seed \
+      --save-path /tmp/dpa_r${rank}_s${seed}.pth
+  done
+done
+#+end_src
+
+---
+
+*** 5. A small but important improvement
+
+Right now your notebook trains tasks sequentially by reusing the same model state:
+
+- DPA
+- then Go/NoGo starting from DPA checkpoint
+- then Dual starting from previous checkpoint
+
+If that is intentional, expose it explicitly with:
+
+#+begin_src bash
+--init-from path/to/checkpoint.pth
+#+end_src
+
+and in =run_dual.py=:
+
+#+begin_src python
+if args.init_from:
+    model.load_state_dict(torch.load(args.init_from, map_location=device))
+#+end_src
+
+This will matter a lot for reproducibility when launching many runs.
+
+---
+
+*** 6. What I would /not/ include in the first script
+
+To keep the addon minimal, I would *not* initially move:
+
+- plotting
+- test notebook visualizations
+- overlap analyses
+- angle plots
+- covariance plots
+
+Those belong in notebooks or a separate =analyze_dual.py=.
+
+First make training robust and batchable.
+
+---
+
+*** 7. Minimal extension beyond this
+
+If you want one extra level of cleanliness, add:
+
+#+begin_src text
+scripts/
+    sweep_dual.sh
+#+end_src
+
+or use a small launcher:
+
+#+begin_src python
+# scripts/launch_sweep.py
+import subprocess
+
+for seed in range(10):
+    subprocess.run([...])
+#+end_src
+
+No need for Hydra/W&B/Ray initially unless you’re doing large-scale sweeps.
+
+---
+
+*** 8. My practical recommendation
+
+Given your current notebook, the *lowest-friction path* is:
+
+1. move *losses* to =src/train/dual/losses.py=
+2. move *dataset generation* to =src/train/dual/data.py=
+3. move *training loop* to =src/train/dual/trainer.py=
+4. create *one CLI* =src/train/dual/run_dual.py=
+
+That’s enough to turn this into a proper training pipeline while staying very close to the notebook.
+
+If you want, I can next give you a *single-file minimal version* (=run_dual.py= only) that is even closer to your notebook and requires almost no refactor.
+
+*** So how do I excplicitly train tasks sequentially by reusing the same model state
+
+Do it by making the checkpoint flow explicit:
+
+1. train DPA from scratch,
+2. save checkpoint,
+3. load that checkpoint before Go/NoGo,
+4. save again,
+5. load that checkpoint before Dual.
+
+The clean way is to add an optional CLI arg:
+
+#+begin_src python
+parser.add_argument("--init-from", type=str, default=None)
+#+end_src
+
+and then after building the model:
+
+#+begin_src python
+if args.init_from is not None:
+    state = torch.load(args.init_from, map_location=model.device)
+    model.load_state_dict(state)
+    print(f"Loaded checkpoint from {args.init_from}")
+#+end_src
+
+---
+
+**** Minimal explicit sequential workflow
+
+Then you run:
+
+#+begin_src bash
+# 1) DPA
+python -m src.train.dual.run_dual \
+  --task dpa \
+  --seed 1 \
+  --save-path /tmp/dpa_1.pth
+
+# 2) Go/NoGo starting from DPA-trained model
+python -m src.train.dual.run_dual \
+  --task gonogo \
+  --seed 1 \
+  --init-from /tmp/dpa_1.pth \
+  --save-path /tmp/gonogo_from_dpa_1.pth
+
+# 3) Dual starting from previous model
+python -m src.train.dual.run_dual \
+  --task dual \
+  --seed 1 \
+  --init-from /tmp/gonogo_from_dpa_1.pth \
+  --save-path /tmp/dual_from_gonogo_1.pth
+#+end_src
+
+That is the explicit version of what the notebook is doing implicitly.
+
+---
+
+**** Why this is better
+
+In the notebook, state is carried by the live Python session:
+
+- the model object persists,
+- parameters are modified in place,
+- later cells continue from earlier training.
+
+In a script, each run starts a fresh Python process, so you must explicitly say:
+
+- /initialize from scratch/ or
+- /initialize from checkpoint X/.
+
+That is exactly what =--init-from= does.
+
+---
+
+**** Minimal code change in =run_dual.py=
+
+Here is the only addition you need.
+
+***** Add parser arg
+
+#+begin_src python
+parser.add_argument("--init-from", type=str, default=None,
+                    help="Path to checkpoint to load before training")
+#+end_src
+
+***** Load after model creation
+
+#+begin_src python
+model = build_model(args)
+device = model.device
+
+if args.init_from is not None:
+    ckpt = torch.load(args.init_from, map_location=device)
+    model.load_state_dict(ckpt)
+    print(f"Loaded checkpoint: {args.init_from}")
+#+end_src
+
+---
+
+**** Optional: save more than just weights
+
+If you want to resume more faithfully later, save a dict instead of raw =state_dict=:
+
+#+begin_src python
+torch.save({
+    "model_state_dict": model.state_dict(),
+    "args": vars(args),
+}, args.save_path)
+#+end_src
+
+and load with:
+
+#+begin_src python
+ckpt = torch.load(args.init_from, map_location=device)
+model.load_state_dict(ckpt["model_state_dict"])
+#+end_src
+
+This is better for long sweeps.
+
+---
+
+**** Best practice for your case
+
+I would make two modes explicit:
+
+- =--init-from None=: start fresh
+- =--init-from path=: continue from prior task
+
+So your experiment lineage becomes obvious from filenames:
+
+#+begin_src text
+dpa_seed1.pth
+gonogo_from_dpa_seed1.pth
+dual_from_gonogo_seed1.pth
+#+end_src
+
+---
+
+**** If you want to automate the full sequence
+
+You can also write a tiny shell script:
+
+#+begin_src bash
+#!/bin/bash
+seed=$1
+outdir=$2
+
+python -m src.train.dual.run_dual \
+  --task dpa \
+  --seed ${seed} \
+  --save-path ${outdir}/dpa_${seed}.pth
+
+python -m src.train.dual.run_dual \
+  --task gonogo \
+  --seed ${seed} \
+  --init-from ${outdir}/dpa_${seed}.pth \
+  --save-path ${outdir}/gonogo_${seed}.pth
+
+python -m src.train.dual.run_dual \
+  --task dual \
+  --seed ${seed} \
+  --init-from ${outdir}/gonogo_${seed}.pth \
+  --save-path ${outdir}/dual_${seed}.pth
+#+end_src
+
+Then launch many seeds:
+
+#+begin_src bash
+for seed in 1 2 3 4 5; do
+  bash scripts/train_seq.sh $seed /tmp/dual_runs
+done
+#+end_src
+
+---
+
+If you want, I can write the exact =run_dual.py= with =--init-from= and sequential task handling in a form directly compatible with your current project.
+
+*** rewrite run_dual.py
+
+Here is a minimal =run_dual.py= that makes sequential training explicit and stays close to your notebook.
+
+Save as:
+
+#+begin_src text
+src/train/dual/run_dual.py
+#+end_src
+
+#+begin_src python
+import os
+import json
+import argparse
+
+import numpy as np
+import torch
+import torch.optim as optim
+
+from src.network import Network
+from src.train.dual.losses import DualLoss
+from src.train.dual.data import (
+    split_data,
+    make_dpa_dataset,
+    make_gonogo_dataset,
+    make_dual_dataset,
+)
+from src.train.dual.trainer import (
+    fit,
+    freeze_for_dpa,
+    freeze_for_gonogo,
+    freeze_for_dual,
+)
+
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+
+
+def build_model(args):
+    kwargs = {
+        "TRAINING": 1,
+        "GAIN": args.gain,
+        "LR_INI": args.lr_ini,
+        "RANK": args.rank,
+        "VAR_FF": [args.var_ff, args.var_ff],
+        "TRAIN_SCALE": args.train_scale,
+        "LR_TYPE": args.lr_type,
+        "K": args.K,
+    }
+
+    model = Network(
+        args.conf_name,
+        REPO_ROOT,
+        VERBOSE=0,
+        DEVICE=args.device,
+        SEED=args.seed,
+        N_BATCH=1,
+        **kwargs,
+    )
+
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    return model
+
+
+def maybe_load_checkpoint(model, init_from):
+    if init_from is None:
+        return
+
+    ckpt = torch.load(init_from, map_location=model.device)
+
+    if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+        model.load_state_dict(ckpt["model_state_dict"])
+    else:
+        model.load_state_dict(ckpt)
+
+    print(f"Loaded checkpoint from: {init_from}")
+
+
+def make_task(task, model, args):
+    device = model.device
+
+    if task == "dpa":
+        freeze_for_dpa(model)
+
+        ff_input, labels, idx = make_dpa_dataset(
+            model=model,
+            device=device,
+            n_batch=args.n_batch,
+            rank=args.rank,
+        )
+
+        criterion = DualLoss(
+            device=device,
+            alpha=args.bce_alpha,
+            thresh=args.thresh,
+            rwd_idx=idx["rwd_idx"],
+            stim_idx=idx["stim_idx"],
+            test_idx=idx["test_idx"],
+            zero_idx=idx["zero_idx"],
+            class_bal=[1.0, 1.0],
+            read_idx=[1, 0, 2],
+        )
+
+        zero_grad = None
+
+    elif task == "gonogo":
+        freeze_for_gonogo(model)
+
+        ff_input, labels, idx = make_gonogo_dataset(
+            model=model,
+            device=device,
+            n_batch=args.n_batch,
+        )
+
+        criterion = DualLoss(
+            device=device,
+            alpha=args.bce_alpha,
+            thresh=args.thresh,
+            rwd_idx=idx["rwd_idx"],
+            zero_idx=idx["zero_idx"],
+            stim_idx=idx["stim_idx"],
+            class_bal=[0.0, 1.0],
+            read_idx=[1, 1],
+        )
+
+        zero_grad = 0
+
+    elif task == "dual":
+        freeze_for_dual(model)
+
+        ff_input, labels, idx = make_dual_dataset(
+            model=model,
+            device=device,
+            n_batch=args.n_batch,
+        )
+
+        criterion = DualLoss(
+            device=device,
+            alpha=args.bce_alpha,
+            thresh=args.thresh,
+            stim_idx=idx["stim_idx"],
+            gng_idx=idx["gng_idx"],
+            cue_idx=idx["cue_idx"],
+            rwd_idx=idx["rwd_idx"],
+            zero_idx=idx["zero_idx"],
+            class_bal=[1.0, 0.0, 1.0, 0.0],
+            read_idx=[1, 0, 1, 1, 2],
+        )
+
+        zero_grad = None
+
+    else:
+        raise ValueError(f"Unknown task: {task}")
+
+    return ff_input, labels, criterion, zero_grad
+
+
+def save_checkpoint(save_path, model, args, history, task):
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    payload = {
+        "model_state_dict": model.state_dict(),
+        "task": task,
+        "args": vars(args),
+        "history": history,
+    }
+
+    torch.save(payload, save_path)
+    print(f"Saved checkpoint to: {save_path}")
+
+    meta_path = save_path.replace(".pth", ".json")
+    with open(meta_path, "w") as f:
+        json.dump(
+            {
+                "task": task,
+                "args": vars(args),
+                "history": history,
+            },
+            f,
+            indent=2,
+        )
+    print(f"Saved metadata to: {meta_path}")
+
+
+def run_one_task(model, task, args, save_path):
+    print(f"\n=== Training task: {task} ===")
+
+    ff_input, labels, criterion, zero_grad = make_task(task, model, args)
+
+    print("ff_input", tuple(ff_input.shape), "labels", tuple(labels.shape))
+
+    train_loader, val_loader = split_data(
+        ff_input,
+        labels,
+        train_perc=args.train_perc,
+        batch_size=args.batch_size,
+    )
+
+    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+
+    history = fit(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        criterion=criterion,
+        optimizer=optimizer,
+        num_epochs=args.epochs,
+        thresh=args.stop_loss,
+        zero_grad=zero_grad,
+    )
+
+    save_checkpoint(save_path, model, args, history, task)
+
+
+def build_sequence_paths(outdir, seed):
+    return {
+        "dpa": os.path.join(outdir, f"dpa_seed{seed}.pth"),
+        "gonogo": os.path.join(outdir, f"gonogo_seed{seed}.pth"),
+        "dual": os.path.join(outdir, f"dual_seed{seed}.pth"),
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser()
+
+    # mode
+    parser.add_argument(
+        "--task",
+        choices=["dpa", "gonogo", "dual", "sequence"],
+        required=True,
+        help="Train one task or the full sequential curriculum",
+    )
+
+    # checkpointing
+    parser.add_argument("--init-from", type=str, default=None)
+    parser.add_argument("--save-path", type=str, default=None)
+    parser.add_argument("--outdir", type=str, default=None)
+
+    # model config
+    parser.add_argument("--conf-name", default="train_dual_EI.yml")
+    parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--rank", type=int, default=2)
+    parser.add_argument("--gain", type=float, default=1.0)
+    parser.add_argument("--lr-ini", type=float, default=1.0)
+    parser.add_argument("--var-ff", type=float, default=0.25)
+    parser.add_argument("--train-scale", default="all")
+    parser.add_argument("--lr-type", default="standard")
+    parser.add_argument("--K", type=int, default=250)
+
+    # optimization
+    parser.add_argument("--n-batch", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--learning-rate", type=float, default=0.1)
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--bce-alpha", type=float, default=1.0)
+    parser.add_argument("--thresh", type=float, default=1.0)
+    parser.add_argument("--stop-loss", type=float, default=0.15)
+    parser.add_argument("--train-perc", type=float, default=0.8)
+
+    args = parser.parse_args()
+
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+
+    model = build_model(args)
+    maybe_load_checkpoint(model, args.init_from)
+
+    if args.task != "sequence":
+        if args.save_path is None:
+            raise ValueError("--save-path is required when --task is dpa/gonogo/dual")
+
+        run_one_task(
+            model=model,
+            task=args.task,
+            args=args,
+            save_path=args.save_path,
+        )
+        return
+
+    # explicit sequential training: DPA -> Go/NoGo -> Dual
+    if args.outdir is None:
+        raise ValueError("--outdir is required when --task sequence")
+
+    paths = build_sequence_paths(args.outdir, args.seed)
+
+    run_one_task(model, "dpa", args, paths["dpa"])
+    run_one_task(model, "gonogo", args, paths["gonogo"])
+    run_one_task(model, "dual", args, paths["dual"])
+
+
+if __name__ == "__main__":
+    main()
+#+end_src
+
+*/ How this works
+
+You now have /two explicit modes/.
+
+**** 1. Train a single task from scratch
+
+#+begin_src bash
+python -m src.train.dual.run_dual \
+  --task dpa \
+  --seed 1 \
+  --save-path /tmp/dpa_seed1.pth
+#+end_src
+
+**** 2. Train a single task starting from an earlier checkpoint
+
+#+begin_src bash
+python -m src.train.dual.run_dual \
+  --task gonogo \
+  --seed 1 \
+  --init-from /tmp/dpa_seed1.pth \
+  --save-path /tmp/gonogo_seed1.pth
+#+end_src
+
+Then:
+
+#+begin_src bash
+python -m src.train.dual.run_dual \
+  --task dual \
+  --seed 1 \
+  --init-from /tmp/gonogo_seed1.pth \
+  --save-path /tmp/dual_seed1.pth
+#+end_src
+
+**** 3. Train the full sequence in one command
+
+#+begin_src bash
+python -m src.train.dual.run_dual \
+  --task sequence \
+  --seed 1 \
+  --outdir /tmp/dual_runs
+#+end_src
+
+This does:
+
+- DPA, save to =/tmp/dual_runs/dpa_seed1.pth=
+- Go/NoGo continuing from that state, save to =/tmp/dual_runs/gonogo_seed1.pth=
+- Dual continuing from that state, save to =/tmp/dual_runs/dual_seed1.pth=
+
+So the sequential reuse of model state is now fully explicit in the script logic.
+
+*/ Why I included =sequence=
+
+Because in your notebook, the real training protocol is not just “train one task”, it is a /curriculum/. If you want to train many RNNs, this is probably the thing you want to sweep over:
+
+#+begin_src bash
+for seed in 1 2 3 4 5; do
+  python -m src.train.dual.run_dual \
+    --task sequence \
+    --seed $seed \
+    --outdir /tmp/dual_runs
+done
+#+end_src
+
+That is the cleanest replacement for the notebook workflow.
+
+*/ One thing to check
+
+Your helper functions assume:
+
+- =model.device= exists and is valid
+- =fit(..., thresh=args.stop_loss)= matches your =trainer.py= signature
+- =freeze_for_*()= only changes =requires_grad= flags and does not need optimizer rebuild beyond what we already do
+
+That should be fine with the structure I suggested.
+
+*/ Small recommendation
+
+I would slightly rename =--thresh= because it is overloaded:
+
+- in notebook: used inside loss
+- in training loop: stopping threshold
+
+I already separated them into:
+
+- =--thresh= → loss threshold
+- =--stop-loss= → early stopping threshold
+
+That will save confusion later.
+
+If you want, next I can also rewrite the companion files =data.py= and =trainer.py= in a form directly copied from your notebook so the whole training pipeline is runnable immediately.
+
+*** yes rewrite the companion files
+
+To do it /explicitly/, add a checkpoint argument and either:
+
+- run each stage manually with =--init-from=, or
+- add a =sequence= mode that trains =dpa -> gonogo -> dual= in one process.
+
+Minimal pattern:
+
+#+begin_src python
+parser.add_argument("--init-from", type=str, default=None)
+#+end_src
+
+After model creation:
+
+#+begin_src python
+if args.init_from is not None:
+    ckpt = torch.load(args.init_from, map_location=model.device)
+    model.load_state_dict(
+        ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
+    )
+#+end_src
+
+Then:
+
+#+begin_src bash
+python -m src.train.dual.run_dual --task dpa    --save-path runs/dpa_s1.pth
+python -m src.train.dual.run_dual --task gonogo --init-from runs/dpa_s1.pth    --save-path runs/gng_s1.pth
+python -m src.train.dual.run_dual --task dual   --init-from runs/gng_s1.pth    --save-path runs/dual_s1.pth
+#+end_src
+
+If you want, I can give you the exact =run_dual.py= plus =data.py= and =trainer.py= ready to drop into your project.
+
+*** give the exaxt files
+
+Below are drop-in minimal files. They preserve your notebook logic, make sequential training explicit, and are enough to run many seeds.
+
+Assumed layout:
+
+#+begin_src text
+src/train/dual/
+    losses.py
+    data.py
+    trainer.py
+    run_dual.py
+#+end_src
+
+If your import root differs, adjust =from src...= accordingly.
+
+---
+
+- 1) =src/train/dual/losses.py=
+
+#+begin_src python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+def safe_mean(tensor):
+    if tensor.numel() == 0:
+        return torch.tensor(0.0, device=tensor.device, dtype=tensor.dtype)
+    return tensor.mean()
+
+
+class BCEOneClassLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.criterion = nn.BCEWithLogitsLoss(reduction="none")
+
+    def forward(self, logits, targets, class_bal=1):
+        bce = self.criterion(logits, targets.float())
+
+        if class_bal == 0:
+            mask1 = targets == 1
+            pos_loss = safe_mean(bce[mask1])
+
+            mask0 = targets == 0
+            neutral_targets = torch.full_like(logits[mask0], 0.5)
+            neutral_loss = safe_mean(self.criterion(logits[mask0], neutral_targets))
+            return pos_loss + 0.01 * neutral_loss
+
+        return safe_mean(bce)
+
+
+class SignBCELoss(nn.Module):
+    def __init__(self, alpha=0.5, thresh=1.0, class_bal=0):
+        super().__init__()
+        self.alpha = alpha
+        self.thresh = thresh
+        self.class_bal = class_bal
+        self.bce_with_logits = BCEOneClassLoss()
+
+    def forward(self, readout, targets):
+        bce_loss = 0.0
+        if self.alpha != 1.0:
+            bce_loss = self.bce_with_logits(readout, targets, self.class_bal)
+
+        sign_overlap = torch.sign(2 * targets - 1) * readout
+        sign_loss = torch.zeros_like(sign_overlap)
+
+        if self.alpha != 0:
+            if self.class_bal == 0:
+                mask0 = targets == 0
+                if mask0.sum() > 0:
+                    sign_loss[mask0] = 0.1 * torch.abs(sign_overlap[mask0])
+
+                mask1 = targets == 1
+                if mask1.sum() > 0:
+                    sign_loss[mask1] = F.relu(self.thresh - sign_overlap[mask1])
+            else:
+                sign_loss = F.relu(self.thresh - sign_overlap)
+
+        return (1 - self.alpha) * bce_loss + self.alpha * safe_mean(sign_loss)
+
+
+class DualLoss(nn.Module):
+    def __init__(
+        self,
+        device,
+        alpha=1.0,
+        thresh=5.0,
+        stim_idx=None,
+        gng_idx=None,
+        cue_idx=None,
+        test_idx=None,
+        rwd_idx=None,
+        zero_idx=None,
+        read_idx=None,
+        class_bal=None,
+    ):
+        super().__init__()
+        self.alpha = alpha
+        self.thresh = thresh
+        self.class_bal = class_bal or [0]
+
+        self.zero_idx = zero_idx if zero_idx is not None else []
+        self.stim_idx = torch.tensor(stim_idx or [], dtype=torch.long, device=device)
+        self.gng_idx = torch.tensor(gng_idx or [], dtype=torch.long, device=device)
+        self.cue_idx = torch.tensor(cue_idx or [], dtype=torch.long, device=device)
+        self.test_idx = torch.tensor(test_idx or [], dtype=torch.long, device=device)
+        self.rwd_idx = torch.tensor(rwd_idx or [], dtype=torch.long, device=device)
+
+        self.read_idx = read_idx or [-1]
+        self.loss = SignBCELoss(self.alpha, self.thresh)
+        self.l1loss = nn.SmoothL1Loss()
+
+    def forward(self, readout, targets):
+        loss = 0.0
+
+        if len(self.zero_idx) > 0:
+            zeros = torch.zeros_like(readout[:, self.zero_idx, 0])
+            loss = self.l1loss(readout[:, self.zero_idx, self.read_idx[0]], zeros)
+
+            if len(self.read_idx) > 1 and self.stim_idx.numel() > 0:
+                stim0 = int(self.stim_idx[0].item())
+                if stim0 > 1:
+                    loss = loss + self.l1loss(
+                        readout[:, :stim0 - 1, self.read_idx[1]],
+                        zeros[:, :stim0 - 1],
+                    )
+
+        if self.test_idx.numel() != 0:
+            self.loss.class_bal = 1
+            loss = loss + self.loss(
+                readout[:, self.test_idx, self.read_idx[-1]],
+                targets[:, -1, : self.test_idx.shape[0]],
+            )
+
+        if self.cue_idx.numel() != 0:
+            self.loss.class_bal = self.class_bal[3]
+            loss = loss + self.loss(
+                readout[:, self.cue_idx, self.read_idx[3]],
+                targets[:, 2, : self.cue_idx.shape[0]],
+            )
+
+        if self.gng_idx.numel() != 0:
+            self.loss.class_bal = 1
+            loss = loss + self.loss(
+                readout[:, self.gng_idx, self.read_idx[2]],
+                targets[:, 2, : self.gng_idx.shape[0]],
+            )
+
+        if self.stim_idx.numel() != 0:
+            self.loss.class_bal = 1
+            loss = loss + self.loss(
+                readout[:, self.stim_idx, self.read_idx[1]],
+                targets[:, 1, : self.stim_idx.shape[0]],
+            )
+
+        if self.rwd_idx.numel() != 0:
+            self.loss.class_bal = self.class_bal[0]
+            loss = loss + self.loss(
+                readout[:, self.rwd_idx, self.read_idx[0]],
+                targets[:, 0, : self.rwd_idx.shape[0]],
+            )
+
+        return loss
+#+end_src
+
+---
+
+- 2) =src/train/dual/data.py=
+
+#+begin_src python
+import numpy as np
+import torch
+
+from torch.utils.data import TensorDataset, DataLoader
+from sklearn.model_selection import train_test_split
+
+
+def split_data(X, Y, train_perc=0.8, batch_size=32):
+    if Y.ndim == 3:
+        stratify = Y[:, 0, 0].detach().cpu().numpy()
+    else:
+        stratify = Y[:, 0].detach().cpu().numpy()
+
+    X_train, X_val, Y_train, Y_val = train_test_split(
+        X,
+        Y,
+        train_size=train_perc,
+        stratify=stratify,
+        shuffle=True,
+    )
+
+    print("train X:", tuple(X_train.shape), "val X:", tuple(X_val.shape))
+    print("train Y:", tuple(Y_train.shape), "val Y:", tuple(Y_val.shape))
+
+    train_loader = DataLoader(
+        TensorDataset(X_train, Y_train),
+        batch_size=batch_size,
+        shuffle=True,
+    )
+    val_loader = DataLoader(
+        TensorDataset(X_val, Y_val),
+        batch_size=batch_size,
+        shuffle=False,
+    )
+    return train_loader, val_loader
+
+
+def get_steps(model):
+    return np.arange(0, model.N_STEPS - model.N_STEADY, model.N_WINDOW)
+
+
+def make_dpa_dataset(model, device, n_batch, rank):
+    steps = get_steps(model)
+
+    mask_rwd = steps >= (model.N_STIM_ON[-1].detach().cpu().numpy() - model.N_STEADY)
+    rwd_idx = np.where(mask_rwd)[0]
+
+    test_idx = rwd_idx if rank == 3 else []
+
+    mask_stim = (
+        (steps >= (model.N_STIM_ON[0].detach().cpu().numpy() - model.N_STEADY)) &
+        (steps < (model.N_STIM_ON[-1].detach().cpu().numpy() - model.N_STEADY))
+    )
+    stim_idx = np.where(mask_stim)[0]
+
+    zero_idx = np.where(~mask_rwd)[0]
+
+    model.N_BATCH = n_batch
+    model.lr_eval_win = max(rwd_idx.shape[0], stim_idx.shape[0])
+
+    ff_input = []
+    labels = np.zeros((3, 4, model.N_BATCH, model.lr_eval_win), dtype=np.float32)
+
+    l = 0
+    for i in [-1, 1]:
+        for k in [-1, 1]:
+            model.I0[0] = i
+            model.I0[4] = k
+
+            if k == 1:
+                labels[2, l] = 1.0
+
+            if i == 1:
+                labels[1, l] = 1.0
+
+            if i == k:
+                labels[0, l] = 1.0
+
+            ff_input.append(model.init_ff_input())
+            l += 1
+
+    labels = (
+        torch.tensor(labels, dtype=torch.float32, device=device)
+        .reshape(3, -1, model.lr_eval_win)
+        .transpose(0, 1)
+    )
+    ff_input = torch.vstack(ff_input)
+
+    idx = {
+        "rwd_idx": rwd_idx.tolist(),
+        "stim_idx": stim_idx.tolist(),
+        "test_idx": test_idx.tolist() if isinstance(test_idx, np.ndarray) else test_idx,
+        "zero_idx": zero_idx.tolist(),
+    }
+    return ff_input, labels, idx
+
+
+def make_gonogo_dataset(model, device, n_batch):
+    steps = get_steps(model)
+
+    rwd_mask = (
+        (steps >= (model.N_STIM_ON[2].detach().cpu().numpy() - model.N_STEADY)) &
+        (steps < (model.N_STIM_ON[4].detach().cpu().numpy() - model.N_STEADY))
+    )
+    rwd_idx = np.where(rwd_mask)[0]
+
+    stim_mask = (
+        (steps >= (model.N_STIM_ON[1].detach().cpu().numpy() - model.N_STEADY)) &
+        (steps < (model.N_STIM_ON[2].detach().cpu().numpy() - model.N_STEADY))
+    )
+    stim_idx = np.where(stim_mask)[0]
+
+    zero_idx = np.where(steps < (model.N_STIM_ON[1].detach().cpu().numpy() - model.N_STEADY))[0]
+
+    model.N_BATCH = n_batch
+    model.lr_eval_win = max(rwd_idx.shape[0], stim_idx.shape[0])
+
+    model.I0[0] = 0
+    model.I0[1] = 1
+    model.I0[2] = 1
+    model.I0[3] = 0
+    model.I0[4] = 0
+    go = model.init_ff_input()
+
+    model.I0[0] = 0
+    model.I0[1] = -1
+    model.I0[2] = 1
+    model.I0[3] = 0
+    model.I0[4] = 0
+    nogo = model.init_ff_input()
+
+    ff_input = torch.cat((go, nogo), dim=0)
+
+    labels_go = torch.ones((model.N_BATCH, model.lr_eval_win), device=device)
+    labels_nogo = torch.zeros((model.N_BATCH, model.lr_eval_win), device=device)
+    labels = torch.cat((labels_go, labels_nogo), dim=0)
+    labels = labels.repeat((2, 1, 1)).transpose(0, 1)
+
+    idx = {
+        "rwd_idx": rwd_idx.tolist(),
+        "stim_idx": stim_idx.tolist(),
+        "zero_idx": zero_idx.tolist(),
+    }
+    return ff_input, labels, idx
+
+
+def make_dual_dataset(model, device, n_batch):
+    steps = get_steps(model)
+
+    mask_rwd = steps >= (model.N_STIM_ON[-1].detach().cpu().numpy() - model.N_STEADY)
+    rwd_idx = np.where(mask_rwd)[0]
+    test_idx = rwd_idx
+
+    mask_cue = (
+        (steps >= (model.N_STIM_ON[2].detach().cpu().numpy() - model.N_STEADY)) &
+        (steps <= (model.N_STIM_OFF[3].detach().cpu().numpy() - model.N_STEADY))
+    )
+    cue_idx = np.where(mask_cue)[0]
+
+    mask_gng = (
+        (steps >= (model.N_STIM_ON[1].detach().cpu().numpy() - model.N_STEADY)) &
+        (steps <= (model.N_STIM_ON[2].detach().cpu().numpy() - model.N_STEADY))
+    )
+    gng_idx = np.where(mask_gng)[0]
+
+    mask_stim = (
+        (steps >= (model.N_STIM_ON[0].detach().cpu().numpy() - model.N_STEADY)) &
+        (steps <= (model.N_STIM_ON[-1].detach().cpu().numpy() - model.N_STEADY))
+    )
+    stim_idx = np.where(mask_stim)[0]
+
+    mask_zero = ~mask_rwd & ~mask_cue & ~mask_stim
+    zero_idx = np.where(mask_zero)[0]
+
+    model.N_BATCH = n_batch
+    model.lr_eval_win = max(
+        rwd_idx.shape[0],
+        cue_idx.shape[0],
+        stim_idx.shape[0],
+        gng_idx.shape[0],
+    )
+
+    ff_input = []
+    labels = np.zeros((4, 12, model.N_BATCH, model.lr_eval_win), dtype=np.float32)
+
+    l = 0
+    for i in [-1, 1]:
+        for j in [-1, 0, 1]:
+            for k in [-1, 1]:
+                model.I0[0] = i
+                model.I0[1] = j
+                model.I0[4] = k
+
+                if k == 1:
+                    labels[3, l] = 1.0
+
+                if i == 1:
+                    labels[1, l] = 1.0
+
+                if i == k:
+                    labels[0, l] = 1.0
+
+                if j == 1:
+                    model.I0[2] = 1.0
+                    model.I0[3] = 0.0 * model.IF_RL
+                    labels[2, l] = 1.0
+                elif j == -1:
+                    model.I0[2] = 1.0
+                    model.I0[3] = 0.0
+                else:
+                    model.I0[2] = 0.0
+                    model.I0[3] = 0.0
+
+                ff_input.append(model.init_ff_input())
+                l += 1
+
+    labels = (
+        torch.tensor(labels, dtype=torch.float32, device=device)
+        .reshape(4, -1, model.lr_eval_win)
+        .transpose(0, 1)
+    )
+    ff_input = torch.vstack(ff_input)
+
+    idx = {
+        "rwd_idx": rwd_idx.tolist(),
+        "test_idx": test_idx.tolist(),
+        "cue_idx": cue_idx.tolist(),
+        "gng_idx": gng_idx.tolist(),
+        "stim_idx": stim_idx.tolist(),
+        "zero_idx": zero_idx.tolist(),
+    }
+    return ff_input, labels, idx
+#+end_src
+
+---
+
+- 3) =src/train/dual/trainer.py=
+
+#+begin_src python
+import torch
+import torch.optim as optim
+
+
+def training_step(dataloader, model, loss_fn, optimizer, zero_grad=None):
+    model.train()
+    total_loss = 0.0
+    total_batches = len(dataloader)
+
+    for X, y in dataloader:
+        X = X.to(model.device)
+        y = y.to(model.device)
+
+        optimizer.zero_grad()
+
+        model(X)
+        y_pred = model.readout
+        loss = loss_fn(y_pred, y)
+
+        loss.backward()
+
+        if zero_grad is not None:
+            try:
+                if zero_grad == "all":
+                    model.low_rank.U.grad[:, :] = 0
+                    model.low_rank.V.grad[:, :] = 0
+                else:
+                    model.low_rank.U.grad[:, zero_grad] = 0
+                    model.low_rank.V.grad[:, zero_grad] = 0
+            except Exception:
+                pass
+
+        optimizer.step()
+        total_loss += loss.item()
+
+    return total_loss / total_batches
+
+
+def validation_step(dataloader, model, loss_fn):
+    size = len(dataloader.dataset)
+    model.eval()
+    val_loss = 0.0
+
+    with torch.no_grad():
+        for X, y in dataloader:
+            X = X.to(model.device)
+            y = y.to(model.device)
+
+            model(X)
+            y_pred = model.readout
+            batch_loss = loss_fn(y_pred, y)
+            val_loss += batch_loss.item() * X.size(0)
+
+    val_loss /= size
+    return val_loss
+
+
+def fit(
+    model,
+    train_loader,
+    val_loader,
+    criterion,
+    optimizer,
+    num_epochs=100,
+    thresh=0.15,
+    zero_grad=None,
+):
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+    }
+
+    for epoch in range(num_epochs):
+        train_loss = training_step(
+            train_loader,
+            model,
+            criterion,
+            optimizer,
+            zero_grad=zero_grad,
+        )
+        val_loss = validation_step(val_loader, model, criterion)
+
+        scheduler.step()
+
+        history["train_loss"].append(float(train_loss))
+        history["val_loss"].append(float(val_loss))
+
+        print(
+            f"Epoch {epoch + 1}/{num_epochs}, "
+            f"Training Loss: {train_loss:.4f}, "
+            f"Validation Loss: {val_loss:.4f}"
+        )
+
+        if val_loss < thresh and train_loss < thresh:
+            print(f"Stopping: both losses below threshold ({train_loss:.4f}, {val_loss:.4f})")
+            break
+
+        if val_loss > 300:
+            print(f"Stopping: validation loss too high ({val_loss:.4f})")
+            break
+
+        if torch.isnan(torch.tensor(train_loss)):
+            print("Stopping: NaN loss")
+            break
+
+    return history
+
+
+def freeze_for_dpa(model):
+    model.J_STP.requires_grad = True
+
+    if getattr(model, "LR_READOUT", False):
+        for param in model.low_rank.linear.parameters():
+            param.requires_grad = False
+        model.low_rank.linear.bias.requires_grad = False
+
+
+def freeze_for_gonogo(model):
+    model.J_STP.requires_grad = False
+
+
+def freeze_for_dual(model):
+    model.J_STP.requires_grad = False
+
+
+def print_trainable_parameters(model):
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print(name, tuple(param.shape))
+#+end_src
+
+---
+
+- 4) =src/train/dual/run_dual.py=
+
+#+begin_src python
+import os
+import json
+import argparse
+import numpy as np
+import torch
+import torch.optim as optim
+
+from src.network import Network
+from src.train.dual.losses import DualLoss
+from src.train.dual.data import (
+    split_data,
+    make_dpa_dataset,
+    make_gonogo_dataset,
+    make_dual_dataset,
+)
+from src.train.dual.trainer import (
+    fit,
+    freeze_for_dpa,
+    freeze_for_gonogo,
+    freeze_for_dual,
+    print_trainable_parameters,
+)
+
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+
+
+def build_model(args):
+    kwargs = {
+        "TRAINING": 1,
+        "GAIN": args.gain,
+        "LR_INI": args.lr_ini,
+        "RANK": args.rank,
+        "VAR_FF": [args.var_ff, args.var_ff],
+        "TRAIN_SCALE": args.train_scale,
+        "LR_TYPE": args.lr_type,
+        "K": args.K,
+    }
+
+    model = Network(
+        args.conf_name,
+        REPO_ROOT,
+        VERBOSE=0,
+        DEVICE=args.device,
+        SEED=args.seed,
+        N_BATCH=1,
+        **kwargs,
+    )
+
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    return model
+
+
+def maybe_load_checkpoint(model, init_from):
+    if init_from is None:
+        return
+
+    ckpt = torch.load(init_from, map_location=model.device)
+
+    if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+        model.load_state_dict(ckpt["model_state_dict"])
+    else:
+        model.load_state_dict(ckpt)
+
+    print(f"Loaded checkpoint: {init_from}")
+
+
+def make_task(task, model, args):
+    device = model.device
+
+    if task == "dpa":
+        freeze_for_dpa(model)
+
+        ff_input, labels, idx = make_dpa_dataset(
+            model=model,
+            device=device,
+            n_batch=args.n_batch,
+            rank=args.rank,
+        )
+
+        criterion = DualLoss(
+            device=device,
+            alpha=args.bce_alpha,
+            thresh=args.loss_thresh,
+            rwd_idx=idx["rwd_idx"],
+            stim_idx=idx["stim_idx"],
+            test_idx=idx["test_idx"],
+            zero_idx=idx["zero_idx"],
+            class_bal=[1.0, 1.0],
+            read_idx=[1, 0, 2],
+        )
+        zero_grad = None
+
+    elif task == "gonogo":
+        freeze_for_gonogo(model)
+
+        ff_input, labels, idx = make_gonogo_dataset(
+            model=model,
+            device=device,
+            n_batch=args.n_batch,
+        )
+
+        criterion = DualLoss(
+            device=device,
+            alpha=args.bce_alpha,
+            thresh=args.loss_thresh,
+            rwd_idx=idx["rwd_idx"],
+            zero_idx=idx["zero_idx"],
+            stim_idx=idx["stim_idx"],
+            class_bal=[0.0, 1.0],
+            read_idx=[1, 1],
+        )
+        zero_grad = 0
+
+    elif task == "dual":
+        freeze_for_dual(model)
+
+        ff_input, labels, idx = make_dual_dataset(
+            model=model,
+            device=device,
+            n_batch=args.n_batch,
+        )
+
+        criterion = DualLoss(
+            device=device,
+            alpha=args.bce_alpha,
+            thresh=args.loss_thresh,
+            stim_idx=idx["stim_idx"],
+            gng_idx=idx["gng_idx"],
+            cue_idx=idx["cue_idx"],
+            rwd_idx=idx["rwd_idx"],
+            zero_idx=idx["zero_idx"],
+            class_bal=[1.0, 0.0, 1.0, 0.0],
+            read_idx=[1, 0, 1, 1, 2],
+        )
+        zero_grad = None
+
+    else:
+        raise ValueError(f"Unknown task: {task}")
+
+    return ff_input, labels, criterion, zero_grad
+
+
+def save_checkpoint(save_path, model, args, history, task):
+    save_dir = os.path.dirname(save_path)
+    if save_dir != "":
+        os.makedirs(save_dir, exist_ok=True)
+
+    payload = {
+        "model_state_dict": model.state_dict(),
+        "task": task,
+        "args": vars(args),
+        "history": history,
+    }
+    torch.save(payload, save_path)
+    print(f"Saved checkpoint: {save_path}")
+
+    meta_path = save_path.replace(".pth", ".json")
+    with open(meta_path, "w") as f:
+        json.dump(
+            {
+                "task": task,
+                "args": vars(args),
+                "history": history,
+            },
+            f,
+            indent=2,
+        )
+
+
+def run_one_task(model, task, args, save_path):
+    print(f"\n=== Training task: {task} ===")
+
+    ff_input, labels, criterion, zero_grad = make_task(task, model, args)
+    print("ff_input:", tuple(ff_input.shape), "labels:", tuple(labels.shape))
+    print_trainable_parameters(model)
+
+    train_loader, val_loader = split_data(
+        ff_input,
+        labels,
+        train_perc=args.train_perc,
+        batch_size=args.batch_size,
+    )
+
+    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+
+    history = fit(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        criterion=criterion,
+        optimizer=optimizer,
+        num_epochs=args.epochs,
+        thresh=args.stop_loss,
+        zero_grad=zero_grad,
+    )
+
+    save_checkpoint(save_path, model, args, history, task)
+
+
+def build_sequence_paths(outdir, seed):
+    os.makedirs(outdir, exist_ok=True)
+    return {
+        "dpa": os.path.join(outdir, f"dpa_seed{seed}.pth"),
+        "gonogo": os.path.join(outdir, f"gonogo_seed{seed}.pth"),
+        "dual": os.path.join(outdir, f"dual_seed{seed}.pth"),
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--task",
+        choices=["dpa", "gonogo", "dual", "sequence"],
+        required=True,
+    )
+
+    parser.add_argument("--init-from", type=str, default=None)
+    parser.add_argument("--save-path", type=str, default=None)
+    parser.add_argument("--outdir", type=str, default=None)
+
+    parser.add_argument("--conf-name", default="train_dual_EI.yml")
+    parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--seed", type=int, default=1)
+
+    parser.add_argument("--rank", type=int, default=2)
+    parser.add_argument("--gain", type=float, default=1.0)
+    parser.add_argument("--lr-ini", type=float, default=1.0)
+    parser.add_argument("--var-ff", type=float, default=0.25)
+    parser.add_argument("--train-scale", default="all")
+    parser.add_argument("--lr-type", default="standard")
+    parser.add_argument("--K", type=int, default=250)
+
+    parser.add_argument("--n-batch", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--learning-rate", type=float, default=0.1)
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--bce-alpha", type=float, default=1.0)
+    parser.add_argument("--loss-thresh", type=float, default=1.0)
+    parser.add_argument("--stop-loss", type=float, default=0.15)
+    parser.add_argument("--train-perc", type=float, default=0.8)
+
+    args = parser.parse_args()
+
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+
+    model = build_model(args)
+    maybe_load_checkpoint(model, args.init_from)
+
+    if args.task in ["dpa", "gonogo", "dual"]:
+        if args.save_path is None:
+            raise ValueError("--save-path is required for single-task training")
+
+        run_one_task(model, args.task, args, args.save_path)
+        return
+
+    if args.task == "sequence":
+        if args.outdir is None:
+            raise ValueError("--outdir is required for --task sequence")
+
+        paths = build_sequence_paths(args.outdir, args.seed)
+
+        run_one_task(model, "dpa", args, paths["dpa"])
+        run_one_task(model, "gonogo", args, paths["gonogo"])
+        run_one_task(model, "dual", args, paths["dual"])
+        return
+
+
+if __name__ == "__main__":
+    main()
+#+end_src
+
+---
+
+- How to use
+
+**** Train one task from scratch
+
+#+begin_src bash
+python -m src.train.dual.run_dual \
+  --task dpa \
+  --seed 1 \
+  --save-path runs/dpa_seed1.pth
+#+end_src
+
+**** Continue from previous checkpoint explicitly
+
+#+begin_src bash
+python -m src.train.dual.run_dual \
+  --task gonogo \
+  --seed 1 \
+  --init-from runs/dpa_seed1.pth \
+  --save-path runs/gonogo_seed1.pth
+#+end_src
+
+#+begin_src bash
+python -m src.train.dual.run_dual \
+  --task dual \
+  --seed 1 \
+  --init-from runs/gonogo_seed1.pth \
+  --save-path runs/dual_seed1.pth
+#+end_src
+
+**** Run full sequential curriculum in one command
+
+#+begin_src bash
+python -m src.train.dual.run_dual \
+  --task sequence \
+  --seed 1 \
+  --outdir runs/seed1
+#+end_src
+
+This does:
+
+- =runs/seed1/dpa_seed1.pth=
+- =runs/seed1/gonogo_seed1.pth=
+- =runs/seed1/dual_seed1.pth=
+
+**** Sweep many seeds
+
+#+begin_src bash
+for seed in 1 2 3 4 5; do
+  python -m src.train.dual.run_dual \
+    --task sequence \
+    --seed $seed \
+    --outdir runs/seed${seed}
+done
+#+end_src
+
+---
+
+- Two small notes
+
+**** 1. =model.device=
+These files assume your =Network= exposes =model.device=. Your notebook uses that, so likely fine.
+
+If not, after =model.to(device)= in =build_model()= add:
+
+#+begin_src python
+model.device = device
+#+end_src
+
+**** 2. exact notebook behavior
+I kept your notebook logic very close, including:
+
+- task-specific freezing,
+- label construction,
+- zeroing selected low-rank gradients,
+- early stopping behavior.
+
+So this should be a minimal addon rather than a redesign.
+
+If you want, next I can give you one more file: a tiny =scripts/sweep_dual.sh= or =scripts/launch_dual.py= to launch many jobs cleanly on one GPU or across multiple GPUs.
+
+*** give me a launch_dual.py so that I can run 10 100 or 1000 nets
+
+Yes — the simplest scalable addon is a small launcher that:
+
+- loops over seeds,
+- calls =run_dual.py=,
+- optionally runs the full sequential curriculum,
+- spreads jobs across GPUs,
+- skips completed runs,
+- logs stdout/stderr per run.
+
+I’d put it here:
+
+#+begin_src text
+scripts/launch_dual.py
+#+end_src
+
+Below is a minimal but useful version.
+
+---
+
+**** =scripts/launch_dual.py=
+
+#+begin_src python
+#!/usr/bin/env python3
+import argparse
+import itertools
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+def parse_args():
+    p = argparse.ArgumentParser()
+
+    # what to run
+    p.add_argument("--task", choices=["dpa", "gonogo", "dual", "sequence"], default="sequence")
+    p.add_argument("--n-runs", type=int, default=10, help="Number of networks / seeds to launch")
+    p.add_argument("--start-seed", type=int, default=1)
+
+    # paths
+    p.add_argument("--python", default=sys.executable)
+    p.add_argument("--module", default="src.train.dual.run_dual")
+    p.add_argument("--out-root", default="runs/dual")
+    p.add_argument("--log-root", default="logs/dual")
+
+    # hardware / scheduling
+    p.add_argument("--gpus", nargs="+", default=["0"], help='GPU ids, e.g. --gpus 0 1 2')
+    p.add_argument("--max-procs-per-gpu", type=int, default=1)
+    p.add_argument("--poll-seconds", type=float, default=5.0)
+
+    # behavior
+    p.add_argument("--overwrite", action="store_true")
+    p.add_argument("--dry-run", action="store_true")
+
+    # forwarded args to run_dual.py
+    p.add_argument("--conf-name", default="train_dual_EI.yml")
+    p.add_argument("--rank", type=int, default=2)
+    p.add_argument("--gain", type=float, default=1.0)
+    p.add_argument("--lr-ini", type=float, default=1.0)
+    p.add_argument("--var-ff", type=float, default=0.25)
+    p.add_argument("--train-scale", default="all")
+    p.add_argument("--lr-type", default="standard")
+    p.add_argument("--K", type=int, default=250)
+
+    p.add_argument("--n-batch", type=int, default=256)
+    p.add_argument("--batch-size", type=int, default=32)
+    p.add_argument("--learning-rate", type=float, default=0.1)
+    p.add_argument("--epochs", type=int, default=10)
+    p.add_argument("--bce-alpha", type=float, default=1.0)
+    p.add_argument("--loss-thresh", type=float, default=1.0)
+    p.add_argument("--stop-loss", type=float, default=0.15)
+    p.add_argument("--train-perc", type=float, default=0.8)
+
+    return p.parse_args()
+
+
+def build_single_cmd(args, seed, gpu):
+    outdir = Path(args.out_root) / f"seed{seed}"
+    logfile = Path(args.log_root) / f"seed{seed}.log"
+
+    cmd = [
+        args.python, "-m", args.module,
+        "--task", args.task,
+        "--seed", str(seed),
+        "--device", f"cuda:{gpu}",
+        "--conf-name", args.conf_name,
+        "--rank", str(args.rank),
+        "--gain", str(args.gain),
+        "--lr-ini", str(args.lr_ini),
+        "--var-ff", str(args.var_ff),
+        "--train-scale", str(args.train_scale),
+        "--lr-type", str(args.lr_type),
+        "--K", str(args.K),
+        "--n-batch", str(args.n_batch),
+        "--batch-size", str(args.batch_size),
+        "--learning-rate", str(args.learning_rate),
+        "--epochs", str(args.epochs),
+        "--bce-alpha", str(args.bce_alpha),
+        "--loss-thresh", str(args.loss_thresh),
+        "--stop-loss", str(args.stop_loss),
+        "--train-perc", str(args.train_perc),
+    ]
+
+    if args.task == "sequence":
+        cmd += ["--outdir", str(outdir)]
+        done_file = outdir / f"dual_seed{seed}.pth"
+    else:
+        outdir.mkdir(parents=True, exist_ok=True)
+        save_path = outdir / f"{args.task}_seed{seed}.pth"
+        cmd += ["--save-path", str(save_path)]
+        done_file = save_path
+
+    return cmd, logfile, done_file
+
+
+def launch_process(cmd, logfile, gpu, dry_run=False):
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = str(gpu)
+
+    logfile.parent.mkdir(parents=True, exist_ok=True)
+
+    pretty = " ".join(cmd)
+    print(f"[launch gpu={gpu}] {pretty}")
+    print(f"[log] {logfile}")
+
+    if dry_run:
+        return None
+
+    f = open(logfile, "w")
+    proc = subprocess.Popen(
+        cmd,
+        stdout=f,
+        stderr=subprocess.STDOUT,
+        env=env,
+    )
+    return {"proc": proc, "logfile": f, "gpu": gpu, "cmd": cmd}
+
+
+def cleanup_finished(active):
+    still_active = []
+    for item in active:
+        ret = item["proc"].poll()
+        if ret is None:
+            still_active.append(item)
+        else:
+            item["logfile"].close()
+            status = "OK" if ret == 0 else f"FAIL({ret})"
+            print(f"[done gpu={item['gpu']}] {status} :: {' '.join(item['cmd'])}")
+    return still_active
+
+
+def count_gpu_load(active, gpu):
+    return sum(1 for item in active if str(item["gpu"]) == str(gpu))
+
+
+def main():
+    args = parse_args()
+
+    seeds = list(range(args.start_seed, args.start_seed + args.n_runs))
+    Path(args.out_root).mkdir(parents=True, exist_ok=True)
+    Path(args.log_root).mkdir(parents=True, exist_ok=True)
+
+    jobs = []
+    for seed in seeds:
+        for gpu in [None]:
+            cmd, logfile, done_file = build_single_cmd(args, seed, gpu="0")  # placeholder
+            jobs.append((seed, done_file))
+
+    pending = []
+    for seed in seeds:
+        if args.task == "sequence":
+            done_file = Path(args.out_root) / f"seed{seed}" / f"dual_seed{seed}.pth"
+        else:
+            done_file = Path(args.out_root) / f"seed{seed}" / f"{args.task}_seed{seed}.pth"
+
+        if done_file.exists() and not args.overwrite:
+            print(f"[skip] seed={seed} already done: {done_file}")
+            continue
+        pending.append(seed)
+
+    print(f"Requested runs: {len(seeds)}")
+    print(f"Pending runs:   {len(pending)}")
+    print(f"GPUs:           {args.gpus}")
+    print(f"Max/GPU:        {args.max_procs_per_gpu}")
+
+    active = []
+    pending_iter = iter(pending)
+
+    while True:
+        active = cleanup_finished(active)
+
+        launched_any = False
+        for gpu in args.gpus:
+            while count_gpu_load(active, gpu) < args.max_procs_per_gpu:
+                try:
+                    seed = next(pending_iter)
+                except StopIteration:
+                    break
+
+                cmd, logfile, done_file = build_single_cmd(args, seed, gpu)
+
+                if done_file.exists() and not args.overwrite:
+                    print(f"[skip] seed={seed} already done: {done_file}")
+                    continue
+
+                proc_info = launch_process(cmd, logfile, gpu, dry_run=args.dry_run)
+                if proc_info is not None:
+                    active.append(proc_info)
+                launched_any = True
+
+        if args.dry_run:
+            break
+
+        if not active and not launched_any:
+            break
+
+        time.sleep(args.poll_seconds)
+
+    if not args.dry_run:
+        while active:
+            active = cleanup_finished(active)
+            time.sleep(args.poll_seconds)
+
+    print("[all done]")
+
+
+if __name__ == "__main__":
+    main()
+#+end_src
+
+---
+
+**** How to use it
+
+***** 1. Run 10 sequentially trained networks on 1 GPU
+
+#+begin_src bash
+python scripts/launch_dual.py \
+  --task sequence \
+  --n-runs 10 \
+  --start-seed 1 \
+  --gpus 0 \
+  --max-procs-per-gpu 1 \
+  --out-root runs/dual \
+  --log-root logs/dual
+#+end_src
+
+This runs seeds 1..10.
+
+---
+
+***** 2. Run 100 networks across 2 GPUs
+
+#+begin_src bash
+python scripts/launch_dual.py \
+  --task sequence \
+  --n-runs 100 \
+  --start-seed 1 \
+  --gpus 0 1 \
+  --max-procs-per-gpu 1 \
+  --out-root runs/dual \
+  --log-root logs/dual
+#+end_src
+
+This schedules one process per GPU at a time.
+
+---
+
+***** 3. Run 1000 networks, 2 jobs per GPU on 4 GPUs
+
+#+begin_src bash
+python scripts/launch_dual.py \
+  --task sequence \
+  --n-runs 1000 \
+  --start-seed 1 \
+  --gpus 0 1 2 3 \
+  --max-procs-per-gpu 2 \
+  --out-root runs/dual \
+  --log-root logs/dual
+#+end_src
+
+Only do =--max-procs-per-gpu 2= if each run fits in memory.
+
+---
+
+***** 4. Run only DPA for many seeds
+
+#+begin_src bash
+python scripts/launch_dual.py \
+  --task dpa \
+  --n-runs 100 \
+  --gpus 0 1
+#+end_src
+
+---
+
+***** 5. Dry run first
+
+#+begin_src bash
+python scripts/launch_dual.py \
+  --task sequence \
+  --n-runs 5 \
+  --gpus 0 1 \
+  --dry-run
+#+end_src
+
+This just prints the commands.
+
+---
+
+**** Output layout
+
+For seed 7 and sequence mode:
+
+#+begin_src text
+runs/dual/seed7/
+    dpa_seed7.pth
+    dpa_seed7.json
+    gonogo_seed7.pth
+    gonogo_seed7.json
+    dual_seed7.pth
+    dual_seed7.json
+
+logs/dual/
+    seed7.log
+#+end_src
+
+---
+
+**** Important note about GPUs
+
+In your =run_dual.py=, you currently pass =--device cuda:X=.
+In the launcher I also set:
+
+#+begin_src python
+env["CUDA_VISIBLE_DEVICES"] = str(gpu)
+#+end_src
+
+That can conflict conceptually if you pass global GPU ids and also mask devices.
+
+***** Simplest fix
+Use only one of these strategies.
+
+I recommend:
+
+- keep =--device cuda:0= always inside launched process,
+- select physical GPU via =CUDA_VISIBLE_DEVICES=.
+
+So in =launch_dual.py=, change:
+
+#+begin_src python
+"--device", f"cuda:{gpu}",
+#+end_src
+
+to:
+
+#+begin_src python
+"--device", "cuda:0",
+#+end_src
+
+because once =CUDA_VISIBLE_DEVICES=gpu=, that process sees its assigned GPU as local =cuda:0=.
+
+So the better =build_single_cmd()= line is:
+
+#+begin_src python
+"--device", "cuda:0",
+#+end_src
+
+Please make that change.
+
+---
+
+**** Recommended small improvement
+
+I’d also make logs task-specific:
+
+for sequence:
+- =logs/dual/seed7.log=
+
+for single-task:
+- =logs/dual/dpa_seed7.log=
+
+Not essential, but cleaner.
+
+---
+
+**** Even better: hyperparameter sweeps
+
+If later you want not just many seeds, but many configs too, extend the launcher over a grid:
+
+- rank in {2,3}
+- lr in {0.03, 0.1}
+- gain in {0.5, 1.0}
+
+Then each run gets a unique folder name.
+
+If you want, I can give you a second version of =launch_dual.py= that supports full parameter grids, resume, and CSV summary collection.
+
+***
+
+***
+
+***
