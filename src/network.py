@@ -8,8 +8,10 @@ from src.config import Configuration
 from src.dynamics import Activation, DynamicsCore
 from src.dynamics.plasticity import PlasticityManager
 from src.io import FFInputBuilder
-from src.state import ForwardOutputs, OutputCollector, StateManager, Tensor
+from src.state import ForwardOutputs, OutputCollector, StateManager
 from src.weights import WeightBuilder, WeightOutputs
+
+Tensor = torch.Tensor
 
 
 class Network(nn.Module):

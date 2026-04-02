@@ -5,10 +5,12 @@ from collections.abc import Sequence
 
 import torch
 
-from src.config.types import OutputConfig, Tensor
+from src.config.types import OutputConfig
 from src.dynamics.plasticity.stp import Plasticity
 from src.state.containers import ForwardOutputs, NetworkState
 from src.utils import print_activity
+
+Tensor = torch.Tensor
 
 
 class OutputCollector:

@@ -6,10 +6,12 @@ from collections.abc import Sequence
 import torch
 from torch import nn
 
-from src.config.types import StateConfig, Tensor
+from src.config.types import StateConfig
 from src.dynamics.activation import Activation
 from src.dynamics.plasticity.stp import Plasticity
 from src.state.containers import NetworkState
+
+Tensor = torch.Tensor
 
 
 def _terminal_mask(step: int, end_indices: Tensor, batch_size: int) -> Tensor:

@@ -4,9 +4,11 @@ from dataclasses import dataclass
 
 import torch
 
-from src.config.types import FFInputConfig, Tensor
+from src.config.types import FFInputConfig
 from src.weights.lr import get_theta
 from src.io.stimuli import Stimuli
+
+Tensor = torch.Tensor
 
 
 @dataclass

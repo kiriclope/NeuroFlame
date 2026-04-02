@@ -4,11 +4,13 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from src.config.types import HebbianConfig, NetworkGeometry, STPModuleConfig, Tensor
+from src.config.types import HebbianConfig, NetworkGeometry, STPModuleConfig
 from src.dynamics.plasticity.hebbian import Hebbian
 from src.dynamics.plasticity.stp import Plasticity
 from src.state.containers import NetworkState
 from src.weights.builder import STPBlockSpec
+
+Tensor = torch.Tensor
 
 
 class PlasticityManager(nn.Module):
@@ -68,7 +70,8 @@ class PlasticityManager(nn.Module):
             mod = Plasticity(
                 sc.USE[block_id], sc.TAU_FAC[block_id], sc.TAU_REC[block_id],
                 sc.DT, (batch_size, geo.Na[pre]),
-                STP_TYPE=sc.STP_TYPE, IF_INIT=reset, device=geo.device,
+                device=geo.device,
+                STP_TYPE=sc.STP_TYPE, IF_INIT=reset,
             )
             if not reset:
                 self._restore_stp_state(
@@ -92,7 +95,8 @@ class PlasticityManager(nn.Module):
         mod = Plasticity(
             sc.FF_USE, sc.TAU_FF_FAC, sc.TAU_FF_REC, sc.DT,
             (batch_size, geo.N_NEURON),
-            STP_TYPE=sc.STP_TYPE, IF_INIT=reset, device=geo.device,
+            device=geo.device,
+            STP_TYPE=sc.STP_TYPE, IF_INIT=reset,
         )
         if not reset:
             if state.u_ff_stp_last is None or state.x_ff_stp_last is None:

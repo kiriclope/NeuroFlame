@@ -4,11 +4,13 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from src.config.types import RecurrentConfig, Tensor
+from src.config.types import RecurrentConfig
 from src.dynamics.activation import Activation
 from src.dynamics.plasticity.stp import Plasticity
 from src.state.containers import NetworkState
 from src.weights.builder import STPBlockSpec, recurrent_matmul
+
+Tensor = torch.Tensor
 
 
 class DynamicsCore(nn.Module):

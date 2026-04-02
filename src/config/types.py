@@ -19,6 +19,7 @@ class RawConfig(Protocol):
     slices: list[slice]
     device: torch.device
     DT: float
+    DURATION: float
     N_STEPS: int
     N_STEADY: int
     N_HEBB: int
@@ -94,11 +95,9 @@ class RawConfig(Protocol):
     BUMP_SWITCH: list[int]
     RANDOM_DELAY: int
     DELAY_LIST: Any
-    ODR_TRAIN: bool
     IF_RL: int
     RWD: int
     GRID_INPUT: int
-    GRID_TEST: Any
     GRID_SIZE: int
     Jab: Tensor
 
@@ -125,6 +124,7 @@ class NetworkGeometry:
 @dataclass(frozen=True)
 class TimeConfig:
     DT: float
+    DURATION: float
     N_STEPS: int
     N_STEADY: int
     N_HEBB: int
@@ -135,7 +135,8 @@ class TimeConfig:
     @classmethod
     def from_raw(cls, m: RawConfig) -> TimeConfig:
         return cls(
-            DT=m.DT, N_STEPS=m.N_STEPS, N_STEADY=m.N_STEADY,
+            DT=m.DT, DURATION=m.DURATION,
+            N_STEPS=m.N_STEPS, N_STEADY=m.N_STEADY,
             N_HEBB=m.N_HEBB, N_WINDOW=m.N_WINDOW,
             N_STIM_ON=m.N_STIM_ON, N_STIM_OFF=m.N_STIM_OFF,
         )
@@ -356,7 +357,8 @@ class TaskConfig:
             ODR_TRAIN=getattr(m, "ODR_TRAIN", False),
             IF_RL=m.IF_RL, RWD=m.RWD,
             odors=getattr(m, "odors", None),
-            GRID_INPUT=m.GRID_INPUT, GRID_TEST=m.GRID_TEST,
+            GRID_INPUT=m.GRID_INPUT,
+            GRID_TEST=getattr(m, "GRID_TEST", None),
             GRID_SIZE=m.GRID_SIZE,
             GRID_X_RANGE=getattr(m, "GRID_X_RANGE", None),
             GRID_Y_RANGE=getattr(m, "GRID_Y_RANGE", None),
@@ -515,6 +517,18 @@ class OutputConfig:
     def IF_STP(self) -> bool: return self._if_stp
     @property
     def VERBOSE(self) -> bool: return self.sim.VERBOSE
+    @property
+    def N_POP(self) -> int: return self.geo.N_POP
+    @property
+    def N_NEURON(self) -> int: return self.geo.N_NEURON
+    @property
+    def slices(self) -> list[slice]: return self.geo.slices
+    @property
+    def N_STEPS(self) -> int: return self.time.N_STEPS
+    @property
+    def N_STEADY(self) -> int: return self.time.N_STEADY
+    @property
+    def DURATION(self) -> float: return self.time.DURATION
 
     @classmethod
     def from_raw(
@@ -572,8 +586,8 @@ class FFInputConfig:
     time: TimeConfig
     task: TaskConfig
     trainable: TrainableWeightConfig
-    _start_indices: Tensor = None
-    _end_indices: Tensor = None
+    _start_indices: Tensor | None = None
+    _end_indices: Tensor | None = None
 
     @property
     def TASK(self) -> str: return self.task.TASK
@@ -620,9 +634,9 @@ class FFInputConfig:
     @property
     def GRID_Y_RANGE(self): return self.task.GRID_Y_RANGE
     @property
-    def start_indices(self) -> Tensor: return self._start_indices
+    def start_indices(self) -> Tensor | None: return self._start_indices
     @property
-    def end_indices(self) -> Tensor: return self._end_indices
+    def end_indices(self) -> Tensor | None: return self._end_indices
 
     @classmethod
     def from_raw(

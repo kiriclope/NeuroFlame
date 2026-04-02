@@ -5,8 +5,8 @@ import torch
 # torch.backends.cudnn.deterministic = True
 # torch.backends.cudnn.benchmark = False
 
-def print_activity(model, step, rates):
 
+def print_activity(model, step, rates):
     times = round((step - model.N_STEADY) / model.N_STEPS * model.DURATION, 2)
 
     activity = []
@@ -15,8 +15,8 @@ def print_activity(model, step, rates):
 
     print("times (s)", times, "rates (Hz)", activity)
 
+
 def set_seed(seed):
-    # seed0 = seed
     if seed == -1:
         seed = int(time.time())
 
@@ -26,13 +26,11 @@ def set_seed(seed):
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-    # print('seed', seed0, 'test', torch.rand(1), torch.cuda.FloatTensor(1).uniform_())
 
 def clear_cache():
     for obj in gc.get_objects():
         if torch.is_tensor(obj):
             del obj
 
-    # Manually triggering the garbage collector afterwards
     gc.collect()
     torch.cuda.empty_cache()

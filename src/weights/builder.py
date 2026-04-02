@@ -197,6 +197,11 @@ class WeightBuilder(nn.Module):
         if not s.IF_STP:
             return None
 
+        if s.W_STP is None:
+            raise RuntimeError(
+                "IF_STP=True but W_STP is None; set W_STP in configuration"
+            )
+
         dtype = self.W_rec_base.dtype
         fix_scale = torch.sqrt(torch.as_tensor(
             geo.Ka[0], device=self.device, dtype=dtype,
