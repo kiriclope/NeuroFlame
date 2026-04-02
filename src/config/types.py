@@ -11,13 +11,23 @@ Tensor = torch.Tensor
 
 
 class RawConfig(Protocol):
-    """Structural type for the attributes Configuration exposes."""
+    """Structural type for the attributes Configuration exposes.
+
+    This covers every attribute that at least one ``from_raw`` class-method
+    reads.  Because ``Configuration`` sets attributes dynamically from YAML
+    plus ``init_const`` / ``init_time_const``, the list is intentionally
+    broad.
+    """
+
+    # ── geometry ──────────────────────────────────────────────────────
     N_POP: int
     N_NEURON: int
     Na: Tensor
     Ka: Tensor
     slices: list[slice]
     device: torch.device
+
+    # ── time ──────────────────────────────────────────────────────────
     DT: float
     DURATION: float
     N_STEPS: int
@@ -26,6 +36,8 @@ class RawConfig(Protocol):
     N_WINDOW: int
     N_STIM_ON: Tensor
     N_STIM_OFF: Tensor
+
+    # ── connectivity ──────────────────────────────────────────────────
     CON_TYPE: str
     PROBA_TYPE: np.ndarray
     KAPPA: Tensor
@@ -34,6 +46,8 @@ class RawConfig(Protocol):
     LR_MEAN: Any
     LR_COV: Any
     PHI0: Tensor
+
+    # ── trainable weights ─────────────────────────────────────────────
     LR_TRAIN: bool
     LR_NORM: int
     LR_INI: float
@@ -53,14 +67,13 @@ class RawConfig(Protocol):
     train_scale: Tensor
     GAIN: float
     CLAMP: bool
+
+    # ── STP weight ────────────────────────────────────────────────────
     IF_STP: bool
     IS_STP: list[int]
     J_STP: Any
-    USE: list[float]
-    TAU_FAC: list[float]
-    TAU_REC: list[float]
-    STP_TYPE: str
-    IF_FF_STP: bool
+
+    # ── dynamics flags ────────────────────────────────────────────────
     TF_TYPE: str
     SYN_DYN: bool
     RATE_DYN: bool
@@ -70,21 +83,28 @@ class RawConfig(Protocol):
     IF_ADAPT: bool
     IF_BATCH_J: bool
     IF_HEBB: bool
+    IF_FF_STP: bool
+    RATE_NOISE: bool
+    IF_OPTO: bool
+
+    # ── dynamics constants ────────────────────────────────────────────
     EXP_DT_TAU: Tensor
     EXP_DT_TAU_SYN: Tensor
     TAU_SYN: Tensor
+
+    # ── Hebbian ───────────────────────────────────────────────────────
     IS_HEBB: list[int]
     ETA: float
     HEBB_TYPE: str
     HEBB_FRAC: float
-    TRAINING: int
-    thresh: Tensor
-    VERBOSE: bool
-    RATE_NOISE: bool
-    VAR_RATE: Tensor
-    IF_OPTO: bool
-    end_indices: Tensor
-    start_indices: Tensor
+
+    # ── STP module ────────────────────────────────────────────────────
+    USE: list[float]
+    TAU_FAC: list[float]
+    TAU_REC: list[float]
+    STP_TYPE: str
+
+    # ── task ──────────────────────────────────────────────────────────
     TASK: str
     N_BATCH: int
     I0: list[float]
@@ -99,6 +119,16 @@ class RawConfig(Protocol):
     RWD: int
     GRID_INPUT: int
     GRID_SIZE: int
+
+    # ── simulation state ──────────────────────────────────────────────
+    TRAINING: int
+    thresh: Tensor
+    VERBOSE: bool
+    VAR_RATE: Tensor
+    end_indices: Tensor
+    start_indices: Tensor
+
+    # ── base weight matrix ────────────────────────────────────────────
     Jab: Tensor
 
 

@@ -3,8 +3,8 @@
 :GPTEL_BACKEND: Anthropic
 :GPTEL_SYSTEM: You are a large language model living in Emacs and a helpful assistant. Respond concisely.
 :GPTEL_TOOLS:
-:GPTEL_MAX_TOKENS: 32000
-:GPTEL_BOUNDS: ((response (1610 4678) (4772 103612)))
+:GPTEL_MAX_TOKENS: 64000
+:GPTEL_BOUNDS: ((response (1610 4731) (4825 105440)))
 :END:
 
 *** I have a python project that I have restructured in a subpackage structure
@@ -49,7 +49,6 @@ src/
 #+end_src
 
 **** Package Init Files
-
 
 #+begin_src python :tangle config/__init__.py
 """Configuration loading and typed sub-configs."""
@@ -98,7 +97,12 @@ __all__ = [
 
 #+begin_src python :tangle weights/__init__.py
 """Weight construction and low-rank parametrizations."""
-from src.weights.builder import WeightBuilder, WeightOutputs, recurrent_matmul
+from src.weights.builder import (
+    WeightBuilder,
+    WeightOutputs,
+    STPBlockSpec,
+    recurrent_matmul,
+)
 from src.weights.connectivity import Connectivity
 from src.weights.lr import (
     LowRankWeights,
@@ -115,6 +119,7 @@ from src.weights.lr import (
 __all__ = [
     "WeightBuilder",
     "WeightOutputs",
+    "STPBlockSpec",
     "recurrent_matmul",
     "Connectivity",
     "LowRankWeights",
@@ -185,10 +190,10 @@ from src.network import Network
 __all__ = ["Network"]
 #+end_src
 
-
 **** Migrated Source Files
 
 Each file below has only its imports updated — no logic changes.
+
 
 #+begin_src python :tangle config/types.py
 """Typed sub-configurations for each network module."""
@@ -204,13 +209,23 @@ Tensor = torch.Tensor
 
 
 class RawConfig(Protocol):
-    """Structural type for the attributes Configuration exposes."""
+    """Structural type for the attributes Configuration exposes.
+
+    This covers every attribute that at least one ``from_raw`` class-method
+    reads.  Because ``Configuration`` sets attributes dynamically from YAML
+    plus ``init_const`` / ``init_time_const``, the list is intentionally
+    broad.
+    """
+
+    # ── geometry ──────────────────────────────────────────────────────
     N_POP: int
     N_NEURON: int
     Na: Tensor
     Ka: Tensor
     slices: list[slice]
     device: torch.device
+
+    # ── time ──────────────────────────────────────────────────────────
     DT: float
     DURATION: float
     N_STEPS: int
@@ -219,6 +234,8 @@ class RawConfig(Protocol):
     N_WINDOW: int
     N_STIM_ON: Tensor
     N_STIM_OFF: Tensor
+
+    # ── connectivity ──────────────────────────────────────────────────
     CON_TYPE: str
     PROBA_TYPE: np.ndarray
     KAPPA: Tensor
@@ -227,6 +244,8 @@ class RawConfig(Protocol):
     LR_MEAN: Any
     LR_COV: Any
     PHI0: Tensor
+
+    # ── trainable weights ─────────────────────────────────────────────
     LR_TRAIN: bool
     LR_NORM: int
     LR_INI: float
@@ -246,14 +265,13 @@ class RawConfig(Protocol):
     train_scale: Tensor
     GAIN: float
     CLAMP: bool
+
+    # ── STP weight ────────────────────────────────────────────────────
     IF_STP: bool
     IS_STP: list[int]
     J_STP: Any
-    USE: list[float]
-    TAU_FAC: list[float]
-    TAU_REC: list[float]
-    STP_TYPE: str
-    IF_FF_STP: bool
+
+    # ── dynamics flags ────────────────────────────────────────────────
     TF_TYPE: str
     SYN_DYN: bool
     RATE_DYN: bool
@@ -263,21 +281,28 @@ class RawConfig(Protocol):
     IF_ADAPT: bool
     IF_BATCH_J: bool
     IF_HEBB: bool
+    IF_FF_STP: bool
+    RATE_NOISE: bool
+    IF_OPTO: bool
+
+    # ── dynamics constants ────────────────────────────────────────────
     EXP_DT_TAU: Tensor
     EXP_DT_TAU_SYN: Tensor
     TAU_SYN: Tensor
+
+    # ── Hebbian ───────────────────────────────────────────────────────
     IS_HEBB: list[int]
     ETA: float
     HEBB_TYPE: str
     HEBB_FRAC: float
-    TRAINING: int
-    thresh: Tensor
-    VERBOSE: bool
-    RATE_NOISE: bool
-    VAR_RATE: Tensor
-    IF_OPTO: bool
-    end_indices: Tensor
-    start_indices: Tensor
+
+    # ── STP module ────────────────────────────────────────────────────
+    USE: list[float]
+    TAU_FAC: list[float]
+    TAU_REC: list[float]
+    STP_TYPE: str
+
+    # ── task ──────────────────────────────────────────────────────────
     TASK: str
     N_BATCH: int
     I0: list[float]
@@ -292,6 +317,16 @@ class RawConfig(Protocol):
     RWD: int
     GRID_INPUT: int
     GRID_SIZE: int
+
+    # ── simulation state ──────────────────────────────────────────────
+    TRAINING: int
+    thresh: Tensor
+    VERBOSE: bool
+    VAR_RATE: Tensor
+    end_indices: Tensor
+    start_indices: Tensor
+
+    # ── base weight matrix ────────────────────────────────────────────
     Jab: Tensor
 
 
@@ -1894,10 +1929,13 @@ class DynamicsCore(nn.Module):
             ff_step = ff_step + ff_stp_hidden
 
         if c.IF_FF_DYN:
+            assert c.EXP_FF is not None, "IF_FF_DYN=True but EXP_FF is None"
             ff_step = state.ff_state * c.EXP_FF + ff_step * (1.0 - c.EXP_FF)
             state.ff_state = ff_step
 
         if c.IF_BATCH_J:
+            assert c.Jab_batch is not None, "IF_BATCH_J=True but Jab_batch is None"
+            assert c.W_batch_T is not None, "IF_BATCH_J=True but W_batch_T is None"
             hidden[:, geo.slices[0]].add_(c.Jab_batch * (rates[:, geo.slices[0]] @ c.W_batch_T))
 
         if c.SYN_DYN:
@@ -1906,6 +1944,7 @@ class DynamicsCore(nn.Module):
             rec_input[0] = hidden
 
         if c.IF_FF_ADAPT:
+            assert c.EXP_FF_ADAPT is not None, "IF_FF_ADAPT=True but EXP_FF_ADAPT is None"
             if state.ff_adapt_thresh is None:
                 state.ff_adapt_thresh = torch.zeros_like(ff_step)
             adapted = torch.sign(ff_step) * torch.relu(torch.abs(ff_step) - state.ff_adapt_thresh)
@@ -1918,6 +1957,7 @@ class DynamicsCore(nn.Module):
         net_input = ff_step + rec_input[0]
 
         if c.IF_NMDA:
+            assert c.EXP_DT_TAU_NMDA is not None, "IF_NMDA=True but EXP_DT_TAU_NMDA is None"
             exc_rates = rates[:, geo.slices[0]]
             if W_rec.dim() == 2:
                 hidden_nmda = recurrent_matmul(exc_rates, W_rec[geo.slices[0]])
@@ -1943,6 +1983,7 @@ class DynamicsCore(nn.Module):
             state.rates = non_linear
 
         if c.IF_ADAPT:
+            assert c.EXP_ADAPT is not None, "IF_ADAPT=True but EXP_ADAPT is None"
             state.thresh[:, geo.slices[0]] = (
                 state.thresh[:, geo.slices[0]] * c.EXP_ADAPT
                 + state.rates[:, geo.slices[0]].detach() * c.A_ADAPT * (1.0 - c.EXP_ADAPT)
@@ -2253,6 +2294,9 @@ class PlasticityManager(nn.Module):
             W_rec[:, geo.slices[1]] = W_rec[:, geo.slices[1]].clamp(max=0.0)
 
         if hc.HEBB_TYPE == "bcm":
+            assert hc.EXP_HEBB is not None, (
+                "IF_HEBB=True with HEBB_TYPE='bcm' but EXP_HEBB is None"
+            )
             hebb_rates = hebb_rates * hc.EXP_HEBB + rates * (1.0 - hc.EXP_HEBB)
 
         return W_rec, hebb_rates
@@ -3112,3 +3156,5 @@ def clear_cache():
     gc.collect()
     torch.cuda.empty_cache()
 #+end_src
+
+*** Check for errors and inconsistencies. Provide the full updated version of the files.

@@ -1,5 +1,10 @@
 """Weight construction and low-rank parametrizations."""
-from src.weights.builder import WeightBuilder, WeightOutputs, recurrent_matmul
+from src.weights.builder import (
+    WeightBuilder,
+    WeightOutputs,
+    STPBlockSpec,
+    recurrent_matmul,
+)
 from src.weights.connectivity import Connectivity
 from src.weights.lr import (
     LowRankWeights,
@@ -16,6 +21,7 @@ from src.weights.lr import (
 __all__ = [
     "WeightBuilder",
     "WeightOutputs",
+    "STPBlockSpec",
     "recurrent_matmul",
     "Connectivity",
     "LowRankWeights",

@@ -146,6 +146,9 @@ class PlasticityManager(nn.Module):
             W_rec[:, geo.slices[1]] = W_rec[:, geo.slices[1]].clamp(max=0.0)
 
         if hc.HEBB_TYPE == "bcm":
+            assert hc.EXP_HEBB is not None, (
+                "IF_HEBB=True with HEBB_TYPE='bcm' but EXP_HEBB is None"
+            )
             hebb_rates = hebb_rates * hc.EXP_HEBB + rates * (1.0 - hc.EXP_HEBB)
 
         return W_rec, hebb_rates

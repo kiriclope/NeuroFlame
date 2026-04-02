@@ -52,14 +52,10 @@ from time import perf_counter
 from scipy.stats import circmean
 
 from src.network import Network
-
-from src.decode import decode_bump, circcvl
 from src.train.dual.task_score import DualScore
 #+end_src
 
 #+RESULTS:
-: Python exe
-: /home/leon/mambaforge/bin/python
 
 * Helpers
 ** Data Split
@@ -124,7 +120,6 @@ def cross_val_data(X, Y, n_splits=5, batch_size=32):
 #+end_src
 
 #+RESULTS:
-: 7b9e6756-4ad4-4635-8c85-ec2e7cea3a3f
 
 ** Optimization
 
@@ -188,6 +183,7 @@ def training_step(dataloader, model, loss_fn, optimizer, zero_grad=None):
 #+end_src
 
 #+RESULTS:
+: 0e6448f7-7aa2-472c-9ded-1bf8f2c108bf
 
 #+begin_src jupyter-python
 def validation_step(dataloader, model, loss_fn):
@@ -210,7 +206,6 @@ def validation_step(dataloader, model, loss_fn):
 #+end_src
 
 #+RESULTS:
-: f876953f-cc76-4dfb-958c-c15fae3e2e7f
 
 #+begin_src jupyter-python
 def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs=100, thresh=0.15, zero_grad=None):
@@ -703,19 +698,15 @@ thresh = 1.0
 model = Network(conf_name, REPO_ROOT, VERBOSE=0, DEVICE=DEVICE, SEED=seed, N_BATCH=1, **kwargs)
 device = torch.device(DEVICE if torch.cuda.is_available() else 'cpu')
 model.to(device);
-print(model.SAVE_PATH)
 #+end_src
 
 #+RESULTS:
-: /home/leon/models/NeuroFlame/src/train/runs/dual
 
 #+begin_src jupyter-python
-from src.lr_utils import clamp_tensor
-Cij = model.Wab_T.cpu().detach().numpy()
+from src.weights.lr import clamp_tensor
+Cij = model.W_rec.cpu().detach().numpy()
 print(Cij.shape)
 #+end_src
-
-#+RESULTS:
 
 #+begin_src jupyter-python
 from scipy.ndimage import gaussian_filter1d, uniform_filter1d
@@ -754,9 +745,6 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/dual/figure_26.png]]
-
-#+RESULTS:
 
 #+begin_src jupyter-python
 import gc
@@ -777,14 +765,13 @@ torch.cuda.reset_accumulated_memory_stats(DEVICE)
 #+begin_src jupyter-python
 # model.J_STP.requires_grad = True
 
-if model.LR_READOUT:
-    for param in model.low_rank.linear.parameters():
-        param.requires_grad = False
-    model.low_rank.linear.bias.requires_grad = False
+# if model.LR_READOUT:
+#     for param in model.low_rank.linear.parameters():
+#         param.requires_grad = False
+#     model.low_rank.linear.bias.requires_grad = False
 #+end_src
 
 #+RESULTS:
-
 
 #+begin_src jupyter-python
 for name, param in model.named_parameters():
@@ -820,14 +807,7 @@ print('zero', zero_idx)
 #+end_src
 
 #+RESULTS:
-: rwd [ 70  71  72  73  74  75  76  77  78  79  80  81  82  83  84  85  86  87
-:   88  89  90  91  92  93  94  95  96  97  98  99 100]
-: stim [10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33
-:  34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57
-:  58 59 60 61 62 63 64 65 66 67 68 69]
-: zero [ 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23
-:  24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
-:  48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69]
+
 
 *** Inputs and Labels
 

@@ -64,10 +64,13 @@ class DynamicsCore(nn.Module):
             ff_step = ff_step + ff_stp_hidden
 
         if c.IF_FF_DYN:
+            assert c.EXP_FF is not None, "IF_FF_DYN=True but EXP_FF is None"
             ff_step = state.ff_state * c.EXP_FF + ff_step * (1.0 - c.EXP_FF)
             state.ff_state = ff_step
 
         if c.IF_BATCH_J:
+            assert c.Jab_batch is not None, "IF_BATCH_J=True but Jab_batch is None"
+            assert c.W_batch_T is not None, "IF_BATCH_J=True but W_batch_T is None"
             hidden[:, geo.slices[0]].add_(c.Jab_batch * (rates[:, geo.slices[0]] @ c.W_batch_T))
 
         if c.SYN_DYN:
@@ -76,6 +79,7 @@ class DynamicsCore(nn.Module):
             rec_input[0] = hidden
 
         if c.IF_FF_ADAPT:
+            assert c.EXP_FF_ADAPT is not None, "IF_FF_ADAPT=True but EXP_FF_ADAPT is None"
             if state.ff_adapt_thresh is None:
                 state.ff_adapt_thresh = torch.zeros_like(ff_step)
             adapted = torch.sign(ff_step) * torch.relu(torch.abs(ff_step) - state.ff_adapt_thresh)
@@ -88,6 +92,7 @@ class DynamicsCore(nn.Module):
         net_input = ff_step + rec_input[0]
 
         if c.IF_NMDA:
+            assert c.EXP_DT_TAU_NMDA is not None, "IF_NMDA=True but EXP_DT_TAU_NMDA is None"
             exc_rates = rates[:, geo.slices[0]]
             if W_rec.dim() == 2:
                 hidden_nmda = recurrent_matmul(exc_rates, W_rec[geo.slices[0]])
@@ -113,6 +118,7 @@ class DynamicsCore(nn.Module):
             state.rates = non_linear
 
         if c.IF_ADAPT:
+            assert c.EXP_ADAPT is not None, "IF_ADAPT=True but EXP_ADAPT is None"
             state.thresh[:, geo.slices[0]] = (
                 state.thresh[:, geo.slices[0]] * c.EXP_ADAPT
                 + state.rates[:, geo.slices[0]].detach() * c.A_ADAPT * (1.0 - c.EXP_ADAPT)
