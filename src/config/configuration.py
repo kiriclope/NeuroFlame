@@ -1,0 +1,323 @@
+from yaml import safe_load
+import numpy as np
+
+import torch
+from torch.distributions import MultivariateNormal
+
+from src.config.types import (
+    ConnectivityConfig,
+    DynamicsConstants,
+    DynamicsFlags,
+    FFInputConfig,
+    HebbianConfig,
+    NetworkGeometry,
+    OutputConfig,
+    RecurrentConfig,
+    SimulationConfig,
+    SimulationState,
+    StateConfig,
+    STPModuleConfig,
+    STPWeightConfig,
+    TaskConfig,
+    TimeConfig,
+    TrainableWeightConfig,
+    WeightConfig,
+)
+from src.utils import set_seed
+
+
+class Configuration:
+    def __init__(self, conf_name, repo_root):
+        self.conf_file = repo_root + "/conf/" + conf_name
+        self.defaults = repo_root + "/conf/defaults.yml"
+
+    def forward(self, **kwargs):
+        with open(self.defaults, "r") as f:
+            parameters = safe_load(f)
+        with open(self.conf_file, "r") as f:
+            config = safe_load(f)
+        parameters.update(config)
+        parameters.update(kwargs)
+        self.__dict__.update(parameters)
+
+        if self.FLOAT_PRECISION == 32:
+            self.FLOAT = torch.float
+            torch.set_float32_matmul_precision('medium')
+        elif self.FLOAT_PRECISION == 16:
+            self.FLOAT = torch.float16
+        elif self.FLOAT_PRECISION == "16b":
+            self.FLOAT = torch.bfloat16
+        else:
+            self.FLOAT = torch.float64
+
+        self.device = torch.device(self.DEVICE)
+        torch.set_default_dtype(self.FLOAT)
+
+        set_seed(self.SEED)
+        init_time_const(self)
+
+        set_seed(self.SEED)
+        init_const(self)
+
+        _build_sub_configs(self)
+        return self
+
+    def __call__(self, **kwargs):
+        return self.forward(**kwargs)
+
+
+def _build_sub_configs(model):
+    geo       = NetworkGeometry.from_raw(model)
+    time      = TimeConfig.from_raw(model)
+    conn      = ConnectivityConfig.from_raw(model)
+    trainable = TrainableWeightConfig.from_raw(model)
+    stp_w     = STPWeightConfig.from_raw(model)
+    flags     = DynamicsFlags.from_raw(model)
+    consts    = DynamicsConstants.from_raw(model)
+    hebb      = HebbianConfig.from_raw(model)
+    stp_mod   = STPModuleConfig.from_raw(model)
+    task      = TaskConfig.from_raw(model)
+    sim_state = SimulationState.from_raw(model)
+
+    model.geo       = geo
+    model.time      = time
+    model.flags     = flags
+    model.consts    = consts
+    model.sim_state = sim_state
+    model.task      = task
+    model.hebb_cfg  = hebb
+    model.stp_cfg   = stp_mod
+
+    model.weight_cfg    = WeightConfig(
+        geo=geo, conn=conn, trainable=trainable, stp=stp_w, Jab=model.Jab,
+    )
+    model.recurrent_cfg = RecurrentConfig.from_raw(
+        model, geo=geo, flags=flags, consts=consts,
+    )
+    model.state_cfg     = StateConfig.from_raw(
+        model, geo=geo, time=time, flags=flags, sim=sim_state,
+    )
+    model.output_cfg    = OutputConfig.from_raw(
+        model, geo=geo, time=time, sim=sim_state,
+    )
+    model.sim_cfg       = SimulationConfig.from_raw(
+        model, geo=geo, time=time, flags=flags,
+        trainable=trainable, sim=sim_state,
+    )
+    model.ff_cfg        = FFInputConfig.from_raw(
+        model, geo=geo, time=time, task=task, trainable=trainable,
+    )
+
+
+def init_time_const(model):
+    model.N_HEBB = int(model.T_HEBB / model.DT)
+    model.N_STEADY = int(model.T_STEADY / model.DT)
+
+    if model.RANDOM_ITI:
+        if model.ITI_LIST is not None:
+            idx_iti = torch.randint(low=0, high=len(model.ITI_LIST), size=(1,)).item()
+            model.N_STEADY = int(model.ITI_LIST[idx_iti] / model.DT)
+        else:
+            model.N_STEADY = int(
+                torch.randint(
+                    low=int(model.MIN_ITI), high=int(model.MAX_ITI) + 1, size=(1,)
+                ).item() / model.DT
+            )
+
+    model.N_WINDOW = int(model.T_WINDOW / model.DT)
+    model.N_STEPS = (
+        int(model.DURATION / model.DT) + model.N_WINDOW + model.N_STEADY + model.N_HEBB
+    )
+
+    model.N_STIM_ON = torch.tensor(
+        [int(i / model.DT) + model.N_STEADY + model.N_HEBB for i in model.T_STIM_ON]
+    ).to(model.device)
+    model.N_STIM_OFF = torch.tensor(
+        [int(i / model.DT) + model.N_STEADY + model.N_HEBB for i in model.T_STIM_OFF]
+    ).to(model.device)
+
+    model.random_shifts = torch.zeros((model.N_BATCH,)).to(model.device)
+    model.start_indices = model.N_STIM_ON.unsqueeze(-1) + model.random_shifts
+    model.end_indices = model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts
+
+    if model.RANDOM_DELAY:
+        model.N_STIM_ON[1] = model.N_STIM_OFF[0] + 1
+        model.N_STIM_OFF[1] = model.N_STIM_ON[1] + int(1.0 / model.DT)
+
+        N_MAX_DELAY = model.MAX_DELAY / model.DT
+        N_MIN_DELAY = model.MIN_DELAY / model.DT
+        model.N_STEPS += int(N_MAX_DELAY - N_MIN_DELAY)
+
+        if model.DELAY_LIST is not None:
+            idx_delay = torch.randint(
+                low=0, high=len(model.DELAY_LIST), size=(model.N_BATCH,)
+            ).to(model.device)
+            chosen_delays = torch.tensor(model.DELAY_LIST, device=model.device)[idx_delay]
+            model.random_shifts = (chosen_delays / model.DT).to(int)
+        else:
+            model.random_shifts = torch.randint(
+                low=int(N_MIN_DELAY), high=int(N_MAX_DELAY), size=(model.N_BATCH,)
+            ).to(model.device)
+
+        model.start_indices = model.N_STIM_ON.unsqueeze(-1) + model.random_shifts
+        model.end_indices = model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts
+
+        if "odr" in model.TASK:
+            model.start_indices[0] = model.N_STIM_ON[0]
+            model.end_indices[0] = model.N_STIM_OFF[0]
+
+        if "dual" in model.TASK:
+            model.start_indices[:-1] = model.N_STIM_ON[:-1].unsqueeze(-1)
+            model.end_indices[:-1] = model.N_STIM_OFF[:-1].unsqueeze(-1)
+
+    model.start_idx = (
+        (model.start_indices - model.N_STEADY - model.N_HEBB) / model.N_WINDOW
+    ).to(int)
+    model.end_idx = (
+        (model.end_indices - model.N_STEADY - model.N_HEBB) / model.N_WINDOW
+    ).to(int)
+
+
+def init_const(model):
+    model.Na = []
+    model.Ka = []
+
+    if "all2all" in model.CON_TYPE:
+        model.K = 1.0
+
+    for i_pop in range(model.N_POP):
+        dum = int(model.N_NEURON * model.frac[i_pop])
+        model.Na.append(dum)
+        if model.FRAC_K:
+            model.Ka.append(model.K * model.frac[i_pop])
+        else:
+            model.Ka.append(model.K)
+
+    model.Na = torch.tensor(model.Na, dtype=torch.int, device=model.device)
+    model.Ka = torch.tensor(model.Ka, device=model.device)
+    model.csumNa = torch.cat(
+        (torch.tensor([0], device=model.device), torch.cumsum(model.Na, dim=0))
+    )
+
+    model.slices = []
+    for i_pop in range(model.N_POP):
+        model.slices.append(slice(model.csumNa[i_pop], model.csumNa[i_pop + 1]))
+
+    if model.TRAIN_SCALE == "all":
+        model.train_scale = model.Na
+    elif model.TRAIN_SCALE == "sparse":
+        model.train_scale = torch.sqrt(model.Ka)
+    elif model.TRAIN_SCALE == "dense":
+        model.train_scale = torch.sqrt(model.Na.float())
+    else:
+        model.train_scale = torch.ones_like(model.Na, dtype=torch.float32)
+
+    if model.VERBOSE:
+        print("Na", model.Na, "Ka", model.Ka, "csumNa", model.csumNa)
+
+    model.TAU = torch.tensor(model.TAU, device=model.device)
+    model.EXP_DT_TAU = torch.ones(model.N_NEURON, device=model.device)
+    model.DT_TAU = torch.ones(model.N_NEURON, device=model.device)
+    for i_pop in range(model.N_POP):
+        model.EXP_DT_TAU[model.slices[i_pop]] = torch.exp(-model.DT / model.TAU[i_pop])
+        model.DT_TAU[model.slices[i_pop]] = model.DT / model.TAU[i_pop]
+
+    model.THRESH = torch.tensor(model.THRESH, device=model.device)
+    model.thresh = torch.ones(model.N_BATCH, model.N_NEURON, device=model.device)
+    for i_pop in range(model.N_POP):
+        model.thresh[:, model.slices[i_pop]] = model.THRESH[i_pop]
+
+    if model.IF_HEBB:
+        model.TAU_HEBB = torch.tensor(model.TAU_HEBB, device=model.device)
+        model.EXP_HEBB = torch.exp(-model.DT / model.TAU_HEBB)
+
+    if model.IF_FF_DYN:
+        model.TAU_FF = torch.tensor(model.TAU_FF, device=model.device)
+        model.EXP_FF = torch.exp(-model.DT / model.TAU_FF)
+
+    if model.IF_FF_ADAPT:
+        model.TAU_FF_ADAPT = torch.tensor(model.TAU_FF_ADAPT, device=model.device)
+        model.EXP_FF_ADAPT = torch.exp(-model.DT / model.TAU_FF_ADAPT)
+
+    if model.IF_ADAPT:
+        model.TAU_ADAPT = torch.tensor(model.TAU_ADAPT, device=model.device)
+        model.EXP_ADAPT = torch.exp(-model.DT / model.TAU_ADAPT)
+
+    model.TAU_SYN = torch.tensor(model.TAU_SYN, device=model.device)
+    model.EXP_DT_TAU_SYN = torch.ones(model.N_NEURON, device=model.device)
+    model.DT_TAU_SYN = torch.ones(model.N_NEURON, device=model.device)
+    for i_pop in range(model.N_POP):
+        model.EXP_DT_TAU_SYN[model.slices[i_pop]] = torch.exp(
+            -model.DT / model.TAU_SYN[i_pop]
+        )
+        model.DT_TAU_SYN[model.slices[i_pop]] = model.DT / model.TAU_SYN[i_pop]
+
+    if model.IF_NMDA:
+        model.TAU_NMDA = torch.tensor(model.TAU_NMDA, device=model.device)
+        model.EXP_DT_TAU_NMDA = torch.ones(model.N_NEURON, device=model.device)
+        model.DT_TAU_NMDA = torch.ones(model.N_NEURON, device=model.device)
+        for i_pop in range(model.N_POP):
+            model.EXP_DT_TAU_NMDA[model.slices[i_pop]] = torch.exp(
+                -model.DT / model.TAU_NMDA[i_pop]
+            )
+            model.DT_TAU_NMDA[model.slices[i_pop]] = model.DT / model.TAU_NMDA[i_pop]
+
+    model.Jab = (
+        model.GAIN
+        * torch.tensor(model.Jab, device=model.device).reshape(model.N_POP, model.N_POP)
+    )
+    for i_pop in range(model.N_POP):
+        model.Jab[:, i_pop] = model.Jab[:, i_pop] / torch.sqrt(model.Ka[i_pop])
+
+    model.Ja0 = torch.tensor(model.Ja0, device=model.device)
+    model.Ja0 = model.Ja0.unsqueeze(0)
+    model.Ja0 = model.Ja0.unsqueeze(-1)
+
+    model.VAR_FF = torch.sqrt(torch.tensor(model.VAR_FF, device=model.device))
+    model.VAR_RATE = (
+        torch.sqrt(torch.tensor(model.VAR_RATE, device=model.device))
+        / torch.sqrt(model.Ka[0])
+    )
+
+    model.VAR_FF.mul_(model.M0)
+    model.VAR_FF = model.VAR_FF.unsqueeze(0)
+    model.VAR_FF = model.VAR_FF.unsqueeze(-1)
+
+    model.PROBA_TYPE = np.array(model.PROBA_TYPE).reshape(model.N_POP, model.N_POP)
+    model.SIGMA = torch.tensor(model.SIGMA, device=model.device).view(
+        model.N_POP, model.N_POP
+    )
+    model.KAPPA = torch.tensor(model.KAPPA, device=model.device).view(
+        model.N_POP, model.N_POP
+    )
+    model.PHASE = torch.tensor(model.PHASE * torch.pi / 180.0, device=model.device)
+
+    if isinstance(model.PHI0, list):
+        model.PHI0 = torch.tensor(model.PHI0, device=model.device).unsqueeze(0)
+
+    model.IS_TRAIN = torch.tensor(model.IS_TRAIN, device=model.device).view(
+        model.N_POP, model.N_POP
+    )
+
+    if "dual" in model.TASK:
+        mean_ = torch.tensor(model.LR_MEAN, device=model.device, dtype=torch.float32)
+        cov_ = torch.tensor(model.LR_COV, device=model.device, dtype=torch.float32)
+
+        if cov_[0, 0] == cov_[0, 1]:
+            mean_ = mean_[[0, 2]]
+            cov_ = torch.tensor(
+                ([cov_[0, 0], cov_[0, 2]], [cov_[2, 0], cov_[2, 2]]),
+                device=model.device,
+                dtype=torch.float32,
+            )
+            multivariate_normal = MultivariateNormal(mean_, cov_)
+            model.PHI0 = multivariate_normal.sample((model.Na[0],)).T
+            model.PHI0 = torch.stack(
+                (model.PHI0[0], model.PHI0[0], model.PHI0[1], model.PHI0[1])
+            ).type(model.FLOAT)
+        else:
+            multivariate_normal = MultivariateNormal(mean_, cov_)
+            model.PHI0 = multivariate_normal.sample((model.Na[0],)).T.type(model.FLOAT)
+
+        model.odors = torch.randn((10, model.Na[0]), device=model.device)
+        model.odors[2] = model.odors[1]

@@ -1,0 +1,3072 @@
+*** Introduce subpackage structure
+
+Here's a proposed subpackage layout and the migration plan:
+
+**** Proposed Directory Tree
+
+#+begin_src
+src/
+├── __init__.py
+├── config/
+│   ├── __init__.py
+│   ├── types.py              ← config_types.py
+│   ├── configuration.py      ← configuration.py
+│   └── defaults.py           ← optional: constants, YAML path helpers
+├── weights/
+│   ├── __init__.py
+│   ├── builder.py            ← network_weights.py
+│   ├── connectivity.py       ← connectivity.py
+│   └── lr.py                 ← lr_utils.py
+├── dynamics/
+│   ├── __init__.py
+│   ├── core.py               ← network_dynamics.py
+│   ├── activation.py         ← activation.py
+│   └── plasticity/
+│       ├── __init__.py
+│       ├── stp.py            ← plasticity.py
+│       ├── hebbian.py        ← hebbian.py
+│       └── manager.py        ← network_plasticity.py
+├── state/
+│   ├── __init__.py
+│   ├── containers.py         ← NetworkState, ForwardOutputs
+│   ├── manager.py            ← StateManager
+│   └── collector.py          ← OutputCollector
+├── io/
+│   ├── __init__.py
+│   ├── ff_input.py           ← ff_input.py
+│   └── stimuli.py            ← stimuli.py
+├── utils.py                  ← utils.py (unchanged)
+└── network.py                ← network.py (top-level façade)
+#+end_src
+
+**** Package Init Files
+
+#+begin_src python :tangle __init__.py
+"""Recurrent network simulation package."""
+from src.network import Network
+
+__all__ = ["Network"]
+#+end_src
+
+#+begin_src python :tangle config/__init__.py
+"""Configuration loading and typed sub-configs."""
+from src.config.configuration import Configuration
+from src.config.types import (
+    ConnectivityConfig,
+    DynamicsConstants,
+    DynamicsFlags,
+    FFInputConfig,
+    HebbianConfig,
+    NetworkGeometry,
+    OutputConfig,
+    RecurrentConfig,
+    SimulationConfig,
+    SimulationState,
+    StateConfig,
+    STPModuleConfig,
+    STPWeightConfig,
+    TaskConfig,
+    TimeConfig,
+    TrainableWeightConfig,
+    WeightConfig,
+)
+
+__all__ = [
+    "Configuration",
+    "ConnectivityConfig",
+    "DynamicsConstants",
+    "DynamicsFlags",
+    "FFInputConfig",
+    "HebbianConfig",
+    "NetworkGeometry",
+    "OutputConfig",
+    "RecurrentConfig",
+    "SimulationConfig",
+    "SimulationState",
+    "StateConfig",
+    "STPModuleConfig",
+    "STPWeightConfig",
+    "TaskConfig",
+    "TimeConfig",
+    "TrainableWeightConfig",
+    "WeightConfig",
+]
+#+end_src
+
+#+begin_src python :tangle weights/__init__.py
+"""Weight construction and low-rank parametrizations."""
+from src.weights.builder import WeightBuilder, WeightOutputs, recurrent_matmul
+from src.weights.connectivity import Connectivity
+from src.weights.lr import (
+    LowRankWeights,
+    SupportLowRankWeights,
+    clamp_tensor,
+    get_idx,
+    get_overlap,
+    get_theta,
+    init_low_rank,
+    masked_normalize,
+    normalize_tensor,
+)
+
+__all__ = [
+    "WeightBuilder",
+    "WeightOutputs",
+    "recurrent_matmul",
+    "Connectivity",
+    "LowRankWeights",
+    "SupportLowRankWeights",
+    "clamp_tensor",
+    "get_idx",
+    "get_overlap",
+    "get_theta",
+    "init_low_rank",
+    "masked_normalize",
+    "normalize_tensor",
+]
+#+end_src
+
+#+begin_src python :tangle dynamics/__init__.py
+"""Single-step dynamics and activation functions."""
+from src.dynamics.activation import Activation
+from src.dynamics.core import DynamicsCore
+
+__all__ = [
+    "Activation",
+    "DynamicsCore",
+]
+#+end_src
+
+#+begin_src python :tangle dynamics/plasticity/__init__.py
+"""Plasticity mechanisms: STP, Hebbian, and management."""
+from src.dynamics.plasticity.stp import Plasticity
+from src.dynamics.plasticity.hebbian import Hebbian
+from src.dynamics.plasticity.manager import PlasticityManager
+
+__all__ = [
+    "Plasticity",
+    "Hebbian",
+    "PlasticityManager",
+]
+#+end_src
+
+#+begin_src python :tangle state/__init__.py
+"""Network state containers and output collection."""
+from src.state.containers import ForwardOutputs, NetworkState
+from src.state.manager import StateManager
+from src.state.collector import OutputCollector
+
+__all__ = [
+    "ForwardOutputs",
+    "NetworkState",
+    "StateManager",
+    "OutputCollector",
+]
+#+end_src
+
+#+begin_src python :tangle io/__init__.py
+"""Feedforward input construction and stimulus generation."""
+from src.io.ff_input import FFInputBuilder
+from src.io.stimuli import Stimuli
+
+__all__ = [
+    "FFInputBuilder",
+    "Stimuli",
+]
+#+end_src
+
+**** Migrated Source Files
+
+Each file below has only its imports updated — no logic changes.
+
+#+begin_src python :tangle config/types.py
+"""Typed sub-configurations for each network module."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Protocol
+
+import numpy as np
+import torch
+
+Tensor = torch.Tensor
+
+
+class RawConfig(Protocol):
+    """Structural type for the attributes Configuration exposes."""
+    N_POP: int
+    N_NEURON: int
+    Na: Tensor
+    Ka: Tensor
+    slices: list[slice]
+    device: torch.device
+    DT: float
+    N_STEPS: int
+    N_STEADY: int
+    N_HEBB: int
+    N_WINDOW: int
+    N_STIM_ON: Tensor
+    N_STIM_OFF: Tensor
+    CON_TYPE: str
+    PROBA_TYPE: np.ndarray
+    KAPPA: Tensor
+    SIGMA: Tensor
+    PHASE: Tensor
+    LR_MEAN: Any
+    LR_COV: Any
+    PHI0: Tensor
+    LR_TRAIN: bool
+    LR_NORM: int
+    LR_INI: float
+    LR_TYPE: str
+    LR_MN: int
+    LR_UeqV: int
+    RANK: int
+    LR_READOUT: int
+    LR_READOUT_DIM: int
+    LR_N_SUPPORTS: int
+    LR_SUPPORT_WEIGHTS: Any
+    LR_BASIS_DIM: Any
+    LR_TRAIN_BIASES: bool
+    LR_INIT_GAUSSIAN_BASIS: Any
+    TRAIN_EI: bool
+    IS_TRAIN: Tensor
+    train_scale: Tensor
+    GAIN: float
+    CLAMP: bool
+    IF_STP: bool
+    IS_STP: list[int]
+    J_STP: Any
+    USE: list[float]
+    TAU_FAC: list[float]
+    TAU_REC: list[float]
+    STP_TYPE: str
+    IF_FF_STP: bool
+    TF_TYPE: str
+    SYN_DYN: bool
+    RATE_DYN: bool
+    IF_NMDA: bool
+    IF_FF_DYN: bool
+    IF_FF_ADAPT: bool
+    IF_ADAPT: bool
+    IF_BATCH_J: bool
+    IF_HEBB: bool
+    EXP_DT_TAU: Tensor
+    EXP_DT_TAU_SYN: Tensor
+    TAU_SYN: Tensor
+    IS_HEBB: list[int]
+    ETA: float
+    HEBB_TYPE: str
+    HEBB_FRAC: float
+    TRAINING: int
+    thresh: Tensor
+    VERBOSE: bool
+    RATE_NOISE: bool
+    VAR_RATE: Tensor
+    IF_OPTO: bool
+    end_indices: Tensor
+    start_indices: Tensor
+    TASK: str
+    N_BATCH: int
+    I0: list[float]
+    SIGMA0: list[float]
+    Ja0: Tensor
+    M0: float
+    VAR_FF: Tensor
+    BUMP_SWITCH: list[int]
+    RANDOM_DELAY: int
+    DELAY_LIST: Any
+    ODR_TRAIN: bool
+    IF_RL: int
+    RWD: int
+    GRID_INPUT: int
+    GRID_TEST: Any
+    GRID_SIZE: int
+    Jab: Tensor
+
+
+# ── leaf configs ──────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class NetworkGeometry:
+    N_POP: int
+    N_NEURON: int
+    Na: Tensor
+    Ka: Tensor
+    slices: list[slice]
+    device: torch.device
+
+    @classmethod
+    def from_raw(cls, m: RawConfig) -> NetworkGeometry:
+        return cls(
+            N_POP=m.N_POP, N_NEURON=m.N_NEURON, Na=m.Na, Ka=m.Ka,
+            slices=m.slices, device=m.device,
+        )
+
+
+@dataclass(frozen=True)
+class TimeConfig:
+    DT: float
+    N_STEPS: int
+    N_STEADY: int
+    N_HEBB: int
+    N_WINDOW: int
+    N_STIM_ON: Tensor
+    N_STIM_OFF: Tensor
+
+    @classmethod
+    def from_raw(cls, m: RawConfig) -> TimeConfig:
+        return cls(
+            DT=m.DT, N_STEPS=m.N_STEPS, N_STEADY=m.N_STEADY,
+            N_HEBB=m.N_HEBB, N_WINDOW=m.N_WINDOW,
+            N_STIM_ON=m.N_STIM_ON, N_STIM_OFF=m.N_STIM_OFF,
+        )
+
+
+@dataclass(frozen=True)
+class ConnectivityConfig:
+    CON_TYPE: str
+    PROBA_TYPE: np.ndarray
+    KAPPA: Tensor
+    SIGMA: Tensor
+    PHASE: Tensor
+    LR_MEAN: Any
+    LR_COV: Any
+    PHI0: Tensor
+
+    @classmethod
+    def from_raw(cls, m: RawConfig) -> ConnectivityConfig:
+        return cls(
+            CON_TYPE=m.CON_TYPE, PROBA_TYPE=m.PROBA_TYPE,
+            KAPPA=m.KAPPA, SIGMA=m.SIGMA, PHASE=m.PHASE,
+            LR_MEAN=m.LR_MEAN, LR_COV=m.LR_COV, PHI0=m.PHI0,
+        )
+
+
+@dataclass(frozen=True)
+class TrainableWeightConfig:
+    LR_TRAIN: bool
+    LR_NORM: int
+    LR_INI: float
+    LR_TYPE: str
+    LR_MN: int
+    LR_UeqV: int
+    RANK: int
+    LR_READOUT: int
+    LR_READOUT_DIM: int
+    LR_N_SUPPORTS: int
+    LR_SUPPORT_WEIGHTS: Any
+    LR_BASIS_DIM: Any
+    LR_TRAIN_BIASES: bool
+    LR_INIT_GAUSSIAN_BASIS: Any
+    TRAIN_EI: bool
+    IS_TRAIN: Tensor
+    train_scale: Tensor
+    GAIN: float
+    CLAMP: bool
+
+    @classmethod
+    def from_raw(cls, m: RawConfig) -> TrainableWeightConfig:
+        return cls(
+            LR_TRAIN=m.LR_TRAIN, LR_NORM=m.LR_NORM, LR_INI=m.LR_INI,
+            LR_TYPE=m.LR_TYPE, LR_MN=m.LR_MN, LR_UeqV=m.LR_UeqV,
+            RANK=m.RANK, LR_READOUT=m.LR_READOUT,
+            LR_READOUT_DIM=m.LR_READOUT_DIM,
+            LR_N_SUPPORTS=m.LR_N_SUPPORTS,
+            LR_SUPPORT_WEIGHTS=m.LR_SUPPORT_WEIGHTS,
+            LR_BASIS_DIM=m.LR_BASIS_DIM,
+            LR_TRAIN_BIASES=m.LR_TRAIN_BIASES,
+            LR_INIT_GAUSSIAN_BASIS=m.LR_INIT_GAUSSIAN_BASIS,
+            TRAIN_EI=m.TRAIN_EI, IS_TRAIN=m.IS_TRAIN,
+            train_scale=m.train_scale, GAIN=m.GAIN, CLAMP=m.CLAMP,
+        )
+
+
+@dataclass(frozen=True)
+class STPWeightConfig:
+    IF_STP: bool
+    IS_STP: list[int]
+    J_STP: Any
+    W_STP: Any
+    TRAIN_J_STP: bool
+
+    @classmethod
+    def from_raw(cls, m: RawConfig) -> STPWeightConfig:
+        return cls(
+            IF_STP=m.IF_STP, IS_STP=m.IS_STP, J_STP=m.J_STP,
+            W_STP=getattr(m, "W_STP", None),
+            TRAIN_J_STP=getattr(m, "TRAIN_J_STP", False),
+        )
+
+
+@dataclass(frozen=True)
+class DynamicsFlags:
+    TF_TYPE: str
+    SYN_DYN: bool
+    RATE_DYN: bool
+    IF_NMDA: bool
+    IF_FF_DYN: bool
+    IF_FF_ADAPT: bool
+    IF_ADAPT: bool
+    IF_BATCH_J: bool
+    IF_HEBB: bool
+    IF_FF_STP: bool
+    RATE_NOISE: bool
+    IF_OPTO: bool
+
+    @classmethod
+    def from_raw(cls, m: RawConfig) -> DynamicsFlags:
+        return cls(
+            TF_TYPE=m.TF_TYPE, SYN_DYN=m.SYN_DYN, RATE_DYN=m.RATE_DYN,
+            IF_NMDA=m.IF_NMDA, IF_FF_DYN=m.IF_FF_DYN,
+            IF_FF_ADAPT=m.IF_FF_ADAPT, IF_ADAPT=m.IF_ADAPT,
+            IF_BATCH_J=m.IF_BATCH_J, IF_HEBB=m.IF_HEBB,
+            IF_FF_STP=m.IF_FF_STP, RATE_NOISE=m.RATE_NOISE,
+            IF_OPTO=m.IF_OPTO,
+        )
+
+
+@dataclass(frozen=True)
+class DynamicsConstants:
+    EXP_DT_TAU: Tensor
+    EXP_DT_TAU_SYN: Tensor
+    EXP_DT_TAU_NMDA: Tensor | None
+    R_NMDA: float
+    EXP_ADAPT: Tensor | None
+    A_ADAPT: float
+    EXP_FF: Tensor | None
+    EXP_FF_ADAPT: Tensor | None
+    A_FF_ADAPT: float
+    Jab_batch: Tensor | None
+    W_batch_T: Tensor | None
+
+    @classmethod
+    def from_raw(cls, m: RawConfig) -> DynamicsConstants:
+        return cls(
+            EXP_DT_TAU=m.EXP_DT_TAU,
+            EXP_DT_TAU_SYN=m.EXP_DT_TAU_SYN,
+            EXP_DT_TAU_NMDA=getattr(m, "EXP_DT_TAU_NMDA", None),
+            R_NMDA=getattr(m, "R_NMDA", 1.0),
+            EXP_ADAPT=getattr(m, "EXP_ADAPT", None),
+            A_ADAPT=getattr(m, "A_ADAPT", 0.0),
+            EXP_FF=getattr(m, "EXP_FF", None),
+            EXP_FF_ADAPT=getattr(m, "EXP_FF_ADAPT", None),
+            A_FF_ADAPT=getattr(m, "A_FF_ADAPT", 0.0),
+            Jab_batch=getattr(m, "Jab_batch", None),
+            W_batch_T=getattr(m, "W_batch_T", None),
+        )
+
+
+@dataclass(frozen=True)
+class HebbianConfig:
+    IS_HEBB: list[int]
+    ETA: float
+    DT: float
+    HEBB_TYPE: str
+    HEBB_FRAC: float
+    EXP_HEBB: Tensor | None
+    IF_HEBB: bool
+
+    @classmethod
+    def from_raw(cls, m: RawConfig) -> HebbianConfig:
+        return cls(
+            IS_HEBB=m.IS_HEBB, ETA=m.ETA, DT=m.DT,
+            HEBB_TYPE=m.HEBB_TYPE, HEBB_FRAC=m.HEBB_FRAC,
+            EXP_HEBB=getattr(m, "EXP_HEBB", None),
+            IF_HEBB=m.IF_HEBB,
+        )
+
+
+@dataclass(frozen=True)
+class STPModuleConfig:
+    IS_STP: list[int]
+    IF_STP: bool
+    IF_FF_STP: bool
+    USE: list[float]
+    TAU_FAC: list[float]
+    TAU_REC: list[float]
+    DT: float
+    STP_TYPE: str
+    FF_USE: float
+    TAU_FF_FAC: float
+    TAU_FF_REC: float
+
+    @classmethod
+    def from_raw(cls, m: RawConfig) -> STPModuleConfig:
+        return cls(
+            IS_STP=m.IS_STP, IF_STP=m.IF_STP,
+            IF_FF_STP=m.IF_FF_STP,
+            USE=m.USE, TAU_FAC=m.TAU_FAC, TAU_REC=m.TAU_REC,
+            DT=m.DT, STP_TYPE=m.STP_TYPE,
+            FF_USE=getattr(m, "FF_USE", 0.3),
+            TAU_FF_FAC=getattr(m, "TAU_FF_FAC", 0.2),
+            TAU_FF_REC=getattr(m, "TAU_FF_REC", 1.0),
+        )
+
+
+@dataclass(frozen=True)
+class TaskConfig:
+    TASK: str
+    N_BATCH: int
+    I0: list[float]
+    SIGMA0: list[float]
+    PHI0: Tensor
+    Ja0: Tensor
+    M0: float
+    VAR_FF: Tensor
+    BUMP_SWITCH: list[int]
+    RANDOM_DELAY: int
+    DELAY_LIST: Any
+    ODR_TRAIN: bool
+    IF_RL: int
+    RWD: int
+    odors: Tensor | None
+    GRID_INPUT: int
+    GRID_TEST: Any
+    GRID_SIZE: int
+    GRID_X_RANGE: tuple[float, float] | None
+    GRID_Y_RANGE: tuple[float, float] | None
+
+    @classmethod
+    def from_raw(cls, m: RawConfig) -> TaskConfig:
+        return cls(
+            TASK=m.TASK, N_BATCH=m.N_BATCH,
+            I0=m.I0, SIGMA0=m.SIGMA0, PHI0=m.PHI0,
+            Ja0=m.Ja0, M0=m.M0, VAR_FF=m.VAR_FF,
+            BUMP_SWITCH=m.BUMP_SWITCH, RANDOM_DELAY=m.RANDOM_DELAY,
+            DELAY_LIST=m.DELAY_LIST,
+            ODR_TRAIN=getattr(m, "ODR_TRAIN", False),
+            IF_RL=m.IF_RL, RWD=m.RWD,
+            odors=getattr(m, "odors", None),
+            GRID_INPUT=m.GRID_INPUT, GRID_TEST=m.GRID_TEST,
+            GRID_SIZE=m.GRID_SIZE,
+            GRID_X_RANGE=getattr(m, "GRID_X_RANGE", None),
+            GRID_Y_RANGE=getattr(m, "GRID_Y_RANGE", None),
+        )
+
+
+@dataclass(frozen=True)
+class SimulationState:
+    TRAINING: int
+    thresh: Tensor
+    VERBOSE: bool
+    VAR_RATE: Tensor
+    N_OPTO: int
+    end_indices: Tensor
+    start_indices: Tensor
+
+    @classmethod
+    def from_raw(cls, m: RawConfig) -> SimulationState:
+        return cls(
+            TRAINING=m.TRAINING, thresh=m.thresh, VERBOSE=m.VERBOSE,
+            VAR_RATE=m.VAR_RATE, N_OPTO=getattr(m, "N_OPTO", 0),
+            end_indices=m.end_indices, start_indices=m.start_indices,
+        )
+
+
+# ── composite configs ─────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class WeightConfig:
+    geo: NetworkGeometry
+    conn: ConnectivityConfig
+    trainable: TrainableWeightConfig
+    stp: STPWeightConfig
+    Jab: Tensor
+
+    @property
+    def GAIN(self) -> float:
+        return self.trainable.GAIN
+
+    @classmethod
+    def from_raw(cls, m: RawConfig, geo: NetworkGeometry) -> WeightConfig:
+        return cls(
+            geo=geo,
+            conn=ConnectivityConfig.from_raw(m),
+            trainable=TrainableWeightConfig.from_raw(m),
+            stp=STPWeightConfig.from_raw(m),
+            Jab=m.Jab,
+        )
+
+
+@dataclass(frozen=True)
+class RecurrentConfig:
+    geo: NetworkGeometry
+    flags: DynamicsFlags
+    consts: DynamicsConstants
+    stp_flag: bool = False
+
+    @property
+    def TF_TYPE(self) -> str: return self.flags.TF_TYPE
+    @property
+    def SYN_DYN(self) -> bool: return self.flags.SYN_DYN
+    @property
+    def RATE_DYN(self) -> bool: return self.flags.RATE_DYN
+    @property
+    def IF_NMDA(self) -> bool: return self.flags.IF_NMDA
+    @property
+    def IF_STP(self) -> bool: return self.stp_flag
+    @property
+    def IF_FF_STP(self) -> bool: return self.flags.IF_FF_STP
+    @property
+    def IF_FF_DYN(self) -> bool: return self.flags.IF_FF_DYN
+    @property
+    def IF_FF_ADAPT(self) -> bool: return self.flags.IF_FF_ADAPT
+    @property
+    def IF_ADAPT(self) -> bool: return self.flags.IF_ADAPT
+    @property
+    def IF_BATCH_J(self) -> bool: return self.flags.IF_BATCH_J
+    @property
+    def IF_HEBB(self) -> bool: return self.flags.IF_HEBB
+    @property
+    def EXP_DT_TAU(self) -> Tensor: return self.consts.EXP_DT_TAU
+    @property
+    def EXP_DT_TAU_SYN(self) -> Tensor: return self.consts.EXP_DT_TAU_SYN
+    @property
+    def EXP_DT_TAU_NMDA(self) -> Tensor | None: return self.consts.EXP_DT_TAU_NMDA
+    @property
+    def R_NMDA(self) -> float: return self.consts.R_NMDA
+    @property
+    def EXP_ADAPT(self) -> Tensor | None: return self.consts.EXP_ADAPT
+    @property
+    def A_ADAPT(self) -> float: return self.consts.A_ADAPT
+    @property
+    def EXP_FF(self) -> Tensor | None: return self.consts.EXP_FF
+    @property
+    def EXP_FF_ADAPT(self) -> Tensor | None: return self.consts.EXP_FF_ADAPT
+    @property
+    def A_FF_ADAPT(self) -> float: return self.consts.A_FF_ADAPT
+    @property
+    def Jab_batch(self) -> Tensor | None: return self.consts.Jab_batch
+    @property
+    def W_batch_T(self) -> Tensor | None: return self.consts.W_batch_T
+
+    @classmethod
+    def from_raw(
+        cls, m: RawConfig, geo: NetworkGeometry,
+        flags: DynamicsFlags, consts: DynamicsConstants,
+    ) -> RecurrentConfig:
+        return cls(geo=geo, flags=flags, consts=consts, stp_flag=m.IF_STP)
+
+
+@dataclass(frozen=True)
+class StateConfig:
+    geo: NetworkGeometry
+    time: TimeConfig
+    flags: DynamicsFlags
+    sim: SimulationState
+    _if_stp: bool = False
+
+    @property
+    def IF_NMDA(self) -> bool: return self.flags.IF_NMDA
+    @property
+    def IF_HEBB(self) -> bool: return self.flags.IF_HEBB
+    @property
+    def IF_FF_ADAPT(self) -> bool: return self.flags.IF_FF_ADAPT
+    @property
+    def IF_STP(self) -> bool: return self._if_stp
+    @property
+    def IF_FF_STP(self) -> bool: return self.flags.IF_FF_STP
+    @property
+    def TF_TYPE(self) -> str: return self.flags.TF_TYPE
+    @property
+    def TRAINING(self) -> int: return self.sim.TRAINING
+    @property
+    def thresh(self) -> Tensor: return self.sim.thresh
+    @property
+    def VERBOSE(self) -> bool: return self.sim.VERBOSE
+
+    @classmethod
+    def from_raw(
+        cls, m: RawConfig, geo: NetworkGeometry,
+        time: TimeConfig, flags: DynamicsFlags, sim: SimulationState,
+    ) -> StateConfig:
+        return cls(
+            geo=geo, time=time, flags=flags, sim=sim, _if_stp=m.IF_STP,
+        )
+
+
+@dataclass(frozen=True)
+class OutputConfig:
+    geo: NetworkGeometry
+    time: TimeConfig
+    sim: SimulationState
+    _if_stp: bool = False
+
+    @property
+    def IF_STP(self) -> bool: return self._if_stp
+    @property
+    def VERBOSE(self) -> bool: return self.sim.VERBOSE
+
+    @classmethod
+    def from_raw(
+        cls, m: RawConfig, geo: NetworkGeometry,
+        time: TimeConfig, sim: SimulationState,
+    ) -> OutputConfig:
+        return cls(geo=geo, time=time, sim=sim, _if_stp=m.IF_STP)
+
+
+@dataclass(frozen=True)
+class SimulationConfig:
+    geo: NetworkGeometry
+    time: TimeConfig
+    flags: DynamicsFlags
+    trainable: TrainableWeightConfig
+    sim: SimulationState
+    _if_stp: bool = False
+
+    @property
+    def TRAINING(self) -> int: return self.sim.TRAINING
+    @property
+    def RATE_NOISE(self) -> bool: return self.flags.RATE_NOISE
+    @property
+    def VAR_RATE(self) -> Tensor: return self.sim.VAR_RATE
+    @property
+    def LR_TRAIN(self) -> bool: return self.trainable.LR_TRAIN
+    @property
+    def LR_NORM(self) -> int: return self.trainable.LR_NORM
+    @property
+    def IF_HEBB(self) -> bool: return self.flags.IF_HEBB
+    @property
+    def IF_STP(self) -> bool: return self._if_stp
+    @property
+    def IF_OPTO(self) -> bool: return self.flags.IF_OPTO
+    @property
+    def N_OPTO(self) -> int: return self.sim.N_OPTO
+    @property
+    def end_indices(self) -> Tensor: return self.sim.end_indices
+
+    @classmethod
+    def from_raw(
+        cls, m: RawConfig, geo: NetworkGeometry, time: TimeConfig,
+        flags: DynamicsFlags, trainable: TrainableWeightConfig,
+        sim: SimulationState,
+    ) -> SimulationConfig:
+        return cls(
+            geo=geo, time=time, flags=flags,
+            trainable=trainable, sim=sim, _if_stp=m.IF_STP,
+        )
+
+
+@dataclass(frozen=True)
+class FFInputConfig:
+    geo: NetworkGeometry
+    time: TimeConfig
+    task: TaskConfig
+    trainable: TrainableWeightConfig
+    _start_indices: Tensor = None
+    _end_indices: Tensor = None
+
+    @property
+    def TASK(self) -> str: return self.task.TASK
+    @property
+    def N_BATCH(self) -> int: return self.task.N_BATCH
+    @property
+    def I0(self) -> list[float]: return self.task.I0
+    @property
+    def SIGMA0(self) -> list[float]: return self.task.SIGMA0
+    @property
+    def PHI0(self) -> Tensor: return self.task.PHI0
+    @property
+    def Ja0(self) -> Tensor: return self.task.Ja0
+    @property
+    def M0(self) -> float: return self.task.M0
+    @property
+    def VAR_FF(self) -> Tensor: return self.task.VAR_FF
+    @property
+    def GAIN(self) -> float: return self.trainable.GAIN
+    @property
+    def BUMP_SWITCH(self) -> list[int]: return self.task.BUMP_SWITCH
+    @property
+    def RANDOM_DELAY(self) -> int: return self.task.RANDOM_DELAY
+    @property
+    def DELAY_LIST(self) -> Any: return self.task.DELAY_LIST
+    @property
+    def ODR_TRAIN(self) -> bool: return self.task.ODR_TRAIN
+    @property
+    def IF_RL(self) -> int: return self.task.IF_RL
+    @property
+    def RWD(self) -> int: return self.task.RWD
+    @property
+    def LR_TRAIN(self) -> bool: return self.trainable.LR_TRAIN
+    @property
+    def odors(self) -> Tensor | None: return self.task.odors
+    @property
+    def GRID_INPUT(self) -> int: return self.task.GRID_INPUT
+    @property
+    def GRID_TEST(self) -> Any: return self.task.GRID_TEST
+    @property
+    def GRID_SIZE(self) -> int: return self.task.GRID_SIZE
+    @property
+    def GRID_X_RANGE(self): return self.task.GRID_X_RANGE
+    @property
+    def GRID_Y_RANGE(self): return self.task.GRID_Y_RANGE
+    @property
+    def start_indices(self) -> Tensor: return self._start_indices
+    @property
+    def end_indices(self) -> Tensor: return self._end_indices
+
+    @classmethod
+    def from_raw(
+        cls, m: RawConfig, geo: NetworkGeometry, time: TimeConfig,
+        task: TaskConfig, trainable: TrainableWeightConfig,
+    ) -> FFInputConfig:
+        return cls(
+            geo=geo, time=time, task=task, trainable=trainable,
+            _start_indices=m.start_indices, _end_indices=m.end_indices,
+        )
+#+end_src
+
+#+begin_src python :tangle config/configuration.py
+from yaml import safe_load
+import numpy as np
+
+import torch
+from torch.distributions import MultivariateNormal
+
+from src.config.types import (
+    ConnectivityConfig,
+    DynamicsConstants,
+    DynamicsFlags,
+    FFInputConfig,
+    HebbianConfig,
+    NetworkGeometry,
+    OutputConfig,
+    RecurrentConfig,
+    SimulationConfig,
+    SimulationState,
+    StateConfig,
+    STPModuleConfig,
+    STPWeightConfig,
+    TaskConfig,
+    TimeConfig,
+    TrainableWeightConfig,
+    WeightConfig,
+)
+from src.utils import set_seed
+
+
+class Configuration:
+    def __init__(self, conf_name, repo_root):
+        self.conf_file = repo_root + "/conf/" + conf_name
+        self.defaults = repo_root + "/conf/defaults.yml"
+
+    def forward(self, **kwargs):
+        with open(self.defaults, "r") as f:
+            parameters = safe_load(f)
+        with open(self.conf_file, "r") as f:
+            config = safe_load(f)
+        parameters.update(config)
+        parameters.update(kwargs)
+        self.__dict__.update(parameters)
+
+        if self.FLOAT_PRECISION == 32:
+            self.FLOAT = torch.float
+            torch.set_float32_matmul_precision('medium')
+        elif self.FLOAT_PRECISION == 16:
+            self.FLOAT = torch.float16
+        elif self.FLOAT_PRECISION == "16b":
+            self.FLOAT = torch.bfloat16
+        else:
+            self.FLOAT = torch.float64
+
+        self.device = torch.device(self.DEVICE)
+        torch.set_default_dtype(self.FLOAT)
+
+        set_seed(self.SEED)
+        init_time_const(self)
+
+        set_seed(self.SEED)
+        init_const(self)
+
+        _build_sub_configs(self)
+        return self
+
+    def __call__(self, **kwargs):
+        return self.forward(**kwargs)
+
+
+def _build_sub_configs(model):
+    geo       = NetworkGeometry.from_raw(model)
+    time      = TimeConfig.from_raw(model)
+    conn      = ConnectivityConfig.from_raw(model)
+    trainable = TrainableWeightConfig.from_raw(model)
+    stp_w     = STPWeightConfig.from_raw(model)
+    flags     = DynamicsFlags.from_raw(model)
+    consts    = DynamicsConstants.from_raw(model)
+    hebb      = HebbianConfig.from_raw(model)
+    stp_mod   = STPModuleConfig.from_raw(model)
+    task      = TaskConfig.from_raw(model)
+    sim_state = SimulationState.from_raw(model)
+
+    model.geo       = geo
+    model.time      = time
+    model.flags     = flags
+    model.consts    = consts
+    model.sim_state = sim_state
+    model.task      = task
+    model.hebb_cfg  = hebb
+    model.stp_cfg   = stp_mod
+
+    model.weight_cfg    = WeightConfig(
+        geo=geo, conn=conn, trainable=trainable, stp=stp_w, Jab=model.Jab,
+    )
+    model.recurrent_cfg = RecurrentConfig.from_raw(
+        model, geo=geo, flags=flags, consts=consts,
+    )
+    model.state_cfg     = StateConfig.from_raw(
+        model, geo=geo, time=time, flags=flags, sim=sim_state,
+    )
+    model.output_cfg    = OutputConfig.from_raw(
+        model, geo=geo, time=time, sim=sim_state,
+    )
+    model.sim_cfg       = SimulationConfig.from_raw(
+        model, geo=geo, time=time, flags=flags,
+        trainable=trainable, sim=sim_state,
+    )
+    model.ff_cfg        = FFInputConfig.from_raw(
+        model, geo=geo, time=time, task=task, trainable=trainable,
+    )
+
+
+def init_time_const(model):
+    model.N_HEBB = int(model.T_HEBB / model.DT)
+    model.N_STEADY = int(model.T_STEADY / model.DT)
+
+    if model.RANDOM_ITI:
+        if model.ITI_LIST is not None:
+            idx_iti = torch.randint(low=0, high=len(model.ITI_LIST), size=(1,)).item()
+            model.N_STEADY = int(model.ITI_LIST[idx_iti] / model.DT)
+        else:
+            model.N_STEADY = int(
+                torch.randint(
+                    low=int(model.MIN_ITI), high=int(model.MAX_ITI) + 1, size=(1,)
+                ).item() / model.DT
+            )
+
+    model.N_WINDOW = int(model.T_WINDOW / model.DT)
+    model.N_STEPS = (
+        int(model.DURATION / model.DT) + model.N_WINDOW + model.N_STEADY + model.N_HEBB
+    )
+
+    model.N_STIM_ON = torch.tensor(
+        [int(i / model.DT) + model.N_STEADY + model.N_HEBB for i in model.T_STIM_ON]
+    ).to(model.device)
+    model.N_STIM_OFF = torch.tensor(
+        [int(i / model.DT) + model.N_STEADY + model.N_HEBB for i in model.T_STIM_OFF]
+    ).to(model.device)
+
+    model.random_shifts = torch.zeros((model.N_BATCH,)).to(model.device)
+    model.start_indices = model.N_STIM_ON.unsqueeze(-1) + model.random_shifts
+    model.end_indices = model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts
+
+    if model.RANDOM_DELAY:
+        model.N_STIM_ON[1] = model.N_STIM_OFF[0] + 1
+        model.N_STIM_OFF[1] = model.N_STIM_ON[1] + int(1.0 / model.DT)
+
+        N_MAX_DELAY = model.MAX_DELAY / model.DT
+        N_MIN_DELAY = model.MIN_DELAY / model.DT
+        model.N_STEPS += int(N_MAX_DELAY - N_MIN_DELAY)
+
+        if model.DELAY_LIST is not None:
+            idx_delay = torch.randint(
+                low=0, high=len(model.DELAY_LIST), size=(model.N_BATCH,)
+            ).to(model.device)
+            chosen_delays = torch.tensor(model.DELAY_LIST, device=model.device)[idx_delay]
+            model.random_shifts = (chosen_delays / model.DT).to(int)
+        else:
+            model.random_shifts = torch.randint(
+                low=int(N_MIN_DELAY), high=int(N_MAX_DELAY), size=(model.N_BATCH,)
+            ).to(model.device)
+
+        model.start_indices = model.N_STIM_ON.unsqueeze(-1) + model.random_shifts
+        model.end_indices = model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts
+
+        if "odr" in model.TASK:
+            model.start_indices[0] = model.N_STIM_ON[0]
+            model.end_indices[0] = model.N_STIM_OFF[0]
+
+        if "dual" in model.TASK:
+            model.start_indices[:-1] = model.N_STIM_ON[:-1].unsqueeze(-1)
+            model.end_indices[:-1] = model.N_STIM_OFF[:-1].unsqueeze(-1)
+
+    model.start_idx = (
+        (model.start_indices - model.N_STEADY - model.N_HEBB) / model.N_WINDOW
+    ).to(int)
+    model.end_idx = (
+        (model.end_indices - model.N_STEADY - model.N_HEBB) / model.N_WINDOW
+    ).to(int)
+
+
+def init_const(model):
+    model.Na = []
+    model.Ka = []
+
+    if "all2all" in model.CON_TYPE:
+        model.K = 1.0
+
+    for i_pop in range(model.N_POP):
+        dum = int(model.N_NEURON * model.frac[i_pop])
+        model.Na.append(dum)
+        if model.FRAC_K:
+            model.Ka.append(model.K * model.frac[i_pop])
+        else:
+            model.Ka.append(model.K)
+
+    model.Na = torch.tensor(model.Na, dtype=torch.int, device=model.device)
+    model.Ka = torch.tensor(model.Ka, device=model.device)
+    model.csumNa = torch.cat(
+        (torch.tensor([0], device=model.device), torch.cumsum(model.Na, dim=0))
+    )
+
+    model.slices = []
+    for i_pop in range(model.N_POP):
+        model.slices.append(slice(model.csumNa[i_pop], model.csumNa[i_pop + 1]))
+
+    if model.TRAIN_SCALE == "all":
+        model.train_scale = model.Na
+    elif model.TRAIN_SCALE == "sparse":
+        model.train_scale = torch.sqrt(model.Ka)
+    elif model.TRAIN_SCALE == "dense":
+        model.train_scale = torch.sqrt(model.Na.float())
+    else:
+        model.train_scale = torch.ones_like(model.Na, dtype=torch.float32)
+
+    if model.VERBOSE:
+        print("Na", model.Na, "Ka", model.Ka, "csumNa", model.csumNa)
+
+    model.TAU = torch.tensor(model.TAU, device=model.device)
+    model.EXP_DT_TAU = torch.ones(model.N_NEURON, device=model.device)
+    model.DT_TAU = torch.ones(model.N_NEURON, device=model.device)
+    for i_pop in range(model.N_POP):
+        model.EXP_DT_TAU[model.slices[i_pop]] = torch.exp(-model.DT / model.TAU[i_pop])
+        model.DT_TAU[model.slices[i_pop]] = model.DT / model.TAU[i_pop]
+
+    model.THRESH = torch.tensor(model.THRESH, device=model.device)
+    model.thresh = torch.ones(model.N_BATCH, model.N_NEURON, device=model.device)
+    for i_pop in range(model.N_POP):
+        model.thresh[:, model.slices[i_pop]] = model.THRESH[i_pop]
+
+    if model.IF_HEBB:
+        model.TAU_HEBB = torch.tensor(model.TAU_HEBB, device=model.device)
+        model.EXP_HEBB = torch.exp(-model.DT / model.TAU_HEBB)
+
+    if model.IF_FF_DYN:
+        model.TAU_FF = torch.tensor(model.TAU_FF, device=model.device)
+        model.EXP_FF = torch.exp(-model.DT / model.TAU_FF)
+
+    if model.IF_FF_ADAPT:
+        model.TAU_FF_ADAPT = torch.tensor(model.TAU_FF_ADAPT, device=model.device)
+        model.EXP_FF_ADAPT = torch.exp(-model.DT / model.TAU_FF_ADAPT)
+
+    if model.IF_ADAPT:
+        model.TAU_ADAPT = torch.tensor(model.TAU_ADAPT, device=model.device)
+        model.EXP_ADAPT = torch.exp(-model.DT / model.TAU_ADAPT)
+
+    model.TAU_SYN = torch.tensor(model.TAU_SYN, device=model.device)
+    model.EXP_DT_TAU_SYN = torch.ones(model.N_NEURON, device=model.device)
+    model.DT_TAU_SYN = torch.ones(model.N_NEURON, device=model.device)
+    for i_pop in range(model.N_POP):
+        model.EXP_DT_TAU_SYN[model.slices[i_pop]] = torch.exp(
+            -model.DT / model.TAU_SYN[i_pop]
+        )
+        model.DT_TAU_SYN[model.slices[i_pop]] = model.DT / model.TAU_SYN[i_pop]
+
+    if model.IF_NMDA:
+        model.TAU_NMDA = torch.tensor(model.TAU_NMDA, device=model.device)
+        model.EXP_DT_TAU_NMDA = torch.ones(model.N_NEURON, device=model.device)
+        model.DT_TAU_NMDA = torch.ones(model.N_NEURON, device=model.device)
+        for i_pop in range(model.N_POP):
+            model.EXP_DT_TAU_NMDA[model.slices[i_pop]] = torch.exp(
+                -model.DT / model.TAU_NMDA[i_pop]
+            )
+            model.DT_TAU_NMDA[model.slices[i_pop]] = model.DT / model.TAU_NMDA[i_pop]
+
+    model.Jab = (
+        model.GAIN
+        * torch.tensor(model.Jab, device=model.device).reshape(model.N_POP, model.N_POP)
+    )
+    for i_pop in range(model.N_POP):
+        model.Jab[:, i_pop] = model.Jab[:, i_pop] / torch.sqrt(model.Ka[i_pop])
+
+    model.Ja0 = torch.tensor(model.Ja0, device=model.device)
+    model.Ja0 = model.Ja0.unsqueeze(0)
+    model.Ja0 = model.Ja0.unsqueeze(-1)
+
+    model.VAR_FF = torch.sqrt(torch.tensor(model.VAR_FF, device=model.device))
+    model.VAR_RATE = (
+        torch.sqrt(torch.tensor(model.VAR_RATE, device=model.device))
+        / torch.sqrt(model.Ka[0])
+    )
+
+    model.VAR_FF.mul_(model.M0)
+    model.VAR_FF = model.VAR_FF.unsqueeze(0)
+    model.VAR_FF = model.VAR_FF.unsqueeze(-1)
+
+    model.PROBA_TYPE = np.array(model.PROBA_TYPE).reshape(model.N_POP, model.N_POP)
+    model.SIGMA = torch.tensor(model.SIGMA, device=model.device).view(
+        model.N_POP, model.N_POP
+    )
+    model.KAPPA = torch.tensor(model.KAPPA, device=model.device).view(
+        model.N_POP, model.N_POP
+    )
+    model.PHASE = torch.tensor(model.PHASE * torch.pi / 180.0, device=model.device)
+
+    if isinstance(model.PHI0, list):
+        model.PHI0 = torch.tensor(model.PHI0, device=model.device).unsqueeze(0)
+
+    model.IS_TRAIN = torch.tensor(model.IS_TRAIN, device=model.device).view(
+        model.N_POP, model.N_POP
+    )
+
+    if "dual" in model.TASK:
+        mean_ = torch.tensor(model.LR_MEAN, device=model.device, dtype=torch.float32)
+        cov_ = torch.tensor(model.LR_COV, device=model.device, dtype=torch.float32)
+
+        if cov_[0, 0] == cov_[0, 1]:
+            mean_ = mean_[[0, 2]]
+            cov_ = torch.tensor(
+                ([cov_[0, 0], cov_[0, 2]], [cov_[2, 0], cov_[2, 2]]),
+                device=model.device,
+                dtype=torch.float32,
+            )
+            multivariate_normal = MultivariateNormal(mean_, cov_)
+            model.PHI0 = multivariate_normal.sample((model.Na[0],)).T
+            model.PHI0 = torch.stack(
+                (model.PHI0[0], model.PHI0[0], model.PHI0[1], model.PHI0[1])
+            ).type(model.FLOAT)
+        else:
+            multivariate_normal = MultivariateNormal(mean_, cov_)
+            model.PHI0 = multivariate_normal.sample((model.Na[0],)).T.type(model.FLOAT)
+
+        model.odors = torch.randn((10, model.Na[0]), device=model.device)
+        model.odors[2] = model.odors[1]
+#+end_src
+
+#+begin_src python :tangle weights/builder.py
+"""Recurrent weight construction and management."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import torch
+from torch import nn
+
+from src.config.types import WeightConfig
+from src.weights.connectivity import Connectivity
+from src.weights.lr import clamp_tensor, init_low_rank, normalize_tensor
+
+
+Tensor = torch.Tensor
+STPBlockSpec = tuple[int, int, int]  # (pre_pop, post_pop, block_id)
+
+
+def recurrent_matmul(rates: Tensor, W: Tensor) -> Tensor:
+    if W.dim() == 2:
+        return rates @ W
+    if W.dim() == 3:
+        return torch.bmm(rates.unsqueeze(1), W).squeeze(1)
+    raise ValueError(f"W must be 2D or 3D, got {W.dim()}D")
+
+
+@dataclass
+class WeightOutputs:
+    W_train: Tensor | None
+    W_rec: Tensor
+    W_stp_blocks: list[Tensor] | None
+
+
+class WeightBuilder(nn.Module):
+    def __init__(self, cfg: WeightConfig) -> None:
+        super().__init__()
+        self.cfg = cfg
+
+        self.low_rank: nn.Module | None = None
+        self.W_train_dense: nn.Parameter | None = None
+        self.stp_block_specs: list[STPBlockSpec] = []
+
+        self._init_base_weights()
+        self._init_trainable_weights()
+        self._init_stp_buffers()
+        self._init_low_rank_module()
+
+    @property
+    def device(self):
+        return self.cfg.geo.device
+
+    def _init_base_weights(self) -> None:
+        geo = self.cfg.geo
+        conn = self.cfg.conn
+        dtype = torch.float32
+        W_rec = torch.zeros(
+            (geo.N_NEURON, geo.N_NEURON), device=self.device, dtype=dtype,
+        )
+        for post in range(geo.N_POP):
+            for pre in range(geo.N_POP):
+                c = Connectivity(
+                    geo.Na[post], geo.Na[pre], geo.Ka[pre], device=self.device,
+                )
+                block = c(
+                    conn.CON_TYPE,
+                    conn.PROBA_TYPE[post][pre],
+                    kappa=conn.KAPPA[post][pre],
+                    phase=conn.PHASE,
+                    sigma=conn.SIGMA[post][pre],
+                    lr_mean=conn.LR_MEAN,
+                    lr_cov=conn.LR_COV,
+                    ksi=conn.PHI0,
+                )
+                W_rec[geo.slices[pre], geo.slices[post]] = self.cfg.Jab[post, pre] * block.T
+        self.register_buffer("W_rec_base", W_rec)
+
+    def _init_trainable_weights(self) -> None:
+        geo = self.cfg.geo
+        t = self.cfg.trainable
+        dtype = self.W_rec_base.dtype
+
+        if t.TRAIN_EI:
+            shape = (geo.N_NEURON, geo.N_NEURON)
+            mask = torch.zeros(shape, device=self.device, dtype=dtype)
+            for post in range(geo.N_POP):
+                for pre in range(geo.N_POP):
+                    mask[geo.slices[pre], geo.slices[post]] = t.IS_TRAIN[post][pre]
+            self.register_buffer("train_mask", mask)
+        else:
+            shape = (geo.Na[0], geo.Na[0])
+
+        if not t.LR_TRAIN:
+            self.W_train_dense = nn.Parameter(
+                torch.randn(shape, device=self.device, dtype=dtype) * t.LR_INI
+            )
+
+    def _init_low_rank_module(self) -> None:
+        geo = self.cfg.geo
+        t = self.cfg.trainable
+        if t.LR_TRAIN:
+            self.low_rank = init_low_rank(
+                N_NEURON=geo.Na[0], RANK=t.RANK, LR_MN=t.LR_MN,
+                LR_READOUT=t.LR_READOUT, LR_INI=t.LR_INI, LR_UeqV=t.LR_UeqV,
+                DEVICE=self.device, LR_TYPE=t.LR_TYPE,
+                LR_N_SUPPORTS=t.LR_N_SUPPORTS,
+                LR_SUPPORT_WEIGHTS=t.LR_SUPPORT_WEIGHTS,
+                LR_BASIS_DIM=t.LR_BASIS_DIM,
+                LR_TRAIN_BIASES=t.LR_TRAIN_BIASES,
+                LR_READOUT_DIM=t.LR_READOUT_DIM,
+                LR_INIT_GAUSSIAN_BASIS=t.LR_INIT_GAUSSIAN_BASIS,
+            )
+
+    def _init_stp_buffers(self) -> None:
+        geo = self.cfg.geo
+        s = self.cfg.stp
+        self.stp_block_specs = []
+
+        if not s.IF_STP:
+            self.J_STP_param = None
+            return
+
+        dtype = self.W_rec_base.dtype
+        j_stp = torch.as_tensor(s.J_STP, device=self.device, dtype=dtype)
+
+        if s.TRAIN_J_STP:
+            self.J_STP_param = nn.Parameter(j_stp.clone())
+        else:
+            self.register_buffer("J_STP_param", j_stp.clone())
+
+        for post in range(geo.N_POP):
+            for pre in range(geo.N_POP):
+                block_id = pre + post * geo.N_POP
+                if not s.IS_STP[block_id]:
+                    continue
+                denom = torch.abs(torch.as_tensor(
+                    self.cfg.Jab[post, pre], device=self.device, dtype=dtype,
+                ))
+                if denom == 0:
+                    raise ValueError(
+                        f"Jab[{post},{pre}] is zero; cannot normalise STP block"
+                    )
+                block = (
+                    self.W_rec_base[geo.slices[pre], geo.slices[post]].clone() / denom
+                )
+                self.stp_block_specs.append((pre, post, block_id))
+                self.register_buffer(
+                    f"_W_stp_base_{len(self.stp_block_specs) - 1}", block,
+                )
+
+    def _get_stp_base(self, block_idx: int) -> Tensor:
+        return getattr(self, f"_W_stp_base_{block_idx}")
+
+    def _j_stp_value(self, block_id: int) -> Tensor:
+        if self.J_STP_param is None:
+            raise RuntimeError("J_STP_param is not initialized")
+        if self.J_STP_param.dim() == 0:
+            return self.J_STP_param
+        return self.J_STP_param[block_id]
+
+    def build_trainable_matrix(self) -> Tensor | None:
+        t = self.cfg.trainable
+        if t.LR_TRAIN:
+            if self.low_rank is None:
+                raise RuntimeError("LR_TRAIN=True but low_rank module is not initialized")
+            return self.low_rank(t.LR_NORM)
+        return self.W_train_dense
+
+    def build_recurrent(self, W_train: Tensor | None) -> Tensor:
+        geo = self.cfg.geo
+        t = self.cfg.trainable
+        W_rec = self.W_rec_base.clone()
+        if W_train is None:
+            return W_rec
+
+        if t.TRAIN_EI:
+            W_eff = W_train
+            for pop_idx in range(geo.N_POP):
+                W_eff = normalize_tensor(W_eff, pop_idx, geo.slices, t.train_scale)
+            W_rec = W_rec + self.train_mask * W_eff
+            if t.CLAMP:
+                for pop_idx in range(geo.N_POP):
+                    W_rec = clamp_tensor(W_rec.T, pop_idx, geo.slices).T
+            return W_rec
+
+        ee = geo.slices[0]
+        k0 = torch.sqrt(torch.as_tensor(
+            geo.Ka[0], device=self.device, dtype=W_rec.dtype,
+        ))
+        W_rec[ee, ee] = W_rec[ee, ee] + t.GAIN * W_train / k0
+        if t.CLAMP:
+            W_rec = clamp_tensor(W_rec.T, 0, geo.slices).T
+        return W_rec
+
+    def build_stp(self, W_train: Tensor | None) -> list[Tensor] | None:
+        geo = self.cfg.geo
+        t = self.cfg.trainable
+        s = self.cfg.stp
+        if not s.IF_STP:
+            return None
+
+        dtype = self.W_rec_base.dtype
+        fix_scale = torch.sqrt(torch.as_tensor(
+            geo.Ka[0], device=self.device, dtype=dtype,
+        ))
+        blocks: list[Tensor] = []
+
+        for block_idx, (pre, post, block_id) in enumerate(self.stp_block_specs):
+            base = self._get_stp_base(block_idx)
+            j = self._j_stp_value(block_id)
+
+            if pre == 0 and post == 0 and W_train is not None and not t.TRAIN_EI:
+                block = (
+                    t.GAIN * j * base / fix_scale
+                    * (1.0 + W_train / t.train_scale[0])
+                )
+                if t.CLAMP:
+                    block = block.clamp(min=0.0)
+            else:
+                k_pre = torch.sqrt(torch.as_tensor(
+                    geo.Ka[pre], device=self.device, dtype=dtype,
+                ))
+                block = s.W_STP[block_id] * j * base / k_pre
+
+            blocks.append(block)
+        return blocks
+
+    def build_all(self, batch_size: int, expand_hebbian: bool = False) -> WeightOutputs:
+        W_train = self.build_trainable_matrix()
+        W_rec = self.build_recurrent(W_train)
+        W_stp = self.build_stp(W_train)
+        if expand_hebbian:
+            W_rec = W_rec.unsqueeze(0).expand(batch_size, -1, -1).clone()
+        return WeightOutputs(W_train=W_train, W_rec=W_rec, W_stp_blocks=W_stp)
+
+    def get_readout(self) -> Tensor | None:
+        if self.low_rank is None:
+            return None
+        return self.low_rank.get_readout()
+#+end_src
+
+#+begin_src python :tangle weights/connectivity.py
+import torch
+from torch.distributions import MultivariateNormal
+
+
+class Connectivity:
+    def __init__(self, Na, Nb, Kb, device, verbose=0):
+        self.Na = torch.tensor(Na).detach().clone()
+        self.Nb = torch.tensor(Nb).detach().clone()
+        self.Kb = torch.tensor(Kb).detach().clone()
+        self.verbose = verbose
+        self.device = device
+
+    def low_rank_proba(self, kappa, lr_mean, lr_cov, ksi=None, **kwargs):
+        if ksi is None:
+            if self.verbose:
+                print("Generating low rank vectors")
+            mean_ = torch.tensor(lr_mean, device=self.device)
+            cov_ = torch.tensor(lr_cov, device=self.device)
+            if mean_.shape[0] > 1:
+                mv_normal = MultivariateNormal(mean_, cov_)
+                self.ksi = mv_normal.sample((self.Nb,)).T
+            else:
+                self.ksi = torch.randn((1, self.Nb), device=self.device)
+        else:
+            self.ksi = ksi
+
+        if self.verbose:
+            print("ksi", self.ksi.shape)
+
+        if self.ksi.shape[0] == 4:
+            Lij = torch.outer(self.ksi[0], self.ksi[1])
+            Lij = Lij + torch.outer(self.ksi[2], self.ksi[3])
+            Pij = 1.0 + kappa * Lij / torch.sqrt(self.Kb)
+        else:
+            Pij = 1.0 + kappa * (self.ksi.T @ self.ksi) / torch.sqrt(self.Kb)
+        return Pij
+
+    def cosine_proba(self, kappa, phase=0):
+        theta_list = torch.linspace(0, 2.0 * torch.pi, self.Na + 1, device=self.device)[:-1]
+        phi_list = torch.linspace(0, 2.0 * torch.pi, self.Nb + 1, device=self.device)[:-1]
+        theta_i, theta_j = torch.meshgrid(theta_list, phi_list, indexing="ij")
+        theta_diff = theta_i - theta_j
+        return 1.0 + kappa * torch.cos(theta_diff - phase)
+
+    def von_mises_proba(self, kappa):
+        theta_list = torch.linspace(0, 2.0 * torch.pi, self.Na + 1, device=self.device)[:-1]
+        phi_list = torch.linspace(0, 2.0 * torch.pi, self.Nb + 1, device=self.device)[:-1]
+        theta_i, theta_j = torch.meshgrid(theta_list, phi_list, indexing="ij")
+        theta_diff = theta_i - theta_j
+        return (
+            torch.exp(kappa * torch.cos(theta_diff))
+            / torch.special.i0(torch.tensor(kappa, device=self.device))
+            / 2.0
+            / torch.pi
+        )
+
+    def get_con_proba(self, proba_type, **kwargs):
+        if "cos" in proba_type:
+            if "spec" in proba_type:
+                Pij = self.cosine_proba(kwargs["kappa"] / torch.sqrt(self.Kb))
+            else:
+                Pij = self.cosine_proba(kwargs["kappa"], kwargs["phase"])
+        elif "lr" == proba_type:
+            Pij = self.low_rank_proba(**kwargs)
+        elif "von_mises" in proba_type:
+            Pij = self.von_mises_proba(kwargs["kappa"])
+        elif "gaussian" in proba_type:
+            Pij = torch.randn((self.Na, self.Nb), device=self.device)
+        else:
+            Pij = torch.tensor(1.0, device=self.device)
+        return Pij
+
+    def forward(self, con_type, proba_type, **kwargs):
+        Pij = self.get_con_proba(proba_type=proba_type, **kwargs)
+        if "sparse" in con_type:
+            Cij = torch.rand(self.Na, self.Nb, device=self.device) <= (
+                self.Kb / float(self.Nb) * Pij
+            ).clamp_(min=0, max=1)
+        else:
+            if "dense" in proba_type:
+                Cij = Pij / torch.sqrt(1.0 * self.Nb)
+            else:
+                Cij = Pij / (1.0 * self.Nb)
+        return Cij
+
+    def __call__(self, con_type="sparse", proba_type="unif", **kwargs):
+        return self.forward(con_type, proba_type, **kwargs)
+#+end_src
+
+#+begin_src python :tangle weights/lr.py
+import torch
+from torch import nn
+from math import floor
+
+
+def normalize_tensor(tensor, pop_idx, slices, scale):
+    norm_tensor = tensor.clone()
+    norm_tensor[:, slices[pop_idx]] = tensor[:, slices[pop_idx]] / scale[pop_idx]
+    return norm_tensor
+
+
+def clamp_tensor(tensor, idx, slices):
+    clamped_tensor = tensor.clone()
+    if idx == 0:
+        clamped_tensor[slices[0]] = tensor[slices[0]].clamp(min=0.0)
+    elif idx == "lr":
+        clamped_tensor[slices[0]] = tensor[slices[0]].clamp(min=-1.0)
+    else:
+        clamped_tensor[slices[1]] = tensor[slices[1]].clamp(max=0.0)
+    return clamped_tensor
+
+
+def masked_normalize(tensor):
+    mask = tensor != 0
+    normalized_tensor = tensor.clone()
+    if mask.any():
+        masked_tensor = tensor[mask]
+        mean = masked_tensor.mean()
+        std = masked_tensor.std(unbiased=False) + 1e-6
+        normalized_tensor[mask] = (masked_tensor - mean) / std
+    return normalized_tensor
+
+
+class LowRankWeights(nn.Module):
+    def __init__(
+        self, N_NEURON, RANK=1, LR_MN=1, LR_READOUT=0, LR_INI=0.001,
+        LR_UeqV=1, DEVICE="cuda", LR_READOUT_DIM=1,
+    ):
+        super().__init__()
+        self.N_NEURON = int(N_NEURON)
+        self.RANK = int(RANK)
+        self.LR_MN = int(LR_MN)
+        self.LR_READOUT = int(LR_READOUT)
+        self.LR_INI = LR_INI
+        self.LR_UeqV = int(LR_UeqV)
+        self.LR_READOUT_DIM = int(LR_READOUT_DIM)
+        self.device = DEVICE
+
+        self.V = nn.Parameter(
+            torch.randn((self.N_NEURON, self.RANK), device=self.device) * self.LR_INI
+        )
+        if self.LR_MN:
+            self.U = nn.Parameter(
+                torch.randn((self.N_NEURON, self.RANK), device=self.device) * self.LR_INI
+            )
+            if self.LR_UeqV:
+                with torch.no_grad():
+                    self.U.copy_(self.V)
+        else:
+            self.U = None
+
+        if self.LR_READOUT:
+            self.readout_linear = nn.Linear(
+                self.N_NEURON, self.LR_READOUT_DIM, device=self.device, bias=True,
+            )
+        self.lr = None
+
+    def get_U(self):
+        return self.U if self.LR_MN else self.V
+
+    def get_V(self):
+        return self.V
+
+    def get_readout(self):
+        return self.get_V()
+
+    def resample_basis(self):
+        return
+
+    def forward(self, LR_NORM=0):
+        U = self.get_U()
+        V = self.get_V()
+        U_norm, V_norm = 1.0, 1.0
+        if LR_NORM:
+            U_norm = U.norm(p="fro") + 1e-6
+            V_norm = V.norm(p="fro") + 1e-6
+        self.lr = (U / U_norm) @ (V.T / V_norm)
+        return self.lr
+
+
+class SupportLowRankWeights(nn.Module):
+    def __init__(
+        self, N_NEURON, RANK=1, LR_MN=1, LR_READOUT=0, LR_INI=0.001,
+        LR_UeqV=1, DEVICE="cuda", N_SUPPORTS=1, SUPPORT_WEIGHTS=None,
+        BASIS_DIM=None, TRAIN_BIASES=False, LR_READOUT_DIM=1,
+        INIT_GAUSSIAN_BASIS=None,
+    ):
+        super().__init__()
+        self.N_NEURON = int(N_NEURON)
+        self.RANK = int(RANK)
+        self.LR_MN = int(LR_MN)
+        self.LR_READOUT = int(LR_READOUT)
+        self.LR_INI = LR_INI
+        self.LR_UeqV = int(LR_UeqV)
+        self.LR_READOUT_DIM = int(LR_READOUT_DIM)
+        self.N_SUPPORTS = int(N_SUPPORTS)
+        self.BASIS_DIM = 2 * self.RANK if BASIS_DIM is None else int(BASIS_DIM)
+        self.TRAIN_BIASES = TRAIN_BIASES
+        self.device = DEVICE
+
+        if INIT_GAUSSIAN_BASIS is None:
+            basis = torch.randn((self.BASIS_DIM, self.N_NEURON), device=self.device)
+        else:
+            basis = INIT_GAUSSIAN_BASIS.to(self.device)
+
+        self.gaussian_basis = nn.Parameter(basis, requires_grad=False)
+        self.supports = nn.Parameter(
+            torch.zeros((self.N_SUPPORTS, self.N_NEURON), device=self.device),
+            requires_grad=False,
+        )
+
+        if SUPPORT_WEIGHTS is None:
+            self.support_weights = nn.Parameter(
+                torch.ones(self.N_SUPPORTS, device=self.device) / self.N_SUPPORTS,
+                requires_grad=False,
+            )
+            l_support = self.N_NEURON // self.N_SUPPORTS
+            for i in range(self.N_SUPPORTS):
+                if i < self.N_SUPPORTS - 1:
+                    self.supports.data[i, l_support * i : l_support * (i + 1)] = 1
+                else:
+                    self.supports.data[i, l_support * i :] = 1
+        else:
+            support_weights = torch.tensor(
+                SUPPORT_WEIGHTS, device=self.device, dtype=torch.float32,
+            )
+            support_weights = support_weights / support_weights.sum()
+            self.support_weights = nn.Parameter(support_weights, requires_grad=False)
+            k = 0
+            for i in range(self.N_SUPPORTS):
+                if i < self.N_SUPPORTS - 1:
+                    width = floor(float(self.support_weights[i]) * self.N_NEURON)
+                    self.supports.data[i, k : k + width] = 1
+                    k += width
+                else:
+                    self.supports.data[i, k:] = 1
+
+        self.V_weights = nn.Parameter(
+            torch.randn(
+                (self.RANK, self.N_SUPPORTS, self.BASIS_DIM), device=self.device,
+            ) * self.LR_INI
+        )
+        self.V_biases = nn.Parameter(
+            torch.zeros((self.RANK, self.N_SUPPORTS), device=self.device),
+            requires_grad=self.TRAIN_BIASES,
+        )
+
+        if self.LR_MN:
+            self.U_weights = nn.Parameter(
+                torch.randn(
+                    (self.RANK, self.N_SUPPORTS, self.BASIS_DIM), device=self.device,
+                ) * self.LR_INI
+            )
+            self.U_biases = nn.Parameter(
+                torch.zeros((self.RANK, self.N_SUPPORTS), device=self.device),
+                requires_grad=self.TRAIN_BIASES,
+            )
+            if self.LR_UeqV:
+                with torch.no_grad():
+                    self.U_weights.copy_(self.V_weights)
+                    self.U_biases.copy_(self.V_biases)
+        else:
+            self.U_weights = None
+            self.U_biases = None
+
+        if self.LR_READOUT:
+            self.readout_weights = nn.Parameter(
+                torch.randn(
+                    (self.LR_READOUT_DIM, self.N_SUPPORTS, self.BASIS_DIM),
+                    device=self.device,
+                ) * self.LR_INI
+            )
+            self.readout_biases = nn.Parameter(
+                torch.zeros(
+                    (self.LR_READOUT_DIM, self.N_SUPPORTS), device=self.device,
+                ),
+                requires_grad=self.TRAIN_BIASES,
+            )
+            self.readout_linear = nn.Linear(
+                self.N_NEURON, self.LR_READOUT_DIM, device=self.device, bias=True,
+            )
+
+        self.U = None
+        self.V = None
+        self.readout = None
+        self.lr = None
+        self.define_proxy_parameters()
+
+    def support_to_neurons(self, weights, biases=None):
+        vec = weights @ self.gaussian_basis
+        vec = torch.sum(vec * self.supports.unsqueeze(0), dim=1)
+        if biases is not None:
+            vec = vec + biases @ self.supports
+        return vec.T
+
+    def define_proxy_parameters(self):
+        self.V = self.support_to_neurons(self.V_weights, self.V_biases)
+        if self.LR_MN:
+            self.U = self.support_to_neurons(self.U_weights, self.U_biases)
+        else:
+            self.U = self.V
+        if self.LR_READOUT:
+            self.readout = self.support_to_neurons(
+                self.readout_weights, self.readout_biases,
+            )
+        else:
+            self.readout = self.V
+
+    def get_U(self):
+        self.define_proxy_parameters()
+        return self.U
+
+    def get_V(self):
+        self.define_proxy_parameters()
+        return self.V
+
+    def get_readout(self):
+        self.define_proxy_parameters()
+        return self.readout
+
+    def resample_basis(self):
+        with torch.no_grad():
+            self.gaussian_basis.normal_()
+        self.define_proxy_parameters()
+
+    def forward(self, LR_NORM=0):
+        U = self.get_U()
+        V = self.get_V()
+        U_norm, V_norm = 1.0, 1.0
+        if LR_NORM:
+            U_norm = U.norm(p="fro") + 1e-6
+            V_norm = V.norm(p="fro") + 1e-6
+        self.lr = (U / U_norm) @ (V.T / V_norm)
+        return self.lr
+
+
+def init_low_rank(
+    N_NEURON, RANK=1, LR_MN=1, LR_READOUT=0, LR_INI=0.001,
+    LR_UeqV=1, DEVICE="cuda", LR_TYPE="standard", LR_N_SUPPORTS=1,
+    LR_SUPPORT_WEIGHTS=None, LR_BASIS_DIM=None, LR_TRAIN_BIASES=False,
+    LR_READOUT_DIM=1, LR_INIT_GAUSSIAN_BASIS=None,
+):
+    if LR_TYPE in ["support", "gaussian_mixture", "gmm"]:
+        return SupportLowRankWeights(
+            N_NEURON=N_NEURON, RANK=RANK, LR_MN=LR_MN,
+            LR_READOUT=LR_READOUT, LR_INI=LR_INI, LR_UeqV=LR_UeqV,
+            DEVICE=DEVICE, N_SUPPORTS=LR_N_SUPPORTS,
+            SUPPORT_WEIGHTS=LR_SUPPORT_WEIGHTS, BASIS_DIM=LR_BASIS_DIM,
+            TRAIN_BIASES=LR_TRAIN_BIASES, LR_READOUT_DIM=LR_READOUT_DIM,
+            INIT_GAUSSIAN_BASIS=LR_INIT_GAUSSIAN_BASIS,
+        )
+    return LowRankWeights(
+        N_NEURON=N_NEURON, RANK=RANK, LR_MN=LR_MN,
+        LR_READOUT=LR_READOUT, LR_INI=LR_INI, LR_UeqV=LR_UeqV,
+        DEVICE=DEVICE, LR_READOUT_DIM=LR_READOUT_DIM,
+    )
+
+
+def get_theta(a, b, IF_NORM=0):
+    u, v = a, b
+    if IF_NORM:
+        u = a / torch.norm(a, p="fro")
+        v = b / torch.norm(b, p="fro")
+    return torch.atan2(v, u)
+
+
+def get_idx(ksi, ksi1):
+    theta = get_theta(ksi, ksi1, IF_NORM=0)
+    return theta.argsort()
+
+
+def get_overlap(model, rates):
+    ksi = model.PHI0
+    if not isinstance(ksi, torch.Tensor):
+        ksi = torch.as_tensor(ksi, device=rates.device, dtype=rates.dtype)
+    else:
+        ksi = ksi.to(device=rates.device, dtype=rates.dtype)
+    return rates @ ksi.T / rates.shape[-1]
+#+end_src
+
+#+begin_src python :tangle dynamics/activation.py
+import torch
+from torch import nn
+
+_SQRT2 = None
+
+
+def _get_sqrt2(device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    global _SQRT2
+    if _SQRT2 is None or _SQRT2.device != device or _SQRT2.dtype != dtype:
+        _SQRT2 = torch.rsqrt(torch.tensor(2.0, device=device, dtype=dtype))
+    return _SQRT2
+
+
+class Activation(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x, func_name="relu", thresh=0.0):
+        if func_name == "relu":
+            return torch.relu(x - thresh)
+        elif func_name == "erf":
+            rsqrt2 = _get_sqrt2(x.device, x.dtype)
+            return torch.erf((x - thresh) * rsqrt2)
+        elif func_name == "sqrt":
+            return (x >= 1.0) * torch.sqrt(torch.abs(4.0 * x - 3.0)) + x * x * (
+                x >= 0
+            ) * (x < 1.0)
+        else:
+            rsqrt2 = _get_sqrt2(x.device, x.dtype)
+            return thresh * 0.5 * (1.0 + torch.erf(x * rsqrt2))
+#+end_src
+
+#+begin_src python :tangle dynamics/core.py
+"""Single-step recurrent dynamics."""
+from __future__ import annotations
+
+import torch
+from torch import nn
+
+from src.config.types import RecurrentConfig, Tensor
+from src.dynamics.activation import Activation
+from src.dynamics.plasticity.stp import Plasticity
+from src.state.containers import NetworkState
+from src.weights.builder import STPBlockSpec, recurrent_matmul
+
+
+class DynamicsCore(nn.Module):
+    def __init__(
+        self, cfg: RecurrentConfig, stp_block_index: list[STPBlockSpec],
+        activation: Activation,
+    ) -> None:
+        super().__init__()
+        self.cfg = cfg
+        self.stp_block_index = stp_block_index
+        self.activation = activation
+
+    def _compute_stp_hidden(
+        self, rates: Tensor, batch_size: int,
+        stp_modules: list[Plasticity], W_stp: list[Tensor],
+    ) -> Tensor:
+        geo = self.cfg.geo
+        hidden = torch.zeros(
+            (batch_size, geo.N_NEURON), device=rates.device, dtype=rates.dtype,
+        )
+        for block_idx, (pre, post, _) in enumerate(self.stp_block_index):
+            stp_out = stp_modules[block_idx](rates[:, geo.slices[pre]])
+            hidden[:, geo.slices[post]] += stp_out @ W_stp[block_idx]
+        return hidden
+
+    def step(
+        self,
+        state: NetworkState,
+        ff_step: Tensor,
+        W_rec: Tensor,
+        W_stp: list[Tensor] | None,
+        stp_modules: list[Plasticity] | None,
+        ff_stp_module: Plasticity | None,
+    ) -> None:
+        c = self.cfg
+        geo = c.geo
+        rates = state.rates
+        rec_input = state.rec_input
+        batch_size = rates.shape[0]
+
+        hidden = recurrent_matmul(rates, W_rec)
+
+        hidden_stp: Tensor | None = None
+        if c.IF_STP and stp_modules is not None and W_stp is not None:
+            hidden_stp = self._compute_stp_hidden(rates, batch_size, stp_modules, W_stp)
+            hidden = hidden + hidden_stp
+
+        if c.IF_FF_STP and ff_stp_module is not None:
+            k0 = torch.sqrt(torch.as_tensor(geo.Ka[0], device=ff_step.device, dtype=ff_step.dtype))
+            ff_stp_hidden = torch.sign(ff_step) * (ff_stp_module(torch.abs(ff_step) / k0) * k0)
+            ff_step = ff_step + ff_stp_hidden
+
+        if c.IF_FF_DYN:
+            ff_step = state.ff_state * c.EXP_FF + ff_step * (1.0 - c.EXP_FF)
+            state.ff_state = ff_step
+
+        if c.IF_BATCH_J:
+            hidden[:, geo.slices[0]].add_(c.Jab_batch * (rates[:, geo.slices[0]] @ c.W_batch_T))
+
+        if c.SYN_DYN:
+            rec_input[0].mul_(c.EXP_DT_TAU_SYN).add_(hidden * (1.0 - c.EXP_DT_TAU_SYN))
+        else:
+            rec_input[0] = hidden
+
+        if c.IF_FF_ADAPT:
+            if state.ff_adapt_thresh is None:
+                state.ff_adapt_thresh = torch.zeros_like(ff_step)
+            adapted = torch.sign(ff_step) * torch.relu(torch.abs(ff_step) - state.ff_adapt_thresh)
+            state.ff_adapt_thresh = (
+                state.ff_adapt_thresh * c.EXP_FF_ADAPT
+                + torch.abs(adapted) * c.A_FF_ADAPT * (1.0 - c.EXP_FF_ADAPT)
+            )
+            ff_step = adapted
+
+        net_input = ff_step + rec_input[0]
+
+        if c.IF_NMDA:
+            exc_rates = rates[:, geo.slices[0]]
+            if W_rec.dim() == 2:
+                hidden_nmda = recurrent_matmul(exc_rates, W_rec[geo.slices[0]])
+            elif W_rec.dim() == 3:
+                hidden_nmda = recurrent_matmul(exc_rates, W_rec[:, geo.slices[0]])
+            else:
+                raise ValueError(f"Invalid W_rec dim for NMDA: {W_rec.dim()}")
+
+            if hidden_stp is not None:
+                hidden_nmda = hidden_nmda.clone()
+                hidden_nmda[:, geo.slices[0]] += hidden_stp[:, geo.slices[0]]
+
+            rec_input[1].mul_(c.EXP_DT_TAU_NMDA).add_(
+                c.R_NMDA * hidden_nmda * (1.0 - c.EXP_DT_TAU_NMDA)
+            )
+            net_input = net_input + rec_input[1]
+
+        non_linear = self.activation(net_input, func_name=c.TF_TYPE, thresh=state.thresh)
+
+        if c.RATE_DYN:
+            state.rates = rates * c.EXP_DT_TAU + non_linear * (1.0 - c.EXP_DT_TAU)
+        else:
+            state.rates = non_linear
+
+        if c.IF_ADAPT:
+            state.thresh[:, geo.slices[0]] = (
+                state.thresh[:, geo.slices[0]] * c.EXP_ADAPT
+                + state.rates[:, geo.slices[0]].detach() * c.A_ADAPT * (1.0 - c.EXP_ADAPT)
+            )
+#+end_src
+
+#+begin_src python :tangle dynamics/plasticity/stp.py
+import torch
+from torch import nn
+
+
+class Plasticity(nn.Module):
+    def __init__(self, USE, TAU_FAC, TAU_REC, DT, size, device, STP_TYPE="markram", IF_INIT=1):
+        super().__init__()
+        N_BATCH = size[0]
+        N_NEURON = size[1]
+
+        self.DT = DT
+        self.stp_type = STP_TYPE
+        self.device = device
+
+        self.TAU_FAC = TAU_FAC
+        self.TAU_REC = TAU_REC
+        self.USE = torch.tensor(USE, device=device, dtype=torch.float32).unsqueeze(-1)
+
+        if TAU_FAC > 0:
+            self.DT_TAU_FAC = torch.tensor(DT / TAU_FAC, device=device).unsqueeze(-1)
+        else:
+            self.DT_TAU_FAC = torch.tensor(0.0, device=device).unsqueeze(-1)
+
+        if TAU_REC > 0:
+            self.DT_TAU_REC = torch.tensor(DT / TAU_REC, device=device).unsqueeze(-1)
+        else:
+            self.DT_TAU_REC = torch.tensor(0.0, device=device).unsqueeze(-1)
+
+        self.EXP_REC = torch.exp(-self.DT_TAU_REC)
+        self.EXP_FAC = torch.exp(-self.DT_TAU_FAC)
+
+        if IF_INIT:
+            self.u_stp = self.USE.expand(N_BATCH, N_NEURON).clone()
+            self.x_stp = torch.ones((N_BATCH, N_NEURON), device=device)
+
+    def markram_stp(self, rates):
+        self.x_stp = (
+            self.x_stp
+            + (1.0 - self.x_stp) * self.DT_TAU_REC
+            - self.DT * self.u_stp * self.x_stp * rates
+        )
+        self.u_stp = (
+            self.u_stp
+            + self.DT_TAU_FAC * (self.USE - self.u_stp)
+            + self.DT * self.USE * (1.0 - self.u_stp) * rates
+        )
+        return (self.u_stp * self.x_stp) * rates
+
+    def markram_stp_exp(self, rates):
+        if self.TAU_FAC == 0:
+            self.u_stp = self.USE.expand_as(self.u_stp)
+        if self.TAU_REC != 0:
+            self.x_stp = (
+                1.0
+                + (self.x_stp - 1.0) * self.EXP_REC
+                - self.DT * self.u_stp * self.x_stp * rates
+            )
+        if self.TAU_FAC != 0.0:
+            self.u_stp = (
+                self.USE
+                + (self.u_stp - self.USE) * self.EXP_FAC
+                + self.DT * self.USE * (1.0 - self.u_stp) * rates
+            )
+        return (self.u_stp * self.x_stp) * rates
+
+    def mato_stp(self, isi):
+        self.u_stp = self.u_stp * torch.exp(-isi / self.TAU_FAC) + self.USE * (
+            1.0 - self.u_stp * torch.exp(-isi / self.TAU_FAC)
+        )
+        self.x_stp = (
+            self.x_stp * (1.0 - self.u_stp) * torch.exp(-isi / self.TAU_REC)
+            + 1.0
+            - torch.exp(-isi / self.TAU_REC)
+        )
+        return self.u_stp * self.x_stp
+
+    def forward(self, rates):
+        if self.stp_type == "mato":
+            return self.mato_stp(rates)
+        if self.stp_type == "markram_exp":
+            return self.markram_stp_exp(rates)
+        return self.markram_stp(rates)
+#+end_src
+
+#+begin_src python :tangle dynamics/plasticity/hebbian.py
+import torch
+import torch.nn.functional as F
+from torch import nn
+
+
+class Hebbian(nn.Module):
+    def __init__(self, ETA, DT, HEBB_TYPE="bcm", CORR_FRAC=0.1):
+        super().__init__()
+        self.DT = DT
+        self.HEBB_TYPE = HEBB_TYPE
+        self.ETA_DT = ETA * DT
+        self.CORR_FRAC = CORR_FRAC
+        self._kernel: torch.Tensor | None = None
+        self._kernel_n: int = -1
+
+    def _get_kernel(self, N: int, device: torch.device) -> torch.Tensor:
+        if self._kernel is not None and self._kernel_n == N and self._kernel.device == device:
+            return self._kernel
+        neighborhood = int(N * self.CORR_FRAC)
+        if neighborhood < 1:
+            neighborhood = 1
+        if neighborhood % 2 == 0:
+            neighborhood += 1
+        self._kernel = torch.ones(1, 1, neighborhood, device=device) / neighborhood
+        self._kernel_n = N
+        return self._kernel
+
+    def spatial_sum(self, rates):
+        N = rates.shape[-1]
+        neighborhood = int(N * self.CORR_FRAC)
+        if neighborhood < 1:
+            return rates
+        if neighborhood % 2 == 0:
+            neighborhood += 1
+        pad = neighborhood // 2
+        kernel = self._get_kernel(N, rates.device)
+        x = rates.unsqueeze(1)
+        x_padded = torch.cat([x[..., -pad:], x, x[..., :pad]], dim=-1)
+        summed = F.conv1d(x_padded, kernel, padding=0)
+        return summed.squeeze(1)
+
+    def hebbian_learning(self, pre, post, avg_pre=None, avg_post=None):
+        if self.HEBB_TYPE == "cov":
+            delta_pre = pre - avg_pre
+            delta_post = post - avg_post
+            return self.ETA_DT * (delta_pre.unsqueeze(2) * delta_post.unsqueeze(1))
+
+        if self.HEBB_TYPE == "corr":
+            spatial_pre = self.spatial_sum(pre)
+            spatial_post = self.spatial_sum(post)
+            mean_pre = spatial_pre.mean(dim=-1, keepdim=True)
+            mean_post = spatial_post.mean(dim=-1, keepdim=True)
+            std_pre = spatial_pre.std(dim=1, unbiased=False, keepdim=True) + 1e-9
+            std_post = spatial_post.std(dim=1, unbiased=False, keepdim=True) + 1e-9
+            spatial_pre = (spatial_pre - mean_pre) / std_pre
+            spatial_post = (spatial_post - mean_post) / std_post
+            return self.ETA_DT * spatial_pre.unsqueeze(2) * spatial_post.unsqueeze(1)
+
+        wij = pre.unsqueeze(2) * post.unsqueeze(1)
+        if self.HEBB_TYPE == "bcm":
+            delta_pre = pre - avg_pre
+            return self.ETA_DT * delta_pre.unsqueeze(2) * wij
+
+        return self.ETA_DT * wij
+
+    def forward(self, pre, post, avg_pre=None, avg_post=None):
+        return self.hebbian_learning(pre, post, avg_pre, avg_post)
+#+end_src
+
+#+begin_src python :tangle dynamics/plasticity/manager.py
+"""Plasticity mechanism construction and Hebbian update logic."""
+from __future__ import annotations
+
+import torch
+from torch import nn
+
+from src.config.types import HebbianConfig, NetworkGeometry, STPModuleConfig, Tensor
+from src.dynamics.plasticity.hebbian import Hebbian
+from src.dynamics.plasticity.stp import Plasticity
+from src.state.containers import NetworkState
+from src.weights.builder import STPBlockSpec
+
+
+class PlasticityManager(nn.Module):
+    def __init__(
+        self,
+        geo: NetworkGeometry,
+        stp_cfg: STPModuleConfig,
+        hebb_cfg: HebbianConfig,
+        W_rec_base: Tensor,
+        stp_block_index: list[STPBlockSpec],
+    ) -> None:
+        super().__init__()
+        self.geo = geo
+        self.stp_cfg = stp_cfg
+        self.hebb_cfg = hebb_cfg
+        self.register_buffer("_W_rec_base", W_rec_base)
+        self.stp_block_index = stp_block_index
+
+        self.hebb: Hebbian | None = (
+            Hebbian(hebb_cfg.ETA, hebb_cfg.DT, hebb_cfg.HEBB_TYPE, hebb_cfg.HEBB_FRAC)
+            if hebb_cfg.IF_HEBB else None
+        )
+
+    @staticmethod
+    def _restore_stp_state(
+        mod: Plasticity, u_saved: Tensor, x_saved: Tensor, label: str,
+    ) -> None:
+        expected = tuple(mod.u_stp.shape)
+        if tuple(u_saved.shape) != expected:
+            raise RuntimeError(
+                f"u_stp shape mismatch at {label}: {tuple(u_saved.shape)} != {expected}"
+            )
+        if tuple(x_saved.shape) != expected:
+            raise RuntimeError(
+                f"x_stp shape mismatch at {label}: {tuple(x_saved.shape)} != {expected}"
+            )
+        mod.u_stp = u_saved.to(device=mod.u_stp.device, dtype=mod.u_stp.dtype)
+        mod.x_stp = x_saved.to(device=mod.x_stp.device, dtype=mod.x_stp.dtype)
+
+    def make_stp_modules(
+        self, state: NetworkState, batch_size: int, reset: bool,
+    ) -> list[Plasticity] | None:
+        sc = self.stp_cfg
+        geo = self.geo
+        if not sc.IF_STP:
+            return None
+
+        n_blocks = len(self.stp_block_index)
+        if not reset:
+            if state.u_stp_last is None or state.x_stp_last is None:
+                raise RuntimeError("STP state missing on restore path")
+            if len(state.u_stp_last) != n_blocks:
+                raise RuntimeError("STP state length mismatch")
+
+        stp_modules: list[Plasticity] = []
+        for block_idx, (pre, _post, block_id) in enumerate(self.stp_block_index):
+            mod = Plasticity(
+                sc.USE[block_id], sc.TAU_FAC[block_id], sc.TAU_REC[block_id],
+                sc.DT, (batch_size, geo.Na[pre]),
+                STP_TYPE=sc.STP_TYPE, IF_INIT=reset, device=geo.device,
+            )
+            if not reset:
+                self._restore_stp_state(
+                    mod, state.u_stp_last[block_idx],
+                    state.x_stp_last[block_idx], f"block {block_idx}",
+                )
+            stp_modules.append(mod)
+
+        state.u_stp_last = [m.u_stp.detach().clone() for m in stp_modules]
+        state.x_stp_last = [m.x_stp.detach().clone() for m in stp_modules]
+        return stp_modules
+
+    def make_ff_stp_module(
+        self, state: NetworkState, batch_size: int, reset: bool,
+    ) -> Plasticity | None:
+        sc = self.stp_cfg
+        geo = self.geo
+        if not sc.IF_FF_STP:
+            return None
+
+        mod = Plasticity(
+            sc.FF_USE, sc.TAU_FF_FAC, sc.TAU_FF_REC, sc.DT,
+            (batch_size, geo.N_NEURON),
+            STP_TYPE=sc.STP_TYPE, IF_INIT=reset, device=geo.device,
+        )
+        if not reset:
+            if state.u_ff_stp_last is None or state.x_ff_stp_last is None:
+                raise RuntimeError("FF-STP state missing on restore path")
+            self._restore_stp_state(
+                mod, state.u_ff_stp_last, state.x_ff_stp_last, "FF-STP",
+            )
+
+        state.u_ff_stp_last = mod.u_stp.detach().clone()
+        state.x_ff_stp_last = mod.x_stp.detach().clone()
+        return mod
+
+    def apply_hebbian(
+        self, hebb_rates: Tensor | None, rates: Tensor, W_rec: Tensor,
+    ) -> tuple[Tensor, Tensor | None]:
+        hc = self.hebb_cfg
+        geo = self.geo
+        if not hc.IF_HEBB:
+            return W_rec, hebb_rates
+        if self.hebb is None:
+            raise RuntimeError("IF_HEBB=True but Hebbian module not initialized")
+        if hebb_rates is None:
+            raise RuntimeError("hebb_rates is None while IF_HEBB=True")
+        if W_rec.dim() != 3:
+            raise ValueError(
+                f"Hebbian path expects batched W_rec, got shape {tuple(W_rec.shape)}"
+            )
+
+        scale = torch.sqrt(torch.as_tensor(
+            geo.Ka[0], device=W_rec.device, dtype=W_rec.dtype,
+        ))
+
+        for pre in range(geo.N_POP):
+            for post in range(geo.N_POP):
+                block_id = pre + post * geo.N_POP
+                if not hc.IS_HEBB[block_id]:
+                    continue
+                W_hebb = self.hebb(
+                    rates[:, geo.slices[pre]], rates[:, geo.slices[post]],
+                    hebb_rates[:, geo.slices[pre]], hebb_rates[:, geo.slices[post]],
+                ) / scale
+                base = self._W_rec_base[geo.slices[pre], geo.slices[post]].unsqueeze(0)
+                W_rec[:, geo.slices[pre], geo.slices[post]] = base + W_hebb
+
+        W_rec[:, geo.slices[0]] = W_rec[:, geo.slices[0]].clamp(min=0.0)
+        if geo.N_POP > 1:
+            W_rec[:, geo.slices[1]] = W_rec[:, geo.slices[1]].clamp(max=0.0)
+
+        if hc.HEBB_TYPE == "bcm":
+            hebb_rates = hebb_rates * hc.EXP_HEBB + rates * (1.0 - hc.EXP_HEBB)
+
+        return W_rec, hebb_rates
+#+end_src
+
+#+begin_src python :tangle state/containers.py
+"""Network state data containers."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import torch
+
+Tensor = torch.Tensor
+
+
+@dataclass
+class ForwardOutputs:
+    rates: Tensor
+    rec_input: Tensor | None = None
+    stp_u: Tensor | None = None
+    stp_x: Tensor | None = None
+    readout: Tensor | None = None
+
+
+@dataclass
+class NetworkState:
+    rates: Tensor
+    rec_input: Tensor
+    thresh: Tensor
+    ff_state: Tensor
+    hebb_rates: Tensor | None = None
+    u_stp_last: list[Tensor] | None = None
+    x_stp_last: list[Tensor] | None = None
+    u_ff_stp_last: Tensor | None = None
+    x_ff_stp_last: Tensor | None = None
+    ff_adapt_thresh: Tensor | None = None
+#+end_src
+
+#+begin_src python :tangle state/manager.py
+"""State initialisation, persistence, and restore."""
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+import torch
+from torch import nn
+
+from src.config.types import StateConfig, Tensor
+from src.dynamics.activation import Activation
+from src.dynamics.plasticity.stp import Plasticity
+from src.state.containers import NetworkState
+
+
+def _terminal_mask(step: int, end_indices: Tensor, batch_size: int) -> Tensor:
+    if end_indices.dim() == 1:
+        if end_indices.shape[0] != batch_size:
+            raise ValueError(
+                f"end_indices shape {tuple(end_indices.shape)} incompatible "
+                f"with batch_size={batch_size}"
+            )
+        return end_indices == step
+    if end_indices.dim() == 2:
+        if end_indices.shape[-1] != batch_size:
+            raise ValueError(
+                f"end_indices shape {tuple(end_indices.shape)} incompatible "
+                f"with batch_size={batch_size}"
+            )
+        return end_indices[-1] == step
+    raise ValueError(f"Unsupported end_indices shape: {tuple(end_indices.shape)}")
+
+
+class StateManager(nn.Module):
+    def __init__(self, cfg: StateConfig, activation: Activation) -> None:
+        super().__init__()
+        self.cfg = cfg
+        self.activation = activation
+
+        self.register_buffer("rates_last", None)
+        self.register_buffer("rec_input_last", None)
+        self.register_buffer("thresh_last", None)
+        self.register_buffer("ff_state_last", None)
+        self.register_buffer("hebb_rates_last", None)
+        self.register_buffer("ff_adapt_thresh_last", None)
+        self.register_buffer("end_mask", None)
+        self.register_buffer("u_ff_stp_last", None)
+        self.register_buffer("x_ff_stp_last", None)
+
+        self._n_stp_blocks: int = 0
+        self._stp_block_sizes: list[int] = []
+
+    # ---- STP list helpers ---------------------------------------------
+
+    def _clear_stp_buffers(self) -> None:
+        names = [
+            f"{prefix}{i}"
+            for i in range(self._n_stp_blocks)
+            for prefix in ("_u_stp_last_", "_x_stp_last_")
+        ]
+        for name in names:
+            if name in self._buffers:
+                delattr(self, name)
+        self._n_stp_blocks = 0
+        self._stp_block_sizes = []
+
+    def _register_stp_list(self, u_list: list[Tensor], x_list: list[Tensor]) -> None:
+        self._clear_stp_buffers()
+        self._n_stp_blocks = len(u_list)
+        self._stp_block_sizes = [u.shape[-1] for u in u_list]
+        for i, (u, x) in enumerate(zip(u_list, x_list)):
+            self.register_buffer(f"_u_stp_last_{i}", u.detach().clone())
+            self.register_buffer(f"_x_stp_last_{i}", x.detach().clone())
+
+    def _get_stp_lists(self) -> tuple[list[Tensor] | None, list[Tensor] | None]:
+        if self._n_stp_blocks == 0:
+            return None, None
+        u_list, x_list = [], []
+        for i in range(self._n_stp_blocks):
+            u = self._buffers.get(f"_u_stp_last_{i}")
+            x = self._buffers.get(f"_x_stp_last_{i}")
+            if u is None or x is None:
+                return None, None
+            u_list.append(u)
+            x_list.append(x)
+        return u_list, x_list
+
+    def _update_stp_indices(self, idx: Tensor, stp_modules: Sequence[Plasticity]) -> None:
+        if self._n_stp_blocks == 0:
+            self._register_stp_list(
+                [torch.zeros_like(m.u_stp) for m in stp_modules],
+                [torch.zeros_like(m.x_stp) for m in stp_modules],
+            )
+        for i, mod in enumerate(stp_modules):
+            self._buffers[f"_u_stp_last_{i}"][idx] = mod.u_stp[idx].detach()
+            self._buffers[f"_x_stp_last_{i}"][idx] = mod.x_stp[idx].detach()
+
+    # ---- public API ---------------------------------------------------
+
+    def initialize(self, ff_input: Tensor) -> NetworkState:
+        c = self.cfg
+        geo = c.geo
+        if ff_input.dim() != 3:
+            raise ValueError(f"ff_input must be 3D, got {tuple(ff_input.shape)}")
+
+        batch_size = ff_input.shape[0]
+        dtype = ff_input.dtype
+
+        thresh = c.thresh[:batch_size].clone().to(device=geo.device, dtype=dtype)
+        rec_input = torch.zeros(
+            (int(c.IF_NMDA) + 1, batch_size, geo.N_NEURON),
+            device=geo.device, dtype=dtype,
+        )
+        ff0 = ff_input[:, 0]
+        rates = self.activation(ff0 + rec_input[0], func_name=c.TF_TYPE, thresh=thresh)
+
+        return NetworkState(
+            rates=rates,
+            rec_input=rec_input,
+            thresh=thresh,
+            ff_state=torch.zeros_like(ff0),
+            hebb_rates=rates.clone() if c.IF_HEBB else None,
+            ff_adapt_thresh=torch.zeros_like(ff0) if c.IF_FF_ADAPT else None,
+        )
+
+    def restore_last_state(self) -> NetworkState:
+        if any(
+            x is None
+            for x in (self.rates_last, self.rec_input_last,
+                      self.thresh_last, self.ff_state_last)
+        ):
+            raise RuntimeError(
+                "No saved state available. Call forward(init_state=True) first."
+            )
+
+        def _c(t: Tensor | None) -> Tensor | None:
+            return None if t is None else t.clone()
+
+        def _cl(lst: list[Tensor] | None) -> list[Tensor] | None:
+            return None if lst is None else [x.clone() for x in lst]
+
+        u_stp, x_stp = self._get_stp_lists()
+
+        return NetworkState(
+            rates=self.rates_last.clone(),
+            rec_input=self.rec_input_last.clone(),
+            thresh=self.thresh_last.clone(),
+            ff_state=self.ff_state_last.clone(),
+            hebb_rates=_c(self.hebb_rates_last),
+            u_stp_last=_cl(u_stp),
+            x_stp_last=_cl(x_stp),
+            u_ff_stp_last=_c(self.u_ff_stp_last),
+            x_ff_stp_last=_c(self.x_ff_stp_last),
+            ff_adapt_thresh=_c(self.ff_adapt_thresh_last),
+        )
+
+    def init_last_state_buffers(self, state: NetworkState, batch_size: int) -> None:
+        c = self.cfg
+        geo = c.geo
+        self.rates_last = torch.zeros_like(state.rates)
+        self.rec_input_last = torch.zeros_like(state.rec_input)
+        self.thresh_last = torch.zeros_like(state.thresh)
+        self.ff_state_last = torch.zeros_like(state.ff_state)
+        self.end_mask = torch.ones(
+            (batch_size, 1), device=geo.device, dtype=state.rates.dtype,
+        )
+        self.hebb_rates_last = (
+            torch.zeros_like(state.hebb_rates)
+            if c.IF_HEBB and state.hebb_rates is not None else None
+        )
+        self.ff_adapt_thresh_last = (
+            torch.zeros_like(state.ff_adapt_thresh)
+            if c.IF_FF_ADAPT and state.ff_adapt_thresh is not None else None
+        )
+        self._clear_stp_buffers()
+        self.u_ff_stp_last = None
+        self.x_ff_stp_last = None
+
+    def save_terminal_state(
+        self,
+        step: int,
+        state: NetworkState,
+        end_indices: Tensor,
+        stp_modules: Sequence[Plasticity] | None = None,
+        ff_stp_module: Plasticity | None = None,
+    ) -> None:
+        if self.end_mask is None:
+            raise RuntimeError("Last-state buffers not initialized.")
+
+        batch_size = state.rates.shape[0]
+        mask = _terminal_mask(step, end_indices, batch_size)
+        if not mask.any():
+            return
+
+        idx = mask.nonzero(as_tuple=True)[0]
+        self.end_mask[idx, 0] = float("nan")
+        self.rates_last[idx] = state.rates[idx].detach()
+        self.rec_input_last[:, idx] = state.rec_input[:, idx].detach()
+        self.thresh_last[idx] = state.thresh[idx].detach()
+        self.ff_state_last[idx] = state.ff_state[idx].detach()
+
+        if self.hebb_rates_last is not None and state.hebb_rates is not None:
+            self.hebb_rates_last[idx] = state.hebb_rates[idx].detach()
+        if self.ff_adapt_thresh_last is not None and state.ff_adapt_thresh is not None:
+            self.ff_adapt_thresh_last[idx] = state.ff_adapt_thresh[idx].detach()
+
+        if stp_modules is not None:
+            self._update_stp_indices(idx, stp_modules)
+        if ff_stp_module is not None:
+            if self.u_ff_stp_last is None or self.x_ff_stp_last is None:
+                self.u_ff_stp_last = torch.zeros_like(ff_stp_module.u_stp)
+                self.x_ff_stp_last = torch.zeros_like(ff_stp_module.x_stp)
+            self.u_ff_stp_last[idx] = ff_stp_module.u_stp[idx].detach()
+            self.x_ff_stp_last[idx] = ff_stp_module.x_stp[idx].detach()
+#+end_src
+
+#+begin_src python :tangle state/collector.py
+"""Output collection during simulation."""
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+import torch
+
+from src.config.types import OutputConfig, Tensor
+from src.dynamics.plasticity.stp import Plasticity
+from src.state.containers import ForwardOutputs, NetworkState
+from src.utils import print_activity
+
+
+class OutputCollector:
+    def __init__(
+        self, cfg: OutputConfig, return_rec: bool = False, return_stp: bool = False,
+    ) -> None:
+        self.cfg = cfg
+        self.return_rec = return_rec
+        self.return_stp = return_stp
+
+        self._rates: list[Tensor] = []
+        self._rec_traces: list[Tensor] = []
+        self._stp_u: list[Tensor] = []
+        self._stp_x: list[Tensor] = []
+
+        self._mv_rates: Tensor | None = None
+        self._mv_rec_input: Tensor | None = None
+
+        time = cfg.time
+        self._acc_start: int = time.N_STEADY + time.N_HEBB
+        self._inv_window: float = 1.0 / time.N_WINDOW
+        self._stacked_cache: Tensor | None = None
+
+    def _ensure_accumulators(self, state: NetworkState) -> None:
+        if self._mv_rates is None:
+            self._mv_rates = torch.zeros_like(state.rates)
+        if self.return_rec and self._mv_rec_input is None:
+            self._mv_rec_input = torch.zeros_like(state.rec_input)
+
+    def _emit(
+        self, step: int, state: NetworkState,
+        stp_modules: Sequence[Plasticity] | None,
+    ) -> None:
+        geo = self.cfg.geo
+        assert self._mv_rates is not None
+
+        if self.cfg.VERBOSE:
+            print_activity(self.cfg, step, state.rates)
+
+        self._rates.append(
+            (self._mv_rates[:, geo.slices[0]] * self._inv_window).detach().clone()
+        )
+
+        if self.return_rec and self._mv_rec_input is not None:
+            rec_trace = (
+                self._mv_rec_input.permute(1, 0, 2)[:, :, geo.slices[0]]
+                * self._inv_window
+            )
+            self._rec_traces.append(rec_trace.detach().clone())
+
+        if self.cfg.IF_STP and self.return_stp and stp_modules and len(stp_modules) > 0:
+            self._stp_u.append(stp_modules[0].u_stp.detach().clone())
+            self._stp_x.append(stp_modules[0].x_stp.detach().clone())
+
+        self._stacked_cache = None
+
+    def update(
+        self, step: int, state: NetworkState,
+        stp_modules: Sequence[Plasticity] | None = None,
+    ) -> None:
+        if step < self._acc_start:
+            return
+
+        self._ensure_accumulators(state)
+        assert self._mv_rates is not None
+
+        self._mv_rates.add_(state.rates)
+        if self.return_rec and self._mv_rec_input is not None:
+            self._mv_rec_input.add_(state.rec_input)
+
+        if (step - self._acc_start + 1) % self.cfg.time.N_WINDOW == 0:
+            self._emit(step, state, stp_modules)
+            self._mv_rates.zero_()
+            if self.return_rec and self._mv_rec_input is not None:
+                self._mv_rec_input.zero_()
+
+    def stacked_rates(self) -> Tensor:
+        if self._stacked_cache is not None:
+            return self._stacked_cache
+        if not self._rates:
+            raise RuntimeError("No rate outputs collected")
+        self._stacked_cache = torch.stack(self._rates, dim=1)
+        return self._stacked_cache
+
+    def finalize(self, readout: Tensor | None = None) -> ForwardOutputs:
+        return ForwardOutputs(
+            rates=self.stacked_rates(),
+            rec_input=torch.stack(self._rec_traces, dim=1) if self._rec_traces else None,
+            stp_u=torch.stack(self._stp_u, dim=1) if self._stp_u else None,
+            stp_x=torch.stack(self._stp_x, dim=1) if self._stp_x else None,
+            readout=readout,
+        )
+#+end_src
+
+#+begin_src python :tangle io/ff_input.py
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import torch
+
+from src.config.types import FFInputConfig, Tensor
+from src.weights.lr import get_theta
+from src.io.stimuli import Stimuli
+
+
+@dataclass
+class StimulusContext:
+    phi0: Tensor
+    theta: Tensor | None
+    phase: Tensor | None
+    grid_inputs: list[Tensor] | None
+
+
+class TaskStimulusFactory:
+    def __init__(self, cfg: FFInputConfig, low_rank=None) -> None:
+        self.cfg = cfg
+        self.low_rank = low_rank
+        self.stimulus_fn = Stimuli(
+            cfg.TASK,
+            (cfg.N_BATCH, cfg.geo.Na[0]),
+            device=cfg.geo.device,
+        )
+
+    def make_context(self, phi0: Tensor) -> StimulusContext:
+        cfg = self.cfg
+        theta = None
+        if self.is_dual_task:
+            if phi0.shape[0] < 3:
+                raise ValueError(
+                    f"Dual task requires phi0 with >= 3 rows, got {phi0.shape[0]}"
+                )
+            theta = get_theta(phi0[0], phi0[2]).unsqueeze(0)
+
+        phase = None
+        if self.is_rand_task:
+            phase = torch.rand((cfg.N_BATCH, 1), device=cfg.geo.device) * 2.0 * torch.pi
+
+        grid_inputs = self.build_grid_inputs() if self.is_flow_task else None
+
+        return StimulusContext(
+            phi0=phi0, theta=theta, phase=phase, grid_inputs=grid_inputs,
+        )
+
+    def build(self, index: int, context: StimulusContext) -> Tensor | None:
+        if self.is_flow_task:
+            return self._build_flow(index, context)
+        if self.is_rand_task:
+            return self._build_rand(index, context)
+        if self.is_dual_task:
+            return self._build_dual(index)
+        return self._build_standard(index, context)
+
+    def build_batch_dual_random_delay(self, batch_idx: int, index: int) -> Tensor:
+        cfg = self.cfg
+        strength = cfg.I0[index]
+        odor_idx = index if strength > 0 else 5 + index
+        return self.stimulus_fn(strength, cfg.SIGMA0[index], cfg.odors[odor_idx])
+
+    @property
+    def is_flow_task(self) -> bool:
+        return "flow" in self.cfg.TASK
+
+    @property
+    def is_rand_task(self) -> bool:
+        return "rand" in self.cfg.TASK
+
+    @property
+    def is_dual_task(self) -> bool:
+        return "dual" in self.cfg.TASK
+
+    def _build_standard(self, index: int, context: StimulusContext) -> Tensor:
+        cfg = self.cfg
+        return self.stimulus_fn(cfg.I0[index], cfg.SIGMA0[index], context.phi0[:, index])
+
+    def _build_rand(self, index: int, context: StimulusContext) -> Tensor:
+        cfg = self.cfg
+        return self.stimulus_fn.odrCosStim(
+            cfg.I0[index], cfg.SIGMA0[index], context.phase, theta=context.theta,
+        )
+
+    def _build_dual(self, index: int) -> Tensor | None:
+        cfg = self.cfg
+        if cfg.LR_TRAIN and cfg.RANDOM_DELAY == 0:
+            if index == cfg.RWD and cfg.IF_RL != 0:
+                return None
+            odor_idx = index if cfg.I0[index] > 0 else 5 + index
+            return self.stimulus_fn(cfg.I0[index], cfg.SIGMA0[index], cfg.odors[odor_idx])
+
+        if cfg.RANDOM_DELAY == 0:
+            stim_idx = 2 * index + 1
+            if stim_idx >= cfg.PHI0.shape[-1]:
+                raise IndexError(
+                    f"PHI0 index {stim_idx} out of range for shape {cfg.PHI0.shape}"
+                )
+            return self.stimulus_fn(
+                cfg.I0[index], cfg.SIGMA0[index], cfg.PHI0[2 * index + 1],
+            )
+        return None
+
+    def _build_flow(self, index: int, context: StimulusContext) -> Tensor | None:
+        cfg = self.cfg
+        if index == cfg.GRID_INPUT:
+            if context.grid_inputs is None:
+                return None
+            return torch.stack(context.grid_inputs).unsqueeze(1)
+        if cfg.GRID_TEST is None:
+            return None
+        sign = (
+            (-1) ** (cfg.GRID_TEST + 1) if cfg.GRID_TEST in (1, 6)
+            else (-1) ** cfg.GRID_TEST
+        )
+        return self.stimulus_fn(
+            sign * cfg.I0[index], cfg.SIGMA0[0], cfg.odors[cfg.GRID_TEST],
+        )
+
+    def build_grid_inputs(self) -> list[Tensor]:
+        cfg = self.cfg
+        if self.low_rank is None:
+            raise RuntimeError("Flow task requires low_rank module to build grid inputs.")
+
+        x = torch.linspace(
+            cfg.GRID_X_RANGE[0], cfg.GRID_X_RANGE[1], cfg.GRID_SIZE,
+            device=cfg.geo.device,
+        )
+        y = torch.linspace(
+            cfg.GRID_Y_RANGE[0], cfg.GRID_Y_RANGE[1], cfg.GRID_SIZE,
+            device=cfg.geo.device,
+        )
+        X, Y = torch.meshgrid(x, y, indexing="ij")
+
+        V = self.low_rank.get_V()
+        vec1 = V[:, 0]
+        vec2 = V[:, 1]
+        vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
+
+        grid_inputs: list[Tensor] = []
+        for i in range(cfg.GRID_SIZE):
+            for j in range(cfg.GRID_SIZE):
+                point = cfg.I0[cfg.GRID_INPUT] * (X[i, j] * vec1 + Y[i, j] * vec2)
+                grid_inputs.append(point)
+        return grid_inputs
+
+
+class FFInputBuilder:
+    def __init__(self, cfg: FFInputConfig, low_rank=None) -> None:
+        self.cfg = cfg
+        self.stimulus_factory = TaskStimulusFactory(cfg, low_rank=low_rank)
+
+    def build(self) -> Tensor:
+        phi0 = self._prepare_phi0()
+        ff_input = self._build_background()
+        if self.cfg.TASK != "None":
+            context = self.stimulus_factory.make_context(phi0)
+            self._add_task_stimuli(ff_input, context)
+        return self._scale(ff_input)
+
+    def _prepare_phi0(self) -> Tensor:
+        phi0 = self.cfg.PHI0
+        if "odr" in self.cfg.TASK and torch.any(phi0 > 2 * torch.pi):
+            return torch.deg2rad(phi0)
+        return phi0
+
+    def _build_background(self) -> Tensor:
+        cfg = self.cfg
+        geo = cfg.geo
+        time = cfg.time
+
+        ff_input = torch.randn(
+            (cfg.N_BATCH, time.N_STEPS, geo.N_NEURON), device=geo.device,
+        )
+        for i_pop in range(geo.N_POP):
+            ff_input[..., geo.slices[i_pop]].mul_(cfg.VAR_FF[:, i_pop])
+
+        for i_pop in range(geo.N_POP):
+            baseline_pre = cfg.Ja0[:, i_pop]
+            if cfg.BUMP_SWITCH[i_pop]:
+                baseline_pre = baseline_pre / torch.sqrt(
+                    torch.as_tensor(geo.Ka[0], device=geo.device)
+                )
+            ff_input[:, : time.N_STIM_ON[0], geo.slices[i_pop]].add_(baseline_pre)
+            ff_input[:, time.N_STIM_ON[0] :, geo.slices[i_pop]].add_(cfg.Ja0[:, i_pop])
+        return ff_input
+
+    def _add_task_stimuli(self, ff_input: Tensor, context: StimulusContext) -> None:
+        for index in range(len(self.cfg.time.N_STIM_ON)):
+            stimulus = self.stimulus_factory.build(index, context)
+            if stimulus is not None:
+                self._apply_stimulus(ff_input, index, stimulus)
+
+    def _apply_stimulus(self, ff_input: Tensor, index: int, stimulus: Tensor) -> None:
+        cfg = self.cfg
+        geo = cfg.geo
+        time = cfg.time
+
+        if cfg.ODR_TRAIN and stimulus.ndim != 3:
+            stimulus = stimulus.unsqueeze(1)
+
+        start = time.N_STIM_ON[index]
+        if start >= time.N_STEPS:
+            return
+
+        if cfg.RANDOM_DELAY:
+            self._apply_random_delay_stimulus(ff_input, index, stimulus)
+            return
+
+        stop = time.N_STIM_OFF[index]
+        ff_input[:, start:stop, geo.slices[0]].add_(stimulus)
+
+    def _apply_random_delay_stimulus(
+        self, ff_input: Tensor, index: int, stimulus: Tensor,
+    ) -> None:
+        cfg = self.cfg
+        geo = cfg.geo
+        for batch_idx in range(cfg.N_BATCH):
+            time_slice = slice(
+                int(cfg.start_indices[index, batch_idx]),
+                int(cfg.end_indices[index, batch_idx]),
+            )
+            if self.stimulus_factory.is_dual_task:
+                stim_j = self.stimulus_factory.build_batch_dual_random_delay(batch_idx, index)
+                ff_input[batch_idx, time_slice, geo.slices[0]].add_(stim_j)
+            else:
+                ff_input[batch_idx, time_slice, geo.slices[0]].add_(stimulus[batch_idx])
+
+    def _scale(self, ff_input: Tensor) -> Tensor:
+        cfg = self.cfg
+        geo = cfg.geo
+        scale = cfg.GAIN * torch.sqrt(torch.as_tensor(geo.Ka[0], device=geo.device)) * cfg.M0
+        return ff_input * scale
+#+end_src
+
+#+begin_src python :tangle io/stimuli.py
+import torch
+from torch import nn
+
+
+def circular_gaussian(degrees, mu=0, sigma=30):
+    delta = (degrees - mu + torch.pi) % (2.0 * torch.pi) - torch.pi
+    return torch.exp(-0.5 * (delta / sigma) ** 2)
+
+
+class Stimuli:
+    def __init__(self, task, size, device):
+        self.task = task
+        self.size = size
+        self.device = device
+
+    def odrCosStim(self, strength, footprint, phase, rnd_phase=0, theta=None):
+        if rnd_phase:
+            phase = torch.rand((self.size[0], 1), device=self.device) * 2.0 * torch.pi
+        if theta is None:
+            theta = torch.linspace(0, 2.0 * torch.pi, self.size[-1] + 1, device=self.device)[:-1]
+            theta = theta.unsqueeze(0).expand((1, self.size[-1]))
+        return strength * nn.ReLU()(1.0 + footprint * torch.cos(theta - phase)) / (1.0 + footprint)
+
+    def odrGaussStim(self, strength, footprint, phase, rnd_phase=0, theta=None):
+        if rnd_phase:
+            phase = torch.rand((self.size[0], 1), device=self.device) * 2.0 * torch.pi
+        if theta is None:
+            theta = torch.linspace(0, 2.0 * torch.pi, self.size[-1] + 1, device=self.device)[:-1]
+            theta = theta.unsqueeze(0).expand((1, self.size[-1]))
+        return strength * circular_gaussian(theta - phase, sigma=footprint)
+
+    def dualStim(self, strength, footprint, phase):
+        return strength * (footprint * phase)
+
+    def forward(self, strength, footprint, phase, **kwargs):
+        if "gauss" in self.task:
+            return self.odrGaussStim(strength, footprint, phase, **kwargs)
+        if "odr" in self.task:
+            return self.odrCosStim(strength, footprint, phase, **kwargs)
+        if "dual" in self.task:
+            return self.dualStim(strength, footprint, phase)
+        return 0
+
+    def __call__(self, strength, footprint, phase, **kwargs):
+        return self.forward(strength, footprint, phase, **kwargs)
+#+end_src
+
+#+begin_src python :tangle network.py
+"""Top-level recurrent network model."""
+from __future__ import annotations
+
+import torch
+from torch import nn
+
+from src.config import Configuration
+from src.dynamics import Activation, DynamicsCore
+from src.dynamics.plasticity import PlasticityManager
+from src.io import FFInputBuilder
+from src.state import ForwardOutputs, OutputCollector, StateManager, Tensor
+from src.weights import WeightBuilder, WeightOutputs
+
+
+class Network(nn.Module):
+    def __init__(self, conf_name, repo_root, **kwargs) -> None:
+        super().__init__()
+
+        self.config = Configuration(conf_name, repo_root)(**kwargs)
+        c = self.config
+        activation = Activation()
+
+        self.weight_builder = WeightBuilder(c.weight_cfg)
+        self.ff_input_builder = FFInputBuilder(
+            c.ff_cfg, low_rank=self.weight_builder.low_rank,
+        )
+        self.state_manager = StateManager(c.state_cfg, activation=activation)
+        self.plasticity_manager = PlasticityManager(
+            geo=c.geo,
+            stp_cfg=c.stp_cfg,
+            hebb_cfg=c.hebb_cfg,
+            W_rec_base=self.weight_builder.W_rec_base,
+            stp_block_index=self.weight_builder.stp_block_specs,
+        )
+        self.dynamics = DynamicsCore(
+            c.recurrent_cfg,
+            stp_block_index=self.weight_builder.stp_block_specs,
+            activation=activation,
+        )
+
+        self.sim = c.sim_cfg
+
+        # Legacy compatibility
+        self.rates_list: Tensor | None = None
+        self.rec_input: Tensor | None = None
+        self.u_list: Tensor | None = None
+        self.x_list: Tensor | None = None
+        self.readout: Tensor | None = None
+        self.W_hebb_T: Tensor | None = None
+
+    @property
+    def cfg(self):
+        return self.config
+
+    def _init_ff_input(self, ff_input: Tensor | None) -> Tensor:
+        sim = self.sim
+        geo = sim.geo
+        time = sim.time
+        if ff_input is None:
+            ff_input = self.ff_input_builder.build().to(geo.device)
+        ff_input = ff_input.to(geo.device)
+        if ff_input.dim() != 3:
+            raise ValueError(f"ff_input must be 3D, got {tuple(ff_input.shape)}")
+        if ff_input.shape[1] < time.N_STEPS:
+            raise ValueError(
+                f"ff_input has {ff_input.shape[1]} steps, need >= {time.N_STEPS}"
+            )
+        return ff_input
+
+    def _apply_opto(self, weights: WeightOutputs) -> None:
+        sim = self.sim
+        if not sim.IF_OPTO or weights.W_stp_blocks is None or not weights.W_stp_blocks:
+            return
+        weights.W_stp_blocks[0] = weights.W_stp_blocks[0].clone()
+        rand_idx = torch.randperm(
+            weights.W_stp_blocks[0].size(0), device=weights.W_stp_blocks[0].device,
+        )[: sim.N_OPTO]
+        weights.W_stp_blocks[0][rand_idx] = 0
+
+    def _update_legacy(self, final: ForwardOutputs, weights: WeightOutputs) -> None:
+        self.rates_list = final.rates
+        self.rec_input = final.rec_input
+        self.u_list = final.stp_u
+        self.x_list = final.stp_x
+        self.readout = final.readout
+        self.W_hebb_T = weights.W_rec if self.sim.IF_HEBB else None
+
+    def forward(
+        self,
+        ff_input: Tensor | None = None,
+        *,
+        return_stp: bool = False,
+        return_rec: bool = False,
+        init_state: bool = True,
+        return_outputs: bool = False,
+    ) -> Tensor | ForwardOutputs:
+        sim = self.sim
+        geo = sim.geo
+        time = sim.time
+        ff_input = self._init_ff_input(ff_input)
+
+        if init_state:
+            state = self.state_manager.initialize(ff_input)
+            if sim.TRAINING == 0:
+                self.state_manager.init_last_state_buffers(state, ff_input.shape[0])
+        else:
+            state = self.state_manager.restore_last_state()
+
+        batch_size = state.rates.shape[0]
+        weights = self.weight_builder.build_all(
+            batch_size=batch_size, expand_hebbian=sim.IF_HEBB,
+        )
+        self._apply_opto(weights)
+
+        stp_modules = self.plasticity_manager.make_stp_modules(
+            state, batch_size=batch_size, reset=init_state,
+        )
+        ff_stp_module = self.plasticity_manager.make_ff_stp_module(
+            state, batch_size=batch_size, reset=init_state,
+        )
+
+        collector = OutputCollector(
+            self.config.output_cfg, return_rec=return_rec, return_stp=return_stp,
+        )
+        hebb_start = time.N_STEADY
+
+        for step in range(time.N_STEPS):
+            if sim.IF_HEBB and step >= hebb_start:
+                weights.W_rec, state.hebb_rates = self.plasticity_manager.apply_hebbian(
+                    state.hebb_rates, state.rates, weights.W_rec,
+                )
+
+            if sim.RATE_NOISE:
+                noise = torch.randn(
+                    (batch_size, geo.N_NEURON), device=geo.device, dtype=state.rates.dtype,
+                )
+                state.rates = state.rates + noise * sim.VAR_RATE
+
+            self.dynamics.step(
+                state=state, ff_step=ff_input[:, step],
+                W_rec=weights.W_rec, W_stp=weights.W_stp_blocks,
+                stp_modules=stp_modules, ff_stp_module=ff_stp_module,
+            )
+
+            if sim.TRAINING == 0:
+                self.state_manager.save_terminal_state(
+                    step=step, state=state, end_indices=sim.end_indices,
+                    stp_modules=stp_modules, ff_stp_module=ff_stp_module,
+                )
+
+            collector.update(step, state, stp_modules=stp_modules)
+
+        readout: Tensor | None = None
+        if sim.LR_TRAIN:
+            ro = self.weight_builder.get_readout()
+            if ro is None:
+                raise RuntimeError("LR_TRAIN=True but no readout available")
+            readout = collector.stacked_rates() @ ro / geo.Na[0]
+
+        final = collector.finalize(readout=readout)
+        self._update_legacy(final, weights)
+
+        return final if return_outputs else final.rates
+#+end_src
+
+#+begin_src python :tangle utils.py
+import time
+import gc
+import torch
+
+# torch.backends.cudnn.deterministic = True
+# torch.backends.cudnn.benchmark = False
+
+def print_activity(model, step, rates):
+
+    times = round((step - model.N_STEADY) / model.N_STEPS * model.DURATION, 2)
+
+    activity = []
+    for i in range(model.N_POP):
+        activity.append(round(torch.mean(rates[:, model.slices[i]]).item(), 2))
+
+    print("times (s)", times, "rates (Hz)", activity)
+
+def set_seed(seed):
+    # seed0 = seed
+    if seed == -1:
+        seed = int(time.time())
+
+    torch.manual_seed(seed)
+
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+    # print('seed', seed0, 'test', torch.rand(1), torch.cuda.FloatTensor(1).uniform_())
+
+def clear_cache():
+    for obj in gc.get_objects():
+        if torch.is_tensor(obj):
+            del obj
+
+    # Manually triggering the garbage collector afterwards
+    gc.collect()
+    torch.cuda.empty_cache()
+#+end_src
