@@ -133,10 +133,11 @@ class WeightBuilder(nn.Module):
         dtype = self.W_rec_base.dtype
         j_stp = torch.as_tensor(s.J_STP, device=self.device, dtype=dtype)
 
-        if s.TRAIN_J_STP:
-            self.J_STP_param = nn.Parameter(j_stp.clone())
-        else:
-            self.register_buffer("J_STP_param", j_stp.clone())
+        self.J_STP_param = nn.Parameter(j_stp.clone())
+        # if s.TRAIN_J_STP:
+        #     self.J_STP_param = nn.Parameter(j_stp.clone())
+        # else:
+        #     self.register_buffer("J_STP_param", j_stp.clone())
 
         for post in range(geo.N_POP):
             for pre in range(geo.N_POP):

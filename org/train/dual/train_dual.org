@@ -14,11 +14,13 @@
 #+end_src
 
 #+RESULTS:
+:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/bin/python
-
+: <Figure size 600x370.82 with 0 Axes>
+:END:
 ** Imports
 
 #+begin_src jupyter-python
@@ -56,8 +58,6 @@ from src.train.dual.task_score import DualScore
 #+end_src
 
 #+RESULTS:
-: Python exe
-: /home/leon/mambaforge/bin/python
 
 ** Helpers
 *** Data Split
@@ -186,7 +186,6 @@ def training_step(dataloader, model, loss_fn, optimizer, zero_grad=None):
 #+end_src
 
 #+RESULTS:
-: 65321fa1-ea2b-413a-a4ad-102430c7178e
 
 #+begin_src jupyter-python
 def validation_step(dataloader, model, loss_fn):
@@ -223,7 +222,7 @@ def optimization(model, train_loader, val_loader, loss_fn, optimizer, num_epochs
           loss = training_step(train_loader, model, loss_fn, optimizer, zero_grad=zero_grad)
           val_loss = validation_step(val_loader, model, loss_fn)
 
-          scheduler.step(val_loss)
+          scheduler.step()
           loss_list.append(loss)
           val_loss_list.append(val_loss)
 
@@ -315,7 +314,7 @@ class SignBCELoss(nn.Module):
 #+end_src
 
 #+RESULTS:
-: a1248424-1f75-416c-9b5d-180f07607c05
+: b3cc7b15-66ad-493f-abd1-94ed0bcbf9e3
 
 #+begin_src jupyter-python
 class AccuracyLoss(nn.Module):
@@ -456,6 +455,7 @@ def del_tensor(obj):
 #+end_src
 
 #+RESULTS:
+: eaee21b7-e35d-442d-82e4-28bbdf85d7d5
 
 #+begin_src jupyter-python
 def calculate_mean_accuracy_and_sem(accuracies):
@@ -631,7 +631,7 @@ kwargs = {
     'GAIN': 1.0,
     'LR_INI': 1.0,
     'RANK': 2,
-    'VAR_FF': [0.25, 0.25],
+    'VAR_FF': [0.1, 0.1],
     'TRAIN_SCALE': 'all',
     'LR_TYPE': 'standard',
     'K': 250,
@@ -663,6 +663,12 @@ print(model.config.SAVE_PATH)
 
 #+RESULTS:
 : /home/leon/models/NeuroFlame/src/train/runs/dual
+: /home/leon/models/NeuroFlame/org/train/dual/../../../src/weights/connectivity.py:7: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).
+:   self.Na = torch.tensor(Na).detach().clone()
+: /home/leon/models/NeuroFlame/org/train/dual/../../../src/weights/connectivity.py:8: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).
+:   self.Nb = torch.tensor(Nb).detach().clone()
+: /home/leon/models/NeuroFlame/org/train/dual/../../../src/weights/connectivity.py:9: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).
+:   self.Kb = torch.tensor(Kb).detach().clone()
 
 #+RESULTS:
 
@@ -745,6 +751,7 @@ for name, param in model.named_parameters():
 #+end_src
 
 #+RESULTS:
+: weight_builder.J_STP_param torch.Size([])
 : weight_builder.low_rank.V torch.Size([1500, 2])
 : weight_builder.low_rank.U torch.Size([1500, 2])
 
@@ -789,7 +796,6 @@ N_BATCH = 256
 model.config.N_BATCH = N_BATCH
 
 c = model.config
-
 model.config.lr_eval_win = np.max( (rwd_idx.shape[0], stim_idx.shape[0]))
 
 ff_input = []
@@ -859,14 +865,20 @@ torch.save(model.state_dict(), '%s/dpa_%d.pth' % (model.config.SAVE_PATH, seed))
 #+end_src
 
 #+RESULTS:
-: training DPA
-: Epoch 1/10, Training Loss: nan, Validation Loss: nan
-: Stopping training as loss is NaN.
-: Elapsed (with compilation) = 0h 0m 14s
-: /home/leon/tmp/ipykernel_1455624/2687779538.py:13: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
-:   scheduler.step(val_loss)
-
-
+#+begin_example
+training DPA
+Epoch 1/10, Training Loss: 1.8097, Validation Loss: 1.7216
+Epoch 2/10, Training Loss: 1.7026, Validation Loss: 1.6923
+Epoch 3/10, Training Loss: 1.6766, Validation Loss: 1.6750
+Epoch 4/10, Training Loss: 1.6628, Validation Loss: 1.6622
+Epoch 5/10, Training Loss: 1.6476, Validation Loss: 1.6520
+Epoch 6/10, Training Loss: 1.6378, Validation Loss: 1.6444
+Epoch 7/10, Training Loss: 1.6294, Validation Loss: 1.6374
+Epoch 8/10, Training Loss: 1.6236, Validation Loss: 1.6330
+Epoch 9/10, Training Loss: 1.6184, Validation Loss: 1.6265
+Epoch 10/10, Training Loss: 1.6116, Validation Loss: 1.6231
+Elapsed (with compilation) = 0h 2m 16s
+#+end_example
 #+begin_src jupyter-python
 del model, ff_input, labels, splits, optimizer, criterion, loss, val_loss
 gc.collect()
@@ -894,6 +906,12 @@ model.eval();
 #+end_src
 
 #+RESULTS:
+: /home/leon/models/NeuroFlame/org/train/dual/../../../src/weights/connectivity.py:7: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).
+:   self.Na = torch.tensor(Na).detach().clone()
+: /home/leon/models/NeuroFlame/org/train/dual/../../../src/weights/connectivity.py:8: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).
+:   self.Nb = torch.tensor(Nb).detach().clone()
+: /home/leon/models/NeuroFlame/org/train/dual/../../../src/weights/connectivity.py:9: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).
+:   self.Kb = torch.tensor(Kb).detach().clone()
 
 #+begin_src jupyter-python :tangle ../../../src/train/test_dpa.py
 N_BATCH = 256
@@ -1001,13 +1019,7 @@ plot_overlap_label(readout, labels.cpu().detach().numpy(), task=0)
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: /home/leon/tmp/ipykernel_1662198/455862791.py:7: RuntimeWarning: Mean of empty slice
-:   mean = np.nanmean(data, axis=0)
-: /home/leon/tmp/ipykernel_1662198/455862791.py:8: SmallSampleWarning: After omitting NaNs, one or more axis-slices of one or more sample arguments is too small; corresponding elements of returned arrays will be NaN. See documentation for sample size requirements.
-:   serr = sem(data, axis=0, nan_policy='omit')
 [[file:./figures/dual/figure_42.png]]
-:END:
 
 #+begin_src jupyter-python
 lr = model.weight_builder.low_rank
@@ -1028,7 +1040,12 @@ ax[2].legend(frameon=0)
 plt.show()
 #+end_src
 
-
+#+RESULTS:
+:RESULTS:
+: /home/leon/tmp/ipykernel_1939497/593079545.py:15: UserWarning: No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+:   ax[2].legend(frameon=0)
+[[file:./figures/dual/figure_43.png]]
+:END:
 
 ** Go/NoGo Task
 
