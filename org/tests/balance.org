@@ -67,6 +67,25 @@ def safe_corrcoef(a, b):
     if np.std(a) < 1e-12 or np.std(b) < 1e-12:
         return np.nan
     return np.corrcoef(a, b)[0, 1]
+
+def get_steady_state_step(model):
+    """Return the ff_input time index corresponding to the last collected output step."""
+    N_STEADY = model.config.N_STEADY
+    N_HEBB = model.config.N_HEBB
+    N_WINDOW = model.config.N_WINDOW
+    return N_STEADY + N_HEBB  # start of collection window
+
+def get_ff_for_output_step(model, rates, output_step=-1):
+    """Map a collected output step index to the corresponding ff_input window average."""
+    N_STEADY = model.config.N_STEADY
+    N_HEBB = model.config.N_HEBB
+    N_WINDOW = model.config.N_WINDOW
+    n_output_steps = rates.shape[0]
+    if output_step < 0:
+        output_step = n_output_steps + output_step
+    ff_start = N_STEADY + N_HEBB + output_step * N_WINDOW
+    ff_end = ff_start + N_WINDOW
+    return ff_start, ff_end
 #+end_src
 
 #+RESULTS:
@@ -123,13 +142,16 @@ ax[0].plot(ff_input[0, :, 0], label='E neuron 0')
 ax[0].plot(ff_input[0, :, Ne], label='I neuron 0', linestyle='--')
 ax[0].set_xlabel('Step')
 ax[0].set_ylabel('FF Input')
+ax[0].set_title('Sample FF input traces')
 ax[0].legend(fontsize=8)
 
-ax[1].imshow(ff_input[0].T, aspect='auto', origin='lower', cmap='jet', vmin=0, vmax=2000)
+im = ax[1].imshow(ff_input[0].T, aspect='auto', origin='lower', cmap='jet', vmin=0, vmax=np.percentile(ff_input[0], 99))
 ax[1].axhline(y=Ne, color='w', linestyle='--', linewidth=0.5, label='E/I boundary')
 ax[1].set_xlabel('Step')
 ax[1].set_ylabel('Neuron #')
+ax[1].set_title('FF input heatmap')
 ax[1].legend(fontsize=7, loc='upper right')
+plt.colorbar(im, ax=ax[1], fraction=0.046, pad=0.04)
 plt.tight_layout()
 plt.show()
 #+end_src
@@ -140,28 +162,31 @@ plt.show()
 *** FF Input Distributions (E vs I)
 
 #+begin_src ipython
-stim_step = model.config.N_STIM_ON[0].item() + 5
+# Pick a step during stimulation
+stim_step = int(model.config.N_STIM_ON[0].item()) + 5
 ff_E = ff_input[0, stim_step, :Ne]
 ff_I = ff_input[0, stim_step, Ne:]
 
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
-ax[0].hist(ff_E, bins=50, alpha=0.7, color='tab:blue', label='E', density=True)
+ax[0].hist(ff_E, bins=50, alpha=0.7, color='tab:blue', label=f'E (μ={np.mean(ff_E):.1f})', density=True)
 if Ni > 0:
-    ax[0].hist(ff_I, bins=50, alpha=0.7, color='tab:red', label='I', density=True)
+    ax[0].hist(ff_I, bins=50, alpha=0.7, color='tab:red', label=f'I (μ={np.mean(ff_I):.1f})', density=True)
 ax[0].set_xlabel('FF Input')
 ax[0].set_ylabel('Density')
 ax[0].set_title(f'FF input distribution (step={stim_step})')
-ax[0].legend()
+ax[0].legend(fontsize=8)
 
 mean_ff_E = np.mean(ff_input[0, :, :Ne], axis=1)
 mean_ff_I = np.mean(ff_input[0, :, Ne:], axis=1) if Ni > 0 else np.full(ff_input.shape[1], np.nan)
 ax[1].plot(mean_ff_E, label='E mean', color='tab:blue')
 ax[1].plot(mean_ff_I, label='I mean', color='tab:red')
+ax[1].axvline(x=model.config.N_STIM_ON[0].item(), color='gray', linestyle=':', alpha=0.7, label='Stim ON')
+ax[1].axvline(x=model.config.N_STIM_OFF[0].item(), color='gray', linestyle='--', alpha=0.7, label='Stim OFF')
 ax[1].set_xlabel('Step')
 ax[1].set_ylabel('Mean FF Input')
 ax[1].set_title('Population-averaged FF input')
-ax[1].legend()
+ax[1].legend(fontsize=8)
 
 plt.tight_layout()
 plt.show()
@@ -175,17 +200,22 @@ plt.show()
 #+begin_src ipython
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
-ax[0].plot(rates[:, :10], alpha=0.7)
-ax[0].plot(rates[:, Ne:Ne+10], alpha=0.7, linestyle='--')
-ax[0].set_xlabel('Step')
-ax[0].set_ylabel('Rates (Hz)')
+n_traces = min(10, Ne)
+ax[0].plot(rates[:, :n_traces], alpha=0.7)
+if Ni > 0:
+    ax[0].plot(rates[:, Ne:Ne+min(10, Ni)], alpha=0.7, linestyle='--')
+ax[0].set_xlabel('Output Step')
+ax[0].set_ylabel('Rate (Hz)')
 ax[0].set_title('Sample E (solid) & I (dashed) traces')
 
-ax[1].imshow(rates.T, aspect='auto', origin='lower', cmap='jet')
-ax[1].axhline(y=Ne, color='w', linestyle='--', linewidth=0.5)
-ax[1].set_xlabel('Step')
+im = ax[1].imshow(rates.T, aspect='auto', origin='lower', cmap='jet',
+                   vmin=0, vmax=np.percentile(rates, 99))
+ax[1].axhline(y=Ne, color='w', linestyle='--', linewidth=0.5, label='E/I boundary')
+ax[1].set_xlabel('Output Step')
 ax[1].set_ylabel('Neuron #')
 ax[1].set_title('All neurons')
+ax[1].legend(fontsize=7, loc='upper right')
+plt.colorbar(im, ax=ax[1], fraction=0.046, pad=0.04)
 plt.tight_layout()
 plt.show()
 #+end_src
@@ -201,22 +231,24 @@ rates_I = rates[-1, Ne:]
 
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
-ax[0].hist(rates_E, bins=50, alpha=0.7, color='tab:blue', label='E', density=True)
+ax[0].hist(rates_E, bins=50, alpha=0.7, color='tab:blue',
+           label=f'E (μ={np.mean(rates_E):.2f}, σ={np.std(rates_E):.2f})', density=True)
 if Ni > 0:
-    ax[0].hist(rates_I, bins=50, alpha=0.7, color='tab:red', label='I', density=True)
+    ax[0].hist(rates_I, bins=50, alpha=0.7, color='tab:red',
+               label=f'I (μ={np.mean(rates_I):.2f}, σ={np.std(rates_I):.2f})', density=True)
 ax[0].set_xlabel('Rate (Hz)')
 ax[0].set_ylabel('Density')
 ax[0].set_title('Steady-state rate distribution')
-ax[0].legend()
+ax[0].legend(fontsize=7)
 
 mean_E = np.mean(rates[:, :Ne], axis=1)
 mean_I = np.mean(rates[:, Ne:], axis=1) if Ni > 0 else np.full(rates.shape[0], np.nan)
-ax[1].plot(mean_E, label='E mean', color='tab:blue')
-ax[1].plot(mean_I, label='I mean', color='tab:red')
-ax[1].set_xlabel('Step')
+ax[1].plot(mean_E, label=f'E (final={mean_E[-1]:.2f} Hz)', color='tab:blue')
+ax[1].plot(mean_I, label=f'I (final={mean_I[-1]:.2f} Hz)', color='tab:red')
+ax[1].set_xlabel('Output Step')
 ax[1].set_ylabel('Mean Rate (Hz)')
 ax[1].set_title('Population-averaged rates')
-ax[1].legend()
+ax[1].legend(fontsize=8)
 
 plt.tight_layout()
 plt.show()
@@ -229,11 +261,9 @@ plt.show()
 
 #+begin_src ipython
 if rec_input is not None:
-    # rec_input shape: (n_steps, n_rec_channels, N_NEURON) or (n_steps, N_NEURON)
-    # From OutputCollector, rec_input is stored as (batch, steps, n_channels, neurons)
-    # After indexing [0], it is (steps, n_channels, neurons) or (steps, neurons)
+    # rec_input shape: (n_steps, n_rec_channels, N_NEURON)
     if rec_input.ndim == 3:
-        rec_syn = rec_input[:, 0, :]  # first synaptic channel (AMPA)
+        rec_syn = rec_input[:, 0, :]
     else:
         rec_syn = rec_input
 
@@ -246,36 +276,40 @@ if rec_input is not None:
     axes[0, 0].plot(rec_E[:, :10], alpha=0.7)
     if Ni > 0:
         axes[0, 0].plot(rec_I[:, :10], alpha=0.7, linestyle='--')
-    axes[0, 0].set_xlabel('Step')
+    axes[0, 0].set_xlabel('Output Step')
     axes[0, 0].set_ylabel('Recurrent Input')
     axes[0, 0].set_title('Sample E (solid) & I (dashed) traces')
 
     # ── Top right: heatmap ──
-    im = axes[0, 1].imshow(rec_syn.T, aspect='auto', origin='lower', cmap='RdBu_r')
+    vmax_rec = np.percentile(np.abs(rec_syn), 99)
+    im = axes[0, 1].imshow(rec_syn.T, aspect='auto', origin='lower', cmap='RdBu_r',
+                            vmin=-vmax_rec, vmax=vmax_rec)
     axes[0, 1].axhline(y=Ne, color='k', linestyle='--', linewidth=0.5)
-    axes[0, 1].set_xlabel('Step')
+    axes[0, 1].set_xlabel('Output Step')
     axes[0, 1].set_ylabel('Neuron #')
     axes[0, 1].set_title('Recurrent input (all neurons)')
     plt.colorbar(im, ax=axes[0, 1], fraction=0.046, pad=0.04)
 
     # ── Bottom left: steady-state distribution ──
-    axes[1, 0].hist(rec_E[-1], bins=50, alpha=0.7, color='tab:blue', label='E', density=True)
+    axes[1, 0].hist(rec_E[-1], bins=50, alpha=0.7, color='tab:blue',
+                     label=f'E (μ={np.mean(rec_E[-1]):.1f})', density=True)
     if Ni > 0:
-        axes[1, 0].hist(rec_I[-1], bins=50, alpha=0.7, color='tab:red', label='I', density=True)
+        axes[1, 0].hist(rec_I[-1], bins=50, alpha=0.7, color='tab:red',
+                         label=f'I (μ={np.mean(rec_I[-1]):.1f})', density=True)
     axes[1, 0].set_xlabel('Recurrent Input')
     axes[1, 0].set_ylabel('Density')
     axes[1, 0].set_title('Steady-state recurrent input distribution')
-    axes[1, 0].legend()
+    axes[1, 0].legend(fontsize=8)
 
     # ── Bottom right: population-averaged recurrent input ──
     mean_rec_E = np.mean(rec_E, axis=1)
     mean_rec_I = np.mean(rec_I, axis=1) if Ni > 0 else np.full(rec_syn.shape[0], np.nan)
-    axes[1, 1].plot(mean_rec_E, label='E mean', color='tab:blue')
-    axes[1, 1].plot(mean_rec_I, label='I mean', color='tab:red')
-    axes[1, 1].set_xlabel('Step')
+    axes[1, 1].plot(mean_rec_E, label=f'E mean (final={mean_rec_E[-1]:.1f})', color='tab:blue')
+    axes[1, 1].plot(mean_rec_I, label=f'I mean (final={mean_rec_I[-1]:.1f})', color='tab:red')
+    axes[1, 1].set_xlabel('Output Step')
     axes[1, 1].set_ylabel('Mean Recurrent Input')
     axes[1, 1].set_title('Population-averaged recurrent input')
-    axes[1, 1].legend()
+    axes[1, 1].legend(fontsize=8)
 
     plt.tight_layout()
     plt.show()
@@ -286,56 +320,74 @@ else:
 #+RESULTS:
 [[file:./figures/balance/figure_11.png]]
 
-*** E/I Balance Check: Recurrent vs Feedforward
+*** Decomposed Input Balance: Inputs to E Neurons
+
+Here we decompose the total input to each E neuron into its constituent parts:
+- FF input (external drive)
+- E→E recurrent excitation
+- I→E recurrent inhibition
+- Net total = FF + E→E + I→E
 
 #+begin_src ipython
 if rec_input is not None:
-    if rec_input.ndim == 3:
-        rec_syn = rec_input[:, 0, :]
-    else:
-        rec_syn = rec_input
+    Wab_T = model.weight_builder.W_rec_base.cpu().detach().numpy()
 
-    # At steady state, compare recurrent input magnitude to FF input magnitude
-    last_step = -1
-    rec_final = rec_syn[last_step]
-    # Map ff_input steps to collected output steps via the window
-    N_STEADY = model.config.N_STEADY
-    N_HEBB = model.config.N_HEBB
-    N_WINDOW = model.config.N_WINDOW
-    # The last collected output step corresponds to the last window
-    ff_last_start = N_STEADY + N_HEBB + (rates.shape[0] - 1) * N_WINDOW
-    ff_last_end = ff_last_start + N_WINDOW
-    ff_final = np.mean(ff_input[0, ff_last_start:ff_last_end], axis=0)
+    # Get steady-state rates and FF input
+    rates_final = rates[-1]  # (N_NEURON,)
+    ff_start, ff_end = get_ff_for_output_step(model, rates, output_step=-1)
+    ff_final = np.mean(ff_input[0, ff_start:ff_end], axis=0)  # (N_NEURON,)
+
+    # --- Inputs TO E neurons ---
+    # E→E: excitatory presynaptic (rows 0:Ne) → postsynaptic E (cols 0:Ne)
+    # Wab_T[pre, post], so Wab_T[:Ne, :Ne] are E→E weights
+    # Recurrent input to E neuron i = sum_j rates[j] * Wab_T[j, i]
+    rec_EtoE = rates_final[:Ne] @ Wab_T[:Ne, :Ne]   # (Ne,) — E→E input per E neuron
+    rec_ItoE = rates_final[Ne:] @ Wab_T[Ne:, :Ne]    # (Ne,) — I→E input per E neuron
+    ff_to_E = ff_final[:Ne]                            # (Ne,)
+
+    net_to_E = ff_to_E + rec_EtoE + rec_ItoE
 
     fig, axes = plt.subplots(1, 3, figsize=[3*width, height])
 
-    # Distribution of net input (rec + ff)
-    net_E = rec_final[:Ne] + ff_final[:Ne]
-    net_I = rec_final[Ne:] + ff_final[Ne:] if Ni > 0 else np.array([])
-
-    axes[0].hist(rec_final[:Ne], bins=50, alpha=0.6, color='tab:blue', label='Rec (E)', density=True)
-    axes[0].hist(ff_final[:Ne], bins=50, alpha=0.6, color='tab:orange', label='FF (E)', density=True)
+    # Panel 1: FF + E→E vs I→E
+    axes[0].hist(ff_to_E + rec_EtoE, bins=50, alpha=0.6, color='tab:blue',
+                 label=f'FF + E→E (μ={np.mean(ff_to_E + rec_EtoE):.1f})', density=True)
+    axes[0].hist(rec_ItoE, bins=50, alpha=0.6, color='tab:red',
+                 label=f'I→E (μ={np.mean(rec_ItoE):.1f})', density=True)
     axes[0].set_xlabel('Input')
     axes[0].set_ylabel('Density')
-    axes[0].set_title('Recurrent vs FF input to E neurons')
+    axes[0].set_title('Excitatory vs Inhibitory inputs to E')
     axes[0].legend(fontsize=7)
+    axes[0].axvline(0, color='k', linewidth=0.5, linestyle='--')
 
-    axes[1].hist(net_E, bins=50, alpha=0.7, color='tab:green', label='E', density=True)
-    if len(net_I) > 0:
-        axes[1].hist(net_I, bins=50, alpha=0.7, color='tab:red', label='I', density=True)
-    axes[1].set_xlabel('Net Input (Rec + FF)')
+    # Panel 2: Net input distribution
+    axes[1].hist(net_to_E, bins=50, alpha=0.7, color='tab:green',
+                 label=f'Net (μ={np.mean(net_to_E):.1f}, σ={np.std(net_to_E):.1f})', density=True)
+    axes[1].set_xlabel('Net Input (FF + E→E + I→E)')
     axes[1].set_ylabel('Density')
-    axes[1].set_title('Net input distribution')
-    axes[1].legend()
+    axes[1].set_title('Net input to E neurons')
+    axes[1].axvline(0, color='k', linewidth=0.5, linestyle='--')
+    axes[1].legend(fontsize=7)
 
-    # Scatter: |rec| vs |ff| per E neuron
-    axes[2].scatter(np.abs(ff_final[:Ne]), np.abs(rec_final[:Ne]), s=2, alpha=0.3)
-    mx = max(np.max(np.abs(ff_final[:Ne])), np.max(np.abs(rec_final[:Ne])))
-    axes[2].plot([0, mx], [0, mx], 'k--', linewidth=0.5)
-    axes[2].set_xlabel('|FF input|')
-    axes[2].set_ylabel('|Recurrent input|')
+    # Panel 3: Scatter |FF + E→E| vs |I→E|
+    exc_mag = np.abs(ff_to_E + rec_EtoE)
+    inh_mag = np.abs(rec_ItoE)
+    axes[2].scatter(exc_mag, inh_mag, s=2, alpha=0.3, color='tab:purple')
+    mx = max(np.max(exc_mag), np.max(inh_mag)) * 1.05
+    axes[2].plot([0, mx], [0, mx], 'k--', linewidth=0.5, label='Perfect balance')
+    axes[2].set_xlabel('|FF + E→E|')
+    axes[2].set_ylabel('|I→E|')
     axes[2].set_title('Balance scatter (E neurons)')
     axes[2].set_aspect('equal')
+    axes[2].set_xlim(0, mx)
+    axes[2].set_ylim(0, mx)
+    axes[2].legend(fontsize=7)
+
+    r_balance = safe_corrcoef(exc_mag, inh_mag)
+    print(f"Balance correlation (|FF+E→E| vs |I→E|): r = {r_balance:.4f}")
+    print(f"Mean net input to E: {np.mean(net_to_E):.2f} ± {np.std(net_to_E):.2f}")
+    print(f"Mean |FF+E→E|: {np.mean(exc_mag):.2f}, Mean |I→E|: {np.mean(inh_mag):.2f}")
+    print(f"Ratio |I→E|/|FF+E→E|: {np.mean(inh_mag)/np.mean(exc_mag):.3f}")
 
     plt.tight_layout()
     plt.show()
@@ -344,7 +396,212 @@ else:
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+: Balance correlation (|FF+E→E| vs |I→E|): r = -0.0091
+: Mean net input to E: -2.30 ± 5.28
+: Mean |FF+E→E|: 54.07, Mean |I→E|: 56.37
+: Ratio |I→E|/|FF+E→E|: 1.042
 [[file:./figures/balance/figure_12.png]]
+:END:
+*** Decomposed Input Balance: Inputs to I Neurons
+
+#+begin_src ipython
+if rec_input is not None and Ni > 0:
+    # --- Inputs TO I neurons ---
+    rec_EtoI = rates_final[:Ne] @ Wab_T[:Ne, Ne:]   # (Ni,) — E→I input per I neuron
+    rec_ItoI = rates_final[Ne:] @ Wab_T[Ne:, Ne:]    # (Ni,) — I→I input per I neuron
+    ff_to_I = ff_final[Ne:]                            # (Ni,)
+
+    net_to_I = ff_to_I + rec_EtoI + rec_ItoI
+
+    fig, axes = plt.subplots(1, 3, figsize=[3*width, height])
+
+    # Panel 1: FF + E→I vs I→I
+    axes[0].hist(ff_to_I + rec_EtoI, bins=50, alpha=0.6, color='tab:blue',
+                 label=f'FF + E→I (μ={np.mean(ff_to_I + rec_EtoI):.1f})', density=True)
+    axes[0].hist(rec_ItoI, bins=50, alpha=0.6, color='tab:red',
+                 label=f'I→I (μ={np.mean(rec_ItoI):.1f})', density=True)
+    axes[0].set_xlabel('Input')
+    axes[0].set_ylabel('Density')
+    axes[0].set_title('Excitatory vs Inhibitory inputs to I')
+    axes[0].legend(fontsize=7)
+    axes[0].axvline(0, color='k', linewidth=0.5, linestyle='--')
+
+    # Panel 2: Net input distribution
+    axes[1].hist(net_to_I, bins=50, alpha=0.7, color='tab:orange',
+                 label=f'Net (μ={np.mean(net_to_I):.1f}, σ={np.std(net_to_I):.1f})', density=True)
+    axes[1].set_xlabel('Net Input (FF + E→I + I→I)')
+    axes[1].set_ylabel('Density')
+    axes[1].set_title('Net input to I neurons')
+    axes[1].axvline(0, color='k', linewidth=0.5, linestyle='--')
+    axes[1].legend(fontsize=7)
+
+    # Panel 3: Scatter |FF + E→I| vs |I→I|
+    exc_mag_I = np.abs(ff_to_I + rec_EtoI)
+    inh_mag_I = np.abs(rec_ItoI)
+    axes[2].scatter(exc_mag_I, inh_mag_I, s=2, alpha=0.3, color='tab:orange')
+    mx_I = max(np.max(exc_mag_I), np.max(inh_mag_I)) * 1.05
+    axes[2].plot([0, mx_I], [0, mx_I], 'k--', linewidth=0.5, label='Perfect balance')
+    axes[2].set_xlabel('|FF + E→I|')
+    axes[2].set_ylabel('|I→I|')
+    axes[2].set_title('Balance scatter (I neurons)')
+    axes[2].set_aspect('equal')
+    axes[2].set_xlim(0, mx_I)
+    axes[2].set_ylim(0, mx_I)
+    axes[2].legend(fontsize=7)
+
+    r_balance_I = safe_corrcoef(exc_mag_I, inh_mag_I)
+    print(f"Balance correlation (|FF+E→I| vs |I→I|): r = {r_balance_I:.4f}")
+    print(f"Mean net input to I: {np.mean(net_to_I):.2f} ± {np.std(net_to_I):.2f}")
+    print(f"Mean |FF+E→I|: {np.mean(exc_mag_I):.2f}, Mean |I→I|: {np.mean(inh_mag_I):.2f}")
+    print(f"Ratio |I→I|/|FF+E→I|: {np.mean(inh_mag_I)/np.mean(exc_mag_I):.3f}")
+
+    plt.tight_layout()
+    plt.show()
+else:
+    print("Skipped: no recurrent input or no I neurons.")
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: Balance correlation (|FF+E→I| vs |I→I|): r = 0.0254
+: Mean net input to I: 0.56 ± 4.13
+: Mean |FF+E→I|: 38.11, Mean |I→I|: 37.55
+: Ratio |I→I|/|FF+E→I|: 0.985
+[[file:./figures/balance/figure_13.png]]
+:END:
+*** Full Input Decomposition Summary
+
+All four recurrent pathways (E→E, I→E, E→I, I→I) plus FF, shown as stacked
+bars for both postsynaptic populations.
+
+#+begin_src ipython
+if rec_input is not None:
+    components = {
+        'E neurons': {
+            'FF': np.mean(ff_to_E),
+            'E→E': np.mean(rec_EtoE),
+            'I→E': np.mean(rec_ItoE),
+        },
+    }
+    if Ni > 0:
+        components['I neurons'] = {
+            'FF': np.mean(ff_to_I),
+            'E→I': np.mean(rec_EtoI),
+            'I→I': np.mean(rec_ItoI),
+        }
+
+    fig, axes = plt.subplots(1, 2, figsize=[2*width, height])
+
+    # Bar chart of mean input components
+    pop_labels = list(components.keys())
+    for ax_idx, pop in enumerate(pop_labels):
+        comp = components[pop]
+        labels = list(comp.keys())
+        values = list(comp.values())
+        colors = ['tab:gray', 'tab:blue', 'tab:red'] if len(values) == 3 else ['tab:gray', 'tab:blue', 'tab:red']
+        bars = axes[0].barh(
+            [f'{pop}\n{l}' for l in labels], values,
+            color=colors[:len(values)], alpha=0.7,
+        )
+        for bar, val in zip(bars, values):
+            axes[0].text(bar.get_width() + 0.5, bar.get_y() + bar.get_height()/2,
+                         f'{val:.1f}', va='center', fontsize=7)
+
+    axes[0].axvline(0, color='k', linewidth=0.5)
+    axes[0].set_xlabel('Mean Input')
+    axes[0].set_title('Mean input components by population')
+
+    # Net input comparison
+    net_means = [np.mean(net_to_E)]
+    net_stds = [np.std(net_to_E)]
+    net_labels = ['E neurons']
+    if Ni > 0:
+        net_means.append(np.mean(net_to_I))
+        net_stds.append(np.std(net_to_I))
+        net_labels.append('I neurons')
+
+    axes[1].bar(net_labels, net_means, yerr=net_stds, color=['tab:blue', 'tab:red'][:len(net_labels)],
+                alpha=0.7, capsize=5)
+    axes[1].axhline(0, color='k', linewidth=0.5)
+    axes[1].set_ylabel('Net Input (mean ± std)')
+    axes[1].set_title('Net input balance check')
+    for i, (m, s) in enumerate(zip(net_means, net_stds)):
+        axes[1].text(i, m + s + 0.5, f'{m:.1f}±{s:.1f}', ha='center', fontsize=7)
+
+    plt.tight_layout()
+    plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/balance/figure_14.png]]
+
+*** Input Balance Over Time
+
+Track how the balance between excitation and inhibition evolves across output steps.
+
+#+begin_src ipython
+if rec_input is not None:
+    if rec_input.ndim == 3:
+        rec_syn = rec_input[:, 0, :]
+    else:
+        rec_syn = rec_input
+
+    n_steps_out = rates.shape[0]
+    N_STEADY = model.config.N_STEADY
+    N_HEBB = model.config.N_HEBB
+    N_WINDOW = model.config.N_WINDOW
+
+    mean_exc_to_E = np.zeros(n_steps_out)
+    mean_inh_to_E = np.zeros(n_steps_out)
+    mean_ff_to_E = np.zeros(n_steps_out)
+    if Ni > 0:
+        mean_exc_to_I = np.zeros(n_steps_out)
+        mean_inh_to_I = np.zeros(n_steps_out)
+        mean_ff_to_I = np.zeros(n_steps_out)
+
+    for t in range(n_steps_out):
+        r_t = rates[t]
+        ff_start_t = N_STEADY + N_HEBB + t * N_WINDOW
+        ff_end_t = ff_start_t + N_WINDOW
+        ff_t = np.mean(ff_input[0, ff_start_t:ff_end_t], axis=0)
+
+        mean_exc_to_E[t] = np.mean(r_t[:Ne] @ Wab_T[:Ne, :Ne]) + np.mean(ff_t[:Ne])
+        mean_inh_to_E[t] = np.mean(r_t[Ne:] @ Wab_T[Ne:, :Ne])
+        mean_ff_to_E[t] = np.mean(ff_t[:Ne])
+
+        if Ni > 0:
+            mean_exc_to_I[t] = np.mean(r_t[:Ne] @ Wab_T[:Ne, Ne:]) + np.mean(ff_t[Ne:])
+            mean_inh_to_I[t] = np.mean(r_t[Ne:] @ Wab_T[Ne:, Ne:])
+            mean_ff_to_I[t] = np.mean(ff_t[Ne:])
+
+    fig, axes = plt.subplots(1, 2, figsize=[2*width, height])
+
+    axes[0].plot(mean_exc_to_E, label='FF + E→E', color='tab:blue')
+    axes[0].plot(mean_inh_to_E, label='I→E', color='tab:red')
+    axes[0].plot(mean_exc_to_E + mean_inh_to_E, label='Net', color='tab:green', linestyle='--')
+    axes[0].axhline(0, color='k', linewidth=0.5, linestyle=':')
+    axes[0].set_xlabel('Output Step')
+    axes[0].set_ylabel('Mean Input')
+    axes[0].set_title('Input balance to E over time')
+    axes[0].legend(fontsize=7)
+
+    if Ni > 0:
+        axes[1].plot(mean_exc_to_I, label='FF + E→I', color='tab:blue')
+        axes[1].plot(mean_inh_to_I, label='I→I', color='tab:red')
+        axes[1].plot(mean_exc_to_I + mean_inh_to_I, label='Net', color='tab:orange', linestyle='--')
+        axes[1].axhline(0, color='k', linewidth=0.5, linestyle=':')
+        axes[1].set_xlabel('Output Step')
+        axes[1].set_ylabel('Mean Input')
+        axes[1].set_title('Input balance to I over time')
+        axes[1].legend(fontsize=7)
+
+    plt.tight_layout()
+    plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/balance/figure_15.png]]
 
 *** Connectivity
 
@@ -361,19 +618,21 @@ ax1.axhline(y=Ne, color='k', linestyle='--', linewidth=0.5)
 ax1.axvline(x=Ne, color='k', linestyle='--', linewidth=0.5)
 ax1.set_xlabel("Presynaptic")
 ax1.set_ylabel("Postsynaptic")
+ax1.set_title("$W_{rec}$ (transposed)")
 plt.colorbar(im, ax=ax1, fraction=0.046, pad=0.04)
 
 ax2 = plt.subplot2grid((2, 3), (0, 1))
 Kj = np.sum(np.abs(Wab_T) > 0, axis=0)
-ax2.set_title('$\\langle K_j \\rangle = %d$' % np.mean(Kj))
-ax2.plot(Kj)
-ax2.set_ylabel("$K_j$ (out-degree)")
+ax2.set_title('Out-degree: $\\langle K_j \\rangle = %d$' % np.mean(Kj))
+ax2.plot(Kj, linewidth=0.5)
+ax2.set_ylabel("$K_j$")
 
 ax3 = plt.subplot2grid((2, 3), (1, 1))
 Ki = np.sum(np.abs(Wab_T) > 0, axis=1)
-ax3.set_title('$\\langle K_i \\rangle = %d$' % np.mean(Ki))
-ax3.plot(Ki)
-ax3.set_ylabel("$K_i$ (in-degree)")
+ax3.set_title('In-degree: $\\langle K_i \\rangle = %d$' % np.mean(Ki))
+ax3.plot(Ki, linewidth=0.5)
+ax3.set_ylabel("$K_i$")
+ax3.set_xlabel("Neuron #")
 
 ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
 diags = []
@@ -383,6 +642,7 @@ diags = np.array(diags)
 ax4.plot(diags)
 ax4.set_xlabel("Offset")
 ax4.set_ylabel("$P_{ij}$")
+ax4.set_title("Trace structure")
 
 plt.tight_layout()
 plt.show()
@@ -391,43 +651,52 @@ plt.show()
 #+RESULTS:
 :RESULTS:
 : W shape: (4000, 4000)
-[[file:./figures/balance/figure_13.png]]
+[[file:./figures/balance/figure_16.png]]
 :END:
 *** Excitatory–Inhibitory Weight Balance
 
 #+begin_src ipython
 Wab_T = model.weight_builder.W_rec_base.cpu().detach().numpy()
 
-# W_rec_base is stored as Wab_T[pre, post], so column i gives inputs to neuron i
-# For each postsynaptic E neuron, sum excitatory and inhibitory inputs
-exc_input = np.sum(Wab_T[:Ne, :Ne], axis=0)   # E←E (sum over E pre for each E post)
-inh_input = np.sum(Wab_T[Ne:, :Ne], axis=0)   # E←I (sum over I pre for each E post)
-total = exc_input + inh_input
+# Wab_T[pre, post]: column i gives all inputs to neuron i
+exc_input_w = np.sum(Wab_T[:Ne, :Ne], axis=0)   # E←E
+inh_input_w = np.sum(Wab_T[Ne:, :Ne], axis=0)   # E←I
+total_w = exc_input_w + inh_input_w
 
 fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
 
-ax[0].hist(exc_input, bins=50, alpha=0.7, color='tab:blue', label='E←E')
-ax[0].hist(inh_input, bins=50, alpha=0.7, color='tab:red', label='E←I')
+ax[0].hist(exc_input_w, bins=50, alpha=0.7, color='tab:blue',
+           label=f'E←E (μ={np.mean(exc_input_w):.2f})')
+ax[0].hist(inh_input_w, bins=50, alpha=0.7, color='tab:red',
+           label=f'E←I (μ={np.mean(inh_input_w):.2f})')
 ax[0].set_xlabel('Summed synaptic weight')
-ax[0].set_title('Input to E neurons')
-ax[0].legend()
+ax[0].set_title('Weight sums to E neurons')
+ax[0].legend(fontsize=7)
 
-ax[1].hist(total, bins=50, alpha=0.7, color='tab:green')
-ax[1].set_xlabel('Net input (E+I)')
-ax[1].set_title('Balance: net weight to E neurons')
+ax[1].hist(total_w, bins=50, alpha=0.7, color='tab:green',
+           label=f'μ={np.mean(total_w):.2f}, σ={np.std(total_w):.2f}')
+ax[1].set_xlabel('Net weight (E+I)')
+ax[1].set_title('Net weight balance to E neurons')
+ax[1].axvline(0, color='k', linewidth=0.5, linestyle='--')
+ax[1].legend(fontsize=7)
 
-ax[2].scatter(exc_input, -inh_input, s=2, alpha=0.3)
-mx = max(np.max(exc_input), np.max(-inh_input))
-ax[2].plot([0, mx], [0, mx], 'k--', linewidth=0.5)
-ax[2].set_xlabel('Excitatory weight sum')
-ax[2].set_ylabel('|Inhibitory weight sum|')
+ax[2].scatter(exc_input_w, -inh_input_w, s=2, alpha=0.3)
+mx = max(np.max(exc_input_w), np.max(-inh_input_w)) * 1.05
+ax[2].plot([0, mx], [0, mx], 'k--', linewidth=0.5, label='E = |I|')
+ax[2].set_xlabel('E←E weight sum')
+ax[2].set_ylabel('|E←I| weight sum')
 ax[2].set_title('E vs |I| per E neuron')
+ax[2].set_aspect('equal')
+ax[2].set_xlim(0, mx)
+ax[2].set_ylim(0, mx)
+ax[2].legend(fontsize=7)
 
 plt.tight_layout()
 plt.show()
 #+end_src
 
 #+RESULTS:
+[[file:./figures/balance/figure_17.png]]
 
 *** Eigenvalue Spectrum
 
@@ -437,20 +706,26 @@ plot_eigen(W)
 #+end_src
 
 #+RESULTS:
-[[file:./figures/balance/figure_15.png]]
 
 ** Balance Scaling
 *** Sweep Over K
 
 #+begin_src ipython
 REPO_ROOT = "/home/leon/models/NeuroFlame"
-K_list = np.linspace(10, 1000, 10).astype(int)
+K_list = np.linspace(100, 1000, 10).astype(int)
 rates_list = []
+rec_input_list = []
+ff_input_list = []
 
 for K in K_list:
     model_k = Network('config_EI.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', K=K)
-    r = model_k.forward(return_all_pops=True)
-    rates_list.append(r[0].cpu().detach().numpy())
+    out_k = model_k(return_outputs=True, return_all_pops=True, return_rec=True)
+    rates_list.append(out_k.rates[0].cpu().detach().numpy())
+    if out_k.rec_input is not None:
+        rec_input_list.append(out_k.rec_input[0].cpu().detach().numpy())
+    else:
+        rec_input_list.append(None)
+    ff_input_list.append(model_k.ff_input_builder.build().cpu().numpy())
 
 Ne = model_k.config.Na[0].item()
 N_NEURON = model_k.config.N_NEURON
@@ -462,12 +737,9 @@ Ni = N_NEURON - Ne
 *** Scaling Plots
 
 #+begin_src ipython
-rates_arr = np.array(rates_list)
-print('rates shape:', rates_arr.shape)
-
 fig, axes = plt.subplots(1, 3, figsize=[3*width, height])
 
-# Mean rate vs sqrt(K)
+# Mean rate vs K
 mean_rates_E = np.array([np.mean(r[-1, :Ne]) for r in rates_list])
 mean_rates_I = np.array([np.mean(r[-1, Ne:]) for r in rates_list])
 sqrtK = np.sqrt(K_list)
@@ -476,10 +748,10 @@ axes[0].plot(K_list, mean_rates_E, '-o', label='E', markersize=4)
 axes[0].plot(K_list, mean_rates_I, '-s', label='I', markersize=4)
 axes[0].set_xlabel('$K$')
 axes[0].set_ylabel('$\\langle r \\rangle$ (Hz)')
-axes[0].set_title('Mean rate vs K')
+axes[0].set_title('Mean steady-state rate vs K')
 axes[0].legend()
 
-# sqrt(K) * mean rate should be O(1) in balanced regime
+# sqrt(K) * mean rate: should plateau in balanced regime
 axes[1].plot(sqrtK, mean_rates_E * sqrtK, '-o', label='E', markersize=4)
 axes[1].plot(sqrtK, mean_rates_I * sqrtK, '-s', label='I', markersize=4)
 axes[1].set_xlabel('$\\sqrt{K}$')
@@ -503,28 +775,29 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: rates shape: (10, 101, 4000)
-[[file:./figures/balance/figure_17.png]]
-:END:
+[[file:./figures/balance/figure_20.png]]
+
 *** Rate Distributions Across K
 
 #+begin_src ipython
 n_plots = len(K_list)
-n_cols = 4
+n_cols = 5
 n_rows = (n_plots + n_cols - 1) // n_cols
-fig, axes = plt.subplots(n_rows, n_cols, figsize=[n_cols*width, n_rows*height])
+fig, axes = plt.subplots(n_rows, n_cols, figsize=[n_cols*width*0.8, n_rows*height])
 axes = axes.flatten()
 
 for i, (K, r) in enumerate(zip(K_list, rates_list)):
     axes[i].hist(r[-1, :Ne], bins=40, alpha=0.6, color='tab:blue', label='E', density=True)
     if Ni > 0:
         axes[i].hist(r[-1, Ne:], bins=40, alpha=0.6, color='tab:red', label='I', density=True)
-    axes[i].set_title(f'K = {K}')
-    axes[i].set_xlabel('Rate (Hz)')
+    mean_e = np.mean(r[-1, :Ne])
+    mean_i = np.mean(r[-1, Ne:]) if Ni > 0 else 0
+    axes[i].set_title(f'K={K}\nE:{mean_e:.1f} I:{mean_i:.1f} Hz', fontsize=8)
+    axes[i].set_xlabel('Rate (Hz)', fontsize=7)
     if i % n_cols == 0:
-        axes[i].set_ylabel('Density')
-    axes[i].legend(fontsize=7)
+        axes[i].set_ylabel('Density', fontsize=7)
+    axes[i].legend(fontsize=6)
+    axes[i].tick_params(labelsize=6)
 
 for j in range(i + 1, len(axes)):
     axes[j].set_visible(False)
@@ -534,7 +807,65 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/balance/figure_18.png]]
+[[file:./figures/balance/figure_21.png]]
+
+*** Balance Quality Across K
+
+For each K value, measure how well excitation and inhibition cancel at the
+single-neuron level: compute the ratio |mean net input| / mean |total excitation|.
+A ratio near 0 indicates tight balance.
+
+#+begin_src ipython
+balance_ratio_E = []
+balance_ratio_I = []
+
+for i, K in enumerate(K_list):
+    r = rates_list[i]
+    ri = rec_input_list[i]
+    ff = ff_input_list[i]
+    mk = Network('config_EI.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', K=K)
+    Wk = mk.weight_builder.W_rec_base.cpu().detach().numpy()
+
+    rates_f = r[-1]
+    Ne_k = mk.config.Na[0].item()
+    N_STEADY_k = mk.config.N_STEADY
+    N_HEBB_k = mk.config.N_HEBB
+    N_WINDOW_k = mk.config.N_WINDOW
+    ff_start_k = N_STEADY_k + N_HEBB_k + (r.shape[0] - 1) * N_WINDOW_k
+    ff_end_k = ff_start_k + N_WINDOW_k
+    ff_f = np.mean(ff[0, ff_start_k:ff_end_k], axis=0)
+
+    # To E
+    exc_E = ff_f[:Ne_k] + rates_f[:Ne_k] @ Wk[:Ne_k, :Ne_k]
+    inh_E = rates_f[Ne_k:] @ Wk[Ne_k:, :Ne_k]
+    net_E = exc_E + inh_E
+    ratio_E = np.mean(np.abs(net_E)) / (np.mean(np.abs(exc_E)) + 1e-9)
+    balance_ratio_E.append(ratio_E)
+
+    # To I
+    Ni_k = mk.config.N_NEURON - Ne_k
+    if Ni_k > 0:
+        exc_I = ff_f[Ne_k:] + rates_f[:Ne_k] @ Wk[:Ne_k, Ne_k:]
+        inh_I = rates_f[Ne_k:] @ Wk[Ne_k:, Ne_k:]
+        net_I = exc_I + inh_I
+        ratio_I = np.mean(np.abs(net_I)) / (np.mean(np.abs(exc_I)) + 1e-9)
+        balance_ratio_I.append(ratio_I)
+
+fig, ax = plt.subplots(figsize=(width, height))
+ax.plot(K_list, balance_ratio_E, '-o', label='To E', markersize=4, color='tab:blue')
+if balance_ratio_I:
+    ax.plot(K_list, balance_ratio_I, '-s', label='To I', markersize=4, color='tab:red')
+ax.set_xlabel('$K$')
+ax.set_ylabel('$|\\langle \\mathrm{net} \\rangle| / \\langle |\\mathrm{exc}| \\rangle$')
+ax.set_title('Balance tightness vs K (lower = tighter)')
+ax.legend()
+ax.set_ylim(bottom=0)
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/balance/figure_22.png]]
 
 ** Temporal Structure
 *** Setup
@@ -546,19 +877,22 @@ rates_ts = model_ts.forward(return_all_pops=True)[0].cpu().detach().numpy()
 Ne_ts = model_ts.config.Na[0].item()
 N_NEURON_ts = model_ts.config.N_NEURON
 Ni_ts = N_NEURON_ts - Ne_ts
+print(f'Temporal structure analysis: Ne={Ne_ts}, Ni={Ni_ts}, steps={rates_ts.shape[0]}')
 #+end_src
 
 #+RESULTS:
+: Temporal structure analysis: Ne=3000, Ni=1000, steps=101
 
 *** Temporal Autocorrelation
 
 #+begin_src ipython
 from numpy import correlate as np_correlate
 
-max_lag = 30
+max_lag = min(30, rates_ts.shape[0] - 1)
 n_samples = 20
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
+e_acs = []
 for neuron_idx in np.random.choice(Ne_ts, min(n_samples, Ne_ts), replace=False):
     r = rates_ts[:, neuron_idx]
     r = r - r.mean()
@@ -566,13 +900,20 @@ for neuron_idx in np.random.choice(Ne_ts, min(n_samples, Ne_ts), replace=False):
         ac = np_correlate(r, r, mode='full')
         ac = ac[len(ac)//2:]
         ac = ac / (ac[0] + 1e-12)
-        ax[0].plot(ac[:max_lag], alpha=0.3, color='tab:blue')
+        ax[0].plot(ac[:max_lag], alpha=0.2, color='tab:blue')
+        e_acs.append(ac[:max_lag])
+
+if e_acs:
+    mean_ac_E = np.mean(e_acs, axis=0)
+    ax[0].plot(mean_ac_E, color='tab:blue', linewidth=2, label='Mean E')
+    ax[0].legend(fontsize=8)
 
 ax[0].set_xlabel('Lag (steps)')
 ax[0].set_ylabel('Autocorrelation')
 ax[0].set_title('E neurons')
 ax[0].axhline(0, color='k', linewidth=0.5, linestyle='--')
 
+i_acs = []
 if Ni_ts > 0:
     for neuron_idx in np.random.choice(range(Ne_ts, N_NEURON_ts), min(n_samples, Ni_ts), replace=False):
         r = rates_ts[:, neuron_idx]
@@ -581,7 +922,13 @@ if Ni_ts > 0:
             ac = np_correlate(r, r, mode='full')
             ac = ac[len(ac)//2:]
             ac = ac / (ac[0] + 1e-12)
-            ax[1].plot(ac[:max_lag], alpha=0.3, color='tab:red')
+            ax[1].plot(ac[:max_lag], alpha=0.2, color='tab:red')
+            i_acs.append(ac[:max_lag])
+
+    if i_acs:
+        mean_ac_I = np.mean(i_acs, axis=0)
+        ax[1].plot(mean_ac_I, color='tab:red', linewidth=2, label='Mean I')
+        ax[1].legend(fontsize=8)
 
 ax[1].set_xlabel('Lag (steps)')
 ax[1].set_ylabel('Autocorrelation')
@@ -593,7 +940,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/balance/figure_20.png]]
+[[file:./figures/balance/figure_24.png]]
 
 *** Cross-Population Correlations
 
@@ -620,27 +967,27 @@ ee_corr = sample_corr(rates_ts, range(Ne_ts), range(Ne_ts), n_pairs)
 
 fig, ax = plt.subplots(figsize=(width, height))
 if ee_corr:
-    ax.hist(ee_corr, bins=40, alpha=0.6, label='E-E', density=True)
+    ax.hist(ee_corr, bins=40, alpha=0.6, label=f'E-E (μ={np.mean(ee_corr):.3f})', density=True)
 
 if Ni_ts > 0:
     ei_corr = sample_corr(rates_ts, range(Ne_ts), range(Ne_ts, N_NEURON_ts), n_pairs)
     ii_corr = sample_corr(rates_ts, range(Ne_ts, N_NEURON_ts), range(Ne_ts, N_NEURON_ts), n_pairs)
     if ei_corr:
-        ax.hist(ei_corr, bins=40, alpha=0.6, label='E-I', density=True)
+        ax.hist(ei_corr, bins=40, alpha=0.6, label=f'E-I (μ={np.mean(ei_corr):.3f})', density=True)
     if ii_corr:
-        ax.hist(ii_corr, bins=40, alpha=0.6, label='I-I', density=True)
+        ax.hist(ii_corr, bins=40, alpha=0.6, label=f'I-I (μ={np.mean(ii_corr):.3f})', density=True)
 
 ax.axvline(0, color='k', linewidth=0.5, linestyle='--')
 ax.set_xlabel('Pairwise correlation')
 ax.set_ylabel('Density')
 ax.set_title('Noise correlations')
-ax.legend()
+ax.legend(fontsize=7)
 plt.tight_layout()
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/balance/figure_21.png]]
+[[file:./figures/balance/figure_25.png]]
 
 *** Fano Factor Over Time
 
@@ -650,15 +997,19 @@ var_E_t = np.var(rates_ts[:, :Ne_ts], axis=1)
 
 fig, ax = plt.subplots(figsize=(width, height))
 valid_E = mean_E_t > 1e-6
-ax.plot(np.where(valid_E)[0], (var_E_t / mean_E_t)[valid_E], label='E', alpha=0.7, color='tab:blue')
+fano_E = np.full_like(mean_E_t, np.nan)
+fano_E[valid_E] = var_E_t[valid_E] / mean_E_t[valid_E]
+ax.plot(fano_E, label='E', alpha=0.7, color='tab:blue')
 
 if Ni_ts > 0:
     mean_I_t = np.mean(rates_ts[:, Ne_ts:], axis=1)
     var_I_t = np.var(rates_ts[:, Ne_ts:], axis=1)
     valid_I = mean_I_t > 1e-6
-    ax.plot(np.where(valid_I)[0], (var_I_t / mean_I_t)[valid_I], label='I', alpha=0.7, color='tab:red')
+    fano_I = np.full_like(mean_I_t, np.nan)
+    fano_I[valid_I] = var_I_t[valid_I] / mean_I_t[valid_I]
+    ax.plot(fano_I, label='I', alpha=0.7, color='tab:red')
 
-ax.set_xlabel('Step')
+ax.set_xlabel('Output Step')
 ax.set_ylabel('Fano Factor (Var / Mean across neurons)')
 ax.set_title('Spatial Fano factor over time')
 ax.legend()
@@ -667,7 +1018,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/balance/figure_22.png]]
+[[file:./figures/balance/figure_26.png]]
 
 *** Power Spectral Density
 
@@ -676,12 +1027,11 @@ from scipy.signal import welch
 
 fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
-# Population-averaged rate traces
 pop_E = np.mean(rates_ts[:, :Ne_ts], axis=1)
 
 DT = model_ts.config.DT
 N_WINDOW_cfg = model_ts.config.N_WINDOW
-fs = 1.0 / (DT * N_WINDOW_cfg)  # sampling frequency of collected rates
+fs = 1.0 / (DT * N_WINDOW_cfg)
 
 nperseg = min(len(pop_E) // 2, 64)
 if nperseg > 4:
@@ -698,40 +1048,40 @@ if nperseg > 4:
     ax[0].set_title('Population rate PSD')
     ax[0].legend()
 
-# Single neuron examples
-for neuron_idx in np.random.choice(Ne_ts, min(5, Ne_ts), replace=False):
-    r = rates_ts[:, neuron_idx]
-    if np.std(r) > 1e-9:
-        f, p = welch(r - r.mean(), fs=fs, nperseg=nperseg)
-        ax[1].semilogy(f, p, alpha=0.4, color='tab:blue')
-
-if Ni_ts > 0:
-    for neuron_idx in np.random.choice(range(Ne_ts, N_NEURON_ts), min(5, Ni_ts), replace=False):
+    # Single neuron examples
+    for neuron_idx in np.random.choice(Ne_ts, min(5, Ne_ts), replace=False):
         r = rates_ts[:, neuron_idx]
         if np.std(r) > 1e-9:
             f, p = welch(r - r.mean(), fs=fs, nperseg=nperseg)
-            ax[1].semilogy(f, p, alpha=0.4, color='tab:red')
+            ax[1].semilogy(f, p, alpha=0.4, color='tab:blue')
 
-ax[1].set_xlabel('Frequency (Hz)')
-ax[1].set_ylabel('PSD')
-ax[1].set_title('Single neuron PSD (blue=E, red=I)')
+    if Ni_ts > 0:
+        for neuron_idx in np.random.choice(range(Ne_ts, N_NEURON_ts), min(5, Ni_ts), replace=False):
+            r = rates_ts[:, neuron_idx]
+            if np.std(r) > 1e-9:
+                f, p = welch(r - r.mean(), fs=fs, nperseg=nperseg)
+                ax[1].semilogy(f, p, alpha=0.4, color='tab:red')
+
+    ax[1].set_xlabel('Frequency (Hz)')
+    ax[1].set_ylabel('PSD')
+    ax[1].set_title('Single neuron PSD (blue=E, red=I)')
+else:
+    ax[0].set_title('Too few steps for PSD')
 
 plt.tight_layout()
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/balance/figure_23.png]]
+[[file:./figures/balance/figure_27.png]]
 
 *** Dimensionality (Participation Ratio)
 
 #+begin_src ipython
-# PCA on steady-state rate snapshots across K
 from sklearn.decomposition import PCA
 
 pr_list = []
 for r in rates_list:
-    # Use the full time series, transpose to (neurons x time)
     X = r[:, :Ne].T  # (Ne, n_steps)
     if X.shape[1] > 2:
         cov = np.cov(X)
@@ -752,8 +1102,54 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/balance/figure_24.png]]
+[[file:./figures/balance/figure_28.png]]
+
+** Summary Statistics
 
 #+begin_src ipython
-
+print("=" * 60)
+print("BALANCE ANALYSIS SUMMARY")
+print("=" * 60)
+print(f"Network: Ne={Ne}, Ni={Ni}, N={N_NEURON}")
+print(f"K values tested: {K_list}")
+print()
+print("--- Single trial (last K) ---")
+print(f"  Mean E rate: {np.mean(rates[-1, :Ne]):.2f} Hz")
+print(f"  Mean I rate: {np.mean(rates[-1, Ne:]):.2f} Hz")
+if rec_input is not None:
+    print(f"  Mean net input to E: {np.mean(net_to_E):.2f}")
+    if Ni > 0:
+        print(f"  Mean net input to I: {np.mean(net_to_I):.2f}")
+print()
+print("--- Scaling ---")
+for i, K in enumerate(K_list):
+    print(f"  K={K:4d}: E={mean_rates_E[i]:.2f} Hz, I={mean_rates_I[i]:.2f} Hz, "
+          f"CV_E={cv_E[i]:.3f}, PR={pr_list[i]:.1f}")
 #+end_src
+
+#+RESULTS:
+#+begin_example
+============================================================
+BALANCE ANALYSIS SUMMARY
+============================================================
+Network: Ne=3000, Ni=1000, N=4000
+K values tested: [  10  120  230  340  450  560  670  780  890 1000]
+
+--- Single trial (last K) ---
+  Mean E rate: 1.42 Hz
+  Mean I rate: 2.38 Hz
+  Mean net input to E: -2.30
+  Mean net input to I: 0.56
+
+--- Scaling ---
+  K=  10: E=4.52 Hz, I=5.31 Hz, CV_E=1.741, PR=2.7
+  K= 120: E=1.58 Hz, I=2.52 Hz, CV_E=1.615, PR=71.9
+  K= 230: E=1.43 Hz, I=2.37 Hz, CV_E=1.367, PR=89.4
+  K= 340: E=1.31 Hz, I=2.30 Hz, CV_E=1.277, PR=93.0
+  K= 450: E=1.27 Hz, I=2.29 Hz, CV_E=1.231, PR=94.5
+  K= 560: E=1.22 Hz, I=2.25 Hz, CV_E=1.208, PR=95.3
+  K= 670: E=1.19 Hz, I=2.24 Hz, CV_E=1.204, PR=95.7
+  K= 780: E=1.15 Hz, I=2.23 Hz, CV_E=1.218, PR=96.0
+  K= 890: E=1.14 Hz, I=2.22 Hz, CV_E=1.222, PR=96.3
+  K=1000: E=1.13 Hz, I=2.21 Hz, CV_E=1.232, PR=96.4
+#+end_example

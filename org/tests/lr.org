@@ -1,0 +1,861 @@
+#+STARTUP: fold
+#+TITLE: Low-Rank Recurrent Networks
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session lr :kernel torch :exports results :output-dir ./figures/lr :file (lc/org-babel-tangle-figure-filename)
+
+** Notebook Settings
+
+#+begin_src ipython
+%load_ext autoreload
+%autoreload 2
+%reload_ext autoreload
+
+%run ../../notebooks/setup.py
+%matplotlib inline
+%config InlineBackend.figure_format = 'png'
+#+end_src
+
+#+RESULTS:
+: The autoreload extension is already loaded. To reload it, use:
+:   %reload_ext autoreload
+: Python exe
+: /home/leon/mambaforge/bin/python
+
+** Imports
+
+#+begin_src ipython
+import sys
+sys.path.insert(0, '../../')
+
+import torch
+import numpy as np
+import pandas as pd
+from time import perf_counter
+
+from src.network import Network
+from src.weights.lr import get_theta, get_idx, get_overlap
+#+end_src
+
+#+RESULTS:
+
+** Helpers
+
+#+begin_src ipython
+def convert_seconds(seconds):
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return h, m, s
+
+def plot_eigen(W):
+    eigenvalues = torch.linalg.eigvals(W).cpu().numpy()
+    real_parts = eigenvalues.real
+    imag_parts = eigenvalues.imag
+
+    plt.figure(figsize=(5, 5))
+    plt.scatter(real_parts, imag_parts, s=2, alpha=0.5)
+    plt.xlabel('Real Part')
+    plt.ylabel('Imaginary Part')
+    plt.axhline(y=0, color='k', linestyle='--', linewidth=0.5)
+    plt.axvline(x=0, color='k', linestyle='--', linewidth=0.5)
+    plt.title('Eigenvalue Spectrum')
+    plt.show()
+
+def add_stim_shading(ax, stim_epochs, t_offset=0.0, colors=None, labels=None, alpha=0.12):
+    """Add vertical shading bands for stimulus epochs."""
+    if colors is None:
+        colors = ['tab:blue', 'tab:red', 'tab:green', 'tab:orange']
+    for i, (on, off) in enumerate(stim_epochs):
+        c = colors[i % len(colors)]
+        lbl = labels[i] if labels else f'Stim {i}'
+        ax.axvspan(on - t_offset, off - t_offset, alpha=alpha, color=c, label=lbl)
+#+end_src
+
+#+RESULTS:
+
+** Model Setup
+*** Configuration
+
+We use the E/I config as a base but enable the trainable low-rank perturbation
+with =RANK=2=.  The low-rank module adds a matrix $\frac{G}{\sqrt{K}} U V^\top$
+to the E→E block.  We initialise with larger =LR_INI= so the structure is visible
+without training.
+
+#+begin_src ipython
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+model = Network('config_lr.yml', REPO_ROOT)
+#+end_src
+
+#+RESULTS:
+
+*** Extract Low-Rank Vectors
+
+#+begin_src ipython
+lr_module = model.weight_builder.low_rank
+U = lr_module.get_U().detach().cpu().numpy()  # (Ne, 2)
+V = lr_module.get_V().detach().cpu().numpy()  # (Ne, 2)
+
+Ne = model.config.Na[0].item()
+N_NEURON = model.config.N_NEURON
+Ni = N_NEURON - Ne
+print(f'Ne={Ne}, Ni={Ni}, N_NEURON={N_NEURON}')
+print(f'U shape: {U.shape}, V shape: {V.shape}')
+print(f'U norms: {np.linalg.norm(U, axis=0)}')
+print(f'V norms: {np.linalg.norm(V, axis=0)}')
+print(f'U[:,0]·U[:,1] = {U[:,0] @ U[:,1]:.4f}')
+print(f'V[:,0]·V[:,1] = {V[:,0] @ V[:,1]:.4f}')
+print(f'U[:,0]·V[:,0] = {U[:,0] @ V[:,0]:.4f}')
+print(f'U[:,0]·V[:,1] = {U[:,0] @ V[:,1]:.4f}')
+#+end_src
+
+#+RESULTS:
+: Ne=3000, Ni=1000, N_NEURON=4000
+: U shape: (3000, 2), V shape: (3000, 2)
+: U norms: [53.683006 54.314014]
+: V norms: [54.71209  53.793026]
+: U[:,0]·U[:,1] = -41.8736
+: V[:,0]·V[:,1] = -77.7240
+: U[:,0]·V[:,0] = 4.6792
+: U[:,0]·V[:,1] = 2.4930
+
+*** Visualise Low-Rank Vectors
+
+#+begin_src ipython
+fig, axes = plt.subplots(2, 3, figsize=[3*width, 2*height])
+
+# U and V profiles: subsample for clarity
+show_idx = np.arange(0, Ne, max(1, Ne // 500))
+for k in range(2):
+    axes[0, 0].plot(show_idx, U[show_idx, k], alpha=0.7, lw=0.4, label=f'$u_{k}$')
+    axes[0, 1].plot(show_idx, V[show_idx, k], alpha=0.7, lw=0.4, label=f'$v_{k}$')
+for ax, title in [(axes[0,0], 'Left vectors $U$'), (axes[0,1], 'Right vectors $V$')]:
+    ax.set_xlabel('E neuron index')
+    ax.set_ylabel('Weight')
+    ax.set_title(title)
+    ax.legend(fontsize=8)
+
+# U-V scatter per rank
+for k in range(2):
+    axes[0, 2].scatter(U[:, k], V[:, k], s=1, alpha=0.15, rasterized=True, label=f'rank {k}')
+axes[0, 2].set_xlabel('$U_i$'); axes[0, 2].set_ylabel('$V_i$')
+axes[0, 2].set_title('$U$ vs $V$ per neuron')
+axes[0, 2].legend(fontsize=8, markerscale=5)
+axes[0, 2].axhline(0, color='k', lw=0.5, ls='--')
+axes[0, 2].axvline(0, color='k', lw=0.5, ls='--')
+
+# Joint distribution in V space
+axes[1, 0].scatter(V[:, 0], V[:, 1], s=1, alpha=0.15, c='tab:purple', rasterized=True)
+axes[1, 0].set_xlabel('$V_0$'); axes[1, 0].set_ylabel('$V_1$')
+axes[1, 0].set_title('Neurons in $V$-space (readout)')
+axes[1, 0].axhline(0, color='k', lw=0.5, ls='--')
+axes[1, 0].axvline(0, color='k', lw=0.5, ls='--')
+
+# Joint distribution in U space
+axes[1, 1].scatter(U[:, 0], U[:, 1], s=1, alpha=0.15, c='tab:orange', rasterized=True)
+axes[1, 1].set_xlabel('$U_0$'); axes[1, 1].set_ylabel('$U_1$')
+axes[1, 1].set_title('Neurons in $U$-space (input)')
+axes[1, 1].axhline(0, color='k', lw=0.5, ls='--')
+axes[1, 1].axvline(0, color='k', lw=0.5, ls='--')
+
+# Low-rank matrix structure
+W_lr = lr_module(0).detach().cpu().numpy()
+vmax_lr = np.percentile(np.abs(W_lr), 99)
+im = axes[1, 2].imshow(W_lr, cmap='RdBu_r', aspect='auto',
+                         vmin=-vmax_lr, vmax=vmax_lr, interpolation='none')
+axes[1, 2].set_xlabel('Post E neuron'); axes[1, 2].set_ylabel('Pre E neuron')
+axes[1, 2].set_title(f'$W_{{LR}} = U V^\\top$ (rank {U.shape[1]})')
+plt.colorbar(im, ax=axes[1, 2], fraction=0.046, pad=0.04)
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/lr/figure_5.png]]
+
+** Stimuli Aligned with Low-Rank Vectors
+*** Build Custom FF Input
+
+We inject stimuli proportional to the right vectors $V_{:,0}$ and $V_{:,1}$
+during two separate epochs, so the input projects cleanly onto the
+low-rank subspace.
+
+#+begin_src ipython
+V_tensor = lr_module.get_V().detach()  # (Ne, 2) on device
+Ne_t = model.config.Na[0].item()
+
+# Build baseline ff_input from the model
+ff_input = model.ff_input_builder.build()  # (N_BATCH, N_STEPS, N_NEURON)
+ff_input_custom = ff_input.clone()
+
+N_STEADY = model.config.N_STEADY
+N_HEBB = model.config.N_HEBB
+DT = model.config.DT
+GAIN = model.config.GAIN
+Ka0 = model.config.Ka[0].item()
+M0 = model.config.M0
+
+# Stimulus parameters
+stim_strength = 2.0
+
+# Epoch 1: inject V[:,0] from t=2s to t=4s (absolute simulation time)
+t_on_1 = int(2.0 / DT) + N_STEADY + N_HEBB
+t_off_1 = int(4.0 / DT) + N_STEADY + N_HEBB
+
+# Epoch 2: inject V[:,1] from t=5s to t=7s
+t_on_2 = int(5.0 / DT) + N_STEADY + N_HEBB
+t_off_2 = int(7.0 / DT) + N_STEADY + N_HEBB
+
+scale = GAIN * np.sqrt(Ka0) * M0
+stim_v0 = stim_strength * V_tensor[:, 0] * scale
+stim_v1 = stim_strength * V_tensor[:, 1] * scale
+
+ee = model.config.slices[0]
+ff_input_custom[:, t_on_1:t_off_1, ee] += stim_v0.unsqueeze(0)
+ff_input_custom[:, t_on_2:t_off_2, ee] += stim_v1.unsqueeze(0)
+
+print(f'Stim V0: steps [{t_on_1}, {t_off_1}), strength={stim_strength}')
+print(f'Stim V1: steps [{t_on_2}, {t_off_2}), strength={stim_strength}')
+print(f'ff_input_custom shape: {ff_input_custom.shape}')
+#+end_src
+
+#+RESULTS:
+: Stim V0: steps [200, 300), strength=2.0
+: Stim V1: steps [350, 450), strength=2.0
+: ff_input_custom shape: torch.Size([1, 605, 4000])
+
+*** Run with Custom Input
+
+#+begin_src ipython
+outputs = model(ff_input_custom, return_outputs=True, return_rec=True)
+rates = outputs.rates.cpu().detach().numpy()[0]  # (n_steps_out, Ne)
+print(f'rates shape: {rates.shape}')
+#+end_src
+
+#+RESULTS:
+: rates shape: (101, 3000)
+
+** Overlap Analysis
+*** Compute Overlaps
+
+The overlap (order parameter) $m_k(t) = \frac{1}{N_E} \sum_i r_i(t) V_{i,k}$
+measures how much the population activity projects onto each low-rank direction.
+
+#+begin_src ipython
+rates_tensor = outputs.rates[0].cpu()  # (n_steps_out, Ne)
+V_cpu = torch.tensor(V, dtype=rates_tensor.dtype)
+
+overlaps = (rates_tensor @ V_cpu) / Ne  # (n_steps_out, 2)
+overlaps = overlaps.numpy()
+
+print(f'Overlap shape: {overlaps.shape}')
+print(f'Final overlaps: m0={overlaps[-1, 0]:.4f}, m1={overlaps[-1, 1]:.4f}')
+#+end_src
+
+#+RESULTS:
+: Overlap shape: (101, 2)
+: Final overlaps: m0=-0.0524, m1=0.0266
+
+*** Using the get_overlap Helper
+
+#+begin_src ipython
+# get_overlap expects model.PHI0 — we set it to V for this analysis
+model.config.PHI0 = V_tensor.T  # (2, Ne)
+overlaps_check = get_overlap(model.config, rates_tensor).numpy()
+print(f'get_overlap shape: {overlaps_check.shape}')
+print(f'Match: {np.allclose(overlaps, overlaps_check, atol=1e-5)}')
+#+end_src
+
+#+RESULTS:
+: get_overlap shape: (101, 2)
+: Match: True
+
+*** Overlap Time Courses
+
+#+begin_src ipython
+N_WINDOW = model.config.N_WINDOW
+dt_out = model.config.DT * N_WINDOW
+t_axis = np.arange(rates.shape[0]) * dt_out
+T_STEADY = model.config.T_STEADY
+
+# Stimulus epochs in output-relative time
+stim_epochs = [(2.0 - T_STEADY, 4.0 - T_STEADY),
+               (5.0 - T_STEADY, 7.0 - T_STEADY)]
+stim_labels = ['Stim $V_0$', 'Stim $V_1$']
+colors_stim = ['tab:blue', 'tab:red']
+
+fig, axes = plt.subplots(1, 3, figsize=[3*width, height])
+
+# --- Panel 1: Overlaps over time ---
+for k in range(2):
+    axes[0].plot(t_axis, overlaps[:, k], color=colors_stim[k], lw=1.5,
+                 label=f'$m_{k}$')
+for i, (on, off) in enumerate(stim_epochs):
+    axes[0].axvspan(on, off, alpha=0.12, color=colors_stim[i], label=stim_labels[i])
+axes[0].set_xlabel('Time (s)')
+axes[0].set_ylabel('Overlap $m_k$')
+axes[0].set_title('Low-rank overlaps')
+axes[0].legend(fontsize=7, ncol=2)
+axes[0].axhline(0, color='k', lw=0.5, ls='--')
+
+# --- Panel 2: Phase portrait m0 vs m1 ---
+axes[1].plot(overlaps[:, 0], overlaps[:, 1], 'k-', alpha=0.2, lw=0.5)
+sc = axes[1].scatter(overlaps[:, 0], overlaps[:, 1], c=t_axis, cmap='viridis',
+                      s=12, alpha=0.8, zorder=3)
+axes[1].scatter(overlaps[0, 0], overlaps[0, 1], c='green', s=60, zorder=5,
+                edgecolors='k', linewidths=0.5, label='Start')
+axes[1].scatter(overlaps[-1, 0], overlaps[-1, 1], c='red', s=60, zorder=5,
+                marker='x', linewidths=2, label='End')
+plt.colorbar(sc, ax=axes[1], label='Time (s)', fraction=0.046, pad=0.04)
+axes[1].set_xlabel('$m_0$'); axes[1].set_ylabel('$m_1$')
+axes[1].set_title('Phase portrait')
+axes[1].legend(fontsize=7)
+axes[1].axhline(0, color='k', lw=0.5, ls='--')
+axes[1].axvline(0, color='k', lw=0.5, ls='--')
+
+# --- Panel 3: Mean rate and overlap magnitude ---
+mean_E = np.mean(rates, axis=1)
+overlap_norm = np.sqrt(overlaps[:, 0]**2 + overlaps[:, 1]**2)
+ln1 = axes[2].plot(t_axis, mean_E, label='Mean E rate', color='tab:gray', lw=1.5)
+axes[2].set_xlabel('Time (s)')
+axes[2].set_ylabel('Rate (Hz)', color='tab:gray')
+axes[2].tick_params(axis='y', labelcolor='tab:gray')
+ax2 = axes[2].twinx()
+ln2 = ax2.plot(t_axis, overlap_norm, label='$|m|$', color='tab:purple', ls='--', lw=1.5)
+ax2.set_ylabel('$|m|$', color='tab:purple')
+ax2.tick_params(axis='y', labelcolor='tab:purple')
+# Combined legend
+lns = ln1 + ln2
+labs = [l.get_label() for l in lns]
+axes[2].legend(lns, labs, fontsize=7, loc='upper right')
+axes[2].set_title('Rate vs overlap magnitude')
+for i, (on, off) in enumerate(stim_epochs):
+    axes[2].axvspan(on, off, alpha=0.08, color=colors_stim[i])
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/lr/figure_10.png]]
+
+** Selectivity Analysis
+*** Neuron Selectivity to Low-Rank Directions
+
+Each neuron's selectivity to direction $k$ is $V_{i,k}$.  Neurons with large
+$|V_{i,k}|$ respond most strongly to input along direction $k$.
+
+#+begin_src ipython
+# Compute stimulus-evoked rate change for each epoch
+dt_out_val = model.config.DT * model.config.N_WINDOW
+
+# Indices into output time steps (relative to output start)
+baseline_steps = slice(0, int(1.5 / dt_out_val))
+stim1_steps = slice(int(2.5 / dt_out_val), int(3.5 / dt_out_val))
+stim2_steps = slice(int(5.5 / dt_out_val), int(6.5 / dt_out_val))
+
+r_base = np.mean(rates[baseline_steps], axis=0)
+r_stim1 = np.mean(rates[stim1_steps], axis=0)
+r_stim2 = np.mean(rates[stim2_steps], axis=0)
+
+delta_r1 = r_stim1 - r_base  # response to V0 input
+delta_r2 = r_stim2 - r_base  # response to V1 input
+
+fig, axes = plt.subplots(2, 3, figsize=[3*width, 2*height])
+
+# --- Row 0: Δr vs V for each stimulus direction ---
+for k, (dr, label) in enumerate([(delta_r1, '$V_0$ stim'), (delta_r2, '$V_1$ stim')]):
+    for j in range(2):
+        axes[0, k].scatter(V[:, j], dr, s=1, alpha=0.1, rasterized=True,
+                           label=f'vs $V_{j}$')
+    # Add linear fit line for the "matching" direction
+    from numpy.polynomial.polynomial import polyfit
+    c_fit = polyfit(V[:, k], dr, 1)
+    x_range = np.linspace(V[:, k].min(), V[:, k].max(), 100)
+    axes[0, k].plot(x_range, c_fit[0] + c_fit[1]*x_range, 'k--', lw=1.5,
+                    label=f'linear fit ($V_{k}$)')
+    axes[0, k].set_xlabel('$V_{i,k}$')
+    axes[0, k].set_ylabel('$\\Delta r_i$')
+    axes[0, k].set_title(f'Response to {label}')
+    axes[0, k].legend(fontsize=7, markerscale=5)
+    axes[0, k].axhline(0, color='k', lw=0.5, ls='--')
+    axes[0, k].axvline(0, color='k', lw=0.5, ls='--')
+
+# --- Row 0, col 2: Correlation matrix ---
+corr_matrix = np.zeros((2, 2))
+for i in range(2):
+    for j in range(2):
+        dr = delta_r1 if i == 0 else delta_r2
+        corr_matrix[i, j] = np.corrcoef(V[:, j], dr)[0, 1]
+
+im = axes[0, 2].imshow(corr_matrix, cmap='RdBu_r', vmin=-1, vmax=1)
+axes[0, 2].set_xticks([0, 1]); axes[0, 2].set_xticklabels(['$V_0$', '$V_1$'])
+axes[0, 2].set_yticks([0, 1])
+axes[0, 2].set_yticklabels(['$\\Delta r$ ($V_0$ stim)', '$\\Delta r$ ($V_1$ stim)'])
+axes[0, 2].set_title('Selectivity correlation')
+for ii in range(2):
+    for jj in range(2):
+        axes[0, 2].text(jj, ii, f'{corr_matrix[ii, jj]:.2f}',
+                        ha='center', va='center', fontsize=11, fontweight='bold')
+plt.colorbar(im, ax=axes[0, 2], fraction=0.046, pad=0.04)
+
+# --- Row 1, col 0: Δr1 vs Δr2, colored by V[:,0] ---
+vlim = np.percentile(np.abs(V[:, 0]), 95)
+sc = axes[1, 0].scatter(delta_r1, delta_r2, c=V[:, 0], cmap='coolwarm',
+                         s=2, alpha=0.3, vmin=-vlim, vmax=vlim, rasterized=True)
+axes[1, 0].set_xlabel('$\\Delta r$ ($V_0$ stim)')
+axes[1, 0].set_ylabel('$\\Delta r$ ($V_1$ stim)')
+axes[1, 0].set_title('Response selectivity (color=$V_{i,0}$)')
+axes[1, 0].axhline(0, color='k', lw=0.5, ls='--')
+axes[1, 0].axvline(0, color='k', lw=0.5, ls='--')
+plt.colorbar(sc, ax=axes[1, 0], fraction=0.046, pad=0.04, label='$V_{i,0}$')
+
+# --- Row 1, col 1-2: Rate heatmaps sorted by V ---
+rate_pctl = np.percentile(rates, 99)
+for col, (sort_v, sort_label) in enumerate([(0, '$V_{i,0}$'), (1, '$V_{i,1}$')]):
+    sort_idx = np.argsort(V[:, sort_v])
+    im_r = axes[1, 1+col].imshow(rates[:, sort_idx].T, aspect='auto', origin='lower',
+                                   cmap='inferno', vmin=0, vmax=rate_pctl,
+                                   interpolation='none')
+    axes[1, 1+col].set_xlabel('Output step')
+    axes[1, 1+col].set_ylabel(f'E neuron (sorted by {sort_label})')
+    axes[1, 1+col].set_title(f'Rates sorted by {sort_label}')
+    plt.colorbar(im_r, ax=axes[1, 1+col], fraction=0.046, pad=0.04, label='Hz')
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/lr/figure_11.png]]
+
+** Weight Structure
+*** Full Recurrent Matrix with Low-Rank Perturbation
+
+#+begin_src ipython
+W_full = model.weight_builder.build_recurrent(
+    model.weight_builder.build_trainable_matrix()
+).cpu().detach().numpy()
+W_base = model.weight_builder.W_rec_base.cpu().detach().numpy()
+W_lr_mat = W_full[:Ne, :Ne] - W_base[:Ne, :Ne]
+
+fig, axes = plt.subplots(1, 3, figsize=[3*width, height+1])
+
+vmax_full = np.percentile(np.abs(W_full), 99)
+im0 = axes[0].imshow(W_full, cmap='RdBu_r', aspect=1,
+                      vmin=-vmax_full, vmax=vmax_full, interpolation='none')
+axes[0].axhline(y=Ne-0.5, color='k', ls='--', lw=0.5)
+axes[0].axvline(x=Ne-0.5, color='k', ls='--', lw=0.5)
+axes[0].set_title('$W_{rec}$ (full)')
+axes[0].set_xlabel('Post'); axes[0].set_ylabel('Pre')
+plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+
+vmax_base = np.percentile(np.abs(W_base), 99)
+im1 = axes[1].imshow(W_base, cmap='RdBu_r', aspect=1,
+                      vmin=-vmax_base, vmax=vmax_base, interpolation='none')
+axes[1].axhline(y=Ne-0.5, color='k', ls='--', lw=0.5)
+axes[1].axvline(x=Ne-0.5, color='k', ls='--', lw=0.5)
+axes[1].set_title('$W_{base}$ (random sparse)')
+axes[1].set_xlabel('Post')
+plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+
+vmax_lr = np.percentile(np.abs(W_lr_mat), 99)
+im2 = axes[2].imshow(W_lr_mat, cmap='RdBu_r', aspect=1,
+                      vmin=-vmax_lr, vmax=vmax_lr, interpolation='none')
+axes[2].set_title('$W_{LR} = G \\cdot U V^\\top / \\sqrt{K}$ (E→E)')
+axes[2].set_xlabel('Post E'); axes[2].set_ylabel('Pre E')
+plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/lr/figure_12.png]]
+
+*** Eigenvalue Spectrum: Base vs Full
+
+#+begin_src ipython
+fig, axes = plt.subplots(1, 2, figsize=[2*width, width])
+
+for ax, (W, title) in zip(axes, [
+    (torch.tensor(W_base), '$W_{base}$'),
+    (torch.tensor(W_full), '$W_{base} + W_{LR}$'),
+]):
+    eigs = torch.linalg.eigvals(W).cpu().numpy()
+    ax.scatter(eigs.real, eigs.imag, s=2, alpha=0.3, color='steelblue', rasterized=True)
+    ax.axhline(0, color='k', ls='--', lw=0.5)
+    ax.axvline(0, color='k', ls='--', lw=0.5)
+    ax.set_xlabel('Real'); ax.set_ylabel('Imag')
+    ax.set_title(f'Eigenvalues of {title}')
+    ax.set_aspect('equal')
+
+    # Highlight outlier eigenvalues (from low-rank perturbation)
+    abs_eigs = np.abs(eigs)
+    thresh = np.percentile(abs_eigs, 99.5)
+    outliers = abs_eigs > thresh
+    if np.any(outliers):
+        ax.scatter(eigs.real[outliers], eigs.imag[outliers], s=40,
+                   facecolors='none', edgecolors='red', lw=1.5, zorder=5,
+                   label=f'{np.sum(outliers)} outliers')
+        ax.legend(fontsize=7)
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/lr/figure_13.png]]
+
+** Varying Input Direction
+*** Parametric Sweep over Stimulus Angle
+
+We inject a stimulus $I_{ext} = A (\cos\theta \cdot V_0 + \sin\theta \cdot V_1)$
+and measure the steady-state overlaps for different angles $\theta$.
+
+#+begin_src ipython
+n_angles = 16
+angles = np.linspace(0, 2 * np.pi, n_angles, endpoint=False)
+overlap_ss = np.zeros((n_angles, 2))
+mean_rate_ss = np.zeros(n_angles)
+
+V_t = lr_module.get_V().detach()
+
+for i, theta in enumerate(angles):
+    ff_i = model.ff_input_builder.build().clone()
+    stim_dir = float(np.cos(theta)) * V_t[:, 0] + float(np.sin(theta)) * V_t[:, 1]
+    stim_scaled = stim_strength * stim_dir * scale
+    ee = model.config.slices[0]
+    t_on = int(2.0 / DT) + N_STEADY + N_HEBB
+    t_off = int(12.0 / DT) + N_STEADY + N_HEBB
+    t_off = min(t_off, ff_i.shape[1])  # guard against overshoot
+    ff_i[:, t_on:t_off, ee] += stim_scaled.unsqueeze(0)
+
+    out_i = model(ff_i, return_outputs=True)
+    r_i = out_i.rates[0].cpu()
+    V_cpu_f = torch.tensor(V, dtype=r_i.dtype)
+    m_i = (r_i @ V_cpu_f) / Ne
+    # Take last 20% as steady state
+    ss_slice = slice(int(0.8 * r_i.shape[0]), r_i.shape[0])
+    overlap_ss[i] = m_i[ss_slice].mean(dim=0).numpy()
+    mean_rate_ss[i] = r_i[ss_slice].mean().numpy()
+
+print('Sweep done.')
+#+end_src
+
+#+RESULTS:
+: Sweep done.
+
+*** Overlap Tuning Curves
+
+#+begin_src ipython
+fig, axes = plt.subplots(1, 3, figsize=[3*width, height])
+
+angles_deg = np.degrees(angles)
+
+# --- Panel 1: Tuning curves ---
+for k in range(2):
+    axes[0].plot(angles_deg, overlap_ss[:, k], '-o', markersize=4, label=f'$m_{k}$')
+axes[0].set_xlabel('Input angle $\\theta$ (deg)')
+axes[0].set_ylabel('Steady-state overlap')
+axes[0].set_title('Overlap tuning curves')
+axes[0].legend()
+axes[0].axhline(0, color='k', lw=0.5, ls='--')
+axes[0].set_xlim(0, 360)
+
+# --- Panel 2: Polar plot of |m| ---
+ax_polar = axes[1]
+ax_polar.remove()
+ax_polar = fig.add_subplot(1, 3, 2, projection='polar')
+overlap_mag = np.sqrt(overlap_ss[:, 0]**2 + overlap_ss[:, 1]**2)
+# Close the curve
+ang_closed = np.append(angles, angles[0])
+mag_closed = np.append(overlap_mag, overlap_mag[0])
+ax_polar.plot(ang_closed, mag_closed, 'o-', markersize=4, color='tab:purple')
+ax_polar.fill(ang_closed, mag_closed, alpha=0.15, color='tab:purple')
+ax_polar.set_title('$|m|$ vs input angle', pad=15)
+
+# --- Panel 3: Output vs input angle ---
+output_angle = np.arctan2(overlap_ss[:, 1], overlap_ss[:, 0])
+output_angle_deg = np.degrees(output_angle) % 360
+axes[2].plot(angles_deg, output_angle_deg, 'o-', markersize=5, color='tab:green')
+axes[2].plot([0, 360], [0, 360], 'k--', lw=0.5, label='Identity')
+axes[2].set_xlabel('Input angle $\\theta$ (deg)')
+axes[2].set_ylabel('Output angle (deg)')
+axes[2].set_title('Input–output angle mapping')
+axes[2].legend(fontsize=8)
+axes[2].set_xlim(0, 360); axes[2].set_ylim(0, 360)
+axes[2].set_aspect('equal')
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/lr/figure_15.png]]
+
+** Dimensionality Analysis
+*** PCA of Activity
+
+#+begin_src ipython
+from sklearn.decomposition import PCA
+
+# BUG FIX: PCA must be fit on (n_samples=time, n_features=neurons)
+# rates shape: (n_steps_out, Ne)
+X = rates  # (n_steps_out, Ne) — correct orientation
+n_components = min(20, *X.shape)
+pca = PCA(n_components=n_components)
+pca.fit(X)
+
+fig, axes = plt.subplots(1, 3, figsize=[3*width, height])
+
+# --- Panel 1: Scree plot ---
+n_show = min(10, n_components)
+axes[0].bar(range(1, n_show + 1), pca.explained_variance_ratio_[:n_show],
+            color='tab:blue', alpha=0.7, edgecolor='k', linewidth=0.5)
+axes[0].set_xlabel('PC')
+axes[0].set_ylabel('Explained variance ratio')
+axes[0].set_title('Scree plot')
+axes[0].set_xticks(range(1, n_show + 1))
+
+# --- Panel 2: Cumulative variance + participation ratio ---
+cum_var = np.cumsum(pca.explained_variance_ratio_)
+axes[1].plot(range(1, len(cum_var) + 1), cum_var, 'o-', markersize=4)
+axes[1].axhline(0.9, color='k', ls='--', lw=0.5, label='90%')
+axes[1].axhline(0.95, color='gray', ls=':', lw=0.5, label='95%')
+axes[1].set_xlabel('Number of PCs')
+axes[1].set_ylabel('Cumulative explained variance')
+axes[1].set_title('Cumulative variance')
+axes[1].legend(fontsize=8)
+
+eigvals = pca.explained_variance_
+pr = (np.sum(eigvals)**2) / np.sum(eigvals**2)
+axes[1].text(0.6, 0.3, f'PR = {pr:.1f}', transform=axes[1].transAxes, fontsize=10,
+             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+# --- Panel 3: Trajectory in PC1–PC2 ---
+proj = X @ pca.components_[:2].T  # (n_steps_out, 2) — now dimensions match
+sc = axes[2].scatter(proj[:, 0], proj[:, 1], c=t_axis, cmap='viridis',
+                      s=12, alpha=0.7, zorder=3)
+axes[2].plot(proj[:, 0], proj[:, 1], 'k-', alpha=0.2, lw=0.5)
+axes[2].scatter(proj[0, 0], proj[0, 1], c='green', s=60, zorder=5,
+                edgecolors='k', linewidths=0.5, label='Start')
+axes[2].scatter(proj[-1, 0], proj[-1, 1], c='red', s=60, zorder=5,
+                marker='x', linewidths=2, label='End')
+plt.colorbar(sc, ax=axes[2], label='Time (s)', fraction=0.046, pad=0.04)
+axes[2].set_xlabel('PC1'); axes[2].set_ylabel('PC2')
+axes[2].set_title('Activity in PC space')
+axes[2].legend(fontsize=7)
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/lr/figure_16.png]]
+
+*** Alignment of PCs with Low-Rank Vectors
+
+#+begin_src ipython
+# Now pca.components_ has shape (n_components, Ne) — correct for dot with V
+V_normed = V / np.linalg.norm(V, axis=0, keepdims=True)
+U_normed = U / np.linalg.norm(U, axis=0, keepdims=True)
+
+n_pcs = min(10, pca.components_.shape[0])
+pc_vecs = pca.components_[:n_pcs]  # (n_pcs, Ne)
+
+pc_V_overlap = pc_vecs @ V_normed  # (n_pcs, 2) — dimensions now match
+pc_U_overlap = pc_vecs @ U_normed  # (n_pcs, 2)
+
+fig, axes = plt.subplots(1, 2, figsize=[2*width, height])
+
+x = np.arange(1, n_pcs + 1)
+w = 0.2
+for k in range(2):
+    axes[0].bar(x - w/2 + k*w, np.abs(pc_V_overlap[:, k]), width=w, alpha=0.7,
+                label=f'|PC·$\\hat{{V}}_{k}$|', edgecolor='k', linewidth=0.3)
+    axes[1].bar(x - w/2 + k*w, np.abs(pc_U_overlap[:, k]), width=w, alpha=0.7,
+                label=f'|PC·$\\hat{{U}}_{k}$|', edgecolor='k', linewidth=0.3)
+
+for ax, title in zip(axes, ['Alignment with $V$ (readout)', 'Alignment with $U$ (input)']):
+    ax.set_xlabel('PC index')
+    ax.set_ylabel('$|\\cos \\alpha|$')
+    ax.set_title(title)
+    ax.set_xticks(x)
+    ax.legend(fontsize=7)
+    ax.set_ylim(0, 1.05)
+    ax.axhline(1.0/np.sqrt(Ne), color='gray', ls=':', lw=0.5, label='chance')
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/lr/figure_17.png]]
+
+** Multiple Batches: Overlap Statistics
+*** Run with Multiple Batches
+
+#+begin_src ipython
+N_BATCH_MULTI = 32
+
+# BUG FIX: pass N_BATCH so ff_input has the right batch dimension.
+# BUG FIX: use TASK='None' (capital N) to match the string check in FFInputBuilder.
+model_multi = Network(
+    'config_lr.yml', REPO_ROOT,
+    N_BATCH=N_BATCH_MULTI,
+    TASK='None',
+)
+
+V_multi = model_multi.weight_builder.low_rank.get_V().detach()
+Ne_m = model_multi.config.Na[0].item()
+
+ff_multi = model_multi.ff_input_builder.build().clone()
+print(f'ff_multi shape: {ff_multi.shape}')  # should be (32, N_STEPS, N_NEURON)
+
+scale_m = (model_multi.config.GAIN
+           * np.sqrt(model_multi.config.Ka[0].item())
+           * model_multi.config.M0)
+
+DT_m = model_multi.config.DT
+N_STEADY_m = model_multi.config.N_STEADY
+N_HEBB_m = model_multi.config.N_HEBB
+ee_m = model_multi.config.slices[0]
+
+# Random stimulus directions per batch
+rng = np.random.default_rng(42)
+batch_angles = rng.uniform(0, 2 * np.pi, N_BATCH_MULTI)
+
+t_on_m = int(2.0 / DT_m) + N_STEADY_m + N_HEBB_m
+t_off_m = int(12.0 / DT_m) + N_STEADY_m + N_HEBB_m
+t_off_m = min(t_off_m, ff_multi.shape[1])
+
+for b in range(N_BATCH_MULTI):
+    stim_dir_b = (float(np.cos(batch_angles[b])) * V_multi[:, 0]
+                  + float(np.sin(batch_angles[b])) * V_multi[:, 1])
+    stim_b = stim_strength * stim_dir_b * scale_m
+    ff_multi[b, t_on_m:t_off_m, ee_m] += stim_b
+
+out_multi = model_multi(ff_multi, return_outputs=True)
+rates_multi = out_multi.rates.cpu()  # (N_BATCH, n_steps_out, Ne)
+V_multi_cpu = V_multi.cpu().to(rates_multi.dtype)
+overlaps_multi = (rates_multi @ V_multi_cpu) / Ne_m  # (N_BATCH, n_steps_out, 2)
+overlaps_multi = overlaps_multi.numpy()
+
+print(f'Multi-batch overlaps shape: {overlaps_multi.shape}')
+#+end_src
+
+#+RESULTS:
+: ff_multi shape: torch.Size([32, 605, 4000])
+: Multi-batch overlaps shape: (32, 101, 2)
+
+*** Overlap Distributions and Trajectories
+
+#+begin_src ipython
+fig, axes = plt.subplots(1, 3, figsize=[3*width, height])
+
+# --- Panel 1: All trajectories in overlap space ---
+for b in range(N_BATCH_MULTI):
+    axes[0].plot(overlaps_multi[b, :, 0], overlaps_multi[b, :, 1],
+                 alpha=0.12, lw=0.5, color='tab:blue')
+# Final points colored by input angle
+sc_end = axes[0].scatter(
+    overlaps_multi[:, -1, 0], overlaps_multi[:, -1, 1],
+    s=25, c=batch_angles, cmap='hsv', vmin=0, vmax=2*np.pi,
+    zorder=5, edgecolors='k', linewidths=0.3,
+)
+plt.colorbar(sc_end, ax=axes[0], label='Input $\\theta$ (rad)', fraction=0.046, pad=0.04)
+axes[0].set_xlabel('$m_0$'); axes[0].set_ylabel('$m_1$')
+axes[0].set_title(f'Trajectories ({N_BATCH_MULTI} batches)')
+axes[0].axhline(0, color='k', lw=0.5, ls='--')
+axes[0].axvline(0, color='k', lw=0.5, ls='--')
+
+# --- Panel 2: Steady-state output angle vs input angle ---
+ss_frac = 0.8
+ss_slice_m = slice(int(ss_frac * overlaps_multi.shape[1]), overlaps_multi.shape[1])
+m_ss = overlaps_multi[:, ss_slice_m, :].mean(axis=1)  # (N_BATCH, 2)
+out_angles = np.arctan2(m_ss[:, 1], m_ss[:, 0])
+out_angles_deg = np.degrees(out_angles) % 360
+in_angles_deg = np.degrees(batch_angles) % 360
+
+axes[1].scatter(in_angles_deg, out_angles_deg,
+                c=batch_angles, cmap='hsv', vmin=0, vmax=2*np.pi,
+                s=30, edgecolors='k', linewidths=0.3)
+axes[1].plot([0, 360], [0, 360], 'k--', lw=0.5, label='Identity')
+axes[1].set_xlabel('Input angle (deg)')
+axes[1].set_ylabel('Output angle (deg)')
+axes[1].set_title('Input → output mapping')
+axes[1].legend(fontsize=8)
+axes[1].set_xlim(0, 360); axes[1].set_ylim(0, 360)
+axes[1].set_aspect('equal')
+
+# --- Panel 3: Distribution of overlap magnitudes ---
+m_mag = np.sqrt(m_ss[:, 0]**2 + m_ss[:, 1]**2)
+axes[2].hist(m_mag, bins=15, alpha=0.7, color='tab:purple', edgecolor='k')
+axes[2].axvline(np.mean(m_mag), color='k', ls='--', lw=1.5, label=f'mean={np.mean(m_mag):.3f}')
+axes[2].set_xlabel('$|m|$ (steady state)')
+axes[2].set_ylabel('Count')
+axes[2].set_title(f'Overlap magnitude\n$\\mu$={np.mean(m_mag):.3f}, $\\sigma$={np.std(m_mag):.3f}')
+axes[2].legend(fontsize=8)
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/lr/figure_19.png]]
+
+** Summary
+
+#+begin_src ipython
+print("=" * 60)
+print("LOW-RANK ANALYSIS SUMMARY")
+print("=" * 60)
+print(f"Network: Ne={Ne}, Ni={Ni}, N={N_NEURON}")
+print(f"Rank: {U.shape[1]}")
+print(f"LR_INI: {model.config.LR_INI}")
+print(f"GAIN: {model.config.GAIN}")
+print(f"U≠V: {not model.config.LR_UeqV}")
+print()
+print("--- Low-rank vector properties ---")
+U_norms = np.linalg.norm(U, axis=0)
+V_norms = np.linalg.norm(V, axis=0)
+print(f"  ||U[:,0]|| = {U_norms[0]:.2f}, ||U[:,1]|| = {U_norms[1]:.2f}")
+print(f"  ||V[:,0]|| = {V_norms[0]:.2f}, ||V[:,1]|| = {V_norms[1]:.2f}")
+print(f"  cos(U0,U1) = {U[:,0]@U[:,1] / (U_norms[0]*U_norms[1]):.3f}")
+print(f"  cos(V0,V1) = {V[:,0]@V[:,1] / (V_norms[0]*V_norms[1]):.3f}")
+print()
+print("--- Dimensionality ---")
+print(f"  Participation ratio: {pr:.1f}")
+print(f"  Var explained by PC1+PC2: {cum_var[1]*100:.1f}%")
+print()
+print("--- PC-LR alignment ---")
+for k in range(min(2, n_pcs)):
+    print(f"  |PC{k+1}·V0| = {np.abs(pc_V_overlap[k,0]):.3f}, "
+          f"|PC{k+1}·V1| = {np.abs(pc_V_overlap[k,1]):.3f}")
+#+end_src
+
+#+RESULTS:
+#+begin_example
+============================================================
+LOW-RANK ANALYSIS SUMMARY
+============================================================
+Network: Ne=3000, Ni=1000, N=4000
+Rank: 2
+LR_INI: 1.0
+GAIN: 1.0
+U≠V: True
+
+--- Low-rank vector properties ---
+  ||U[:,0]|| = 53.68, ||U[:,1]|| = 54.31
+  ||V[:,0]|| = 54.71, ||V[:,1]|| = 53.79
+  cos(U0,U1) = -0.014
+  cos(V0,V1) = -0.026
+
+--- Dimensionality ---
+  Participation ratio: 2.3
+  Var explained by PC1+PC2: 91.0%
+
+--- PC-LR alignment ---
+  |PC1·V0| = 0.500, |PC1·V1| = 0.456
+  |PC2·V0| = 0.374, |PC2·V1| = 0.448
+#+end_example
