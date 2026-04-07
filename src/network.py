@@ -24,7 +24,7 @@ class Network(nn.Module):
 
         self.weight_builder = WeightBuilder(c.weight_cfg)
         self.ff_input_builder = FFInputBuilder(
-            self.config,  # pass the live Configuration, not c.ff_cfg
+            self.config,
             low_rank=self.weight_builder.low_rank,
         )
 
@@ -44,7 +44,6 @@ class Network(nn.Module):
 
         self.sim = c.sim_cfg
 
-        # Legacy compatibility
         self.rates_list: Tensor | None = None
         self.rec_input: Tensor | None = None
         self.u_list: Tensor | None = None
@@ -97,6 +96,7 @@ class Network(nn.Module):
         return_rec: bool = False,
         init_state: bool = True,
         return_outputs: bool = False,
+        return_all_pops: bool = False,
     ) -> Tensor | ForwardOutputs:
         sim = self.sim
         geo = sim.geo
@@ -125,6 +125,7 @@ class Network(nn.Module):
 
         collector = OutputCollector(
             self.config.output_cfg, return_rec=return_rec, return_stp=return_stp,
+            return_all_pops=return_all_pops,
         )
         hebb_start = time.N_STEADY
 
@@ -159,7 +160,12 @@ class Network(nn.Module):
             ro = self.weight_builder.get_readout()
             if ro is None:
                 raise RuntimeError("LR_TRAIN=True but no readout available")
-            readout = collector.stacked_rates() @ ro / geo.Na[0]
+            # Readout always uses E-only rates
+            if return_all_pops:
+                e_rates = collector.stacked_rates()[:, :, geo.slices[0]]
+            else:
+                e_rates = collector.stacked_rates()
+            readout = e_rates @ ro / geo.Na[0]
 
         final = collector.finalize(readout=readout)
         self._update_legacy(final, weights)

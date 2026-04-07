@@ -16,10 +16,12 @@ Tensor = torch.Tensor
 class OutputCollector:
     def __init__(
         self, cfg: OutputConfig, return_rec: bool = False, return_stp: bool = False,
+        return_all_pops: bool = False,
     ) -> None:
         self.cfg = cfg
         self.return_rec = return_rec
         self.return_stp = return_stp
+        self.return_all_pops = return_all_pops
 
         self._rates: list[Tensor] = []
         self._rec_traces: list[Tensor] = []
@@ -33,6 +35,12 @@ class OutputCollector:
         self._acc_start: int = time.N_STEADY + time.N_HEBB
         self._inv_window: float = 1.0 / time.N_WINDOW
         self._stacked_cache: Tensor | None = None
+
+    def _rate_slice(self):
+        """Which neurons to store: all or just E."""
+        if self.return_all_pops:
+            return slice(None)
+        return self.cfg.geo.slices[0]
 
     def _ensure_accumulators(self, state: NetworkState) -> None:
         if self._mv_rates is None:
@@ -50,13 +58,14 @@ class OutputCollector:
         if self.cfg.VERBOSE:
             print_activity(self.cfg, step, state.rates)
 
+        rs = self._rate_slice()
         self._rates.append(
-            (self._mv_rates[:, geo.slices[0]] * self._inv_window).detach().clone()
+            (self._mv_rates[:, rs] * self._inv_window).detach().clone()
         )
 
         if self.return_rec and self._mv_rec_input is not None:
             rec_trace = (
-                self._mv_rec_input.permute(1, 0, 2)[:, :, geo.slices[0]]
+                self._mv_rec_input.permute(1, 0, 2)[:, :, rs]
                 * self._inv_window
             )
             self._rec_traces.append(rec_trace.detach().clone())

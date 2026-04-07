@@ -2,340 +2,758 @@
 #+TITLE: Balanced Networks
 #+PROPERTY: header-args:ipython :results both :exports both :async yes :session bal :kernel torch :exports results :output-dir ./figures/balance :file (lc/org-babel-tangle-figure-filename)
 
-* Notebook Settings
+** Notebook Settings
 
 #+begin_src ipython
-  %load_ext autoreload
-  %autoreload 2
-  %reload_ext autoreload
+%load_ext autoreload
+%autoreload 2
+%reload_ext autoreload
 
-  %run ../../notebooks/setup.py
-  %matplotlib inline
-  %config InlineBackend.figure_format = 'png'
+%run ../../notebooks/setup.py
+%matplotlib inline
+%config InlineBackend.figure_format = 'png'
 #+end_src
 
 #+RESULTS:
+:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
-
-* Imports
+: /home/leon/mambaforge/bin/python
+: <Figure size 600x370.82 with 0 Axes>
+:END:
+** Imports
 
 #+begin_src ipython
-  import sys
-  sys.path.insert(0, '../../')
+import sys
+sys.path.insert(0, '../../')
 
-  import torch
-  import pandas as pd
-  from time import perf_counter
+import torch
+import numpy as np
+import pandas as pd
+from time import perf_counter
 
-  from src.network import Network
-  from src.lif_network import LIFNetwork
-  from src.plot_utils import plot_con
-  from src.decode import decode_bump
+from src.network import Network
+from src.weights.lr import get_theta, get_idx, get_overlap
 #+end_src
 
 #+RESULTS:
 
-* Helpers
-** Connectivity
+** Helpers
 
 #+begin_src ipython
-  def plot_eigen(W):
-      # Compute eigenvalues
-      eigenvalues = torch.linalg.eigvals(W).cpu().numpy()
+def convert_seconds(seconds):
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return h, m, s
 
-      # Extract real and imaginary parts
-      real_parts = eigenvalues.real
-      imag_parts = eigenvalues.imag
+def plot_eigen(W):
+    eigenvalues = torch.linalg.eigvals(W).cpu().numpy()
+    real_parts = eigenvalues.real
+    imag_parts = eigenvalues.imag
 
-      # Plotting
-      plt.scatter(real_parts, imag_parts)
-      plt.xlabel('Real Part')
-      plt.ylabel('Imaginary Part')
-      plt.axhline(y=0, color='k', linestyle='--')
-      plt.axvline(x=0, color='k', linestyle='--')
+    plt.figure(figsize=(5, 5))
+    plt.scatter(real_parts, imag_parts, s=2, alpha=0.5)
+    plt.xlabel('Real Part')
+    plt.ylabel('Imaginary Part')
+    plt.axhline(y=0, color='k', linestyle='--', linewidth=0.5)
+    plt.axvline(x=0, color='k', linestyle='--', linewidth=0.5)
+    plt.title('Eigenvalue Spectrum')
+    plt.show()
 
-      # plt.grid(True, which='both')
-      plt.show()
+def safe_corrcoef(a, b):
+    """Pearson correlation that returns NaN for constant inputs."""
+    if np.std(a) < 1e-12 or np.std(b) < 1e-12:
+        return np.nan
+    return np.corrcoef(a, b)[0, 1]
 #+end_src
 
 #+RESULTS:
 
-** Random
+** Single Trial
+*** Model
 
 #+begin_src ipython
-  def convert_seconds(seconds):
-      h = seconds // 3600
-      m = (seconds % 3600) // 60
-      s = seconds % 60
-      return h, m, s
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+model = Network('config_EI.yml', REPO_ROOT)
 #+end_src
 
 #+RESULTS:
 
+*** Dynamics
+
 #+begin_src ipython
-  def get_theta(a, b, GM=0, IF_NORM=0):
-
-      if GM:
-          b = b - np.dot(b, a) / np.dot(a, a) * a
-
-      if IF_NORM:
-          u = a / np.linalg.norm(a)
-          v = b / np.linalg.norm(b)
-      else:
-          u=a
-          v=b
-
-      return np.arctan2(v, u)
+outputs = model(return_outputs=True, return_all_pops=True, return_rec=True)
+rates = outputs.rates.cpu().detach().numpy()[0]
+rec_input = outputs.rec_input.cpu().detach().numpy()[0] if outputs.rec_input is not None else None
+print('rates shape:', rates.shape)
+if rec_input is not None:
+    print('rec_input shape:', rec_input.shape)
 #+end_src
 
 #+RESULTS:
+: rates shape: (101, 4000)
+: rec_input shape: (101, 1, 4000)
 
 #+begin_src ipython
-  def normalize(v):
-      return v / np.linalg.norm(v)
-
-  def project(x, u):
-      return x * u
-  # return np.dot(x, u) * u
-
-  def sort_by_angle(x, u, v):
-      u_hat = normalize(u)
-      v_hat = normalize(v)
-
-      x_proj_u = project(x, u_hat)
-      x_proj_v = project(x, v_hat)
-      # x_proj = x_proj_u + x_proj_v
-      theta = np.arctan2(x_proj_v, x_proj_u) + np.pi
-
-      # cos_theta = np.dot(x_proj, u_hat) / np.linalg.norm(x_proj) * u_hat
-      # sin_theta = np.dot(x_proj, v_hat) / np.linalg.norm(x_proj) * v_hat
-      # theta = np.arctan2(sin_theta, cos_theta)
-
-      # Pair up each element of x with the corresponding angle
-      # x_angle_pairs = list(zip(x, theta))
-
-      # Sort based on the angle
-      # x_angle_pairs.sort(key=lambda pair: pair[1])
-
-      # Extract the sorted elements
-      # sorted_x = [pair[0] for pair in x_angle_pairs]
-
-      return theta
+Ne = model.config.Na[0].item()
+N_NEURON = model.config.N_NEURON
+Ni = N_NEURON - Ne
+print(f'Ne={Ne}, Ni={Ni}, N_NEURON={N_NEURON}')
 #+end_src
 
 #+RESULTS:
+: Ne=3000, Ni=1000, N_NEURON=4000
 
 #+begin_src ipython
-  def get_idx(model):
-      ksi = model.PHI0.cpu().detach().numpy()
-      print(ksi.shape)
-
-      idx = np.arange(0, len(ksi[0]))
-      theta = get_theta(ksi[0], ksi[2], GM=0, IF_NORM=0)
-
-      return theta.argsort()
+ff_input = model.ff_input_builder.build().cpu().numpy()
+print('ff_input shape:', ff_input.shape)
 #+end_src
 
 #+RESULTS:
+: ff_input shape: (1, 605, 4000)
+
+*** FF Input
 
 #+begin_src ipython
-  def get_overlap(model, rates):
-      ksi = model.PHI0.cpu().detach().numpy()
-      return rates @ ksi.T / rates.shape[-1]
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
 
+ax[0].plot(ff_input[0, :, 0], label='E neuron 0')
+ax[0].plot(ff_input[0, :, Ne], label='I neuron 0', linestyle='--')
+ax[0].set_xlabel('Step')
+ax[0].set_ylabel('FF Input')
+ax[0].legend(fontsize=8)
+
+ax[1].imshow(ff_input[0].T, aspect='auto', origin='lower', cmap='jet', vmin=0, vmax=2000)
+ax[1].axhline(y=Ne, color='w', linestyle='--', linewidth=0.5, label='E/I boundary')
+ax[1].set_xlabel('Step')
+ax[1].set_ylabel('Neuron #')
+ax[1].legend(fontsize=7, loc='upper right')
+plt.tight_layout()
+plt.show()
 #+end_src
 
 #+RESULTS:
+[[file:./figures/balance/figure_7.png]]
 
-* Single Trial
-** Model
+*** FF Input Distributions (E vs I)
 
 #+begin_src ipython
-  REPO_ROOT = "/home/leon/models/NeuroFlame"
-  model = Network('config_EI.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', TASK='dual', LIVE_FF_UPDATE=1)
+stim_step = model.config.N_STIM_ON[0].item() + 5
+ff_E = ff_input[0, stim_step, :Ne]
+ff_I = ff_input[0, stim_step, Ne:]
+
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+ax[0].hist(ff_E, bins=50, alpha=0.7, color='tab:blue', label='E', density=True)
+if Ni > 0:
+    ax[0].hist(ff_I, bins=50, alpha=0.7, color='tab:red', label='I', density=True)
+ax[0].set_xlabel('FF Input')
+ax[0].set_ylabel('Density')
+ax[0].set_title(f'FF input distribution (step={stim_step})')
+ax[0].legend()
+
+mean_ff_E = np.mean(ff_input[0, :, :Ne], axis=1)
+mean_ff_I = np.mean(ff_input[0, :, Ne:], axis=1) if Ni > 0 else np.full(ff_input.shape[1], np.nan)
+ax[1].plot(mean_ff_E, label='E mean', color='tab:blue')
+ax[1].plot(mean_ff_I, label='I mean', color='tab:red')
+ax[1].set_xlabel('Step')
+ax[1].set_ylabel('Mean FF Input')
+ax[1].set_title('Population-averaged FF input')
+ax[1].legend()
+
+plt.tight_layout()
+plt.show()
 #+end_src
 
 #+RESULTS:
+[[file:./figures/balance/figure_8.png]]
 
-** Dynamics
+*** Rate Traces
 
 #+begin_src ipython
-  rates = model(RET_FF=1).cpu().detach().numpy()[0]
-  print(rates.shape)
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+ax[0].plot(rates[:, :10], alpha=0.7)
+ax[0].plot(rates[:, Ne:Ne+10], alpha=0.7, linestyle='--')
+ax[0].set_xlabel('Step')
+ax[0].set_ylabel('Rates (Hz)')
+ax[0].set_title('Sample E (solid) & I (dashed) traces')
+
+ax[1].imshow(rates.T, aspect='auto', origin='lower', cmap='jet')
+ax[1].axhline(y=Ne, color='w', linestyle='--', linewidth=0.5)
+ax[1].set_xlabel('Step')
+ax[1].set_ylabel('Neuron #')
+ax[1].set_title('All neurons')
+plt.tight_layout()
+plt.show()
 #+end_src
 
 #+RESULTS:
-: (101, 2000)
+[[file:./figures/balance/figure_9.png]]
+
+*** Rate Distributions (E vs I)
 
 #+begin_src ipython
-  ff_input = model.ff_input.cpu().numpy()
-  print(ff_input.shape)
+rates_E = rates[-1, :Ne]
+rates_I = rates[-1, Ne:]
+
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+ax[0].hist(rates_E, bins=50, alpha=0.7, color='tab:blue', label='E', density=True)
+if Ni > 0:
+    ax[0].hist(rates_I, bins=50, alpha=0.7, color='tab:red', label='I', density=True)
+ax[0].set_xlabel('Rate (Hz)')
+ax[0].set_ylabel('Density')
+ax[0].set_title('Steady-state rate distribution')
+ax[0].legend()
+
+mean_E = np.mean(rates[:, :Ne], axis=1)
+mean_I = np.mean(rates[:, Ne:], axis=1) if Ni > 0 else np.full(rates.shape[0], np.nan)
+ax[1].plot(mean_E, label='E mean', color='tab:blue')
+ax[1].plot(mean_I, label='I mean', color='tab:red')
+ax[1].set_xlabel('Step')
+ax[1].set_ylabel('Mean Rate (Hz)')
+ax[1].set_title('Population-averaged rates')
+ax[1].legend()
+
+plt.tight_layout()
+plt.show()
 #+end_src
 
 #+RESULTS:
-: (1, 101, 2000)
+[[file:./figures/balance/figure_10.png]]
+
+*** Recurrent Input Analysis
 
 #+begin_src ipython
-  print(np.max(ff_input))
-  print(np.mean(ff_input==0))
+if rec_input is not None:
+    # rec_input shape: (n_steps, n_rec_channels, N_NEURON) or (n_steps, N_NEURON)
+    # From OutputCollector, rec_input is stored as (batch, steps, n_channels, neurons)
+    # After indexing [0], it is (steps, n_channels, neurons) or (steps, neurons)
+    if rec_input.ndim == 3:
+        rec_syn = rec_input[:, 0, :]  # first synaptic channel (AMPA)
+    else:
+        rec_syn = rec_input
+
+    rec_E = rec_syn[:, :Ne]
+    rec_I = rec_syn[:, Ne:]
+
+    fig, axes = plt.subplots(2, 2, figsize=[2*width, 2*height])
+
+    # ── Top left: sample traces ──
+    axes[0, 0].plot(rec_E[:, :10], alpha=0.7)
+    if Ni > 0:
+        axes[0, 0].plot(rec_I[:, :10], alpha=0.7, linestyle='--')
+    axes[0, 0].set_xlabel('Step')
+    axes[0, 0].set_ylabel('Recurrent Input')
+    axes[0, 0].set_title('Sample E (solid) & I (dashed) traces')
+
+    # ── Top right: heatmap ──
+    im = axes[0, 1].imshow(rec_syn.T, aspect='auto', origin='lower', cmap='RdBu_r')
+    axes[0, 1].axhline(y=Ne, color='k', linestyle='--', linewidth=0.5)
+    axes[0, 1].set_xlabel('Step')
+    axes[0, 1].set_ylabel('Neuron #')
+    axes[0, 1].set_title('Recurrent input (all neurons)')
+    plt.colorbar(im, ax=axes[0, 1], fraction=0.046, pad=0.04)
+
+    # ── Bottom left: steady-state distribution ──
+    axes[1, 0].hist(rec_E[-1], bins=50, alpha=0.7, color='tab:blue', label='E', density=True)
+    if Ni > 0:
+        axes[1, 0].hist(rec_I[-1], bins=50, alpha=0.7, color='tab:red', label='I', density=True)
+    axes[1, 0].set_xlabel('Recurrent Input')
+    axes[1, 0].set_ylabel('Density')
+    axes[1, 0].set_title('Steady-state recurrent input distribution')
+    axes[1, 0].legend()
+
+    # ── Bottom right: population-averaged recurrent input ──
+    mean_rec_E = np.mean(rec_E, axis=1)
+    mean_rec_I = np.mean(rec_I, axis=1) if Ni > 0 else np.full(rec_syn.shape[0], np.nan)
+    axes[1, 1].plot(mean_rec_E, label='E mean', color='tab:blue')
+    axes[1, 1].plot(mean_rec_I, label='I mean', color='tab:red')
+    axes[1, 1].set_xlabel('Step')
+    axes[1, 1].set_ylabel('Mean Recurrent Input')
+    axes[1, 1].set_title('Population-averaged recurrent input')
+    axes[1, 1].legend()
+
+    plt.tight_layout()
+    plt.show()
+else:
+    print("Recurrent input not returned. Re-run with return_rec=True.")
 #+end_src
 
 #+RESULTS:
-: 1377.0
-: 0.0
+[[file:./figures/balance/figure_11.png]]
+
+*** E/I Balance Check: Recurrent vs Feedforward
 
 #+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+if rec_input is not None:
+    if rec_input.ndim == 3:
+        rec_syn = rec_input[:, 0, :]
+    else:
+        rec_syn = rec_input
 
-  ax[0].plot(ff_input[0, :, 0])
-  ax[0].plot(ff_input[0, :, 0])
+    # At steady state, compare recurrent input magnitude to FF input magnitude
+    last_step = -1
+    rec_final = rec_syn[last_step]
+    # Map ff_input steps to collected output steps via the window
+    N_STEADY = model.config.N_STEADY
+    N_HEBB = model.config.N_HEBB
+    N_WINDOW = model.config.N_WINDOW
+    # The last collected output step corresponds to the last window
+    ff_last_start = N_STEADY + N_HEBB + (rates.shape[0] - 1) * N_WINDOW
+    ff_last_end = ff_last_start + N_WINDOW
+    ff_final = np.mean(ff_input[0, ff_last_start:ff_last_end], axis=0)
 
-  ax[0].set_xlabel('Step')
-  ax[0].set_ylabel('FF Input')
+    fig, axes = plt.subplots(1, 3, figsize=[3*width, height])
 
-  ax[1].imshow(ff_input[0].T, aspect='auto', origin='lower', cmap='jet', vmin=0, vmax=2000)
-  plt.show()
+    # Distribution of net input (rec + ff)
+    net_E = rec_final[:Ne] + ff_final[:Ne]
+    net_I = rec_final[Ne:] + ff_final[Ne:] if Ni > 0 else np.array([])
+
+    axes[0].hist(rec_final[:Ne], bins=50, alpha=0.6, color='tab:blue', label='Rec (E)', density=True)
+    axes[0].hist(ff_final[:Ne], bins=50, alpha=0.6, color='tab:orange', label='FF (E)', density=True)
+    axes[0].set_xlabel('Input')
+    axes[0].set_ylabel('Density')
+    axes[0].set_title('Recurrent vs FF input to E neurons')
+    axes[0].legend(fontsize=7)
+
+    axes[1].hist(net_E, bins=50, alpha=0.7, color='tab:green', label='E', density=True)
+    if len(net_I) > 0:
+        axes[1].hist(net_I, bins=50, alpha=0.7, color='tab:red', label='I', density=True)
+    axes[1].set_xlabel('Net Input (Rec + FF)')
+    axes[1].set_ylabel('Density')
+    axes[1].set_title('Net input distribution')
+    axes[1].legend()
+
+    # Scatter: |rec| vs |ff| per E neuron
+    axes[2].scatter(np.abs(ff_final[:Ne]), np.abs(rec_final[:Ne]), s=2, alpha=0.3)
+    mx = max(np.max(np.abs(ff_final[:Ne])), np.max(np.abs(rec_final[:Ne])))
+    axes[2].plot([0, mx], [0, mx], 'k--', linewidth=0.5)
+    axes[2].set_xlabel('|FF input|')
+    axes[2].set_ylabel('|Recurrent input|')
+    axes[2].set_title('Balance scatter (E neurons)')
+    axes[2].set_aspect('equal')
+
+    plt.tight_layout()
+    plt.show()
+else:
+    print("Recurrent input not returned.")
 #+end_src
 
 #+RESULTS:
-[[./figures/balance/figure_12.png]]
+[[file:./figures/balance/figure_12.png]]
+
+*** Connectivity
 
 #+begin_src ipython
-  import matplotlib.colors
-  # Color for False and True
-  cmap = matplotlib.colors.ListedColormap(['blue', 'yellow'])
+Wab_T = model.weight_builder.W_rec_base.cpu().detach().numpy()
+print('W shape:', Wab_T.shape)
 
-  r_max = 20
+fig = plt.figure(figsize=(12, 5))
 
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
+vmax = np.percentile(np.abs(Wab_T), 99)
+im = ax1.imshow(Wab_T, cmap='RdBu_r', aspect=1, vmin=-vmax, vmax=vmax)
+ax1.axhline(y=Ne, color='k', linestyle='--', linewidth=0.5)
+ax1.axvline(x=Ne, color='k', linestyle='--', linewidth=0.5)
+ax1.set_xlabel("Presynaptic")
+ax1.set_ylabel("Postsynaptic")
+plt.colorbar(im, ax=ax1, fraction=0.046, pad=0.04)
 
-  ax[0].plot(rates[:, :20])
-  ax[0].plot(rates[:, -20:])
+ax2 = plt.subplot2grid((2, 3), (0, 1))
+Kj = np.sum(np.abs(Wab_T) > 0, axis=0)
+ax2.set_title('$\\langle K_j \\rangle = %d$' % np.mean(Kj))
+ax2.plot(Kj)
+ax2.set_ylabel("$K_j$ (out-degree)")
 
-  ax[0].set_xlabel('Step')
-  ax[0].set_ylabel('Rates')
+ax3 = plt.subplot2grid((2, 3), (1, 1))
+Ki = np.sum(np.abs(Wab_T) > 0, axis=1)
+ax3.set_title('$\\langle K_i \\rangle = %d$' % np.mean(Ki))
+ax3.plot(Ki)
+ax3.set_ylabel("$K_i$ (in-degree)")
 
-  ax[1].imshow(rates.T, aspect='auto', origin='lower', cmap='jet')
+ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
+diags = []
+for i in range(int(Wab_T.shape[0] / 2)):
+    diags.append(np.trace(Wab_T, offset=i) / Wab_T.shape[0])
+diags = np.array(diags)
+ax4.plot(diags)
+ax4.set_xlabel("Offset")
+ax4.set_ylabel("$P_{ij}$")
 
-  # plt.colorbar()
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[./figures/balance/figure_13.png]]
-
-#+RESULTS:
-
-** Connectivity
-
-#+begin_src ipython
-  Cij = model.Wab_T.cpu().detach().numpy()
-  print(Cij.shape)
-
-  plt.figure(figsize=(12, 5))  # Set the figure size (width, height) in inches
-
-  ax1 = plt.subplot2grid((2, 3), (0, 0), rowspan=2)
-  im = ax1.imshow(Cij, cmap='jet', aspect=1)
-  ax1.set_xlabel("Presynaptic")
-  ax1.set_ylabel("Postsynaptic")
-
-  # Second column, first row
-  ax2 = plt.subplot2grid((2, 3), (0, 1))
-  Kj = np.sum(Cij, axis=0)  # sum over pres
-  ax2.set_title('$<K_j>= %d$' % np.mean(Kj))
-  ax2.plot(Kj)
-  # ax2.set_xticklabels([])
-  ax2.set_ylabel("$K_j$")
-
-  # # Second column, second row
-  ax3 = plt.subplot2grid((2, 3), (1, 1))
-  Ki = np.sum(Cij, axis=1)  # sum over pres
-  ax3.set_title('$<K_i>= %d$' % np.mean(Ki))
-  ax3.plot(Kj)
-  ax3.set_ylabel("$K_i$")
-
-  ax4 = plt.subplot2grid((2, 3), (0, 2), rowspan=2)
-  diags = []
-  for i in range(int(Cij.shape[0] / 2)):
-      diags.append(np.trace(Cij, offset=i) / Cij.shape[0])
-  diags = np.array(diags)
-  ax4.plot(diags)
-  ax4.set_xlabel("Neuron #")
-  ax4.set_ylabel("$P_{ij}$")
-
-  plt.tight_layout()
-  plt.show()
+plt.tight_layout()
+plt.show()
 #+end_src
 
 #+RESULTS:
 :RESULTS:
-: (2500, 2500)
-[[./figures/balance/figure_14.png]]
+: W shape: (4000, 4000)
+[[file:./figures/balance/figure_13.png]]
 :END:
-
-** FF Inputs
+*** Excitatory–Inhibitory Weight Balance
 
 #+begin_src ipython
-  ff_input = model.ff_input.cpu().detach().numpy()
-  print(ff_input.shape)
+Wab_T = model.weight_builder.W_rec_base.cpu().detach().numpy()
 
-  fig, ax = plt.subplots(1, 2)
+# W_rec_base is stored as Wab_T[pre, post], so column i gives inputs to neuron i
+# For each postsynaptic E neuron, sum excitatory and inhibitory inputs
+exc_input = np.sum(Wab_T[:Ne, :Ne], axis=0)   # E←E (sum over E pre for each E post)
+inh_input = np.sum(Wab_T[Ne:, :Ne], axis=0)   # E←I (sum over I pre for each E post)
+total = exc_input + inh_input
 
-  ax[0].plot(ff_input[0, :, :5])
-  ax[0].plot(ff_input[0, :, -5:])
-  ax[0].set_xlabel('Step')
-  ax[0].set_ylabel('FF Input')
+fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
 
-  ax[1].imshow(ff_input[0].T, cmap='jet', vmin=0, aspect='auto')
-  ax[1].set_xlabel('Step')
-  ax[1].set_ylabel('Neuron #')
-  ax[1].set_ylim([0, 10000])
-  plt.show()
+ax[0].hist(exc_input, bins=50, alpha=0.7, color='tab:blue', label='E←E')
+ax[0].hist(inh_input, bins=50, alpha=0.7, color='tab:red', label='E←I')
+ax[0].set_xlabel('Summed synaptic weight')
+ax[0].set_title('Input to E neurons')
+ax[0].legend()
+
+ax[1].hist(total, bins=50, alpha=0.7, color='tab:green')
+ax[1].set_xlabel('Net input (E+I)')
+ax[1].set_title('Balance: net weight to E neurons')
+
+ax[2].scatter(exc_input, -inh_input, s=2, alpha=0.3)
+mx = max(np.max(exc_input), np.max(-inh_input))
+ax[2].plot([0, mx], [0, mx], 'k--', linewidth=0.5)
+ax[2].set_xlabel('Excitatory weight sum')
+ax[2].set_ylabel('|Inhibitory weight sum|')
+ax[2].set_title('E vs |I| per E neuron')
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+
+*** Eigenvalue Spectrum
+
+#+begin_src ipython
+W = model.weight_builder.W_rec_base.cpu().detach()
+plot_eigen(W)
+#+end_src
+
+#+RESULTS:
+[[file:./figures/balance/figure_15.png]]
+
+** Balance Scaling
+*** Sweep Over K
+
+#+begin_src ipython
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+K_list = np.linspace(10, 1000, 10).astype(int)
+rates_list = []
+
+for K in K_list:
+    model_k = Network('config_EI.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', K=K)
+    r = model_k.forward(return_all_pops=True)
+    rates_list.append(r[0].cpu().detach().numpy())
+
+Ne = model_k.config.Na[0].item()
+N_NEURON = model_k.config.N_NEURON
+Ni = N_NEURON - Ne
+#+end_src
+
+#+RESULTS:
+
+*** Scaling Plots
+
+#+begin_src ipython
+rates_arr = np.array(rates_list)
+print('rates shape:', rates_arr.shape)
+
+fig, axes = plt.subplots(1, 3, figsize=[3*width, height])
+
+# Mean rate vs sqrt(K)
+mean_rates_E = np.array([np.mean(r[-1, :Ne]) for r in rates_list])
+mean_rates_I = np.array([np.mean(r[-1, Ne:]) for r in rates_list])
+sqrtK = np.sqrt(K_list)
+
+axes[0].plot(K_list, mean_rates_E, '-o', label='E', markersize=4)
+axes[0].plot(K_list, mean_rates_I, '-s', label='I', markersize=4)
+axes[0].set_xlabel('$K$')
+axes[0].set_ylabel('$\\langle r \\rangle$ (Hz)')
+axes[0].set_title('Mean rate vs K')
+axes[0].legend()
+
+# sqrt(K) * mean rate should be O(1) in balanced regime
+axes[1].plot(sqrtK, mean_rates_E * sqrtK, '-o', label='E', markersize=4)
+axes[1].plot(sqrtK, mean_rates_I * sqrtK, '-s', label='I', markersize=4)
+axes[1].set_xlabel('$\\sqrt{K}$')
+axes[1].set_ylabel('$\\sqrt{K} \\cdot \\langle r \\rangle$')
+axes[1].set_title('Balance scaling (should plateau)')
+axes[1].legend()
+
+# CV of rates
+cv_E = np.array([np.std(r[-1, :Ne]) / (np.mean(r[-1, :Ne]) + 1e-9) for r in rates_list])
+cv_I = np.array([np.std(r[-1, Ne:]) / (np.mean(r[-1, Ne:]) + 1e-9) for r in rates_list])
+
+axes[2].plot(K_list, cv_E, '-o', label='CV(E)', markersize=4)
+axes[2].plot(K_list, cv_I, '-s', label='CV(I)', markersize=4)
+axes[2].set_xlabel('$K$')
+axes[2].set_ylabel('CV')
+axes[2].set_title('Coefficient of variation vs K')
+axes[2].legend()
+
+plt.tight_layout()
+plt.show()
 #+end_src
 
 #+RESULTS:
 :RESULTS:
-: (1, 101, 2000)
-[[./figures/balance/figure_15.png]]
+: rates shape: (10, 101, 4000)
+[[file:./figures/balance/figure_17.png]]
 :END:
-
-* Balance
+*** Rate Distributions Across K
 
 #+begin_src ipython
-  REPO_ROOT = "/home/leon/models/NeuroFlame"
-  K_list = [500, 1000, 1500, 2000, 2500, 3000]
-  rates_list = []
+n_plots = len(K_list)
+n_cols = 4
+n_rows = (n_plots + n_cols - 1) // n_cols
+fig, axes = plt.subplots(n_rows, n_cols, figsize=[n_cols*width, n_rows*height])
+axes = axes.flatten()
 
-  for K in K_list:
-      model = Network('config_2pop.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', K=K)
-      rates = model.forward()
-      rates_list.append(rates[0].cpu().detach().numpy())
+for i, (K, r) in enumerate(zip(K_list, rates_list)):
+    axes[i].hist(r[-1, :Ne], bins=40, alpha=0.6, color='tab:blue', label='E', density=True)
+    if Ni > 0:
+        axes[i].hist(r[-1, Ne:], bins=40, alpha=0.6, color='tab:red', label='I', density=True)
+    axes[i].set_title(f'K = {K}')
+    axes[i].set_xlabel('Rate (Hz)')
+    if i % n_cols == 0:
+        axes[i].set_ylabel('Density')
+    axes[i].legend(fontsize=7)
 
+for j in range(i + 1, len(axes)):
+    axes[j].set_visible(False)
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/balance/figure_18.png]]
+
+** Temporal Structure
+*** Setup
+
+#+begin_src ipython
+REPO_ROOT = "/home/leon/models/NeuroFlame"
+model_ts = Network('config_EI.yml', REPO_ROOT, VERBOSE=0, DEVICE='cuda', K=500)
+rates_ts = model_ts.forward(return_all_pops=True)[0].cpu().detach().numpy()
+Ne_ts = model_ts.config.Na[0].item()
+N_NEURON_ts = model_ts.config.N_NEURON
+Ni_ts = N_NEURON_ts - Ne_ts
 #+end_src
 
 #+RESULTS:
 
-#+begin_src ipython
-  rates = np.array(rates_list)
-  print(rates.shape)
+*** Temporal Autocorrelation
 
-  plt.plot(np.sqrt(K_list), np.mean(rates[..., model.slices[0]]) * np.sqrt(K_list), '-o')
-  plt.xlabel('$\sqrt{K}$')
-  plt.ylabel('$\sqrt{K}$ Rates')
-  plt.show()
+#+begin_src ipython
+from numpy import correlate as np_correlate
+
+max_lag = 30
+n_samples = 20
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+for neuron_idx in np.random.choice(Ne_ts, min(n_samples, Ne_ts), replace=False):
+    r = rates_ts[:, neuron_idx]
+    r = r - r.mean()
+    if np.std(r) > 1e-9:
+        ac = np_correlate(r, r, mode='full')
+        ac = ac[len(ac)//2:]
+        ac = ac / (ac[0] + 1e-12)
+        ax[0].plot(ac[:max_lag], alpha=0.3, color='tab:blue')
+
+ax[0].set_xlabel('Lag (steps)')
+ax[0].set_ylabel('Autocorrelation')
+ax[0].set_title('E neurons')
+ax[0].axhline(0, color='k', linewidth=0.5, linestyle='--')
+
+if Ni_ts > 0:
+    for neuron_idx in np.random.choice(range(Ne_ts, N_NEURON_ts), min(n_samples, Ni_ts), replace=False):
+        r = rates_ts[:, neuron_idx]
+        r = r - r.mean()
+        if np.std(r) > 1e-9:
+            ac = np_correlate(r, r, mode='full')
+            ac = ac[len(ac)//2:]
+            ac = ac / (ac[0] + 1e-12)
+            ax[1].plot(ac[:max_lag], alpha=0.3, color='tab:red')
+
+ax[1].set_xlabel('Lag (steps)')
+ax[1].set_ylabel('Autocorrelation')
+ax[1].set_title('I neurons')
+ax[1].axhline(0, color='k', linewidth=0.5, linestyle='--')
+
+plt.tight_layout()
+plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: (6, 101, 5000)
-[[./figures/balance/figure_17.png]]
-:END:
+[[file:./figures/balance/figure_20.png]]
+
+*** Cross-Population Correlations
+
+#+begin_src ipython
+n_pairs = 500
+
+def sample_corr(rates, idx_a, idx_b, n_pairs):
+    corrs = []
+    idx_a = np.array(list(idx_a))
+    idx_b = np.array(list(idx_b))
+    if len(idx_a) < 2 or len(idx_b) < 2:
+        return corrs
+    for _ in range(n_pairs):
+        i = np.random.choice(idx_a)
+        j = np.random.choice(idx_b)
+        if i == j:
+            continue
+        c = safe_corrcoef(rates[:, i], rates[:, j])
+        if np.isfinite(c):
+            corrs.append(c)
+    return corrs
+
+ee_corr = sample_corr(rates_ts, range(Ne_ts), range(Ne_ts), n_pairs)
+
+fig, ax = plt.subplots(figsize=(width, height))
+if ee_corr:
+    ax.hist(ee_corr, bins=40, alpha=0.6, label='E-E', density=True)
+
+if Ni_ts > 0:
+    ei_corr = sample_corr(rates_ts, range(Ne_ts), range(Ne_ts, N_NEURON_ts), n_pairs)
+    ii_corr = sample_corr(rates_ts, range(Ne_ts, N_NEURON_ts), range(Ne_ts, N_NEURON_ts), n_pairs)
+    if ei_corr:
+        ax.hist(ei_corr, bins=40, alpha=0.6, label='E-I', density=True)
+    if ii_corr:
+        ax.hist(ii_corr, bins=40, alpha=0.6, label='I-I', density=True)
+
+ax.axvline(0, color='k', linewidth=0.5, linestyle='--')
+ax.set_xlabel('Pairwise correlation')
+ax.set_ylabel('Density')
+ax.set_title('Noise correlations')
+ax.legend()
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/balance/figure_21.png]]
+
+*** Fano Factor Over Time
+
+#+begin_src ipython
+mean_E_t = np.mean(rates_ts[:, :Ne_ts], axis=1)
+var_E_t = np.var(rates_ts[:, :Ne_ts], axis=1)
+
+fig, ax = plt.subplots(figsize=(width, height))
+valid_E = mean_E_t > 1e-6
+ax.plot(np.where(valid_E)[0], (var_E_t / mean_E_t)[valid_E], label='E', alpha=0.7, color='tab:blue')
+
+if Ni_ts > 0:
+    mean_I_t = np.mean(rates_ts[:, Ne_ts:], axis=1)
+    var_I_t = np.var(rates_ts[:, Ne_ts:], axis=1)
+    valid_I = mean_I_t > 1e-6
+    ax.plot(np.where(valid_I)[0], (var_I_t / mean_I_t)[valid_I], label='I', alpha=0.7, color='tab:red')
+
+ax.set_xlabel('Step')
+ax.set_ylabel('Fano Factor (Var / Mean across neurons)')
+ax.set_title('Spatial Fano factor over time')
+ax.legend()
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/balance/figure_22.png]]
+
+*** Power Spectral Density
+
+#+begin_src ipython
+from scipy.signal import welch
+
+fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+
+# Population-averaged rate traces
+pop_E = np.mean(rates_ts[:, :Ne_ts], axis=1)
+
+DT = model_ts.config.DT
+N_WINDOW_cfg = model_ts.config.N_WINDOW
+fs = 1.0 / (DT * N_WINDOW_cfg)  # sampling frequency of collected rates
+
+nperseg = min(len(pop_E) // 2, 64)
+if nperseg > 4:
+    freqs_E, psd_E = welch(pop_E - pop_E.mean(), fs=fs, nperseg=nperseg)
+    ax[0].semilogy(freqs_E, psd_E, color='tab:blue', label='E pop')
+
+    if Ni_ts > 0:
+        pop_I = np.mean(rates_ts[:, Ne_ts:], axis=1)
+        freqs_I, psd_I = welch(pop_I - pop_I.mean(), fs=fs, nperseg=nperseg)
+        ax[0].semilogy(freqs_I, psd_I, color='tab:red', label='I pop')
+
+    ax[0].set_xlabel('Frequency (Hz)')
+    ax[0].set_ylabel('PSD')
+    ax[0].set_title('Population rate PSD')
+    ax[0].legend()
+
+# Single neuron examples
+for neuron_idx in np.random.choice(Ne_ts, min(5, Ne_ts), replace=False):
+    r = rates_ts[:, neuron_idx]
+    if np.std(r) > 1e-9:
+        f, p = welch(r - r.mean(), fs=fs, nperseg=nperseg)
+        ax[1].semilogy(f, p, alpha=0.4, color='tab:blue')
+
+if Ni_ts > 0:
+    for neuron_idx in np.random.choice(range(Ne_ts, N_NEURON_ts), min(5, Ni_ts), replace=False):
+        r = rates_ts[:, neuron_idx]
+        if np.std(r) > 1e-9:
+            f, p = welch(r - r.mean(), fs=fs, nperseg=nperseg)
+            ax[1].semilogy(f, p, alpha=0.4, color='tab:red')
+
+ax[1].set_xlabel('Frequency (Hz)')
+ax[1].set_ylabel('PSD')
+ax[1].set_title('Single neuron PSD (blue=E, red=I)')
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/balance/figure_23.png]]
+
+*** Dimensionality (Participation Ratio)
+
+#+begin_src ipython
+# PCA on steady-state rate snapshots across K
+from sklearn.decomposition import PCA
+
+pr_list = []
+for r in rates_list:
+    # Use the full time series, transpose to (neurons x time)
+    X = r[:, :Ne].T  # (Ne, n_steps)
+    if X.shape[1] > 2:
+        cov = np.cov(X)
+        eigvals = np.linalg.eigvalsh(cov)
+        eigvals = eigvals[eigvals > 0]
+        pr = (np.sum(eigvals) ** 2) / np.sum(eigvals ** 2)
+        pr_list.append(pr)
+    else:
+        pr_list.append(np.nan)
+
+fig, ax = plt.subplots(figsize=(width, height))
+ax.plot(K_list, pr_list, '-o', markersize=4, color='tab:purple')
+ax.set_xlabel('$K$')
+ax.set_ylabel('Participation Ratio')
+ax.set_title('Effective dimensionality (E population)')
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/balance/figure_24.png]]
 
 #+begin_src ipython
 
 #+end_src
-
-#+RESULTS:
