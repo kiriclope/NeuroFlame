@@ -60,7 +60,15 @@ class Configuration:
         init_const(self)
 
         _build_sub_configs(self)
+
         return self
+
+    def rebuild_ff(self):
+        """Rebuild task and ff configs after mutating I0, N_BATCH, etc."""
+        self.task = TaskConfig.from_raw(self)
+        self.ff_cfg = FFInputConfig.from_raw(
+            self, self.geo, self.time, self.task, self.weight_cfg.trainable,
+        )
 
     def __call__(self, **kwargs):
         return self.forward(**kwargs)

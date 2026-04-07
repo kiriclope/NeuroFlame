@@ -241,9 +241,13 @@ class STPWeightConfig:
 
     @classmethod
     def from_raw(cls, m: RawConfig) -> STPWeightConfig:
+        w_stp = getattr(m, "W_STP", None)
+        if w_stp is None and m.IF_STP:
+            # Default: use IS_STP as per-block weight multipliers
+            w_stp = m.IS_STP
         return cls(
             IF_STP=m.IF_STP, IS_STP=m.IS_STP, J_STP=m.J_STP,
-            W_STP=getattr(m, "W_STP", None),
+            W_STP=w_stp,
             TRAIN_J_STP=getattr(m, "TRAIN_J_STP", False),
         )
 

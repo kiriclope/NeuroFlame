@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import matplotlib as mpl
-import matplotlib.pyplot as plt
 import seaborn as sns
 
 # Common manuscript widths (inches)

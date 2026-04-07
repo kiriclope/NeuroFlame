@@ -24,8 +24,10 @@ class Network(nn.Module):
 
         self.weight_builder = WeightBuilder(c.weight_cfg)
         self.ff_input_builder = FFInputBuilder(
-            c.ff_cfg, low_rank=self.weight_builder.low_rank,
+            self.config,  # pass the live Configuration, not c.ff_cfg
+            low_rank=self.weight_builder.low_rank,
         )
+
         self.state_manager = StateManager(c.state_cfg, activation=activation)
         self.plasticity_manager = PlasticityManager(
             geo=c.geo,
