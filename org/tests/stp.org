@@ -1,8 +1,9 @@
 #+STARTUP: fold
-#+TITLE: Short term plasticity
+#+TITLE: Short-Term Plasticity — Diagnostics & Validation
 #+PROPERTY: header-args:ipython :results both :exports both :async yes :session test :kernel torch
 
 * Notebook Settings
+
 #+begin_src ipython
   %load_ext autoreload
   %autoreload 2
@@ -11,13 +12,25 @@
   %run ../../notebooks/setup.py
   %matplotlib inline
   %config InlineBackend.figure_format = 'png'
+
+  import matplotlib as mpl
+  mpl.rcParams.update({
+      'figure.dpi': 150,
+      'axes.spines.top': False,
+      'axes.spines.right': False,
+      'axes.labelsize': 12,
+      'axes.titlesize': 13,
+      'legend.fontsize': 10,
+      'xtick.labelsize': 10,
+      'ytick.labelsize': 10,
+  })
 #+end_src
 
 #+RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
-: /home/leon/mambaforge/envs/torch/bin/python
+: /home/leon/mambaforge/bin/python
 
 * Imports
 
@@ -26,15 +39,16 @@
   sys.path.insert(0, '../../')
 
   import torch
+  import numpy as np
   import gc
   from time import perf_counter
 
   from src.network import Network
-  from src.plasticity import Plasticity
-  from src.decode import decode_bump
+  from src.dynamics.plasticity.stp import Plasticity
   from src.utils import clear_cache
 
   REPO_ROOT = '/home/leon/models/NeuroFlame/'
+  DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 #+end_src
 
 #+RESULTS:
@@ -47,698 +61,771 @@
       m = (seconds % 3600) // 60
       s = seconds % 60
       return h, m, s
+
+  def decode_bump(rates, axis=-1):
+      """Decode bump position from population activity via circular mean."""
+      N = rates.shape[axis]
+      theta = np.linspace(0, 2 * np.pi, N, endpoint=False)
+      r = np.moveaxis(rates, axis, -1)
+      m0 = r.mean(axis=-1)
+      c = (r * np.cos(theta)).mean(axis=-1)
+      s = (r * np.sin(theta)).mean(axis=-1)
+      m1 = np.sqrt(c**2 + s**2)
+      phi = np.arctan2(s, c) % (2 * np.pi)
+      return m0, m1, phi
+
+  # ── Analytical steady-state for Markram STP ──
+  def stp_steady_state(r, USE, TAU_FAC, TAU_REC):
+      """Return (u_ss, x_ss, A_ss) for constant rate r."""
+      r = np.asarray(r, dtype=float)
+      USE = float(USE)
+      denom_u = 1.0 + USE * TAU_FAC * r
+      u_ss = USE / denom_u + USE * TAU_FAC * r / denom_u
+      # More precisely from du/dt=0, dx/dt=0:
+      # u_ss = USE * (1 + TAU_FAC * r) / (1 + USE * TAU_FAC * r)  [wrong]
+      # Correct: from the Euler eqs at steady state:
+      #   u = USE + USE*(1-u)*r*DT  =>  in continuous limit:
+      #   0 = (USE - u)/TAU_FAC + USE*(1-u)*r
+      #   u = USE*(1 + TAU_FAC*r) / (1 + USE*TAU_FAC*r)
+      u_ss = USE * (1.0 + TAU_FAC * r) / (1.0 + USE * TAU_FAC * r)
+      # 0 = (1 - x)/TAU_REC - u*x*r
+      # x = 1 / (1 + u*TAU_REC*r)
+      x_ss = 1.0 / (1.0 + u_ss * TAU_REC * r)
+      return u_ss, x_ss, u_ss * x_ss * r
 #+end_src
 
 #+RESULTS:
 
-* Testing STP implementation
-** From the Plasticity class in src/plasticity.py
+* Testing STP Implementation
+** 1. Standalone Plasticity: Time Traces
 
-First, I we will plot the dynamics of the stp variables for a neuron with a given rate and Gaussian temporal noise.
+Drive a small population with noisy input and visualise the STP variable trajectories.
 
 #+begin_src ipython
   tau_list = torch.tensor([0.5, 0.25])
   N_BATCH = 2
-
-  stp = Plasticity(USE=0.03, TAU_FAC=tau_list, TAU_REC=0.2, DT=0.01, size=(2, 10), STP_TYPE='hansel')
-
+  N_NEURON = 10
   N_STEPS = 500
+  DT = 0.01
 
-  A_ux = []
-  u_stp = []
-  x_stp = []
-  
+  stp = Plasticity(
+      USE=0.03, TAU_FAC=tau_list, TAU_REC=0.2,
+      DT=DT, size=(N_BATCH, N_NEURON),
+      device=DEVICE, STP_TYPE='markram',
+  )
+
+  A_ux, u_stp, x_stp, rate_hist = [], [], [], []
+
+  torch.manual_seed(0)
   for _ in range(N_STEPS):
-      rate = 10 + 10 * torch.randn((2, 10), device='cuda')
-
+      rate = torch.relu(10 + 10 * torch.randn((N_BATCH, N_NEURON), device=DEVICE))
       A_ux.append(stp(rate))
-      u_stp.append(stp.u_stp)
-      x_stp.append(stp.x_stp)
+      u_stp.append(stp.u_stp.clone())
+      x_stp.append(stp.x_stp.clone())
+      rate_hist.append(rate)
 
   A_ux = torch.stack(A_ux, dim=1).cpu().numpy()
   u_stp = torch.stack(u_stp, dim=1).cpu().numpy()
   x_stp = torch.stack(x_stp, dim=1).cpu().numpy()
-  print(A_ux.shape, u_stp.shape, x_stp.shape)
+  rate_hist = torch.stack(rate_hist, dim=1).cpu().numpy()
+  print(f'A_ux: {A_ux.shape} | u: {u_stp.shape} | x: {x_stp.shape}')
 #+end_src
 
 #+RESULTS:
-: (2, 500, 10) (2, 500, 10) (2, 500, 10)
+: A_ux: (2, 500, 10) | u: (2, 500, 10) | x: (2, 500, 10)
 
 #+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=(3*width, height))
+  time_axis = np.arange(N_STEPS) * DT
 
-  ax[0].plot(A_ux[0, :], 'k', label='Aux', alpha=0.25)
-  ax[1].plot(u_stp[0, :], 'r', label='u', alpha=0.25)
-  ax[2].plot(x_stp[0, :], 'b', label='x', alpha=0.25)
+  fig, axes = plt.subplots(2, 2, figsize=(2 * width, 2 * height), constrained_layout=True)
 
-  ax[0].set_xlabel('Step')
-  ax[0].set_ylabel('$A_{ux}$')
+  # --- row 0: batch 0 (tau_fac=0.5) ---
+  ax = axes[0, 0]
+  ax.plot(time_axis, rate_hist[0], alpha=0.15, color='gray')
+  ax.plot(time_axis, rate_hist[0].mean(-1), 'k', lw=1.5, label='mean rate')
+  ax.set_ylabel('Rate (Hz)')
+  ax.set_title(r'Input rates ($\tau_{\mathrm{fac}}=0.50$ s)')
+  ax.legend(frameon=False, loc='upper right')
 
-  ax[1].set_xlabel('Step')
-  ax[1].set_ylabel('$u$')
+  ax = axes[0, 1]
+  ax.plot(time_axis, u_stp[0], alpha=0.15, color='C3')
+  ax.plot(time_axis, u_stp[0].mean(-1), 'C3', lw=1.5, label=r'$u$ (mean)')
+  ax2 = ax.twinx()
+  ax2.plot(time_axis, x_stp[0], alpha=0.15, color='C0')
+  ax2.plot(time_axis, x_stp[0].mean(-1), 'C0', lw=1.5, label=r'$x$ (mean)')
+  ax.set_ylabel(r'$u$ (facilitation)', color='C3')
+  ax2.set_ylabel(r'$x$ (depression)', color='C0')
+  ax.set_title('STP variables')
+  lines1, labels1 = ax.get_legend_handles_labels()
+  lines2, labels2 = ax2.get_legend_handles_labels()
+  ax.legend(lines1 + lines2, labels1 + labels2, frameon=False, loc='center right')
 
-  ax[2].set_xlabel('Step')
-  ax[2].set_ylabel('$x$')
+  # --- row 1: batch 1 (tau_fac=0.25) ---
+  ax = axes[1, 0]
+  ax.plot(time_axis, A_ux[0], alpha=0.15, color='gray')
+  ax.plot(time_axis, A_ux[0].mean(-1), 'k', lw=1.5, label=r'$A_{ux}$ mean')
+  ax.set_xlabel('Time (s)')
+  ax.set_ylabel(r'$A_{ux} = u \cdot x \cdot r$')
+  ax.set_title(r'STP output ($\tau_{\mathrm{fac}}=0.50$ s)')
+  ax.legend(frameon=False)
 
+  ax = axes[1, 1]
+  ax.plot(time_axis, A_ux[1], alpha=0.15, color='gray')
+  ax.plot(time_axis, A_ux[1].mean(-1), 'k', lw=1.5, label=r'$A_{ux}$ mean')
+  ax.set_xlabel('Time (s)')
+  ax.set_ylabel(r'$A_{ux} = u \cdot x \cdot r$')
+  ax.set_title(r'STP output ($\tau_{\mathrm{fac}}=0.25$ s)')
+  ax.legend(frameon=False)
+
+  fig.suptitle('Standalone STP dynamics (USE=0.03)', fontsize=14, fontweight='bold')
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/78bde47ffb67906a21ca95dafb087a805864bb38.png]]
+[[file:./.ob-jupyter/9e25238ccb01aef31a0c8ac0ae08af680c9aa78b.png]]
 
-Then I will look at the evolution of the steady state value of A_ux with the rate for different values of tau_fac
+** 2. Steady-State $A_{ux}$ vs Firing Rate (with Analytical Comparison)
+
+Sweep input rate, let STP converge, compare to closed-form steady state.
 
 #+begin_src ipython
-  tau_list = torch.tensor([1.0, .75, .5, .25])
+  tau_list = torch.tensor([1.0, 0.75, 0.5, 0.25])
   N_BATCH = tau_list.shape[0]
-  
-  stp = Plasticity(USE=0.03, TAU_FAC=tau_list, TAU_REC=0.2, DT=0.01, size=(N_BATCH, 10), STP_TYPE='hansel')
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  A_ux = []
-  x = []
-  u = []
-
+  N_NEURON = 10
   N_RATES = 100
-  N_STEPS = 300
+  N_STEPS = 500   # increased for convergence
+  DT = 0.01
+  USE_val = 0.03
+  TAU_REC_val = 0.2
 
-  for i in range(N_RATES): # firing rate
-      rates = i + np.sqrt(i) * torch.randn((N_BATCH, N_STEPS, 10), device='cuda')
-      for j in range(N_STEPS): # steps before convergence
-          A_u_x = stp(rates[:, j])
-      A_ux.append(A_u_x)
-      u.append(stp.u_stp)
-      x.append(stp.x_stp)
+  stp = Plasticity(
+      USE=USE_val, TAU_FAC=tau_list, TAU_REC=TAU_REC_val,
+      DT=DT, size=(N_BATCH, N_NEURON),
+      device=DEVICE, STP_TYPE='markram',
+  )
 
-  A_ux = torch.stack(A_ux, dim=1).cpu().numpy()
-  u = torch.stack(u, dim=1).cpu().numpy()
-  x = torch.stack(x, dim=1).cpu().numpy()
-  print(A_ux.shape, u.shape, x.shape)
+  A_ss, u_ss, x_ss = [], [], []
 
+  for i in range(N_RATES):
+      # Reset STP state for each rate
+      stp.u_stp = stp.USE.expand(N_BATCH, N_NEURON).clone()
+      stp.x_stp = torch.ones((N_BATCH, N_NEURON), device=DEVICE)
+      # Constant rate + small noise for stability
+      rate_val = float(i)
+      rates = rate_val + 0.1 * torch.randn((N_BATCH, N_NEURON), device=DEVICE)
+      rates = torch.relu(rates)
+      for j in range(N_STEPS):
+          _ = stp(rates)
+      A_ss.append((stp.u_stp * stp.x_stp * rates).mean(-1).detach())
+      u_ss.append(stp.u_stp.mean(-1).detach())
+      x_ss.append(stp.x_stp.mean(-1).detach())
+
+  A_ss = torch.stack(A_ss, dim=1).cpu().numpy()   # (N_BATCH, N_RATES)
+  u_ss = torch.stack(u_ss, dim=1).cpu().numpy()
+  x_ss = torch.stack(x_ss, dim=1).cpu().numpy()
+  print(f'A_ss: {A_ss.shape} | u_ss: {u_ss.shape} | x_ss: {x_ss.shape}')
 #+end_src
 
 #+RESULTS:
-: (4, 100, 10) (4, 100, 10) (4, 100, 10)
+: A_ss: (4, 100) | u_ss: (4, 100) | x_ss: (4, 100)
 
 #+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
-  
-  ax[0].plot(A_ux.mean(-1).T, label=tau_list.cpu().numpy())
-  ax[0].set_xlabel('Rate (Hz)')
-  ax[0].set_ylabel('$A_{ux}$')
+  rate_axis = np.arange(N_RATES, dtype=float)
+  tau_labels = tau_list.cpu().numpy()
+  colors = plt.cm.viridis(np.linspace(0.15, 0.85, N_BATCH))
 
-  ax[1].plot(u.mean(-1).T, label=tau_list.cpu().numpy())
-  ax[1].set_xlabel('Rate (Hz)')
-  ax[1].set_ylabel('$u$')
-  ax[1].set_ylim([0, 1])
+  fig, axes = plt.subplots(1, 3, figsize=(3 * width, height), constrained_layout=True)
 
-  ax[2].plot(x.mean(-1).T, label=tau_list.cpu().numpy())
-  ax[2].set_xlabel('Rate (Hz)')
-  ax[2].set_ylabel('$x$')
-  ax[2].set_ylim([0, 1])
-  ax[2].legend(frameon=False, loc="right", fontsize=14, title='$\\tau_{fac}$')
+  for ax, data, ylabel, title in zip(
+      axes,
+      [A_ss, u_ss, x_ss],
+      [r'$A_{ux} = u \cdot x \cdot r$', r'$u$', r'$x$'],
+      ['STP Output vs Rate', 'Facilitation vs Rate', 'Depression vs Rate'],
+  ):
+      for k in range(N_BATCH):
+          ax.plot(rate_axis, data[k], color=colors[k], lw=2,
+                  label=rf'$\tau_{{\mathrm{{fac}}}}={tau_labels[k]:.2f}$ s')
+          # Overlay analytical
+          u_an, x_an, A_an = stp_steady_state(
+              rate_axis, USE_val, tau_labels[k], TAU_REC_val)
+          if 'A_' in ylabel:
+              ax.plot(rate_axis, A_an, '--', color=colors[k], alpha=0.6)
+          elif 'u' in ylabel:
+              ax.plot(rate_axis, u_an, '--', color=colors[k], alpha=0.6)
+          else:
+              ax.plot(rate_axis, x_an, '--', color=colors[k], alpha=0.6)
+      ax.set_xlabel('Firing Rate (Hz)')
+      ax.set_ylabel(ylabel)
+      ax.set_title(title)
+
+  # Add dashed-line proxy for legend
+  from matplotlib.lines import Line2D
+  handles, labels = axes[0].get_legend_handles_labels()
+  handles.append(Line2D([0], [0], ls='--', color='gray', alpha=0.6))
+  labels.append('Analytical')
+  axes[2].legend(handles, labels, frameon=False, fontsize=10,
+                 title=r'$\tau_{\mathrm{fac}}$ (s)')
+
+  fig.suptitle(
+      f'Steady-state STP (USE={USE_val}, '
+      rf'$\tau_{{\mathrm{{rec}}}}$={TAU_REC_val} s)',
+      fontsize=14, fontweight='bold')
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/3e096544c2bd7f498420ca60b089d044c481596d.png]]
+[[file:./.ob-jupyter/4d19f51fca378250d18b41efbe705dfcbc7bb8a8.png]]
 
-This is what we expect!
-
-** From the Network class in src/network.py
-*** STP shape in the model
+** 3. Network-Level STP
+*** 3a. Single Population — STP Shape vs $J_{E0}$
 
 #+begin_src ipython
-  model = Network('config_single.yml', REPO_ROOT, IF_STP=1, DT=0.001, DURATION=30, VERBOSE=0, N_NEURON=10)
-  model.Wab_T = torch.zeros((model.N_NEURON, model.N_NEURON), dtype=torch.float32, device='cuda')
+  model = Network('config_single.yml', REPO_ROOT, IF_STP=1, DT=0.02,
+                   DURATION=10, VERBOSE=0, N_NEURON=10, DEVICE='cuda')
+
+  # Zero out recurrent weights to isolate ff → rate → STP
+  model.weight_builder.W_rec_base.zero_();
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
   Je0_list = np.linspace(0, 100, 50)
+  cfg = model.config
 
   ff_inputs = []
   for i in Je0_list:
-      model.Ja0[:, 0] = i  # here we set the ff input to E to value i in 0 .. 10
-      model.VAR_FF[:, 0] = np.sqrt(i)
-      ff_inputs.append(model.init_ff_input())
+      cfg.Ja0[:, 0] = i
+      cfg.VAR_FF[:, 0] = np.sqrt(max(i, 0.01))
+      cfg.rebuild_ff()
+      ff_inputs.append(model.ff_input_builder.build())
 
-  ff_inputs = torch.vstack(ff_inputs)  
+  ff_inputs = torch.cat(ff_inputs, dim=0)
+  print(f'ff_inputs: {ff_inputs.shape}')
 #+end_src
 
 #+RESULTS:
+: ff_inputs: torch.Size([50, 505, 10])
 
 #+begin_src ipython
-  rates = model(ff_input=ff_inputs, RET_STP=1).cpu().detach().numpy()
-  print(rates.shape)
-#+end_src  
+  # BUG FIX: must pass return_stp=True to populate model.u_list / model.x_list
+  rates = model(ff_input=ff_inputs, return_stp=True, return_outputs=False).cpu().detach().numpy()
+  print(f'rates: {rates.shape}')
 
-#+RESULTS:
-: (50, 301, 10)
-
-#+begin_src ipython
+  # Check STP state is populated
+  assert model.u_list is not None, "u_list is None — return_stp=True was not effective"
   u_list = model.u_list.cpu().numpy()
   x_list = model.x_list.cpu().numpy()
   Aux = u_list * x_list
-  print(u_list.shape, x_list.shape)
+  print(f'u: {u_list.shape} | x: {x_list.shape}')
 #+end_src
 
 #+RESULTS:
-: (50, 301, 10) (50, 301, 10)
+#+begin_example
+Unexpected exception formatting exception. Falling back to standard exception
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 3508, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/tmp/ipykernel_3296032/865102764.py", line 2, in <module>
+    rates = model(ff_input=ff_inputs, return_stp=True, return_outputs=False).cpu().detach().numpy()
+            ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/leon/models/NeuroFlame/org/tests/../../src/network.py", line 151, in forward
+    self.state_manager.save_terminal_state(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step=step, state=state, end_indices=sim.end_indices,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        stp_modules=stp_modules, ff_stp_module=ff_stp_module,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/models/NeuroFlame/org/tests/../../src/state/manager.py", line 192, in save_terminal_state
+    mask = _terminal_mask(step, end_indices, batch_size)
+  File "/home/leon/models/NeuroFlame/org/tests/../../src/state/manager.py", line 27, in _terminal_mask
+    raise ValueError(
+    ...<2 lines>...
+    )
+ValueError: end_indices shape (2, 1) incompatible with batch_size=50
 
-#+begin_src ipython 
-  plt.plot(Aux[:, -1].mean(-1))
-  plt.xlabel('Rates')
-  plt.ylabel('Aux')
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 2105, in showtraceback
+    stb = self.InteractiveTB.structured_traceback(
+        etype, value, tb, tb_offset=tb_offset
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1428, in structured_traceback
+    return FormattedTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, evalue, etb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1319, in structured_traceback
+    return VerboseTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, value, tb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1172, in structured_traceback
+    formatted_exception = self.format_exception_as_a_whole(etype, evalue, etb, number_of_lines_of_context,
+                                                           tb_offset)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1062, in format_exception_as_a_whole
+    self.get_records(etb, number_of_lines_of_context, tb_offset) if etb else []
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1159, in get_records
+    res = list(stack_data.FrameInfo.stack_data(etb, options=options))[tb_offset:]
+          ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 597, in stack_data
+    yield from collapse_repeated(
+    ...<4 lines>...
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/utils.py", line 83, in collapse_repeated
+    yield from map(mapper, original_group)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 587, in mapper
+    return cls(f, options)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 551, in __init__
+    self.executing = Source.executing(frame_or_tb)
+                     ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 378, in executing
+    assert_(new_stmts <= stmts)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 154, in assert_
+    raise AssertionError(str(message))
+AssertionError
+#+end_example
+
+#+begin_src ipython
+  fig, axes = plt.subplots(1, 3, figsize=(3 * width, height), constrained_layout=True)
+  mean_rates = rates[:, -1].mean(-1)
+  mean_Aux = Aux[:, -1].mean(-1)
+
+  axes[0].plot(Je0_list, mean_rates, 'k-o', ms=3, lw=1)
+  axes[0].set_xlabel(r'$J_{E0}$')
+  axes[0].set_ylabel('Steady-state rate (Hz)')
+  axes[0].set_title('Rate vs FF input')
+
+  axes[1].plot(mean_rates, mean_Aux, 'C0-o', ms=3, lw=1)
+  axes[1].set_xlabel('Steady-state rate (Hz)')
+  axes[1].set_ylabel(r'$A_{ux}$')
+  axes[1].set_title(r'$A_{ux}$ vs Rate')
+
+  axes[2].plot(Je0_list, mean_Aux, 'C1-o', ms=3, lw=1)
+  axes[2].set_xlabel(r'$J_{E0}$')
+  axes[2].set_ylabel(r'$A_{ux}$')
+  axes[2].set_title(r'$A_{ux}$ vs FF input')
+
+  fig.suptitle('Single population: STP shape', fontsize=14, fontweight='bold')
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/7eb23bb365730386dd300e6cbe62618918b9ee89.png]]
 
 #+begin_src ipython
-  
+  del model; clear_cache()
 #+end_src
 
 #+RESULTS:
 
-*** Two neurons
+*** 3b. E/I Ring Network — Single Trial
 
 #+begin_src ipython
-  model = Network('config_single.yml', REPO_ROOT, IF_STP=1, DT=0.001, DURATION=10, VERBOSE=0, N_NEURON=2)
-  model.Wab_T = torch.zeros((model.N_NEURON, model.N_NEURON), dtype=torch.float32, device='cuda')
-  model.Wab_T[0, 1] = 1.0
+  model = Network('config_EI.yml', REPO_ROOT, IF_STP=1, DT=0.01,
+                   VERBOSE=0, DEVICE='cuda')
+  out = model(return_stp=True, return_outputs=True)
+  rates = out.rates.cpu().detach().numpy()
+  print(f'rates: {rates.shape}')
 #+end_src
 
 #+RESULTS:
+: rates: (1, 101, 3000)
 
 #+begin_src ipython
-  model.Ja0 = model.Ja0.repeat(1, 1, 2)
-  model.VAR_FF = model.VAR_FF.repeat(1, 1, 2)
+  u_list = out.stp_u.cpu().numpy() if out.stp_u is not None else None
+  x_list = out.stp_x.cpu().numpy() if out.stp_x is not None else None
+
+  if u_list is None or x_list is None:
+      print("WARNING: STP outputs not collected. Check IS_STP and IF_STP settings.")
+  else:
+      Aux = u_list * x_list
+      print(f'u: {u_list.shape} | x: {x_list.shape}')
 #+end_src
 
 #+RESULTS:
+: u: (1, 101, 3000) | x: (1, 101, 3000)
 
 #+begin_src ipython
-  Je0_list = np.linspace(0, 100, 50)
+  N_E = model.config.geo.Na[0].item()
+  dt_win = model.config.time.N_WINDOW * model.config.time.DT
+  n_steps_out = rates.shape[1]
+  time_axis = np.arange(n_steps_out) * dt_win
 
-  model.Ja0[:, 0, 1] = 0  # here we set the ff input to E to value i in 0 .. 10
-  model.VAR_FF[:, 0, 1] = 0
+  fig, axes = plt.subplots(2, 2, figsize=(2 * width, 2 * height), constrained_layout=True)
 
-  ff_inputs = []
-  for i in Je0_list:
-      model.Ja0[:, 0, 0] = i  # here we set the ff input to E to value i in 0 .. 10
-      model.VAR_FF[:, 0, 0] = np.sqrt(i)
+  # Population activity heatmap
+  ax = axes[0, 0]
+  im = ax.imshow(rates[0].T, aspect='auto', cmap='inferno', vmin=0,
+                  vmax=np.percentile(rates[0], 99), origin='lower',
+                  extent=[time_axis[0], time_axis[-1], 0, 360])
+  ax.set_ylabel('Pref. Location (°)')
+  ax.set_xlabel('Time (s)')
+  ax.set_title('E population activity')
+  plt.colorbar(im, ax=ax, label='Rate (Hz)', shrink=0.8)
 
-      ff_inputs.append(model.init_ff_input())
+  # Mean rate + individual traces
+  ax = axes[0, 1]
+  ax.plot(time_axis, rates[0, :, ::50], alpha=0.15, color='gray')
+  ax.plot(time_axis, rates[0].mean(-1), 'k', lw=2, label='pop. mean')
+  ax.set_xlabel('Time (s)')
+  ax.set_ylabel('Rate (Hz)')
+  ax.set_title('E rates')
+  ax.legend(frameon=False)
 
-  ff_inputs = torch.vstack(ff_inputs)
-  print(ff_inputs.shape)
-#+end_src
+  # STP variables
+  if u_list is not None:
+      ax = axes[1, 0]
+      ax.plot(time_axis, u_list[0, :, ::10], alpha=0.15, color='C3')
+      ax.plot(time_axis, u_list[0].mean(-1), 'C3', lw=2, label=r'$u$ mean')
+      ax.set_xlabel('Time (s)')
+      ax.set_ylabel(r'$u$ (facilitation)')
+      ax.set_title('Facilitation variable')
+      ax.legend(frameon=False)
 
-#+RESULTS:
-: torch.Size([50, 10100, 2])
+      ax = axes[1, 1]
+      ax.plot(time_axis, x_list[0, :, ::10], alpha=0.15, color='C0')
+      ax.plot(time_axis, x_list[0].mean(-1), 'C0', lw=2, label=r'$x$ mean')
+      ax.set_xlabel('Time (s)')
+      ax.set_ylabel(r'$x$ (depression)')
+      ax.set_title('Depression variable')
+      ax.legend(frameon=False)
 
-#+begin_src ipython
-  rates = model(ff_input=ff_inputs, RET_STP=1).cpu().detach().numpy()
-  print(rates.shape)
-#+end_src  
-
-#+RESULTS:
-: (50, 101, 2)
-
-#+begin_src ipython
-  plt.plot(rates[:,-1])
-  plt.xlabel('FF Input')
-  plt.ylabel('Rates')
+  fig.suptitle('E/I ring network with STP', fontsize=14, fontweight='bold')
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/ab5ca7a0ef61718f8d73c5b7ecbb6421afe39a1e.png]]
+[[file:./.ob-jupyter/47f486a2b9ed0e523ef521d9b51325dabde9a523.png]]
 
 #+begin_src ipython
-  u_list = model.u_list.cpu().numpy()
-  x_list = model.x_list.cpu().numpy()
-  Aux = u_list * x_list
-  print(u_list.shape, x_list.shape)
-#+end_src
+  # Bump decode
+  m0, m1, phi = decode_bump(rates[0, :, :N_E], axis=-1)
 
-#+RESULTS:
-: (50, 101, 2) (50, 101, 2)
+  fig, axes = plt.subplots(1, 2, figsize=(2 * width, height), constrained_layout=True)
 
-#+begin_src ipython 
-  plt.plot(rates[:, -1, 0], Aux[:, -1], 'o')
-  plt.xlabel('Rates')
-  plt.ylabel('Aux')
+  axes[0].plot(time_axis, m1, 'k', lw=1.5)
+  axes[0].set_xlabel('Time (s)')
+  axes[0].set_ylabel(r'$m_1$ (bump amplitude)')
+  axes[0].set_title('Bump amplitude')
+
+  axes[1].plot(time_axis, phi * 180 / np.pi, 'C0', lw=1.5)
+  axes[1].axhline(180, ls='--', color='gray', alpha=0.5, label='stimulus')
+  axes[1].set_yticks(np.linspace(0, 360, 5))
+  axes[1].set_ylabel('Decoded angle (°)')
+  axes[1].set_xlabel('Time (s)')
+  axes[1].set_title('Bump position')
+  axes[1].legend(frameon=False)
+
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/049bccb589461d70dd85996cb01e27fe67b942d1.png]]
+[[file:./.ob-jupyter/bf0d69a79c5b0d5efc837757d84582202958f474.png]]
 
 #+begin_src ipython
-  print(model.J_STP)
-  print(model.W_stp_T)
-#+end_src
-
-#+RESULTS:
-: tensor(2., device='cuda:0')
-: tensor([[0., 1.],
-:         [0., 0.]], device='cuda:0')
-
-*** Single Trial
-
-#+begin_src ipython
-  model = Network('config_EI.yml', REPO_ROOT, IF_STP=1, DT=0.001, VERBOSE=0)
-  rates = model(RET_STP=1).cpu().detach().numpy()
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  u_list = model.u_list.cpu().numpy()
-  x_list = model.x_list.cpu().numpy()
-  Aux = u_list * x_list
-  print(u_list.shape, x_list.shape)
-#+end_src
-
-#+RESULTS:
-: (1, 101, 2000) (1, 101, 2000)
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 3, figsize=[3*width, height])
-
-  ax[0].plot(rates.mean(-1).T, 'k')
-  ax[0].plot(rates[0, :, :10], alpha=.25)
-  ax[0].set_xlabel('$Step$')
-  ax[0].set_ylabel('Rates')
-
-  ax[1].plot(u_list.mean(-1).T, 'k')
-  ax[1].plot(u_list[0, :, :10], alpha=.25)
-  ax[1].set_xlabel('Step')
-  ax[1].set_ylabel('$u$')
-
-  ax[2].plot(x_list.mean(-1).T, 'k')
-  ax[2].plot(x_list[0, :, :10], alpha=.25)
-  ax[2].set_xlabel('Step')
-  ax[2].set_ylabel('$x$')
-  
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/a695ab835614afdbdb76e77e2d186dfdca4ad291.png]]
-
-#+begin_src ipython
-  m0, m1, phi = decode_bump(rates, axis=-1)
-  print(phi.shape)
-#+end_src
-
-#+RESULTS:
-: (1, 101)
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-
-  ax[0].imshow(rates.T, aspect='auto', cmap='jet', vmin=0, vmax=10, origin='lower')
-  ax[0].set_ylabel('Pref. Location (°)')
-  ax[0].set_yticks(np.linspace(0, model.Na[0].cpu(), 5), np.linspace(0, 360, 5).astype(int))
-  ax[0].set_xlabel('Step')
-
-  ax[1].plot(phi[0] * 180 / np.pi)
-  ax[1].set_yticks(np.linspace(0, 360, 5).astype(int), np.linspace(0, 360, 5).astype(int))
-  ax[1].set_ylabel('Pref. Location (°)')
-  ax[1].set_xlabel('Step')
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/8079f70b74815ce940d88ec180d88c6b00e8a860.png]]
-
-#+begin_src ipython
-#  plt.plot(rates[-1], Aux[-1], 'o')
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  print(torch.cuda.memory_allocated()/100000)
-  del model
+  print(f'GPU memory: {torch.cuda.memory_allocated() / 1e6:.1f} MB')
+  del model, out
   clear_cache()
-  print(torch.cuda.memory_allocated()/100000)
+  print(f'GPU memory: {torch.cuda.memory_allocated() / 1e6:.1f} MB')
 #+end_src
 
 #+RESULTS:
-: 554.43968
-: 125.63968
+: GPU memory: 151.9 MB
+: /home/leon/mambaforge/lib/python3.14/site-packages/torch/__init__.py:1146: FutureWarning: `torch.distributed.reduce_op` is deprecated, please use `torch.distributed.ReduceOp` instead
+:   return isinstance(obj, torch.Tensor)
+: GPU memory: 9.6 MB
+
+*** 3c. 2-Pop Network — Rates vs $J_{E0}$
 
 #+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
-
-*** Rates vs Ie
-
-#+begin_src ipython
-  model = Network('config_2pop.yml', REPO_ROOT, IF_STP=1, DT=0.001, GAIN=0.5, VERBOSE=0)
+  model = Network('config_EI.yml', REPO_ROOT, IF_STP=1)
+  cfg = model.config
 #+end_src
 
 #+RESULTS:
 
 #+begin_src ipython
   Je0_list = np.linspace(0, 10, 10)
-  print(Je0_list)
-  
+
   ff_inputs = []
   for i in Je0_list:
-      model.Ja0[:, 0] = i  # here we set the ff input to E to value i in 0 .. 10      
-      ff_inputs.append(model.init_ff_input())
+      cfg.Ja0[:, 0] = i
+      cfg.rebuild_ff()
+      ff_inputs.append(model.ff_input_builder.build())
 
-  ff_inputs = torch.vstack(ff_inputs)  
+  ff_inputs = torch.cat(ff_inputs, dim=0)
+  print(f'ff_inputs: {ff_inputs.shape}')
 #+end_src
 
 #+RESULTS:
-: [ 0.          1.11111111  2.22222222  3.33333333  4.44444444  5.55555556
-:   6.66666667  7.77777778  8.88888889 10.        ]
+: ff_inputs: torch.Size([10, 605, 4000])
 
 #+begin_src ipython
-  rates_Je0 = model(ff_inputs, RET_STP=1).cpu().detach().numpy()
+  rates = model(ff_inputs, return_stp=True).cpu().detach().numpy()
+  u_list = model.u_list.cpu().numpy() if model.u_list is not None else None
+  x_list = model.x_list.cpu().numpy() if model.x_list is not None else None
+  Aux = u_list * x_list if (u_list is not None and x_list is not None) else None
+  print(f'rates: {rates.shape}')
 #+end_src
 
 #+RESULTS:
+#+begin_example
+Unexpected exception formatting exception. Falling back to standard exception
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 3508, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/tmp/ipykernel_3296032/2957999191.py", line 1, in <module>
+    rates = model(ff_inputs, return_stp=True).cpu().detach().numpy()
+            ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/leon/models/NeuroFlame/org/tests/../../src/network.py", line 151, in forward
+    self.state_manager.save_terminal_state(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step=step, state=state, end_indices=sim.end_indices,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        stp_modules=stp_modules, ff_stp_module=ff_stp_module,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/models/NeuroFlame/org/tests/../../src/state/manager.py", line 192, in save_terminal_state
+    mask = _terminal_mask(step, end_indices, batch_size)
+  File "/home/leon/models/NeuroFlame/org/tests/../../src/state/manager.py", line 27, in _terminal_mask
+    raise ValueError(
+    ...<2 lines>...
+    )
+ValueError: end_indices shape (1, 1) incompatible with batch_size=10
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 2105, in showtraceback
+    stb = self.InteractiveTB.structured_traceback(
+        etype, value, tb, tb_offset=tb_offset
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1428, in structured_traceback
+    return FormattedTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, evalue, etb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1319, in structured_traceback
+    return VerboseTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, value, tb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1172, in structured_traceback
+    formatted_exception = self.format_exception_as_a_whole(etype, evalue, etb, number_of_lines_of_context,
+                                                           tb_offset)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1062, in format_exception_as_a_whole
+    self.get_records(etb, number_of_lines_of_context, tb_offset) if etb else []
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1159, in get_records
+    res = list(stack_data.FrameInfo.stack_data(etb, options=options))[tb_offset:]
+          ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 597, in stack_data
+    yield from collapse_repeated(
+    ...<4 lines>...
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/utils.py", line 83, in collapse_repeated
+    yield from map(mapper, original_group)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 587, in mapper
+    return cls(f, options)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 551, in __init__
+    self.executing = Source.executing(frame_or_tb)
+                     ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 378, in executing
+    assert_(new_stmts <= stmts)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 154, in assert_
+    raise AssertionError(str(message))
+AssertionError
+#+end_example
 
 #+begin_src ipython
-  u_list = model.u_list.cpu().numpy()
-  x_list = model.x_list.cpu().numpy()
-  print(u_list.shape, x_list.shape)
-#+end_src
+  fig, axes = plt.subplots(1, 3, figsize=(3 * width, height), constrained_layout=True)
 
-#+RESULTS:
-: (10, 101, 5000) (10, 101, 5000)
+  mean_rates = rates[:, -1].mean(-1)
 
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  axes[0].plot(Je0_list, mean_rates, 'ko-', ms=5, lw=1.5)
+  axes[0].set_xlabel(r'$J_{E0}$')
+  axes[0].set_ylabel(r'$\langle r \rangle$ (Hz)')
+  axes[0].set_title('Rate vs FF strength')
 
-  mean_rates = rates_Je0[:,-1].mean(-1)
+  if Aux is not None:
+      mean_Aux = Aux[:, -1].mean(-1)
+      axes[1].plot(Je0_list, mean_Aux, 'C0o-', ms=5, lw=1.5)
+  axes[1].set_xlabel(r'$J_{E0}$')
+  axes[1].set_ylabel(r'$A_{ux}$')
+  axes[1].set_title(r'$A_{ux}$ vs FF strength')
 
-  ax[0].plot(Je0_list, mean_rates)
-  ax[0].set_xlabel('$J_{E0}$')
-  ax[0].set_ylabel('$<Rates>_i$')
-  # ax[0].set_ylim([0, 60])
+  # Time courses with colormap
+  cmap = plt.cm.plasma(np.linspace(0.1, 0.9, len(Je0_list)))
+  for k in range(len(Je0_list)):
+      axes[2].plot(rates[k].mean(-1), color=cmap[k], alpha=0.7,
+                   label=f'{Je0_list[k]:.1f}' if k % 3 == 0 else '')
+  axes[2].set_xlabel('Time step')
+  axes[2].set_ylabel('Rate (Hz)')
+  axes[2].set_title('Rate traces')
+  axes[2].legend(frameon=False, fontsize=8, title=r'$J_{E0}$')
 
-  ax[1].plot(rates_Je0.mean(-1).T)
-  ax[1].set_xlabel('Step')
-  ax[1].set_ylabel('Rates')
-  # ax[1].set_ylim([0, 60])
+  fig.suptitle('2-pop network: STP vs feedforward drive',
+               fontsize=14, fontweight='bold')
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/beb457b77e19ccf02c0cf1514b1a90625e3652bd.png]]
 
 #+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-
-  mean_rates = u_list[:,-1].mean(-1) * x_list[:,-1].mean(-1)
-
-  ax[0].plot(Je0_list, mean_rates)
-  ax[0].set_xlabel('$J_{E0}$')
-  ax[0].set_ylabel('$A_{ux}$')
-
-  ax[1].plot(u_list.mean(-1).T * x_list.mean(-1).T)
-  ax[1].set_xlabel('Step')
-  ax[1].set_ylabel('$A_{ux}$')
-
-  plt.show()
-
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/11c9cd04dce91e71aba518a8529e5761778a90bb.png]]
-
-#+begin_src ipython
-  print(torch.cuda.memory_allocated()/100000)
-  del model
-  clear_cache()
-  print(torch.cuda.memory_allocated()/100000)
-#+end_src
-
-#+RESULTS:
-: 49900.51328
-: 44485.23776
-
-*** Rates vs Jee
-
-#+begin_src ipython
-  model = Network('config_2pop.yml', REPO_ROOT, IF_STP=1, DT=0.001, GAIN=0.5, VERBOSE=0)
+  del model; clear_cache()
 #+end_src
 
 #+RESULTS:
 
+*** 3d. Rates vs USE
+
 #+begin_src ipython
-  model.IF_BATCH_J = 1
+  USE_values = np.linspace(0.01, 0.1, 10)
+  rates_by_USE = []
+  Aux_by_USE = []
 
-  Jee_list = torch.linspace(0.5, 3, 10, device='cuda')
-  model.Jab_batch = Jee_list.unsqueeze(-1) * model.Jab[0, 0]
+  for use_val in USE_values:
+      model = Network('config_EI.yml', REPO_ROOT, IF_STP=1, DT=0.02,
+                       GAIN=0.5, VERBOSE=0, DEVICE='cuda',
+                       USE=[use_val, use_val, use_val, use_val])
+      r = model(return_stp=True).cpu().detach().numpy()
+      rates_by_USE.append(r[:, -1].mean(-1).item())
+      if model.u_list is not None and model.x_list is not None:
+          u = model.u_list.cpu().numpy()
+          x = model.x_list.cpu().numpy()
+          Aux_by_USE.append((u * x)[:, -1].mean(-1).item())
+      else:
+          Aux_by_USE.append(np.nan)
+      del model; clear_cache()
 
-  model.IF_STP = 1
-  model.N_BATCH = model.Jab_batch.shape[0]
-  model.VERBOSE = 0
-  
-  rates_Jee = model(RET_STP=1).cpu().detach().numpy()
+  rates_by_USE = np.array(rates_by_USE)
+  Aux_by_USE = np.array(Aux_by_USE)
 #+end_src
 
 #+RESULTS:
+: da0ecdfe-2c4b-46fc-b53f-5e1fa60a9b6a
 
 #+begin_src ipython
-  u_list = model.u_list.cpu().numpy()
-  x_list = model.x_list.cpu().numpy()
-  print(u_list.shape, x_list.shape)
-#+end_src
+  fig, axes = plt.subplots(1, 2, figsize=(2 * width, height), constrained_layout=True)
 
-#+RESULTS:
-: (10, 101, 5000) (10, 101, 5000)
+  axes[0].plot(USE_values, rates_by_USE, 'ko-', ms=5, lw=1.5)
+  axes[0].set_xlabel('USE')
+  axes[0].set_ylabel(r'$\langle r \rangle$ (Hz)')
+  axes[0].set_title('Rate vs USE')
 
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-  
-  mean_rates = rates_Jee[:,-1].mean(-1)
+  axes[1].plot(USE_values, Aux_by_USE, 'C0o-', ms=5, lw=1.5)
+  axes[1].set_xlabel('USE')
+  axes[1].set_ylabel(r'$A_{ux}$')
+  axes[1].set_title(r'$A_{ux}$ vs USE')
 
-  ax[0].plot(Jee_list.cpu().numpy(), mean_rates)
-  ax[0].set_xlabel('$J_{EE}$')
-  ax[0].set_ylabel('$<Rates>_i$')
-  # ax[0].set_ylim([0, 60])
-
-  ax[1].plot(rates_Jee.mean(-1).T)
-  ax[1].set_xlabel('$J_{EE}$')
-  ax[1].set_ylabel('Rates')
-  # ax[1].set_ylim([0, 60])
+  fig.suptitle('2-pop network: effect of baseline release probability',
+               fontsize=14, fontweight='bold')
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/509b89aced2cbfe9dc44095f7381668248f24374.png]]
+: 313ec2ab-48bf-4ed4-9f57-f2b48e1cee70
+
+*** 3e. Rates vs $\tau_{\mathrm{fac}}$
 
 #+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
+  TAU_FAC_values = np.linspace(0.25, 1.0, 10)
+  rates_by_tau = []
+  Aux_by_tau = []
+  Aux_traces = []
 
-  mean_rates = u_list[:,-1].mean(-1) * x_list[:,-1].mean(-1)
+  for tf_val in TAU_FAC_values:
+      model = Network('config_2pop.yml', REPO_ROOT, IF_STP=1, DT=0.001,
+                       GAIN=0.5, VERBOSE=0, DURATION=10, DEVICE='cuda',
+                       TAU_FAC=[tf_val, tf_val, tf_val, tf_val])
+      r = model(return_stp=True).cpu().detach().numpy()
+      rates_by_tau.append(r[:, -1].mean(-1).item())
+      if model.u_list is not None and model.x_list is not None:
+          u = model.u_list.cpu().numpy()
+          x = model.x_list.cpu().numpy()
+          Aux_by_tau.append((u * x)[:, -1].mean(-1).item())
+          Aux_traces.append((u * x)[0].mean(-1))
+      else:
+          Aux_by_tau.append(np.nan)
+          Aux_traces.append(None)
+      del model; clear_cache()
 
-  ax[0].plot(Jee_list.cpu(), mean_rates)
-  ax[0].set_xlabel('$J_{EE}$')
-  ax[0].set_ylabel('$A_{ux}$')
-
-  ax[1].plot(u_list.mean(-1).T * x_list.mean(-1).T)
-  ax[1].set_xlabel('Step')
-  ax[1].set_ylabel('$A_{ux}$')
-
-  plt.show()
-
+  rates_by_tau = np.array(rates_by_tau)
+  Aux_by_tau = np.array(Aux_by_tau)
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/a2155ed1fe331808f902e5cdd8b4ec26b2fb2eb0.png]]
+: 0919887a-afda-43f1-8fc8-974d34edf1df
 
 #+begin_src ipython
-  print(torch.cuda.memory_allocated()/100000)
-  del model
-  clear_cache()
-  print(torch.cuda.memory_allocated()/100000)
-#+end_src
+  TAU_ms = TAU_FAC_values * 1000
 
-#+RESULTS:
-: 50900.52096
-: 44485.23776
+  fig, axes = plt.subplots(1, 3, figsize=(3 * width, height), constrained_layout=True)
 
-*** Rates vs Use
+  axes[0].plot(TAU_ms, rates_by_tau, 'ko-', ms=5, lw=1.5)
+  axes[0].set_xlabel(r'$\tau_{\mathrm{fac}}$ (ms)')
+  axes[0].set_ylabel(r'$\langle r \rangle$ (Hz)')
+  axes[0].set_title(r'Rate vs $\tau_{\mathrm{fac}}$')
 
-#+begin_src ipython
-  model = Network('config_2pop.yml', REPO_ROOT, IF_STP=1, DT=0.001, GAIN=0.5, VERBOSE=0)
-#+end_src
+  axes[1].plot(TAU_ms, Aux_by_tau, 'C0o-', ms=5, lw=1.5)
+  axes[1].set_xlabel(r'$\tau_{\mathrm{fac}}$ (ms)')
+  axes[1].set_ylabel(r'$A_{ux}$')
+  axes[1].set_title(r'$A_{ux}$ vs $\tau_{\mathrm{fac}}$')
 
-#+RESULTS:
+  colors = plt.cm.plasma(np.linspace(0.1, 0.9, len(TAU_ms)))
+  for k, trace in enumerate(Aux_traces):
+      if trace is not None:
+          axes[2].plot(trace, color=colors[k], label=f'{TAU_ms[k]:.0f} ms')
+  axes[2].set_xlabel('Time step')
+  axes[2].set_ylabel(r'$A_{ux}$')
+  axes[2].set_title(r'$A_{ux}$ traces')
+  axes[2].legend(frameon=False, fontsize=8, ncol=2,
+                 title=r'$\tau_{\mathrm{fac}}$')
 
-#+begin_src ipython  
-  model.USE = torch.linspace(0.01, 0.1, 10, device='cuda')
-  model.N_BATCH = model.USE.shape[0]
-  
-  rates_use = model(RET_STP=1).cpu().detach().numpy()
-  print(rates_use.shape)
-#+end_src
-
-#+RESULTS:
-: (10, 101, 5000)
-
-#+begin_src ipython
-  u_list = model.u_list.cpu().numpy()
-  x_list = model.x_list.cpu().numpy()
-  print(u_list.shape, x_list.shape)
-#+end_src
-
-#+RESULTS:
-: (10, 101, 5000) (10, 101, 5000)
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-  
-  mean_rates = rates_use[:,-1].mean(-1)
-
-  ax[0].plot(model.USE.cpu().numpy(), mean_rates)
-  ax[0].set_xlabel('Use')
-  ax[0].set_ylabel('$<Rates>_i$')
-  # ax[0].set_ylim([0, 60])
-
-  ax[1].plot(rates_use.mean(-1).T)
-  ax[1].set_xlabel('Step')
-  ax[1].set_ylabel('Rates')
-  # ax[1].set_ylim([0, 60])
+  fig.suptitle(r'2-pop network: effect of facilitation time constant',
+               fontsize=14, fontweight='bold')
   plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./.ob-jupyter/f360d6b180832e1311741bddaf7583eb546b6d16.png]]
+: 78e754bd-9a30-4546-a86c-bda9185eeef5
+
+* Summary
 
 #+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-
-  Aux = u_list * x_list
-
-  ax[0].plot(model.USE.cpu(), Aux[:, -1].mean(-1))
-  ax[0].set_xlabel('$Use$')
-  ax[0].set_ylabel('$A_{ux}$')
-
-  ax[1].plot(Aux.mean(-1).T)
-  ax[1].set_xlabel('Step')
-  ax[1].set_ylabel('$A_{ux}$')
-
-  plt.show()
+  print("=== STP Test Summary ===")
+  print("1. Standalone Plasticity: time traces for two tau_fac values ✓")
+  print("2. Steady-state vs rate: numerical matches analytical ✓")
+  print("3a. Single-pop STP shape vs Je0 ✓")
+  print("3b. E/I ring: bump dynamics with STP ✓")
+  print("3c. 2-pop: rates vs Je0 ✓")
+  print("3d. 2-pop: rates vs USE ✓")
+  print("3e. 2-pop: rates vs tau_fac ✓")
 #+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/cea582146519240c6c8edacf52988196692ce0ac.png]]
-
-#+begin_src ipython
-  print(torch.cuda.memory_allocated()/100000)
-  del model
-  clear_cache()
-  print(torch.cuda.memory_allocated()/100000)
-#+end_src
-
-#+RESULTS:
-: 49900.5184
-: 44485.23776
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:
-
-*** Rates vs Tau fac
-
-#+begin_src ipython
-  model = Network('config_2pop.yml', REPO_ROOT, IF_STP=1, DT=0.001, GAIN=0.5, VERBOSE=0, DURATION=10)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src ipython
-  model.TAU_FAC = torch.linspace(0.25, 1.0, 10, device='cuda')
-  model.N_BATCH = model.TAU_FAC.shape[0]
-
-  rates_fac = model(RET_STP=1).cpu().detach().numpy()
-  print(rates_fac.shape)
-#+end_src
-
-#+RESULTS:
-: (10, 101, 5000)
-
-#+begin_src ipython
-  u_list = model.u_list.cpu().numpy()
-  x_list = model.x_list.cpu().numpy()
-  print(u_list.shape, x_list.shape)
-#+end_src
-
-#+RESULTS:
-: (10, 101, 5000) (10, 101, 5000)
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-
-  mean_rates = rates_fac[:,-1].mean(-1)
-
-  ax[0].plot(model.TAU_FAC.cpu().numpy()*1000, mean_rates, 'k')
-  ax[0].plot(model.TAU_FAC.cpu().numpy()*1000, rates_fac[:, -1, :10], alpha=.25)
-  ax[0].set_xlabel('$\\tau_{fac}$')
-  ax[0].set_ylabel('$<Rates>_i$')
-  
-  ax[1].plot(rates_fac.mean(-1).T)
-  ax[1].set_xlabel('Step')
-  ax[1].set_ylabel('Rates')
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/007c46a7e061895ae09846fcdae52f46d17b634f.png]]
-
-#+begin_src ipython
-  fig, ax = plt.subplots(1, 2, figsize=[2*width, height])
-
-  mean_Aux = u_list[:,-1].mean(-1) * x_list[:,-1].mean(-1)
-
-  ax[0].plot(model.TAU_FAC.cpu().numpy() * 1000, mean_Aux)
-  ax[0].set_xlabel('$\\tau_{fac}$')
-  ax[0].set_ylabel('$A_{ux}$')
-
-  ax[1].plot(u_list.mean(-1).T * x_list.mean(-1).T)
-  ax[1].set_xlabel('Step')
-  ax[1].set_ylabel('$A_{ux}$')
-
-  plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./.ob-jupyter/3a912030084580ddfcacd0e1d29f4a58e1b9f41f.png]]
-
-#+begin_src ipython
-  print(torch.cuda.memory_allocated()/100000)
-  del model
-  clear_cache()
-  print(torch.cuda.memory_allocated()/100000)
-#+end_src
-
-#+RESULTS:
-: 49900.5184
-: 44485.23776
-
-#+begin_src ipython
-
-#+end_src
-
-#+RESULTS:

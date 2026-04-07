@@ -12,22 +12,49 @@ class Plasticity(nn.Module):
         self.stp_type = STP_TYPE
         self.device = device
 
+        # ── store raw time-constants (may be scalar or tensor) ────────
         self.TAU_FAC = TAU_FAC
         self.TAU_REC = TAU_REC
-        self.USE = torch.tensor(USE, device=device, dtype=torch.float32).unsqueeze(-1)
 
-        if TAU_FAC > 0:
-            self.DT_TAU_FAC = torch.tensor(DT / TAU_FAC, device=device).unsqueeze(-1)
-        else:
-            self.DT_TAU_FAC = torch.tensor(0.0, device=device).unsqueeze(-1)
+        # ── USE: always a (*, 1) tensor for broadcasting ─────────────
+        self.USE = torch.as_tensor(USE, device=device, dtype=torch.float32)
+        if self.USE.dim() == 0:
+            self.USE = self.USE.unsqueeze(-1)
+        elif self.USE.dim() == 1 and self.USE.shape[0] != 1:
+            self.USE = self.USE.unsqueeze(-1)
 
-        if TAU_REC > 0:
-            self.DT_TAU_REC = torch.tensor(DT / TAU_REC, device=device).unsqueeze(-1)
+        # ── DT / TAU ratios: handle scalar *and* tensor TAU ──────────
+        TAU_FAC_t = torch.as_tensor(TAU_FAC, device=device, dtype=torch.float32)
+        TAU_REC_t = torch.as_tensor(TAU_REC, device=device, dtype=torch.float32)
+
+        # Safe division: where tau > 0 use DT/tau, else 0
+        self.DT_TAU_FAC = torch.where(
+            TAU_FAC_t > 0,
+            torch.tensor(DT, device=device, dtype=torch.float32) / TAU_FAC_t,
+            torch.tensor(0.0, device=device, dtype=torch.float32),
+        )
+        self.DT_TAU_REC = torch.where(
+            TAU_REC_t > 0,
+            torch.tensor(DT, device=device, dtype=torch.float32) / TAU_REC_t,
+            torch.tensor(0.0, device=device, dtype=torch.float32),
+        )
+
+        # Add trailing dim for broadcasting against (N_BATCH, N_NEURON)
+        if self.DT_TAU_FAC.dim() == 0:
+            self.DT_TAU_FAC = self.DT_TAU_FAC.unsqueeze(-1)
         else:
-            self.DT_TAU_REC = torch.tensor(0.0, device=device).unsqueeze(-1)
+            self.DT_TAU_FAC = self.DT_TAU_FAC.unsqueeze(-1)
+        if self.DT_TAU_REC.dim() == 0:
+            self.DT_TAU_REC = self.DT_TAU_REC.unsqueeze(-1)
+        else:
+            self.DT_TAU_REC = self.DT_TAU_REC.unsqueeze(-1)
 
         self.EXP_REC = torch.exp(-self.DT_TAU_REC)
         self.EXP_FAC = torch.exp(-self.DT_TAU_FAC)
+
+        # ── boolean flags for zero-tau branches (element-wise safe) ───
+        self._fac_is_zero = (TAU_FAC_t == 0).all().item()
+        self._rec_is_zero = (TAU_REC_t == 0).all().item()
 
         if IF_INIT:
             self.u_stp = self.USE.expand(N_BATCH, N_NEURON).clone()
@@ -47,15 +74,15 @@ class Plasticity(nn.Module):
         return (self.u_stp * self.x_stp) * rates
 
     def markram_stp_exp(self, rates):
-        if self.TAU_FAC == 0:
+        if self._fac_is_zero:
             self.u_stp = self.USE.expand_as(self.u_stp)
-        if self.TAU_REC != 0:
+        if not self._rec_is_zero:
             self.x_stp = (
                 1.0
                 + (self.x_stp - 1.0) * self.EXP_REC
                 - self.DT * self.u_stp * self.x_stp * rates
             )
-        if self.TAU_FAC != 0.0:
+        if not self._fac_is_zero:
             self.u_stp = (
                 self.USE
                 + (self.u_stp - self.USE) * self.EXP_FAC

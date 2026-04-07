@@ -15,11 +15,13 @@
 #+end_src
 
 #+RESULTS:
+:RESULTS:
 : The autoreload extension is already loaded. To reload it, use:
 :   %reload_ext autoreload
 : Python exe
 : /home/leon/mambaforge/bin/python
-
+: <Figure size 600x370.82 with 0 Axes>
+:END:
 ** Imports
 
 #+begin_src ipython
@@ -68,6 +70,19 @@ def add_stim_shading(ax, stim_epochs, t_offset=0.0, colors=None, labels=None, al
         c = colors[i % len(colors)]
         lbl = labels[i] if labels else f'Stim {i}'
         ax.axvspan(on - t_offset, off - t_offset, alpha=alpha, color=c, label=lbl)
+
+# ── Shared timing helpers (computed once after model is built) ────────
+def get_output_time_axis(model):
+    """Return time axis (seconds) for the rate output tensor."""
+    dt_out = model.config.DT * model.config.N_WINDOW
+    n_out = int((model.config.N_STEPS - model.config.N_STEADY - model.config.N_HEBB)
+                / model.config.N_WINDOW)
+    return np.arange(n_out) * dt_out
+
+def get_stim_epochs_output(model, t_stim_on, t_stim_off):
+    """Convert absolute stimulus times to output-relative times."""
+    t_off = model.config.T_STEADY + getattr(model.config, 'T_HEBB', 0.0)
+    return [(on - t_off, off - t_off) for on, off in zip(t_stim_on, t_stim_off)]
 #+end_src
 
 #+RESULTS:
@@ -91,8 +106,9 @@ model = Network('config_lr.yml', REPO_ROOT)
 
 #+begin_src ipython
 lr_module = model.weight_builder.low_rank
-U = lr_module.get_U().detach().cpu().numpy()  # (Ne, 2)
-V = lr_module.get_V().detach().cpu().numpy()  # (Ne, 2)
+U = lr_module.get_U().detach().cpu().numpy()   # (Ne, 2)
+V = lr_module.get_V().detach().cpu().numpy()   # (Ne, 2)
+V_tensor = lr_module.get_V().detach()          # keep on device for later
 
 Ne = model.config.Na[0].item()
 N_NEURON = model.config.N_NEURON
@@ -101,10 +117,14 @@ print(f'Ne={Ne}, Ni={Ni}, N_NEURON={N_NEURON}')
 print(f'U shape: {U.shape}, V shape: {V.shape}')
 print(f'U norms: {np.linalg.norm(U, axis=0)}')
 print(f'V norms: {np.linalg.norm(V, axis=0)}')
-print(f'U[:,0]·U[:,1] = {U[:,0] @ U[:,1]:.4f}')
-print(f'V[:,0]·V[:,1] = {V[:,0] @ V[:,1]:.4f}')
-print(f'U[:,0]·V[:,0] = {U[:,0] @ V[:,0]:.4f}')
-print(f'U[:,0]·V[:,1] = {U[:,0] @ V[:,1]:.4f}')
+
+# Orthogonality diagnostics
+U_n = U / np.linalg.norm(U, axis=0, keepdims=True)
+V_n = V / np.linalg.norm(V, axis=0, keepdims=True)
+print(f'cos(U0,U1) = {U_n[:,0] @ U_n[:,1]:.4f}')
+print(f'cos(V0,V1) = {V_n[:,0] @ V_n[:,1]:.4f}')
+print(f'cos(U0,V0) = {U_n[:,0] @ V_n[:,0]:.4f}')
+print(f'cos(U0,V1) = {U_n[:,0] @ V_n[:,1]:.4f}')
 #+end_src
 
 #+RESULTS:
@@ -112,10 +132,10 @@ print(f'U[:,0]·V[:,1] = {U[:,0] @ V[:,1]:.4f}')
 : U shape: (3000, 2), V shape: (3000, 2)
 : U norms: [53.683006 54.314014]
 : V norms: [54.71209  53.793026]
-: U[:,0]·U[:,1] = -41.8736
-: V[:,0]·V[:,1] = -77.7240
-: U[:,0]·V[:,0] = 4.6792
-: U[:,0]·V[:,1] = 2.4930
+: cos(U0,U1) = -0.0144
+: cos(V0,V1) = -0.0264
+: cos(U0,V0) = 0.0016
+: cos(U0,V1) = 0.0009
 
 *** Visualise Low-Rank Vectors
 
@@ -135,7 +155,8 @@ for ax, title in [(axes[0,0], 'Left vectors $U$'), (axes[0,1], 'Right vectors $V
 
 # U-V scatter per rank
 for k in range(2):
-    axes[0, 2].scatter(U[:, k], V[:, k], s=1, alpha=0.15, rasterized=True, label=f'rank {k}')
+    axes[0, 2].scatter(U[:, k], V[:, k], s=1, alpha=0.15, rasterized=True,
+                       label=f'rank {k}')
 axes[0, 2].set_xlabel('$U_i$'); axes[0, 2].set_ylabel('$V_i$')
 axes[0, 2].set_title('$U$ vs $V$ per neuron')
 axes[0, 2].legend(fontsize=8, markerscale=5)
@@ -143,26 +164,32 @@ axes[0, 2].axhline(0, color='k', lw=0.5, ls='--')
 axes[0, 2].axvline(0, color='k', lw=0.5, ls='--')
 
 # Joint distribution in V space
-axes[1, 0].scatter(V[:, 0], V[:, 1], s=1, alpha=0.15, c='tab:purple', rasterized=True)
+axes[1, 0].scatter(V[:, 0], V[:, 1], s=1, alpha=0.15, c='tab:purple',
+                   rasterized=True)
 axes[1, 0].set_xlabel('$V_0$'); axes[1, 0].set_ylabel('$V_1$')
 axes[1, 0].set_title('Neurons in $V$-space (readout)')
 axes[1, 0].axhline(0, color='k', lw=0.5, ls='--')
 axes[1, 0].axvline(0, color='k', lw=0.5, ls='--')
 
 # Joint distribution in U space
-axes[1, 1].scatter(U[:, 0], U[:, 1], s=1, alpha=0.15, c='tab:orange', rasterized=True)
+axes[1, 1].scatter(U[:, 0], U[:, 1], s=1, alpha=0.15, c='tab:orange',
+                   rasterized=True)
 axes[1, 1].set_xlabel('$U_0$'); axes[1, 1].set_ylabel('$U_1$')
 axes[1, 1].set_title('Neurons in $U$-space (input)')
 axes[1, 1].axhline(0, color='k', lw=0.5, ls='--')
 axes[1, 1].axvline(0, color='k', lw=0.5, ls='--')
 
-# Low-rank matrix structure
+# Low-rank matrix structure (subsample for display)
 W_lr = lr_module(0).detach().cpu().numpy()
-vmax_lr = np.percentile(np.abs(W_lr), 99)
-im = axes[1, 2].imshow(W_lr, cmap='RdBu_r', aspect='auto',
-                         vmin=-vmax_lr, vmax=vmax_lr, interpolation='none')
-axes[1, 2].set_xlabel('Post E neuron'); axes[1, 2].set_ylabel('Pre E neuron')
-axes[1, 2].set_title(f'$W_{{LR}} = U V^\\top$ (rank {U.shape[1]})')
+show_n = min(500, Ne)
+W_lr_sub = W_lr[:show_n, :show_n]
+vmax_lr = np.percentile(np.abs(W_lr_sub), 99)
+im = axes[1, 2].imshow(W_lr_sub, cmap='RdBu_r', aspect='auto',
+                        vmin=-vmax_lr, vmax=vmax_lr, interpolation='none')
+axes[1, 2].set_xlabel('Post E neuron')
+axes[1, 2].set_ylabel('Pre E neuron')
+axes[1, 2].set_title(f'$W_{{LR}} = U V^\\top$ (rank {U.shape[1]}, '
+                      f'first {show_n})')
 plt.colorbar(im, ax=axes[1, 2], fraction=0.046, pad=0.04)
 
 plt.tight_layout()
@@ -180,7 +207,6 @@ during two separate epochs, so the input projects cleanly onto the
 low-rank subspace.
 
 #+begin_src ipython
-V_tensor = lr_module.get_V().detach()  # (Ne, 2) on device
 Ne_t = model.config.Na[0].item()
 
 # Build baseline ff_input from the model
@@ -205,6 +231,10 @@ t_off_1 = int(4.0 / DT) + N_STEADY + N_HEBB
 t_on_2 = int(5.0 / DT) + N_STEADY + N_HEBB
 t_off_2 = int(7.0 / DT) + N_STEADY + N_HEBB
 
+# Guard against overshoot
+t_off_1 = min(t_off_1, ff_input_custom.shape[1])
+t_off_2 = min(t_off_2, ff_input_custom.shape[1])
+
 scale = GAIN * np.sqrt(Ka0) * M0
 stim_v0 = stim_strength * V_tensor[:, 0] * scale
 stim_v1 = stim_strength * V_tensor[:, 1] * scale
@@ -216,12 +246,14 @@ ff_input_custom[:, t_on_2:t_off_2, ee] += stim_v1.unsqueeze(0)
 print(f'Stim V0: steps [{t_on_1}, {t_off_1}), strength={stim_strength}')
 print(f'Stim V1: steps [{t_on_2}, {t_off_2}), strength={stim_strength}')
 print(f'ff_input_custom shape: {ff_input_custom.shape}')
+print(f'N_STEPS: {model.config.N_STEPS}')
 #+end_src
 
 #+RESULTS:
 : Stim V0: steps [200, 300), strength=2.0
 : Stim V1: steps [350, 450), strength=2.0
 : ff_input_custom shape: torch.Size([1, 605, 4000])
+: N_STEPS: 605
 
 *** Run with Custom Input
 
@@ -229,10 +261,12 @@ print(f'ff_input_custom shape: {ff_input_custom.shape}')
 outputs = model(ff_input_custom, return_outputs=True, return_rec=True)
 rates = outputs.rates.cpu().detach().numpy()[0]  # (n_steps_out, Ne)
 print(f'rates shape: {rates.shape}')
+print(f'mean rate: {rates.mean():.2f} Hz, max: {rates.max():.2f} Hz')
 #+end_src
 
 #+RESULTS:
 : rates shape: (101, 3000)
+: mean rate: 2.69 Hz, max: 124.43 Hz
 
 ** Overlap Analysis
 *** Compute Overlaps
@@ -255,31 +289,35 @@ print(f'Final overlaps: m0={overlaps[-1, 0]:.4f}, m1={overlaps[-1, 1]:.4f}')
 : Overlap shape: (101, 2)
 : Final overlaps: m0=-0.0524, m1=0.0266
 
-*** Using the get_overlap Helper
+*** Verify with Inline Computation
 
 #+begin_src ipython
-# get_overlap expects model.PHI0 — we set it to V for this analysis
-model.config.PHI0 = V_tensor.T  # (2, Ne)
-overlaps_check = get_overlap(model.config, rates_tensor).numpy()
-print(f'get_overlap shape: {overlaps_check.shape}')
-print(f'Match: {np.allclose(overlaps, overlaps_check, atol=1e-5)}')
+# BUG FIX: Do NOT mutate model.config.PHI0 — it corrupts downstream ff_input builds.
+# Instead verify the overlap inline.
+V_cpu_check = V_tensor.cpu().to(rates_tensor.dtype)
+overlaps_check = (rates_tensor @ V_cpu_check) / Ne
+print(f'Inline overlap shape: {overlaps_check.shape}')
+print(f'Match: {np.allclose(overlaps, overlaps_check.numpy(), atol=1e-5)}')
 #+end_src
 
 #+RESULTS:
-: get_overlap shape: (101, 2)
+: Inline overlap shape: torch.Size([101, 2])
 : Match: True
 
 *** Overlap Time Courses
 
 #+begin_src ipython
-N_WINDOW = model.config.N_WINDOW
-dt_out = model.config.DT * N_WINDOW
-t_axis = np.arange(rates.shape[0]) * dt_out
+t_axis = get_output_time_axis(model)
+# Trim to actual output length (rates may be shorter than computed n_out)
+t_axis = t_axis[:rates.shape[0]]
+
 T_STEADY = model.config.T_STEADY
+T_HEBB = getattr(model.config, 'T_HEBB', 0.0)
+t_offset = T_STEADY + T_HEBB
 
 # Stimulus epochs in output-relative time
-stim_epochs = [(2.0 - T_STEADY, 4.0 - T_STEADY),
-               (5.0 - T_STEADY, 7.0 - T_STEADY)]
+stim_epochs = [(2.0 - t_offset, 4.0 - t_offset),
+               (5.0 - t_offset, 7.0 - t_offset)]
 stim_labels = ['Stim $V_0$', 'Stim $V_1$']
 colors_stim = ['tab:blue', 'tab:red']
 
@@ -294,7 +332,7 @@ for i, (on, off) in enumerate(stim_epochs):
 axes[0].set_xlabel('Time (s)')
 axes[0].set_ylabel('Overlap $m_k$')
 axes[0].set_title('Low-rank overlaps')
-axes[0].legend(fontsize=7, ncol=2)
+axes[0].legend(fontsize=7, ncol=2, loc='upper left')
 axes[0].axhline(0, color='k', lw=0.5, ls='--')
 
 # --- Panel 2: Phase portrait m0 vs m1 ---
@@ -320,10 +358,10 @@ axes[2].set_xlabel('Time (s)')
 axes[2].set_ylabel('Rate (Hz)', color='tab:gray')
 axes[2].tick_params(axis='y', labelcolor='tab:gray')
 ax2 = axes[2].twinx()
-ln2 = ax2.plot(t_axis, overlap_norm, label='$|m|$', color='tab:purple', ls='--', lw=1.5)
+ln2 = ax2.plot(t_axis, overlap_norm, label='$|m|$', color='tab:purple',
+               ls='--', lw=1.5)
 ax2.set_ylabel('$|m|$', color='tab:purple')
 ax2.tick_params(axis='y', labelcolor='tab:purple')
-# Combined legend
 lns = ln1 + ln2
 labs = [l.get_label() for l in lns]
 axes[2].legend(lns, labs, fontsize=7, loc='upper right')
@@ -345,13 +383,20 @@ Each neuron's selectivity to direction $k$ is $V_{i,k}$.  Neurons with large
 $|V_{i,k}|$ respond most strongly to input along direction $k$.
 
 #+begin_src ipython
-# Compute stimulus-evoked rate change for each epoch
+from numpy.polynomial.polynomial import polyfit
+
 dt_out_val = model.config.DT * model.config.N_WINDOW
 
 # Indices into output time steps (relative to output start)
-baseline_steps = slice(0, int(1.5 / dt_out_val))
-stim1_steps = slice(int(2.5 / dt_out_val), int(3.5 / dt_out_val))
-stim2_steps = slice(int(5.5 / dt_out_val), int(6.5 / dt_out_val))
+# Use safe clipping so slices don't exceed array bounds
+n_out = rates.shape[0]
+
+def safe_step(t_sec):
+    return int(np.clip(t_sec / dt_out_val, 0, n_out - 1))
+
+baseline_steps = slice(0, safe_step(1.5))
+stim1_steps = slice(safe_step(2.5), safe_step(3.5))
+stim2_steps = slice(safe_step(5.5), safe_step(6.5))
 
 r_base = np.mean(rates[baseline_steps], axis=0)
 r_stim1 = np.mean(rates[stim1_steps], axis=0)
@@ -367,8 +412,6 @@ for k, (dr, label) in enumerate([(delta_r1, '$V_0$ stim'), (delta_r2, '$V_1$ sti
     for j in range(2):
         axes[0, k].scatter(V[:, j], dr, s=1, alpha=0.1, rasterized=True,
                            label=f'vs $V_{j}$')
-    # Add linear fit line for the "matching" direction
-    from numpy.polynomial.polynomial import polyfit
     c_fit = polyfit(V[:, k], dr, 1)
     x_range = np.linspace(V[:, k].min(), V[:, k].max(), 100)
     axes[0, k].plot(x_range, c_fit[0] + c_fit[1]*x_range, 'k--', lw=1.5,
@@ -388,10 +431,11 @@ for i in range(2):
         corr_matrix[i, j] = np.corrcoef(V[:, j], dr)[0, 1]
 
 im = axes[0, 2].imshow(corr_matrix, cmap='RdBu_r', vmin=-1, vmax=1)
-axes[0, 2].set_xticks([0, 1]); axes[0, 2].set_xticklabels(['$V_0$', '$V_1$'])
+axes[0, 2].set_xticks([0, 1])
+axes[0, 2].set_xticklabels(['$V_0$', '$V_1$'])
 axes[0, 2].set_yticks([0, 1])
 axes[0, 2].set_yticklabels(['$\\Delta r$ ($V_0$ stim)', '$\\Delta r$ ($V_1$ stim)'])
-axes[0, 2].set_title('Selectivity correlation')
+axes[0, 2].set_title('Selectivity–direction correlation')
 for ii in range(2):
     for jj in range(2):
         axes[0, 2].text(jj, ii, f'{corr_matrix[ii, jj]:.2f}',
@@ -413,9 +457,14 @@ plt.colorbar(sc, ax=axes[1, 0], fraction=0.046, pad=0.04, label='$V_{i,0}$')
 rate_pctl = np.percentile(rates, 99)
 for col, (sort_v, sort_label) in enumerate([(0, '$V_{i,0}$'), (1, '$V_{i,1}$')]):
     sort_idx = np.argsort(V[:, sort_v])
-    im_r = axes[1, 1+col].imshow(rates[:, sort_idx].T, aspect='auto', origin='lower',
-                                   cmap='inferno', vmin=0, vmax=rate_pctl,
-                                   interpolation='none')
+    # Subsample neurons for readability
+    n_show = min(500, Ne)
+    step = max(1, Ne // n_show)
+    show_neurons = sort_idx[::step]
+    im_r = axes[1, 1+col].imshow(
+        rates[:, show_neurons].T, aspect='auto', origin='lower',
+        cmap='inferno', vmin=0, vmax=rate_pctl, interpolation='none',
+    )
     axes[1, 1+col].set_xlabel('Output step')
     axes[1, 1+col].set_ylabel(f'E neuron (sorted by {sort_label})')
     axes[1, 1+col].set_title(f'Rates sorted by {sort_label}')
@@ -440,28 +489,33 @@ W_lr_mat = W_full[:Ne, :Ne] - W_base[:Ne, :Ne]
 
 fig, axes = plt.subplots(1, 3, figsize=[3*width, height+1])
 
+# Subsample for display (3000x3000 is too large for imshow)
+show_n = min(500, Ne)
+show_sl = slice(0, show_n)
+
 vmax_full = np.percentile(np.abs(W_full), 99)
-im0 = axes[0].imshow(W_full, cmap='RdBu_r', aspect=1,
+im0 = axes[0].imshow(W_full[:show_n+Ni, :show_n+Ni], cmap='RdBu_r', aspect=1,
                       vmin=-vmax_full, vmax=vmax_full, interpolation='none')
-axes[0].axhline(y=Ne-0.5, color='k', ls='--', lw=0.5)
-axes[0].axvline(x=Ne-0.5, color='k', ls='--', lw=0.5)
-axes[0].set_title('$W_{rec}$ (full)')
+axes[0].axhline(y=show_n-0.5, color='lime', ls='--', lw=0.8)
+axes[0].axvline(x=show_n-0.5, color='lime', ls='--', lw=0.8)
+axes[0].set_title(f'$W_{{rec}}$ (first {show_n} E + {Ni} I)')
 axes[0].set_xlabel('Post'); axes[0].set_ylabel('Pre')
 plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
 vmax_base = np.percentile(np.abs(W_base), 99)
-im1 = axes[1].imshow(W_base, cmap='RdBu_r', aspect=1,
+im1 = axes[1].imshow(W_base[:show_n+Ni, :show_n+Ni], cmap='RdBu_r', aspect=1,
                       vmin=-vmax_base, vmax=vmax_base, interpolation='none')
-axes[1].axhline(y=Ne-0.5, color='k', ls='--', lw=0.5)
-axes[1].axvline(x=Ne-0.5, color='k', ls='--', lw=0.5)
+axes[1].axhline(y=show_n-0.5, color='lime', ls='--', lw=0.8)
+axes[1].axvline(x=show_n-0.5, color='lime', ls='--', lw=0.8)
 axes[1].set_title('$W_{base}$ (random sparse)')
 axes[1].set_xlabel('Post')
 plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
 vmax_lr = np.percentile(np.abs(W_lr_mat), 99)
-im2 = axes[2].imshow(W_lr_mat, cmap='RdBu_r', aspect=1,
+im2 = axes[2].imshow(W_lr_mat[:show_n, :show_n], cmap='RdBu_r', aspect=1,
                       vmin=-vmax_lr, vmax=vmax_lr, interpolation='none')
-axes[2].set_title('$W_{LR} = G \\cdot U V^\\top / \\sqrt{K}$ (E→E)')
+axes[2].set_title(f'$W_{{LR}} = G \\cdot U V^\\top / \\sqrt{{K}}$\n'
+                  f'(E→E, first {show_n})')
 axes[2].set_xlabel('Post E'); axes[2].set_ylabel('Pre E')
 plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
 
@@ -482,7 +536,15 @@ for ax, (W, title) in zip(axes, [
     (torch.tensor(W_full), '$W_{base} + W_{LR}$'),
 ]):
     eigs = torch.linalg.eigvals(W).cpu().numpy()
-    ax.scatter(eigs.real, eigs.imag, s=2, alpha=0.3, color='steelblue', rasterized=True)
+    ax.scatter(eigs.real, eigs.imag, s=2, alpha=0.3, color='steelblue',
+               rasterized=True)
+
+    # Ginibre circle for reference: radius = sigma * sqrt(N * p) / sqrt(K)
+    # For sparse Erdos-Renyi with Jab ~ 1/sqrt(K), spectral radius ~ GAIN
+    circle = plt.Circle((0, 0), model.config.GAIN, fill=False,
+                         color='gray', ls=':', lw=1, label='$r = G$')
+    ax.add_patch(circle)
+
     ax.axhline(0, color='k', ls='--', lw=0.5)
     ax.axvline(0, color='k', ls='--', lw=0.5)
     ax.set_xlabel('Real'); ax.set_ylabel('Imag')
@@ -497,14 +559,13 @@ for ax, (W, title) in zip(axes, [
         ax.scatter(eigs.real[outliers], eigs.imag[outliers], s=40,
                    facecolors='none', edgecolors='red', lw=1.5, zorder=5,
                    label=f'{np.sum(outliers)} outliers')
-        ax.legend(fontsize=7)
+    ax.legend(fontsize=7, loc='upper left')
 
 plt.tight_layout()
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/lr/figure_13.png]]
 
 ** Varying Input Direction
 *** Parametric Sweep over Stimulus Angle
@@ -526,8 +587,7 @@ for i, theta in enumerate(angles):
     stim_scaled = stim_strength * stim_dir * scale
     ee = model.config.slices[0]
     t_on = int(2.0 / DT) + N_STEADY + N_HEBB
-    t_off = int(12.0 / DT) + N_STEADY + N_HEBB
-    t_off = min(t_off, ff_i.shape[1])  # guard against overshoot
+    t_off = min(int(12.0 / DT) + N_STEADY + N_HEBB, ff_i.shape[1])
     ff_i[:, t_on:t_off, ee] += stim_scaled.unsqueeze(0)
 
     out_i = model(ff_i, return_outputs=True)
@@ -535,14 +595,21 @@ for i, theta in enumerate(angles):
     V_cpu_f = torch.tensor(V, dtype=r_i.dtype)
     m_i = (r_i @ V_cpu_f) / Ne
     # Take last 20% as steady state
-    ss_slice = slice(int(0.8 * r_i.shape[0]), r_i.shape[0])
-    overlap_ss[i] = m_i[ss_slice].mean(dim=0).numpy()
-    mean_rate_ss[i] = r_i[ss_slice].mean().numpy()
+    ss_start = int(0.8 * r_i.shape[0])
+    overlap_ss[i] = m_i[ss_start:].mean(dim=0).numpy()
+    mean_rate_ss[i] = r_i[ss_start:].mean().numpy()
+    if i % 4 == 0:
+        print(f'  θ={np.degrees(theta):5.1f}°  m0={overlap_ss[i,0]:.4f}  '
+              f'm1={overlap_ss[i,1]:.4f}  <r>={mean_rate_ss[i]:.2f}')
 
 print('Sweep done.')
 #+end_src
 
 #+RESULTS:
+:   θ=  0.0°  m0=6.7095  m1=-0.1533  <r>=4.45
+:   θ= 90.0°  m0=-0.3627  m1=6.6178  <r>=4.49
+:   θ=180.0°  m0=-6.7769  m1=0.3815  <r>=4.49
+:   θ=270.0°  m0=0.4296  m1=-6.2759  <r>=4.23
 : Sweep done.
 
 *** Overlap Tuning Curves
@@ -567,7 +634,6 @@ ax_polar = axes[1]
 ax_polar.remove()
 ax_polar = fig.add_subplot(1, 3, 2, projection='polar')
 overlap_mag = np.sqrt(overlap_ss[:, 0]**2 + overlap_ss[:, 1]**2)
-# Close the curve
 ang_closed = np.append(angles, angles[0])
 mag_closed = np.append(overlap_mag, overlap_mag[0])
 ax_polar.plot(ang_closed, mag_closed, 'o-', markersize=4, color='tab:purple')
@@ -599,9 +665,8 @@ plt.show()
 #+begin_src ipython
 from sklearn.decomposition import PCA
 
-# BUG FIX: PCA must be fit on (n_samples=time, n_features=neurons)
-# rates shape: (n_steps_out, Ne)
-X = rates  # (n_steps_out, Ne) — correct orientation
+# rates shape: (n_steps_out, Ne) — correct: samples=time, features=neurons
+X = rates
 n_components = min(20, *X.shape)
 pca = PCA(n_components=n_components)
 pca.fit(X)
@@ -633,8 +698,8 @@ axes[1].text(0.6, 0.3, f'PR = {pr:.1f}', transform=axes[1].transAxes, fontsize=1
              bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
 # --- Panel 3: Trajectory in PC1–PC2 ---
-proj = X @ pca.components_[:2].T  # (n_steps_out, 2) — now dimensions match
-sc = axes[2].scatter(proj[:, 0], proj[:, 1], c=t_axis, cmap='viridis',
+proj = X @ pca.components_[:2].T  # (n_steps_out, 2)
+sc = axes[2].scatter(proj[:, 0], proj[:, 1], c=t_axis[:len(proj)], cmap='viridis',
                       s=12, alpha=0.7, zorder=3)
 axes[2].plot(proj[:, 0], proj[:, 1], 'k-', alpha=0.2, lw=0.5)
 axes[2].scatter(proj[0, 0], proj[0, 1], c='green', s=60, zorder=5,
@@ -656,14 +721,13 @@ plt.show()
 *** Alignment of PCs with Low-Rank Vectors
 
 #+begin_src ipython
-# Now pca.components_ has shape (n_components, Ne) — correct for dot with V
 V_normed = V / np.linalg.norm(V, axis=0, keepdims=True)
 U_normed = U / np.linalg.norm(U, axis=0, keepdims=True)
 
 n_pcs = min(10, pca.components_.shape[0])
 pc_vecs = pca.components_[:n_pcs]  # (n_pcs, Ne)
 
-pc_V_overlap = pc_vecs @ V_normed  # (n_pcs, 2) — dimensions now match
+pc_V_overlap = pc_vecs @ V_normed  # (n_pcs, 2)
 pc_U_overlap = pc_vecs @ U_normed  # (n_pcs, 2)
 
 fig, axes = plt.subplots(1, 2, figsize=[2*width, height])
@@ -676,6 +740,7 @@ for k in range(2):
     axes[1].bar(x - w/2 + k*w, np.abs(pc_U_overlap[:, k]), width=w, alpha=0.7,
                 label=f'|PC·$\\hat{{U}}_{k}$|', edgecolor='k', linewidth=0.3)
 
+chance = 1.0 / np.sqrt(Ne)
 for ax, title in zip(axes, ['Alignment with $V$ (readout)', 'Alignment with $U$ (input)']):
     ax.set_xlabel('PC index')
     ax.set_ylabel('$|\\cos \\alpha|$')
@@ -683,7 +748,8 @@ for ax, title in zip(axes, ['Alignment with $V$ (readout)', 'Alignment with $U$ 
     ax.set_xticks(x)
     ax.legend(fontsize=7)
     ax.set_ylim(0, 1.05)
-    ax.axhline(1.0/np.sqrt(Ne), color='gray', ls=':', lw=0.5, label='chance')
+    ax.axhline(chance, color='gray', ls=':', lw=0.5,
+               label=f'chance $1/\\sqrt{{N_E}}$={chance:.3f}')
 
 plt.tight_layout()
 plt.show()
@@ -698,8 +764,6 @@ plt.show()
 #+begin_src ipython
 N_BATCH_MULTI = 32
 
-# BUG FIX: pass N_BATCH so ff_input has the right batch dimension.
-# BUG FIX: use TASK='None' (capital N) to match the string check in FFInputBuilder.
 model_multi = Network(
     'config_lr.yml', REPO_ROOT,
     N_BATCH=N_BATCH_MULTI,
@@ -710,7 +774,7 @@ V_multi = model_multi.weight_builder.low_rank.get_V().detach()
 Ne_m = model_multi.config.Na[0].item()
 
 ff_multi = model_multi.ff_input_builder.build().clone()
-print(f'ff_multi shape: {ff_multi.shape}')  # should be (32, N_STEPS, N_NEURON)
+print(f'ff_multi shape: {ff_multi.shape}')
 
 scale_m = (model_multi.config.GAIN
            * np.sqrt(model_multi.config.Ka[0].item())
@@ -726,8 +790,7 @@ rng = np.random.default_rng(42)
 batch_angles = rng.uniform(0, 2 * np.pi, N_BATCH_MULTI)
 
 t_on_m = int(2.0 / DT_m) + N_STEADY_m + N_HEBB_m
-t_off_m = int(12.0 / DT_m) + N_STEADY_m + N_HEBB_m
-t_off_m = min(t_off_m, ff_multi.shape[1])
+t_off_m = min(int(12.0 / DT_m) + N_STEADY_m + N_HEBB_m, ff_multi.shape[1])
 
 for b in range(N_BATCH_MULTI):
     stim_dir_b = (float(np.cos(batch_angles[b])) * V_multi[:, 0]
@@ -747,6 +810,12 @@ print(f'Multi-batch overlaps shape: {overlaps_multi.shape}')
 #+RESULTS:
 : ff_multi shape: torch.Size([32, 605, 4000])
 : Multi-batch overlaps shape: (32, 101, 2)
+: /home/leon/models/NeuroFlame/org/tests/../../src/weights/connectivity.py:7: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).
+:   self.Na = torch.tensor(Na).detach().clone()
+: /home/leon/models/NeuroFlame/org/tests/../../src/weights/connectivity.py:8: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).
+:   self.Nb = torch.tensor(Nb).detach().clone()
+: /home/leon/models/NeuroFlame/org/tests/../../src/weights/connectivity.py:9: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).
+:   self.Kb = torch.tensor(Kb).detach().clone()
 
 *** Overlap Distributions and Trajectories
 
@@ -757,13 +826,13 @@ fig, axes = plt.subplots(1, 3, figsize=[3*width, height])
 for b in range(N_BATCH_MULTI):
     axes[0].plot(overlaps_multi[b, :, 0], overlaps_multi[b, :, 1],
                  alpha=0.12, lw=0.5, color='tab:blue')
-# Final points colored by input angle
 sc_end = axes[0].scatter(
     overlaps_multi[:, -1, 0], overlaps_multi[:, -1, 1],
     s=25, c=batch_angles, cmap='hsv', vmin=0, vmax=2*np.pi,
     zorder=5, edgecolors='k', linewidths=0.3,
 )
-plt.colorbar(sc_end, ax=axes[0], label='Input $\\theta$ (rad)', fraction=0.046, pad=0.04)
+plt.colorbar(sc_end, ax=axes[0], label='Input $\\theta$ (rad)',
+             fraction=0.046, pad=0.04)
 axes[0].set_xlabel('$m_0$'); axes[0].set_ylabel('$m_1$')
 axes[0].set_title(f'Trajectories ({N_BATCH_MULTI} batches)')
 axes[0].axhline(0, color='k', lw=0.5, ls='--')
@@ -771,8 +840,8 @@ axes[0].axvline(0, color='k', lw=0.5, ls='--')
 
 # --- Panel 2: Steady-state output angle vs input angle ---
 ss_frac = 0.8
-ss_slice_m = slice(int(ss_frac * overlaps_multi.shape[1]), overlaps_multi.shape[1])
-m_ss = overlaps_multi[:, ss_slice_m, :].mean(axis=1)  # (N_BATCH, 2)
+ss_start_m = int(ss_frac * overlaps_multi.shape[1])
+m_ss = overlaps_multi[:, ss_start_m:, :].mean(axis=1)  # (N_BATCH, 2)
 out_angles = np.arctan2(m_ss[:, 1], m_ss[:, 0])
 out_angles_deg = np.degrees(out_angles) % 360
 in_angles_deg = np.degrees(batch_angles) % 360
@@ -791,10 +860,12 @@ axes[1].set_aspect('equal')
 # --- Panel 3: Distribution of overlap magnitudes ---
 m_mag = np.sqrt(m_ss[:, 0]**2 + m_ss[:, 1]**2)
 axes[2].hist(m_mag, bins=15, alpha=0.7, color='tab:purple', edgecolor='k')
-axes[2].axvline(np.mean(m_mag), color='k', ls='--', lw=1.5, label=f'mean={np.mean(m_mag):.3f}')
+axes[2].axvline(np.mean(m_mag), color='k', ls='--', lw=1.5,
+                label=f'mean={np.mean(m_mag):.3f}')
 axes[2].set_xlabel('$|m|$ (steady state)')
 axes[2].set_ylabel('Count')
-axes[2].set_title(f'Overlap magnitude\n$\\mu$={np.mean(m_mag):.3f}, $\\sigma$={np.std(m_mag):.3f}')
+axes[2].set_title(f'Overlap magnitude\n'
+                  f'$\\mu$={np.mean(m_mag):.3f}, $\\sigma$={np.std(m_mag):.3f}')
 axes[2].legend(fontsize=8)
 
 plt.tight_layout()
@@ -803,6 +874,59 @@ plt.show()
 
 #+RESULTS:
 [[file:./figures/lr/figure_19.png]]
+
+** Gain Modulation of Low-Rank Dynamics
+*** Sweep over Stimulus Strength
+
+How does the overlap magnitude scale with input strength?
+This reveals the effective gain of the low-rank channel.
+
+#+begin_src ipython
+strengths = np.array([0.1, 0.5, 1.0, 2.0, 4.0, 8.0])
+theta_test = np.pi / 4  # 45° — equal V0 + V1
+
+overlap_vs_strength = np.zeros((len(strengths), 2))
+rate_vs_strength = np.zeros(len(strengths))
+
+for si, A in enumerate(strengths):
+    ff_s = model.ff_input_builder.build().clone()
+    stim_dir = (float(np.cos(theta_test)) * V_t[:, 0]
+                + float(np.sin(theta_test)) * V_t[:, 1])
+    stim_scaled = A * stim_dir * scale
+    t_on = int(2.0 / DT) + N_STEADY + N_HEBB
+    t_off = min(int(12.0 / DT) + N_STEADY + N_HEBB, ff_s.shape[1])
+    ff_s[:, t_on:t_off, ee] += stim_scaled.unsqueeze(0)
+
+    out_s = model(ff_s, return_outputs=True)
+    r_s = out_s.rates[0].cpu()
+    m_s = (r_s @ torch.tensor(V, dtype=r_s.dtype)) / Ne
+    ss_start = int(0.8 * r_s.shape[0])
+    overlap_vs_strength[si] = m_s[ss_start:].mean(dim=0).numpy()
+    rate_vs_strength[si] = r_s[ss_start:].mean().numpy()
+
+fig, axes = plt.subplots(1, 2, figsize=[2*width, height])
+
+m_mag_s = np.sqrt(overlap_vs_strength[:, 0]**2 + overlap_vs_strength[:, 1]**2)
+axes[0].plot(strengths, m_mag_s, 'o-', color='tab:purple', lw=1.5)
+axes[0].set_xlabel('Stimulus strength $A$')
+axes[0].set_ylabel('$|m|$ (steady state)')
+axes[0].set_title('Overlap magnitude vs input strength')
+axes[0].set_xscale('log')
+axes[0].grid(True, alpha=0.3)
+
+axes[1].plot(strengths, rate_vs_strength, 's-', color='tab:gray', lw=1.5)
+axes[1].set_xlabel('Stimulus strength $A$')
+axes[1].set_ylabel('Mean E rate (Hz)')
+axes[1].set_title('Mean rate vs input strength')
+axes[1].set_xscale('log')
+axes[1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/lr/figure_20.png]]
 
 ** Summary
 
@@ -832,6 +956,10 @@ print("--- PC-LR alignment ---")
 for k in range(min(2, n_pcs)):
     print(f"  |PC{k+1}·V0| = {np.abs(pc_V_overlap[k,0]):.3f}, "
           f"|PC{k+1}·V1| = {np.abs(pc_V_overlap[k,1]):.3f}")
+print()
+print("--- Gain sweep (θ=45°) ---")
+for si, A in enumerate(strengths):
+    print(f"  A={A:5.2f}  |m|={m_mag_s[si]:.4f}  <r>={rate_vs_strength[si]:.2f}")
 #+end_src
 
 #+RESULTS:
@@ -858,4 +986,12 @@ U≠V: True
 --- PC-LR alignment ---
   |PC1·V0| = 0.500, |PC1·V1| = 0.456
   |PC2·V0| = 0.374, |PC2·V1| = 0.448
+
+--- Gain sweep (θ=45°) ---
+  A= 0.10  |m|=0.4708  <r>=1.43
+  A= 0.50  |m|=2.0610  <r>=1.89
+  A= 1.00  |m|=3.6375  <r>=2.70
+  A= 2.00  |m|=6.5382  <r>=4.38
+  A= 4.00  |m|=12.1685  <r>=7.75
+  A= 8.00  |m|=23.3721  <r>=14.50
 #+end_example

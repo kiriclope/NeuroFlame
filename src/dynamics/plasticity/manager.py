@@ -13,6 +13,16 @@ from src.weights.builder import STPBlockSpec
 Tensor = torch.Tensor
 
 
+def _index_or_last(seq, idx):
+    """Index into a list/tuple, clamping to the last element if too short.
+    If seq is a scalar, return it unchanged."""
+    if isinstance(seq, (list, tuple)):
+        if idx < len(seq):
+            return seq[idx]
+        return seq[-1]
+    return seq  # scalar fallback
+
+
 class PlasticityManager(nn.Module):
     def __init__(
         self,
@@ -68,7 +78,9 @@ class PlasticityManager(nn.Module):
         stp_modules: list[Plasticity] = []
         for block_idx, (pre, _post, block_id) in enumerate(self.stp_block_index):
             mod = Plasticity(
-                sc.USE[block_id], sc.TAU_FAC[block_id], sc.TAU_REC[block_id],
+                _index_or_last(sc.USE, block_id),
+                _index_or_last(sc.TAU_FAC, block_id),
+                _index_or_last(sc.TAU_REC, block_id),
                 sc.DT, (batch_size, geo.Na[pre]),
                 device=geo.device,
                 STP_TYPE=sc.STP_TYPE, IF_INIT=reset,
