@@ -1,0 +1,251 @@
+:PROPERTIES:
+:GPTEL_MODEL: claude-opus-4-6
+:GPTEL_BACKEND: Anthropic
+:GPTEL_SYSTEM: You are a large language model living in Emacs and a helpful assistant.\nYou are a machine learning expert and a programming expert.\nRespond concisely. Without repetition.
+:GPTEL_TOOLS: plot_overlap plot_rates run_simulation get_defaults get_config list_configs
+:GPTEL_BOUNDS: ((response (2947 3096) (3655 8364)))
+:GPTEL_MAX_TOKENS: 128000
+:END:
+
+*** I am a emacs user. I want to use mcp.el with gptel
+
+This is my config
+
+#+begin_src emacs-lisp
+       ;;;; --- gptel ---
+(use-package gptel
+  :straight '(gptel :host github
+                    :repo "karthink/gptel"
+                    :branch "master")
+  :init
+  (setq lc/gptel-openai
+        (gptel-make-openai "OpenAI"
+                           :host "api.openai.com"
+                           :key (lc/authinfo-get-password "api.openai.com" "apikey")))
+
+  (setq lc/gptel-anthropic
+        (gptel-make-anthropic "Anthropic"
+                              :key (lc/authinfo-get-password "api.anthropic.com" "apikey")))
+
+  (setq gptel-backend lc/gptel-openai)
+
+  (require 'gptel-integrations)
+  :config
+  (setq gptel-model 'gpt-5.4)
+  (setq gptel-default-mode 'org-mode)
+  )
+
+
+(defun gptel-fix-response-levels (beg end)
+  "Correctly shifts heading levels ONLY within the gptel response."
+  (save-excursion
+    (let ((parent-level
+           ;; 1. Find the parent level by looking BEFORE the response (beg)
+           (save-excursion
+             (goto-char beg)
+             (if (re-search-backward org-heading-regexp nil t)
+                 (org-current-level)
+               0)))) ;; Default to 0 if at top of file
+
+      (save-restriction
+        ;; 2. CRITICAL: Lock operations to ONLY the response text
+        (narrow-to-region beg end)
+        (goto-char (point-min))
+
+        ;; 3. Check if the response actually has headings
+        (when (re-search-forward org-heading-regexp nil t)
+          (let* ((current-level (org-current-level))
+                 ;; We want the response to be 1 level deeper than parent
+                 (target-level (1+ parent-level))
+                 (diff (- target-level current-level)))
+
+            (unless (zerop diff)
+              ;; Apply shift to ALL headings in the narrowed response
+              (goto-char (point-min))
+              (while (re-search-forward "^\\(\\*+\\) " nil t)
+                (let* ((stars (match-string 1))
+                       (new-level (max 1 (+ (length stars) diff))))
+                  (replace-match (concat (make-string new-level ?*) " ") t t)))
+              (message "Gptel: Adjusted response depth by %d." diff))))))))
+
+(add-hook 'gptel-post-response-functions #'gptel-fix-response-levels)
+
+(use-package gptel-agent
+  :config (gptel-agent-update))         ;Read files from agents directories
+#+end_src
+
+#+RESULTS:
+: t
+
+#+begin_src emacs-lisp
+(use-package mcp
+  :ensure t
+  :after gptel
+  :custom (mcp-hub-servers
+           `(("neuroflame"
+                :command "python"
+                :args '("mcp_server.py")
+                :roots "/home/leon/Projects/NeuroFlame/mcp")
+             ("fetch" . (:command "uvx" :args ("mcp-server-fetch")))))
+
+  :config (require 'mcp-hub)
+  :hook (after-init . mcp-hub-start-all-server))
+
+(use-package gptel-mcp
+  :after gptel mcp
+  :ensure t
+  :straight '(gptel-mcp :host github
+                    :repo "lizqwerscott/gptel-mcp"
+                    :branch "master")
+  :bind (:map gptel-mode-map
+              ("C-c m" . gptel-mcp-dispatch)))
+#+end_src
+
+*** I want to understand how to use MCP. Can you design a simple mcp server, add it to the mcp.el configuration and show me how to ust it?
+
+**** Understanding MCP with a Simple Example
+
+***** What is MCP?
+
+MCP (Model Context Protocol) lets LLMs *call tools* on your machine. You write a server that exposes tools, the LLM decides when to call them, and results flow back into the conversation.
+
+***** 1. A Simple MCP Server
+
+Let's build a *file-stats* server that exposes two tools:
+- =word_count= — count words/lines/chars in a file
+- =list_directory= — list files in a directory
+
+Create =~/.config/mcp/file_stats_server.py=:
+
+#+begin_src python :tangle /.config/mcp/file_stats_server.py
+#!/usr/bin/env python3
+"""A simple MCP server that provides file-system utilities."""
+
+import os
+import json
+import sys
+
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("file-stats")
+
+
+@mcp.tool()
+def word_count(filepath: str) -> str:
+    """Count words, lines, and characters in a file.
+
+    Args:
+        filepath: Absolute path to the file to analyze.
+    """
+    try:
+        with open(os.path.expanduser(filepath), "r") as f:
+            content = f.read()
+        lines = content.count("\n")
+        words = len(content.split())
+        chars = len(content)
+        return json.dumps({"lines": lines, "words": words, "chars": chars, "filepath": filepath})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def list_directory(dirpath: str) -> str:
+    """List files and subdirectories in a directory.
+
+    Args:
+        dirpath: Absolute path to the directory.
+    """
+    try:
+        dirpath = os.path.expanduser(dirpath)
+        entries = []
+        for entry in sorted(os.listdir(dirpath)):
+            full = os.path.join(dirpath, entry)
+            entries.append({
+                "name": entry,
+                "type": "dir" if os.path.isdir(full) else "file",
+                "size": os.path.getsize(full) if os.path.isfile(full) else None,
+            })
+        return json.dumps(entries, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
+#+end_src
+
+Install the dependency:
+
+#+begin_src bash
+pip install mcp[cli]
+#+end_src
+
+Test it works:
+
+#+begin_src bash
+python ~/.config/mcp/file_stats_server.py  # should hang waiting for stdin — that's correct, Ctrl-C to quit#
+#+end_src
+
+#+RESULTS:
+
+***** 2. Add It to Your Emacs Config
+
+Update your =mcp-hub-servers=:
+
+#+begin_src emacs-lisp
+(use-package mcp
+  :ensure t
+  :after gptel
+:custom (mcp-hub-servers
+         `(("fetch" . (:command "uvx" :args ("mcp-server-fetch")))
+           ("file-stats" . (:command "python"
+                             :args (,(expand-file-name "~/.config/mcp/file_stats_server.py"))))))
+  :config (require 'mcp-hub)
+  :hook (after-init . mcp-hub-start-all-server))
+#+end_src
+
+#+RESULTS:
+| mcp-hub-start-all-server | org-persist-load-all | dashboard-insert-startupify-lists | pgtk-use-im-context-handler | tramp-register-archive-autoload-file-name-handler | table--make-cell-map | magit-maybe-define-global-key-bindings |
+
+***** 3. How to Use It
+
+****** Verify the server is running
+
+#+begin_src
+M-x mcp-hub
+#+end_src
+
+You should see =file-stats= listed with status *running* and its two tools registered.
+
+****** Use it in gptel
+
+1. *Open a gptel buffer*: =M-x gptel= (or however you launch it)
+2. *Activate the MCP tools*: Press =C-c m= (=gptel-mcp-dispatch=) — this shows available MCP tools. *Enable* the =file-stats= tools (toggle them on).
+3. *Ask a question that needs the tools*:
+
+#+begin_src
+How many words are in my init.el? The file is at ~/.emacs.d/init.el
+#+end_src
+
+****** What happens behind the scenes
+
+#+begin_src
+┌─────────┐    prompt     ┌─────────┐   stdio/JSON    ┌──────────────┐
+│  You in  │ ──────────── │  LLM    │ ───────────────▶│ file_stats   │
+│  gptel   │              │ (GPT/   │ ◀───────────────│ MCP server   │
+│  buffer  │ ◀─────────── │ Claude) │   tool result   │ (Python)     │
+└─────────┘   response    └─────────┘                 └──────────────┘
+#+end_src
+
+1. Your prompt + tool schemas are sent to the LLM.
+2. The LLM decides to call =word_count= with ={"filepath": "~/.emacs.d/init.el"}=.
+3. =gptel-mcp= intercepts the tool call, routes it through =mcp.el= to your Python server via stdio.
+4. The server runs the function, returns JSON.
+5. The result is fed back to the LLM, which formulates a human-readable answer.
+
+****** Key points
+
+- *You never call tools manually* — the LLM decides based on your prompt.
+- *=C-c m=* is how you control which tools are available to the LLM for the current buffer.
+- *=mcp-hub=* is your dashboard — restart/stop servers, see registered tools.
+- Tools must have good *docstrings* and *typed arguments* — that's what the LLM reads to decide how to call them.

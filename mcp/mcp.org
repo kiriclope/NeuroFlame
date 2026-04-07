@@ -1,0 +1,4711 @@
+:PROPERTIES:
+:GPTEL_MODEL: claude-opus-4-6
+:GPTEL_BACKEND: Anthropic
+:GPTEL_SYSTEM: You are a large language model living in Emacs and a helpful assistant.\nYou are a machine learning expert and a programming expert.\nRespond concisely. Without repetition.
+:GPTEL_TOOLS:
+:GPTEL_BOUNDS: ((response (472 45850) (45877 65822) (65823 94067) (99516 100166) (103302 113705) (113943 148726)))
+:GPTEL_MAX_TOKENS: 128000
+:END:
+
+*** I have a python project.
+**** Files
+
+#+begin_src python :tangle ../network_state.py
+"""Mutable trajectory state and structured forward outputs."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from src.network_types import Tensor
+
+
+@dataclass
+class ForwardOutputs:
+    """Structured outputs returned by a forward pass.
+
+    Attributes
+    ----------
+    rates : Tensor
+        Time-windowed excitatory rates, shape ``(B, T_out, Na[0])``.
+    rec_input : Tensor | None
+        Recurrent input traces (optional).
+    stp_u : Tensor | None
+        STP facilitation variable snapshots (optional).
+    stp_x : Tensor | None
+        STP depression variable snapshots (optional).
+    readout : Tensor | None
+        Low-rank readout projection (optional).
+    """
+
+    rates: Tensor
+    rec_input: Tensor | None = None
+    stp_u: Tensor | None = None
+    stp_x: Tensor | None = None
+    readout: Tensor | None = None
+
+
+@dataclass
+class NetworkState:
+    """Mutable per-trajectory recurrent state.
+
+    STP persistence fields (``u_stp_last``, etc.) are carried here so that
+    ``StateManager`` and ``PlasticityManager`` share a single source of truth.
+    """
+
+    rates: Tensor
+    rec_input: Tensor          # shape (n_syn, B, N)
+    thresh: Tensor
+    ff_state: Tensor
+
+    hebb_rates: Tensor | None = None
+
+    # STP persistence (recurrent)
+    u_stp_last: list[Tensor] | None = None
+    x_stp_last: list[Tensor] | None = None
+
+    # STP persistence (feedforward)
+    u_ff_stp_last: Tensor | None = None
+    x_ff_stp_last: Tensor | None = None
+
+    # Feedforward adaptation
+    ff_adapt_thresh: Tensor | None = None
+#+end_src
+
+#+begin_src python :tangle ../network_state_mgr.py
+"""Initialize, persist, and restore transient trajectory state."""
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+import torch
+from torch import nn
+
+from src.activation import Activation
+from src.network_state import NetworkState
+from src.network_types import Tensor
+from src.plasticity import Plasticity
+
+
+class StateManager(nn.Module):
+    """Initialize, restore, and persist transient network trajectory state.
+
+    Terminal-state buffers are registered so that ``.to()`` / ``.cuda()``
+    moves them automatically.  STP lists are stored as individual registered
+    buffers so they also follow device transfers.
+
+    Important: ``forward(init_state=True)`` must be called at least once
+    before ``forward(init_state=False)`` to ensure terminal-state buffers
+    are allocated.
+    """
+
+    def __init__(self, cfg, activation: Activation) -> None:
+        super().__init__()
+        self.cfg = cfg
+        self.activation = activation
+
+        self.register_buffer("rates_last", None)
+        self.register_buffer("rec_input_last", None)
+        self.register_buffer("thresh_last", None)
+        self.register_buffer("ff_state_last", None)
+        self.register_buffer("hebb_rates_last", None)
+        self.register_buffer("ff_adapt_thresh_last", None)
+        self.register_buffer("end_mask", None)
+        self.register_buffer("u_ff_stp_last", None)
+        self.register_buffer("x_ff_stp_last", None)
+
+        # STP list state: individual registered buffers for device safety
+        self._n_stp_blocks: int = 0
+        self._stp_block_sizes: list[int] = []
+
+    # ---- STP list helpers (device-safe) --------------------------------
+
+    def _clear_stp_buffers(self) -> None:
+        """Remove all existing per-block STP registered buffers."""
+        names_to_remove: list[str] = []
+        for i in range(self._n_stp_blocks):
+            for prefix in ("_u_stp_last_", "_x_stp_last_"):
+                name = f"{prefix}{i}"
+                if name in self._buffers:
+                    names_to_remove.append(name)
+        for name in names_to_remove:
+            delattr(self, name)
+        self._n_stp_blocks = 0
+        self._stp_block_sizes = []
+
+    def _register_stp_list(
+        self, u_list: list[Tensor], x_list: list[Tensor],
+    ) -> None:
+        """Store STP state lists as individual registered buffers."""
+        self._clear_stp_buffers()
+        self._n_stp_blocks = len(u_list)
+        self._stp_block_sizes = [u.shape[-1] for u in u_list]
+        for i, (u, x) in enumerate(zip(u_list, x_list)):
+            self.register_buffer(f"_u_stp_last_{i}", u.detach().clone())
+            self.register_buffer(f"_x_stp_last_{i}", x.detach().clone())
+
+    def _get_stp_lists(self) -> tuple[list[Tensor] | None, list[Tensor] | None]:
+        """Retrieve STP state lists from registered buffers."""
+        if self._n_stp_blocks == 0:
+            return None, None
+        u_list: list[Tensor] = []
+        x_list: list[Tensor] = []
+        for i in range(self._n_stp_blocks):
+            u = self._buffers.get(f"_u_stp_last_{i}")
+            x = self._buffers.get(f"_x_stp_last_{i}")
+            if u is None or x is None:
+                return None, None
+            u_list.append(u)
+            x_list.append(x)
+        return u_list, x_list
+
+    def _update_stp_indices(
+        self, idx: Tensor, stp_modules: Sequence[Plasticity],
+    ) -> None:
+        """Update STP buffers at specific batch indices."""
+        if self._n_stp_blocks == 0:
+            # First time — register all buffers (zero-filled)
+            self._register_stp_list(
+                [torch.zeros_like(m.u_stp) for m in stp_modules],
+                [torch.zeros_like(m.x_stp) for m in stp_modules],
+            )
+        for i, mod in enumerate(stp_modules):
+            u_buf = self._buffers[f"_u_stp_last_{i}"]
+            x_buf = self._buffers[f"_x_stp_last_{i}"]
+            u_buf[idx] = mod.u_stp[idx].detach()
+            x_buf[idx] = mod.x_stp[idx].detach()
+
+    # ---- public API ---------------------------------------------------
+
+    def initialize(self, ff_input: Tensor) -> NetworkState:
+        """Create a fresh ``NetworkState`` from the first feedforward frame."""
+        c = self.cfg
+        if ff_input.dim() != 3:
+            raise ValueError(f"ff_input must be 3D, got {tuple(ff_input.shape)}")
+
+        batch_size = ff_input.shape[0]
+        dtype = ff_input.dtype
+
+        thresh = c.thresh[:batch_size].clone().to(device=c.device, dtype=dtype)
+        rec_input = torch.zeros(
+            (c.IF_NMDA + 1, batch_size, c.N_NEURON),
+            device=c.device,
+            dtype=dtype,
+        )
+
+        ff0 = ff_input[:, 0]
+        rates = self.activation(
+            ff0 + rec_input[0], func_name=c.TF_TYPE, thresh=thresh,
+        )
+
+        return NetworkState(
+            rates=rates,
+            rec_input=rec_input,
+            thresh=thresh,
+            ff_state=torch.zeros_like(ff0),
+            hebb_rates=rates.clone() if c.IF_HEBB else None,
+            ff_adapt_thresh=torch.zeros_like(ff0) if c.IF_FF_ADAPT else None,
+        )
+
+    def restore_last_state(self) -> NetworkState:
+        """Reconstruct a ``NetworkState`` from saved terminal-state buffers.
+
+        Raises ``RuntimeError`` if no state has been saved yet (i.e. if
+        ``forward(init_state=True)`` was never called).
+        """
+        if any(
+            x is None
+            for x in (
+                self.rates_last,
+                self.rec_input_last,
+                self.thresh_last,
+                self.ff_state_last,
+            )
+        ):
+            raise RuntimeError(
+                "No saved state available to restore. "
+                "Ensure forward(init_state=True) is called first."
+            )
+
+        def _clone(t: Tensor | None) -> Tensor | None:
+            return None if t is None else t.clone()
+
+        def _clone_list(lst: list[Tensor] | None) -> list[Tensor] | None:
+            return None if lst is None else [x.clone() for x in lst]
+
+        u_stp_last, x_stp_last = self._get_stp_lists()
+
+        return NetworkState(
+            rates=self.rates_last.clone(),
+            rec_input=self.rec_input_last.clone(),
+            thresh=self.thresh_last.clone(),
+            ff_state=self.ff_state_last.clone(),
+            hebb_rates=_clone(self.hebb_rates_last),
+            u_stp_last=_clone_list(u_stp_last),
+            x_stp_last=_clone_list(x_stp_last),
+            u_ff_stp_last=_clone(self.u_ff_stp_last),
+            x_ff_stp_last=_clone(self.x_ff_stp_last),
+            ff_adapt_thresh=_clone(self.ff_adapt_thresh_last),
+        )
+
+    def init_last_state_buffers(
+        self, state: NetworkState, batch_size: int,
+    ) -> None:
+        """Allocate zero-filled terminal-state buffers matching *state*."""
+        c = self.cfg
+        self.rates_last = torch.zeros_like(state.rates)
+        self.rec_input_last = torch.zeros_like(state.rec_input)
+        self.thresh_last = torch.zeros_like(state.thresh)
+        self.ff_state_last = torch.zeros_like(state.ff_state)
+        self.end_mask = torch.ones(
+            (batch_size, 1), device=c.device, dtype=state.rates.dtype,
+        )
+
+        self.hebb_rates_last = (
+            torch.zeros_like(state.hebb_rates)
+            if c.IF_HEBB and state.hebb_rates is not None
+            else None
+        )
+        self.ff_adapt_thresh_last = (
+            torch.zeros_like(state.ff_adapt_thresh)
+            if c.IF_FF_ADAPT and state.ff_adapt_thresh is not None
+            else None
+        )
+
+        # Clear STP buffers from any previous run
+        self._clear_stp_buffers()
+        self.u_ff_stp_last = None
+        self.x_ff_stp_last = None
+
+    def save_terminal_state_if_needed(
+        self,
+        step: int,
+        state: NetworkState,
+        end_indices: Tensor,
+        stp_modules: Sequence[Plasticity] | None = None,
+        ff_stp_module: Plasticity | None = None,
+    ) -> None:
+        """Snapshot state for batch elements whose trajectory ends at *step*."""
+        if self.end_mask is None:
+            raise RuntimeError(
+                "Last-state buffers were not initialized. "
+                "Call init_last_state_buffers() first."
+            )
+
+        batch_size = state.rates.shape[0]
+        mask = _terminal_mask(step, end_indices, batch_size)
+        if not mask.any():
+            return
+
+        idx = mask.nonzero(as_tuple=True)[0]
+
+        self.end_mask[idx, 0] = float("nan")
+        self.rates_last[idx] = state.rates[idx].detach()
+        self.rec_input_last[:, idx] = state.rec_input[:, idx].detach()
+        self.thresh_last[idx] = state.thresh[idx].detach()
+        self.ff_state_last[idx] = state.ff_state[idx].detach()
+
+        if self.hebb_rates_last is not None and state.hebb_rates is not None:
+            self.hebb_rates_last[idx] = state.hebb_rates[idx].detach()
+
+        if (
+            self.ff_adapt_thresh_last is not None
+            and state.ff_adapt_thresh is not None
+        ):
+            self.ff_adapt_thresh_last[idx] = state.ff_adapt_thresh[idx].detach()
+
+        if stp_modules is not None:
+            self._update_stp_indices(idx, stp_modules)
+
+        if ff_stp_module is not None:
+            if self.u_ff_stp_last is None or self.x_ff_stp_last is None:
+                self.u_ff_stp_last = torch.zeros_like(ff_stp_module.u_stp)
+                self.x_ff_stp_last = torch.zeros_like(ff_stp_module.x_stp)
+            self.u_ff_stp_last[idx] = ff_stp_module.u_stp[idx].detach()
+            self.x_ff_stp_last[idx] = ff_stp_module.x_stp[idx].detach()
+
+
+# ---- module-level helpers (easier to test independently) ---------------
+
+def _terminal_mask(
+    step: int, end_indices: Tensor, batch_size: int,
+) -> Tensor:
+    """Boolean mask: which batch elements terminate at *step*.
+
+    If ``end_indices`` is 2-D ``(n_conditions, B)``, the last row is used.
+    """
+    if end_indices.dim() == 1:
+        if end_indices.shape[0] != batch_size:
+            raise ValueError(
+                f"end_indices shape {tuple(end_indices.shape)} incompatible "
+                f"with batch_size={batch_size}"
+            )
+        return end_indices == step
+
+    if end_indices.dim() == 2:
+        if end_indices.shape[-1] != batch_size:
+            raise ValueError(
+                f"end_indices shape {tuple(end_indices.shape)} incompatible "
+                f"with batch_size={batch_size}"
+            )
+        return end_indices[-1] == step
+
+    raise ValueError(
+        f"Unsupported end_indices shape: {tuple(end_indices.shape)}"
+    )
+#+end_src
+
+#+begin_src python :tangle ../network_types.py
+"""Shared type aliases for the network package."""
+from __future__ import annotations
+
+from typing import TypeAlias
+
+import torch
+
+Tensor: TypeAlias = torch.Tensor
+STPBlockSpec: TypeAlias = tuple[int, int, int]  # (pre_pop, post_pop, block_id)
+#+end_src
+
+#+begin_src python :tangle ../network_dynamics.py
+"""Single-step recurrent dynamics."""
+from __future__ import annotations
+
+import torch
+from torch import nn
+
+from src.activation import Activation
+from src.network_state import NetworkState
+from src.network_types import STPBlockSpec, Tensor
+from src.network_weights import recurrent_matmul
+from src.plasticity import Plasticity
+
+
+class DynamicsCore(nn.Module):
+    """
+    One-step recurrent dynamics update.
+
+    Trajectory-stateless: all evolving variables live in ``NetworkState``
+    or in per-forward-pass plasticity modules.
+
+    Parameters
+    ----------
+    cfg : Configuration
+        Network configuration object.
+    stp_block_index : list[STPBlockSpec]
+        Per-block (pre_pop, post_pop, block_id) tuples.
+    activation : Activation
+        Shared activation module (injected to avoid duplicate instances).
+    """
+
+    def __init__(
+        self,
+        cfg,
+        stp_block_index: list[STPBlockSpec],
+        activation: Activation,
+    ) -> None:
+        super().__init__()
+        self.cfg = cfg
+        self.stp_block_index = stp_block_index
+        self.activation = activation
+
+    # ------------------------------------------------------------------
+
+    def _compute_stp_hidden(
+        self,
+        rates: Tensor,
+        batch_size: int,
+        stp_modules: list[Plasticity],
+        W_stp: list[Tensor],
+    ) -> Tensor:
+        """Compute STP contribution to hidden state.
+
+        Always called behind an ``IF_STP`` guard, so *stp_modules* and
+        *W_stp* are guaranteed non-None by the caller.
+        """
+        c = self.cfg
+        hidden = torch.zeros(
+            (batch_size, c.N_NEURON), device=rates.device, dtype=rates.dtype,
+        )
+        for block_idx, (pre, post, _) in enumerate(self.stp_block_index):
+            stp_out = stp_modules[block_idx](rates[:, c.slices[pre]])
+            hidden[:, c.slices[post]] += stp_out @ W_stp[block_idx]
+        return hidden
+
+    def step(
+        self,
+        state: NetworkState,
+        ff_step: Tensor,
+        W_rec: Tensor,
+        W_stp: list[Tensor] | None,
+        stp_modules: list[Plasticity] | None,
+        ff_stp_module: Plasticity | None,
+    ) -> None:
+        """Advance the network by one simulation step.  Mutates *state* in-place."""
+        c = self.cfg
+        rates = state.rates
+        rec_input = state.rec_input
+        batch_size = rates.shape[0]
+
+        # --- recurrent input ---
+        hidden = recurrent_matmul(rates, W_rec)
+
+        hidden_stp: Tensor | None = None
+        if c.IF_STP and stp_modules is not None and W_stp is not None:
+            hidden_stp = self._compute_stp_hidden(
+                rates, batch_size, stp_modules, W_stp,
+            )
+            hidden = hidden + hidden_stp
+
+        # --- feedforward STP ---
+        if c.IF_FF_STP and ff_stp_module is not None:
+            k0 = torch.sqrt(torch.as_tensor(
+                c.Ka[0], device=ff_step.device, dtype=ff_step.dtype,
+            ))
+            ff_stp_hidden = torch.sign(ff_step) * (
+                ff_stp_module(torch.abs(ff_step) / k0) * k0
+            )
+            ff_step = ff_step + ff_stp_hidden
+
+        # --- feedforward dynamics ---
+        if c.IF_FF_DYN:
+            ff_step = state.ff_state * c.EXP_FF + ff_step * (1.0 - c.EXP_FF)
+            state.ff_state = ff_step
+
+        # --- batch J shortcut ---
+        if c.IF_BATCH_J:
+            hidden[:, c.slices[0]].add_(
+                c.Jab_batch * (rates[:, c.slices[0]] @ c.W_batch_T)
+            )
+
+        # --- synaptic dynamics ---
+        if c.SYN_DYN:
+            rec_input[0].mul_(c.EXP_DT_TAU_SYN).add_(
+                hidden * (1.0 - c.EXP_DT_TAU_SYN),
+            )
+        else:
+            rec_input[0] = hidden
+
+        # --- feedforward adaptation ---
+        if c.IF_FF_ADAPT:
+            if state.ff_adapt_thresh is None:
+                state.ff_adapt_thresh = torch.zeros_like(ff_step)
+            adapted = torch.sign(ff_step) * torch.relu(
+                torch.abs(ff_step) - state.ff_adapt_thresh
+            )
+            state.ff_adapt_thresh = (
+                state.ff_adapt_thresh * c.EXP_FF_ADAPT
+                + torch.abs(adapted) * c.A_FF_ADAPT * (1.0 - c.EXP_FF_ADAPT)
+            )
+            ff_step = adapted
+
+        net_input = ff_step + rec_input[0]
+
+        # --- NMDA (excitatory recurrent only) ---
+        if c.IF_NMDA:
+            exc_rates = rates[:, c.slices[0]]
+            if W_rec.dim() == 2:
+                hidden_nmda = recurrent_matmul(exc_rates, W_rec[c.slices[0]])
+            elif W_rec.dim() == 3:
+                hidden_nmda = recurrent_matmul(exc_rates, W_rec[:, c.slices[0]])
+            else:
+                raise ValueError(f"Invalid W_rec dim for NMDA: {W_rec.dim()}")
+
+            if hidden_stp is not None:
+                # Add excitatory STP contribution; clone to avoid mutating
+                # the result of recurrent_matmul
+                hidden_nmda = hidden_nmda.clone()
+                hidden_nmda[:, c.slices[0]] += hidden_stp[:, c.slices[0]]
+
+            rec_input[1].mul_(c.EXP_DT_TAU_NMDA).add_(
+                c.R_NMDA * hidden_nmda * (1.0 - c.EXP_DT_TAU_NMDA)
+            )
+            net_input = net_input + rec_input[1]
+
+        # --- activation ---
+        non_linear = self.activation(
+            net_input, func_name=c.TF_TYPE, thresh=state.thresh,
+        )
+
+        # --- rate dynamics ---
+        if c.RATE_DYN:
+            state.rates = rates * c.EXP_DT_TAU + non_linear * (1.0 - c.EXP_DT_TAU)
+        else:
+            state.rates = non_linear
+
+        # --- adaptation ---
+        if c.IF_ADAPT:
+            state.thresh[:, c.slices[0]] = (
+                state.thresh[:, c.slices[0]] * c.EXP_ADAPT
+                + state.rates[:, c.slices[0]].detach() * c.A_ADAPT * (1.0 - c.EXP_ADAPT)
+            )
+#+end_src
+
+#+begin_src python :tangle ../network_plasticity.py
+"""Plasticity mechanism construction and Hebbian update logic."""
+from __future__ import annotations
+
+import torch
+from torch import nn
+
+from src.hebbian import Hebbian
+from src.network_state import NetworkState
+from src.network_types import STPBlockSpec, Tensor
+from src.plasticity import Plasticity
+
+
+class PlasticityManager(nn.Module):
+    """Construct and manage plasticity mechanisms used during simulation.
+
+    STP state is persisted on the ``NetworkState`` instance that is passed in,
+    ensuring a single source of truth shared with ``StateManager``.
+
+    The Hebbian block_id convention is: ``block_id = pre + post * N_POP``
+    (row-major in the (post, pre) population grid).
+    """
+
+    def __init__(
+        self,
+        cfg,
+        W_rec_base: Tensor,
+        stp_block_index: list[STPBlockSpec],
+    ) -> None:
+        super().__init__()
+        self.cfg = cfg
+        self.register_buffer("_W_rec_base", W_rec_base)
+        self.stp_block_index = stp_block_index
+
+        self.hebb: Hebbian | None = (
+            Hebbian(cfg.ETA, cfg.DT, cfg.HEBB_TYPE, cfg.HEBB_FRAC)
+            if cfg.IF_HEBB
+            else None
+        )
+
+    def _build_stp_module(
+        self,
+        pre: int,
+        block_id: int,
+        batch_size: int,
+        reset: bool,
+    ) -> Plasticity:
+        c = self.cfg
+        return Plasticity(
+            c.USE[block_id],
+            c.TAU_FAC[block_id],
+            c.TAU_REC[block_id],
+            c.DT,
+            (batch_size, c.Na[pre]),
+            STP_TYPE=c.STP_TYPE,
+            IF_INIT=reset,
+            device=c.device,
+        )
+
+    @staticmethod
+    def _restore_stp_state(
+        mod: Plasticity,
+        u_saved: Tensor,
+        x_saved: Tensor,
+        block_label: str,
+    ) -> None:
+        expected = tuple(mod.u_stp.shape)
+        if tuple(u_saved.shape) != expected:
+            raise RuntimeError(
+                f"Restored u_stp shape mismatch at {block_label}: "
+                f"{tuple(u_saved.shape)} != {expected}"
+            )
+        if tuple(x_saved.shape) != expected:
+            raise RuntimeError(
+                f"Restored x_stp shape mismatch at {block_label}: "
+                f"{tuple(x_saved.shape)} != {expected}"
+            )
+        mod.u_stp = u_saved.to(device=mod.u_stp.device, dtype=mod.u_stp.dtype)
+        mod.x_stp = x_saved.to(device=mod.x_stp.device, dtype=mod.x_stp.dtype)
+
+    def make_stp_modules(
+        self,
+        state: NetworkState,
+        batch_size: int,
+        reset: bool,
+    ) -> list[Plasticity] | None:
+        if not self.cfg.IF_STP:
+            return None
+
+        n_blocks = len(self.stp_block_index)
+        stp_modules: list[Plasticity] = []
+
+        if not reset:
+            if state.u_stp_last is None or state.x_stp_last is None:
+                raise RuntimeError("STP state missing on restore path")
+            if len(state.u_stp_last) != n_blocks or len(state.x_stp_last) != n_blocks:
+                raise RuntimeError(
+                    f"STP state length mismatch: "
+                    f"got {len(state.u_stp_last)}/{len(state.x_stp_last)}, "
+                    f"expected {n_blocks}"
+                )
+
+        for block_idx, (pre, _post, block_id) in enumerate(self.stp_block_index):
+            mod = self._build_stp_module(pre, block_id, batch_size, reset)
+
+            if not reset:
+                self._restore_stp_state(
+                    mod,
+                    state.u_stp_last[block_idx],
+                    state.x_stp_last[block_idx],
+                    f"block {block_idx}",
+                )
+
+            stp_modules.append(mod)
+
+        # Persist initial/current STP state back onto NetworkState
+        state.u_stp_last = [m.u_stp.detach().clone() for m in stp_modules]
+        state.x_stp_last = [m.x_stp.detach().clone() for m in stp_modules]
+        return stp_modules
+
+    def make_ff_stp_module(
+        self,
+        state: NetworkState,
+        batch_size: int,
+        reset: bool,
+    ) -> Plasticity | None:
+        c = self.cfg
+        if not c.IF_FF_STP:
+            return None
+
+        mod = Plasticity(
+            c.FF_USE,
+            c.TAU_FF_FAC,
+            c.TAU_FF_REC,
+            c.DT,
+            (batch_size, c.N_NEURON),
+            STP_TYPE=c.STP_TYPE,
+            IF_INIT=reset,
+            device=c.device,
+        )
+
+        if not reset:
+            if state.u_ff_stp_last is None or state.x_ff_stp_last is None:
+                raise RuntimeError("FF-STP state missing on restore path")
+            self._restore_stp_state(
+                mod, state.u_ff_stp_last, state.x_ff_stp_last, "FF-STP",
+            )
+
+        state.u_ff_stp_last = mod.u_stp.detach().clone()
+        state.x_ff_stp_last = mod.x_stp.detach().clone()
+        return mod
+
+    def apply_hebbian(
+        self,
+        hebb_rates: Tensor | None,
+        rates: Tensor,
+        W_rec: Tensor,
+    ) -> tuple[Tensor, Tensor | None]:
+        """Apply Hebbian updates to the effective recurrent matrix.
+
+        Expects ``W_rec`` to be 3-D (batched) when ``IF_HEBB`` is enabled.
+        ``W_rec`` is modified in-place and also returned for convenience.
+        """
+        c = self.cfg
+        if not c.IF_HEBB:
+            return W_rec, hebb_rates
+        if self.hebb is None:
+            raise RuntimeError("IF_HEBB=True but Hebbian module is not initialized")
+        if hebb_rates is None:
+            raise RuntimeError("hebb_rates is None while IF_HEBB=True")
+        if W_rec.dim() != 3:
+            raise ValueError(
+                f"Hebbian path expects batched W_rec, got shape {tuple(W_rec.shape)}"
+            )
+
+        scale = torch.sqrt(torch.as_tensor(
+            c.Ka[0], device=W_rec.device, dtype=W_rec.dtype,
+        ))
+
+        for pre in range(c.N_POP):
+            pre_rates = rates[:, c.slices[pre]]
+            hebb_pre = hebb_rates[:, c.slices[pre]]
+
+            for post in range(c.N_POP):
+                block_id = pre + post * c.N_POP
+                if not c.IS_HEBB[block_id]:
+                    continue
+
+                W_hebb = self.hebb(
+                    pre_rates,
+                    rates[:, c.slices[post]],
+                    hebb_pre,
+                    hebb_rates[:, c.slices[post]],
+                ) / scale
+
+                base = self._W_rec_base[c.slices[pre], c.slices[post]].unsqueeze(0)
+                W_rec[:, c.slices[pre], c.slices[post]] = base + W_hebb
+
+        W_rec[:, c.slices[0]] = W_rec[:, c.slices[0]].clamp(min=0.0)
+        if c.N_POP > 1:
+            W_rec[:, c.slices[1]] = W_rec[:, c.slices[1]].clamp(max=0.0)
+
+        if c.HEBB_TYPE == "bcm":
+            hebb_rates = hebb_rates * c.EXP_HEBB + rates * (1.0 - c.EXP_HEBB)
+
+        return W_rec, hebb_rates
+#+end_src
+
+#+begin_src python :tangle ../network_weights.py
+"""Recurrent weight construction and management."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import torch
+from torch import nn
+
+from src.connectivity import Connectivity
+from src.lr_utils import clamp_tensor, init_low_rank, normalize_tensor
+from src.network_types import STPBlockSpec, Tensor
+
+
+def recurrent_matmul(rates: Tensor, W: Tensor) -> Tensor:
+    """Batched or unbatched recurrent matrix multiply."""
+    if W.dim() == 2:
+        return rates @ W
+    if W.dim() == 3:
+        return torch.bmm(rates.unsqueeze(1), W).squeeze(1)
+    raise ValueError(f"W must be 2D or 3D, got {W.dim()}D")
+
+
+@dataclass
+class WeightOutputs:
+    """Container for all weight matrices built at the start of a forward pass."""
+    W_train: Tensor | None
+    W_rec: Tensor
+    W_stp_blocks: list[Tensor] | None
+
+
+class WeightBuilder(nn.Module):
+    def __init__(self, cfg) -> None:
+        super().__init__()
+        self.cfg = cfg
+
+        self.low_rank: nn.Module | None = None
+        self.W_train_dense: nn.Parameter | None = None
+        self.stp_block_specs: list[STPBlockSpec] = []
+
+        self._init_base_weights()
+        self._init_trainable_weights()
+        self._init_stp_buffers()
+        self._init_low_rank_module()
+
+    @property
+    def device(self):
+        return self.cfg.device
+
+    # -- initialisation -------------------------------------------------
+
+    def _init_base_weights(self) -> None:
+        c = self.cfg
+        dtype = torch.float32
+        W_rec = torch.zeros(
+            (c.N_NEURON, c.N_NEURON), device=self.device, dtype=dtype,
+        )
+
+        for post in range(c.N_POP):
+            for pre in range(c.N_POP):
+                conn = Connectivity(
+                    c.Na[post], c.Na[pre], c.Ka[pre], device=self.device,
+                )
+                block = conn(
+                    c.CON_TYPE,
+                    c.PROBA_TYPE[post][pre],
+                    kappa=c.KAPPA[post][pre],
+                    phase=c.PHASE,
+                    sigma=c.SIGMA[post][pre],
+                    lr_mean=c.LR_MEAN,
+                    lr_cov=c.LR_COV,
+                    ksi=c.PHI0,
+                )
+                W_rec[c.slices[pre], c.slices[post]] = c.Jab[post, pre] * block.T
+
+        self.register_buffer("W_rec_base", W_rec)
+
+    def _init_trainable_weights(self) -> None:
+        c = self.cfg
+        dtype = self.W_rec_base.dtype
+
+        if c.TRAIN_EI:
+            shape = (c.N_NEURON, c.N_NEURON)
+            mask = torch.zeros(shape, device=self.device, dtype=dtype)
+            for post in range(c.N_POP):
+                for pre in range(c.N_POP):
+                    mask[c.slices[pre], c.slices[post]] = c.IS_TRAIN[post][pre]
+            self.register_buffer("train_mask", mask)
+        else:
+            shape = (c.Na[0], c.Na[0])
+
+        if not c.LR_TRAIN:
+            self.W_train_dense = nn.Parameter(
+                torch.randn(shape, device=self.device, dtype=dtype) * c.LR_INI
+            )
+
+    def _init_low_rank_module(self) -> None:
+        c = self.cfg
+        if c.LR_TRAIN:
+            self.low_rank = init_low_rank(
+                N_NEURON=c.Na[0], RANK=c.RANK, LR_MN=c.LR_MN,
+                LR_READOUT=c.LR_READOUT, LR_INI=c.LR_INI, LR_UeqV=c.LR_UeqV,
+                DEVICE=self.device, LR_TYPE=c.LR_TYPE,
+                LR_N_SUPPORTS=c.LR_N_SUPPORTS,
+                LR_SUPPORT_WEIGHTS=c.LR_SUPPORT_WEIGHTS,
+                LR_BASIS_DIM=c.LR_BASIS_DIM,
+                LR_TRAIN_BIASES=c.LR_TRAIN_BIASES,
+                LR_READOUT_DIM=c.LR_READOUT_DIM,
+                LR_INIT_GAUSSIAN_BASIS=c.LR_INIT_GAUSSIAN_BASIS,
+            )
+
+    def _init_stp_buffers(self) -> None:
+        c = self.cfg
+        self.stp_block_specs = []
+
+        if not c.IF_STP:
+            self.J_STP_param = None
+            return
+
+        dtype = self.W_rec_base.dtype
+        j_stp = torch.as_tensor(c.J_STP, device=self.device, dtype=dtype)
+
+        if getattr(c, "TRAIN_J_STP", False):
+            self.J_STP_param = nn.Parameter(j_stp.clone())
+        else:
+            self.register_buffer("J_STP_param", j_stp.clone())
+
+        for post in range(c.N_POP):
+            for pre in range(c.N_POP):
+                block_id = pre + post * c.N_POP
+                if not c.IS_STP[block_id]:
+                    continue
+                denom = torch.abs(torch.as_tensor(
+                    c.Jab[post, pre], device=self.device, dtype=dtype,
+                ))
+                if denom == 0:
+                    raise ValueError(
+                        f"Jab[{post},{pre}] is zero; cannot normalise STP block"
+                    )
+                block = (
+                    self.W_rec_base[c.slices[pre], c.slices[post]].clone() / denom
+                )
+                self.stp_block_specs.append((pre, post, block_id))
+                self.register_buffer(
+                    f"_W_stp_base_{len(self.stp_block_specs) - 1}", block,
+                )
+
+    def _get_stp_base(self, block_idx: int) -> Tensor:
+        return getattr(self, f"_W_stp_base_{block_idx}")
+
+    # -- runtime --------------------------------------------------------
+
+    def _j_stp_value(self, block_id: int) -> Tensor:
+        if self.J_STP_param is None:
+            raise RuntimeError("J_STP_param is not initialized")
+        if self.J_STP_param.dim() == 0:
+            return self.J_STP_param
+        return self.J_STP_param[block_id]
+
+    def build_trainable_matrix(self) -> Tensor | None:
+        if self.cfg.LR_TRAIN:
+            if self.low_rank is None:
+                raise RuntimeError(
+                    "LR_TRAIN=True but low_rank module is not initialized"
+                )
+            return self.low_rank(self.cfg.LR_NORM)
+        return self.W_train_dense
+
+    def build_recurrent(self, W_train: Tensor | None) -> Tensor:
+        c = self.cfg
+        W_rec = self.W_rec_base.clone()
+        if W_train is None:
+            return W_rec
+
+        if c.TRAIN_EI:
+            W_eff = W_train
+            for pop_idx in range(c.N_POP):
+                W_eff = normalize_tensor(W_eff, pop_idx, c.slices, c.train_scale)
+            W_rec = W_rec + self.train_mask * W_eff
+            if c.CLAMP:
+                for pop_idx in range(c.N_POP):
+                    W_rec = clamp_tensor(W_rec.T, pop_idx, c.slices).T
+            return W_rec
+
+        # E-to-E only training path
+        ee = c.slices[0]
+        k0 = torch.sqrt(torch.as_tensor(
+            c.Ka[0], device=self.device, dtype=W_rec.dtype,
+        ))
+        W_rec[ee, ee] = W_rec[ee, ee] + c.GAIN * W_train / k0
+        if c.CLAMP:
+            W_rec = clamp_tensor(W_rec.T, 0, c.slices).T
+        return W_rec
+
+    def build_stp(self, W_train: Tensor | None) -> list[Tensor] | None:
+        c = self.cfg
+        if not c.IF_STP:
+            return None
+
+        dtype = self.W_rec_base.dtype
+        fix_scale = torch.sqrt(torch.as_tensor(
+            c.Ka[0], device=self.device, dtype=dtype,
+        ))
+        blocks: list[Tensor] = []
+
+        for block_idx, (pre, post, block_id) in enumerate(self.stp_block_specs):
+            base = self._get_stp_base(block_idx)
+            j = self._j_stp_value(block_id)
+
+            if (
+                pre == 0
+                and post == 0
+                and W_train is not None
+                and not c.TRAIN_EI
+            ):
+                block = (
+                    c.GAIN * j * base / fix_scale
+                    * (1.0 + W_train / c.train_scale[0])
+                )
+                if c.CLAMP:
+                    block = block.clamp(min=0.0)
+            else:
+                k_pre = torch.sqrt(torch.as_tensor(
+                    c.Ka[pre], device=self.device, dtype=dtype,
+                ))
+                block = c.W_STP[block_id] * j * base / k_pre
+
+            blocks.append(block)
+        return blocks
+
+    def expand_for_hebbian(self, W_rec: Tensor, batch_size: int) -> Tensor:
+        if not self.cfg.IF_HEBB:
+            return W_rec
+        return W_rec.unsqueeze(0).expand(batch_size, -1, -1).clone()
+
+    def build_all(self, batch_size: int) -> WeightOutputs:
+        W_train = self.build_trainable_matrix()
+        W_rec = self.build_recurrent(W_train)
+        W_stp = self.build_stp(W_train)
+        W_rec = self.expand_for_hebbian(W_rec, batch_size)
+        return WeightOutputs(W_train=W_train, W_rec=W_rec, W_stp_blocks=W_stp)
+
+    def get_readout(self) -> Tensor | None:
+        if self.low_rank is None:
+            return None
+        return self.low_rank.get_readout()
+#+end_src
+
+#+begin_src python :tangle ../network_outputs.py
+"""Time-windowed output accumulation during simulation."""
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+import torch
+
+from src.network_state import ForwardOutputs, NetworkState
+from src.network_types import Tensor
+from src.plasticity import Plasticity
+from src.utils import print_activity
+
+
+class OutputCollector:
+    """
+    Collect time-averaged outputs during simulation.
+
+    Accumulation begins at step ``N_STEADY + N_HEBB``.  Every ``N_WINDOW``
+    steps the running mean is emitted and the accumulator resets.
+
+    ``rates`` outputs contain **excitatory population only** (``slices[0]``).
+    """
+
+    def __init__(
+        self,
+        cfg,
+        return_rec: bool = False,
+        return_stp: bool = False,
+    ) -> None:
+        self.cfg = cfg
+        self.return_rec = return_rec
+        self.return_stp = return_stp
+
+        self._rates: list[Tensor] = []
+        self._rec_traces: list[Tensor] = []
+        self._stp_u: list[Tensor] = []
+        self._stp_x: list[Tensor] = []
+
+        self._mv_rates: Tensor | None = None
+        self._mv_rec_input: Tensor | None = None
+        self._acc_start: int = cfg.N_STEADY + cfg.N_HEBB
+        self._inv_window: float = 1.0 / cfg.N_WINDOW
+        self._stacked_rates_cache: Tensor | None = None
+
+    def _ensure_accumulators(self, state: NetworkState) -> None:
+        if self._mv_rates is None:
+            self._mv_rates = torch.zeros_like(state.rates)
+        if self.return_rec and self._mv_rec_input is None:
+            self._mv_rec_input = torch.zeros_like(state.rec_input)
+
+    def _reset_accumulators(self) -> None:
+        assert self._mv_rates is not None
+        self._mv_rates.zero_()
+        if self.return_rec and self._mv_rec_input is not None:
+            self._mv_rec_input.zero_()
+
+    def _emit(
+        self,
+        step: int,
+        state: NetworkState,
+        stp_modules: Sequence[Plasticity] | None,
+    ) -> None:
+        c = self.cfg
+        assert self._mv_rates is not None
+
+        if c.VERBOSE:
+            print_activity(c, step, state.rates)
+
+        self._rates.append(
+            (self._mv_rates[:, c.slices[0]] * self._inv_window).detach().clone()
+        )
+
+        if self.return_rec and self._mv_rec_input is not None:
+            # rec_input shape: (n_syn, B, N) -> permute to (B, n_syn, N)
+            rec_trace = (
+                self._mv_rec_input.permute(1, 0, 2)[:, :, c.slices[0]]
+                * self._inv_window
+            )
+            self._rec_traces.append(rec_trace.detach().clone())
+
+        if c.IF_STP and self.return_stp and stp_modules and len(stp_modules) > 0:
+            self._stp_u.append(stp_modules[0].u_stp.detach().clone())
+            self._stp_x.append(stp_modules[0].x_stp.detach().clone())
+
+        # Invalidate cache when new data is appended
+        self._stacked_rates_cache = None
+
+    def update(
+        self,
+        step: int,
+        state: NetworkState,
+        stp_modules: Sequence[Plasticity] | None = None,
+    ) -> None:
+        if step < self._acc_start:
+            return
+
+        self._ensure_accumulators(state)
+        assert self._mv_rates is not None
+
+        self._mv_rates.add_(state.rates)
+        if self.return_rec and self._mv_rec_input is not None:
+            self._mv_rec_input.add_(state.rec_input)
+
+        if (step - self._acc_start + 1) % self.cfg.N_WINDOW == 0:
+            self._emit(step, state, stp_modules)
+            self._reset_accumulators()
+
+    def stacked_rates(self) -> Tensor:
+        """Stack collected rate windows.  Shape: ``(B, T_out, Na[0])``.
+
+        Result is cached so repeated calls (e.g. for readout + finalize)
+        avoid redundant work.
+        """
+        if self._stacked_rates_cache is not None:
+            return self._stacked_rates_cache
+        if not self._rates:
+            raise RuntimeError(
+                "No rate outputs collected; check N_STEPS/N_WINDOW scheduling"
+            )
+        self._stacked_rates_cache = torch.stack(self._rates, dim=1)
+        return self._stacked_rates_cache
+
+    def finalize(self, readout: Tensor | None = None) -> ForwardOutputs:
+        return ForwardOutputs(
+            rates=self.stacked_rates(),
+            rec_input=(
+                torch.stack(self._rec_traces, dim=1) if self._rec_traces else None
+            ),
+            stp_u=torch.stack(self._stp_u, dim=1) if self._stp_u else None,
+            stp_x=torch.stack(self._stp_x, dim=1) if self._stp_x else None,
+            readout=readout,
+        )
+#+end_src
+
+#+begin_src python :tangle ../network.py
+"""Top-level recurrent network model."""
+from __future__ import annotations
+
+import torch
+from torch import nn
+
+from src.activation import Activation
+from src.configuration import Configuration
+from src.ff_input import FFInputBuilder
+from src.network_dynamics import DynamicsCore
+from src.network_outputs import OutputCollector
+from src.network_plasticity import PlasticityManager
+from src.network_state import ForwardOutputs
+from src.network_state_mgr import StateManager
+from src.network_types import Tensor
+from src.network_weights import WeightBuilder, WeightOutputs
+
+
+class Network(nn.Module):
+    """
+    Top-level recurrent network model.
+
+    Returns ``Tensor`` with shape ``(B, T_out, Na[0])`` by default,
+    or ``ForwardOutputs`` when ``return_outputs=True``.
+
+    Note: ``forward(init_state=True)`` must be called at least once before
+    ``forward(init_state=False)`` to ensure terminal-state buffers exist.
+    """
+
+    def __init__(self, conf_name, repo_root, **kwargs) -> None:
+        super().__init__()
+
+        self.config = Configuration(conf_name, repo_root)(**kwargs)
+
+        # Single shared activation instance
+        activation = Activation()
+
+        self.weight_builder = WeightBuilder(self.config)
+
+        # Pass low_rank reference so flow tasks can access V
+        self.ff_input_builder = FFInputBuilder(
+            self.config, low_rank=self.weight_builder.low_rank,
+        )
+        self.state_manager = StateManager(self.config, activation=activation)
+        self.plasticity_manager = PlasticityManager(
+            self.config,
+            W_rec_base=self.weight_builder.W_rec_base,
+            stp_block_index=self.weight_builder.stp_block_specs,
+        )
+        self.dynamics = DynamicsCore(
+            self.config,
+            stp_block_index=self.weight_builder.stp_block_specs,
+            activation=activation,
+        )
+
+        # Legacy compatibility attributes
+        self.rates_list: Tensor | None = None
+        self.rec_input: Tensor | None = None
+        self.u_list: Tensor | None = None
+        self.x_list: Tensor | None = None
+        self.readout: Tensor | None = None
+        self.W_hebb_T: Tensor | None = None
+
+    @property
+    def cfg(self):
+        return self.config
+
+    # -- internal helpers -----------------------------------------------
+
+    def _init_ff_input(self, ff_input: Tensor | None) -> Tensor:
+        c = self.cfg
+        if ff_input is None:
+            ff_input = self.ff_input_builder.build().to(c.device)
+
+        ff_input = ff_input.to(c.device)
+
+        if ff_input.dim() != 3:
+            raise ValueError(
+                f"ff_input must be 3D, got {tuple(ff_input.shape)}"
+            )
+        if ff_input.shape[1] < c.N_STEPS:
+            raise ValueError(
+                f"ff_input has only {ff_input.shape[1]} steps, "
+                f"expected >= {c.N_STEPS}"
+            )
+        return ff_input
+
+    def _apply_opto(self, weights: WeightOutputs) -> None:
+        c = self.cfg
+        if (
+            not c.IF_OPTO
+            or weights.W_stp_blocks is None
+            or len(weights.W_stp_blocks) == 0
+        ):
+            return
+
+        # Clone first block to avoid mutating cached weights
+        weights.W_stp_blocks[0] = weights.W_stp_blocks[0].clone()
+        rand_idx = torch.randperm(
+            weights.W_stp_blocks[0].size(0),
+            device=weights.W_stp_blocks[0].device,
+        )[: c.N_OPTO]
+        weights.W_stp_blocks[0][rand_idx] = 0
+
+    def _update_legacy_outputs(
+        self, final: ForwardOutputs, weights: WeightOutputs,
+    ) -> None:
+        self.rates_list = final.rates
+        self.rec_input = final.rec_input
+        self.u_list = final.stp_u
+        self.x_list = final.stp_x
+        self.readout = final.readout
+        self.W_hebb_T = weights.W_rec if self.cfg.IF_HEBB else None
+
+    # -- forward --------------------------------------------------------
+
+    def forward(
+        self,
+        ff_input: Tensor | None = None,
+        *,
+        return_stp: bool = False,
+        return_rec: bool = False,
+        init_state: bool = True,
+        return_outputs: bool = False,
+    ) -> Tensor | ForwardOutputs:
+        c = self.cfg
+        ff_input = self._init_ff_input(ff_input)
+
+        if init_state:
+            state = self.state_manager.initialize(ff_input)
+            if c.TRAINING == 0:
+                self.state_manager.init_last_state_buffers(
+                    state, ff_input.shape[0],
+                )
+        else:
+            state = self.state_manager.restore_last_state()
+
+        batch_size = state.rates.shape[0]
+        weights = self.weight_builder.build_all(batch_size=batch_size)
+        self._apply_opto(weights)
+
+        stp_modules = self.plasticity_manager.make_stp_modules(
+            state, batch_size=batch_size, reset=init_state,
+        )
+        ff_stp_module = self.plasticity_manager.make_ff_stp_module(
+            state, batch_size=batch_size, reset=init_state,
+        )
+
+        collector = OutputCollector(
+            c, return_rec=return_rec, return_stp=return_stp,
+        )
+
+        # Hebbian plasticity is active from N_STEADY onward (covers both
+        # the warm-up window [N_STEADY, N_STEADY + N_HEBB) and the
+        # subsequent output collection phase).
+        hebb_start = c.N_STEADY
+
+        for step in range(c.N_STEPS):
+            # Hebbian plasticity (uses rates from previous step)
+            if c.IF_HEBB and step >= hebb_start:
+                weights.W_rec, state.hebb_rates = (
+                    self.plasticity_manager.apply_hebbian(
+                        state.hebb_rates, state.rates, weights.W_rec,
+                    )
+                )
+
+            if c.RATE_NOISE:
+                noise = torch.randn(
+                    (batch_size, c.N_NEURON),
+                    device=c.device,
+                    dtype=state.rates.dtype,
+                )
+                state.rates = state.rates + noise * c.VAR_RATE
+
+            self.dynamics.step(
+                state=state,
+                ff_step=ff_input[:, step],
+                W_rec=weights.W_rec,
+                W_stp=weights.W_stp_blocks,
+                stp_modules=stp_modules,
+                ff_stp_module=ff_stp_module,
+            )
+
+            if c.TRAINING == 0:
+                self.state_manager.save_terminal_state_if_needed(
+                    step=step,
+                    state=state,
+                    end_indices=c.end_indices,
+                    stp_modules=stp_modules,
+                    ff_stp_module=ff_stp_module,
+                )
+
+            collector.update(step, state, stp_modules=stp_modules)
+
+        readout: Tensor | None = None
+        if c.LR_TRAIN:
+            ro = self.weight_builder.get_readout()
+            if ro is None:
+                raise RuntimeError(
+                    "LR_TRAIN=True but no low-rank readout available"
+                )
+            readout = collector.stacked_rates() @ ro / c.Na[0]
+
+        final = collector.finalize(readout=readout)
+        self._update_legacy_outputs(final, weights)
+
+        return final if return_outputs else final.rates
+#+end_src
+
+
+---
+
+**** Additional Files
+
+#+begin_src python :tangle ../ff_input.py
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import torch
+
+from src.configuration import Configuration
+from src.lr_utils import get_theta
+from src.network_types import Tensor
+from src.stimuli import Stimuli
+
+
+@dataclass
+class StimulusContext:
+    phi0: Tensor
+    theta: Tensor | None
+    phase: Tensor | None
+    grid_inputs: list[Tensor] | None
+
+
+class TaskStimulusFactory:
+    """
+    Create task-dependent stimuli for feedforward input construction.
+    """
+
+    def __init__(self, config: Configuration, low_rank=None) -> None:
+        self.config = config
+        self.low_rank = low_rank
+        self.stimulus_fn = Stimuli(
+            config.TASK,
+            (config.N_BATCH, config.Na[0]),
+            device=config.device,
+        )
+
+    def make_context(self, phi0: Tensor) -> StimulusContext:
+        cfg = self.config
+
+        theta = None
+        if self.is_dual_task:
+            if phi0.shape[0] < 3:
+                raise ValueError(
+                    f"Dual task requires phi0 with >= 3 rows, got {phi0.shape[0]}"
+                )
+            theta = get_theta(phi0[0], phi0[2]).unsqueeze(0)
+
+        phase = None
+        if self.is_rand_task:
+            phase = torch.rand((cfg.N_BATCH, 1), device=cfg.device) * 2.0 * torch.pi
+
+        grid_inputs = self.build_grid_inputs() if self.is_flow_task else None
+
+        return StimulusContext(
+            phi0=phi0,
+            theta=theta,
+            phase=phase,
+            grid_inputs=grid_inputs,
+        )
+
+    def build(self, index: int, context: StimulusContext) -> Tensor | None:
+        if self.is_flow_task:
+            return self._build_flow(index, context)
+
+        if self.is_rand_task:
+            return self._build_rand(index, context)
+
+        if self.is_dual_task:
+            return self._build_dual(index)
+
+        return self._build_standard(index, context)
+
+    def build_batch_dual_random_delay(self, batch_idx: int, index: int) -> Tensor:
+        cfg = self.config
+        strength = cfg.I0[index]
+        odor_idx = index if strength > 0 else 5 + index
+        return self.stimulus_fn(
+            strength,
+            cfg.SIGMA0[index],
+            cfg.odors[odor_idx],
+        )
+
+    @property
+    def is_flow_task(self) -> bool:
+        return "flow" in self.config.TASK
+
+    @property
+    def is_rand_task(self) -> bool:
+        return "rand" in self.config.TASK
+
+    @property
+    def is_dual_task(self) -> bool:
+        return "dual" in self.config.TASK
+
+    def _build_standard(self, index: int, context: StimulusContext) -> Tensor:
+        cfg = self.config
+        return self.stimulus_fn(
+            cfg.I0[index],
+            cfg.SIGMA0[index],
+            context.phi0[:, index],
+        )
+
+    def _build_rand(self, index: int, context: StimulusContext) -> Tensor:
+        cfg = self.config
+        return self.stimulus_fn.odrCosStim(
+            cfg.I0[index],
+            cfg.SIGMA0[index],
+            context.phase,
+            theta=context.theta,
+        )
+
+    def _build_dual(self, index: int) -> Tensor | None:
+        cfg = self.config
+
+        if cfg.LR_TRAIN and cfg.RANDOM_DELAY == 0:
+            if index == cfg.RWD and cfg.IF_RL != 0:
+                return None
+
+            odor_idx = index if cfg.I0[index] > 0 else 5 + index
+            return self.stimulus_fn(
+                cfg.I0[index],
+                cfg.SIGMA0[index],
+                cfg.odors[odor_idx],
+            )
+
+        if cfg.RANDOM_DELAY == 0:
+            stim_idx = 2 * index + 1
+            if stim_idx >= cfg.PHI0.shape[-1]:
+                raise IndexError(
+                    f"PHI0 index {stim_idx} out of range for shape {cfg.PHI0.shape}"
+                )
+            return self.stimulus_fn(
+                cfg.I0[index],
+                cfg.SIGMA0[index],
+                cfg.PHI0[2 * index + 1],
+            )
+
+        return None
+
+    def _build_flow(self, index: int, context: StimulusContext) -> Tensor | None:
+        cfg = self.config
+
+        if index == cfg.GRID_INPUT:
+            if context.grid_inputs is None:
+                return None
+            return torch.stack(context.grid_inputs).unsqueeze(1)
+
+        if cfg.GRID_TEST is None:
+            return None
+
+        sign = (-1) ** (cfg.GRID_TEST + 1) if cfg.GRID_TEST in (1, 6) else (-1) ** cfg.GRID_TEST
+        return self.stimulus_fn(
+            sign * cfg.I0[index],
+            cfg.SIGMA0[0],
+            cfg.odors[cfg.GRID_TEST],
+        )
+
+    def build_grid_inputs(self) -> list[Tensor]:
+        cfg = self.config
+
+        if self.low_rank is None:
+            raise RuntimeError(
+                "Flow task requires low_rank module to build grid inputs. "
+                "Pass low_rank to TaskStimulusFactory constructor."
+            )
+
+        x = torch.linspace(
+            cfg.GRID_X_RANGE[0],
+            cfg.GRID_X_RANGE[1],
+            cfg.GRID_SIZE,
+            device=cfg.device,
+        )
+        y = torch.linspace(
+            cfg.GRID_Y_RANGE[0],
+            cfg.GRID_Y_RANGE[1],
+            cfg.GRID_SIZE,
+            device=cfg.device,
+        )
+        X, Y = torch.meshgrid(x, y, indexing="ij")
+
+        V = self.low_rank.get_V()
+        vec1 = V[:, 0]
+        vec2 = V[:, 1]
+        vec2 = vec2 - (vec2 @ vec1) * vec1 / (vec1 @ vec1)
+
+        grid_inputs: list[Tensor] = []
+        for i in range(cfg.GRID_SIZE):
+            for j in range(cfg.GRID_SIZE):
+                point = cfg.I0[cfg.GRID_INPUT] * (X[i, j] * vec1 + Y[i, j] * vec2)
+                grid_inputs.append(point)
+
+        return grid_inputs
+
+
+class FFInputBuilder:
+    """
+    Build feedforward input tensor of shape (B, T, N).
+    """
+
+    def __init__(self, config: Configuration, low_rank=None) -> None:
+        self.config = config
+        self.stimulus_factory = TaskStimulusFactory(config, low_rank=low_rank)
+
+    def build(self) -> Tensor:
+        phi0 = self._prepare_phi0()
+        ff_input = self._build_background()
+
+        if self.config.TASK != "None":
+            context = self.stimulus_factory.make_context(phi0)
+            self._add_task_stimuli(ff_input, context)
+
+        return self._scale(ff_input)
+
+    def _prepare_phi0(self) -> Tensor:
+        phi0 = self.config.PHI0
+        if "odr" in self.config.TASK and torch.any(phi0 > 2 * torch.pi):
+            return torch.deg2rad(phi0)
+        return phi0
+
+    def _build_background(self) -> Tensor:
+        cfg = self.config
+
+        ff_input = torch.randn(
+            (cfg.N_BATCH, cfg.N_STEPS, cfg.N_NEURON),
+            device=cfg.device,
+        )
+
+        for i_pop in range(cfg.N_POP):
+            ff_input[..., cfg.slices[i_pop]].mul_(cfg.VAR_FF[:, i_pop])
+
+        for i_pop in range(cfg.N_POP):
+            baseline_pre = cfg.Ja0[:, i_pop]
+            if cfg.BUMP_SWITCH[i_pop]:
+                baseline_pre = baseline_pre / torch.sqrt(
+                    torch.as_tensor(cfg.Ka[0], device=cfg.device)
+                )
+
+            ff_input[:, : cfg.N_STIM_ON[0], cfg.slices[i_pop]].add_(baseline_pre)
+            ff_input[:, cfg.N_STIM_ON[0] :, cfg.slices[i_pop]].add_(cfg.Ja0[:, i_pop])
+
+        return ff_input
+
+    def _add_task_stimuli(self, ff_input: Tensor, context: StimulusContext) -> None:
+        for index in range(len(self.config.N_STIM_ON)):
+            stimulus = self.stimulus_factory.build(index, context)
+            if stimulus is not None:
+                self._apply_stimulus(ff_input, index, stimulus)
+
+    def _apply_stimulus(self, ff_input: Tensor, index: int, stimulus: Tensor) -> None:
+        cfg = self.config
+
+        if getattr(cfg, "ODR_TRAIN", False) and stimulus.ndim != 3:
+            stimulus = stimulus.unsqueeze(1)
+
+        start = cfg.N_STIM_ON[index]
+        if start >= cfg.N_STEPS:
+            return
+
+        if cfg.RANDOM_DELAY:
+            self._apply_random_delay_stimulus(ff_input, index, stimulus)
+            return
+
+        stop = cfg.N_STIM_OFF[index]
+        ff_input[:, start:stop, cfg.slices[0]].add_(stimulus)
+
+    def _apply_random_delay_stimulus(
+        self,
+        ff_input: Tensor,
+        index: int,
+        stimulus: Tensor,
+    ) -> None:
+        cfg = self.config
+
+        for batch_idx in range(cfg.N_BATCH):
+            time_slice = slice(
+                int(cfg.start_indices[index, batch_idx]),
+                int(cfg.end_indices[index, batch_idx]),
+            )
+
+            if self.stimulus_factory.is_dual_task:
+                stim_j = self.stimulus_factory.build_batch_dual_random_delay(batch_idx, index)
+                ff_input[batch_idx, time_slice, cfg.slices[0]].add_(stim_j)
+            else:
+                ff_input[batch_idx, time_slice, cfg.slices[0]].add_(stimulus[batch_idx])
+
+    def _scale(self, ff_input: Tensor) -> Tensor:
+        cfg = self.config
+        scale = cfg.GAIN * torch.sqrt(torch.as_tensor(cfg.Ka[0], device=cfg.device)) * cfg.M0
+        return ff_input * scale
+#+end_src
+
+#+begin_src python :tangle ../configuration.py
+from yaml import safe_load
+import numpy as np
+
+import torch
+from torch.distributions import MultivariateNormal
+
+from src.utils import set_seed
+
+
+class Configuration:
+    def __init__(self, conf_name, repo_root):
+        self.conf_file = repo_root + "/conf/" + conf_name
+        self.defaults = repo_root + "/conf/defaults.yml"
+
+    def forward(self, **kwargs):
+        with open(self.defaults, "r") as f:
+            parameters = safe_load(f)
+        with open(self.conf_file, "r") as f:
+            config = safe_load(f)
+        parameters.update(config)
+        parameters.update(kwargs)
+
+        self.__dict__.update(parameters)
+
+        if self.FLOAT_PRECISION == 32:
+            self.FLOAT = torch.float
+            torch.set_float32_matmul_precision('medium')
+        elif self.FLOAT_PRECISION == 16:
+            self.FLOAT = torch.float16
+        elif self.FLOAT_PRECISION == "16b":
+            self.FLOAT = torch.bfloat16
+        else:
+            self.FLOAT = torch.float64
+
+        self.device = torch.device(self.DEVICE)
+        torch.set_default_dtype(self.FLOAT)
+
+        # Use actual seed for random delay/ITI generation so results
+        # are reproducible, then re-seed for connectivity.
+        set_seed(self.SEED)
+        init_time_const(self)
+
+        # Re-seed for the connectivity/input vectors
+        set_seed(self.SEED)
+
+        # create networks' constants
+        init_const(self)
+
+        return self
+
+    def __call__(self, **kwargs):
+        return self.forward(**kwargs)
+
+
+def init_time_const(model):
+    ##########################################
+    # creating time steps from continuous time
+    ##########################################
+
+    model.N_HEBB = int(model.T_HEBB / model.DT)
+
+    model.N_STEADY = int(model.T_STEADY / model.DT)
+
+    if model.RANDOM_ITI:
+        if model.ITI_LIST is not None:
+            idx_iti = torch.randint(low=0, high=len(model.ITI_LIST), size=(1,)).item()
+            model.N_STEADY = int(model.ITI_LIST[idx_iti] / model.DT)
+        else:
+            model.N_STEADY = int(torch.randint(low=int(model.MIN_ITI), high=int(model.MAX_ITI)+1, size=(1,)).item() / model.DT)
+
+    model.N_WINDOW = int(model.T_WINDOW / model.DT)
+    model.N_STEPS = int(model.DURATION / model.DT) + model.N_WINDOW + model.N_STEADY + model.N_HEBB
+
+    model.N_STIM_ON = torch.tensor([int(i / model.DT) + model.N_STEADY + model.N_HEBB for i in model.T_STIM_ON]).to(model.device)
+    model.N_STIM_OFF = torch.tensor([int(i / model.DT) + model.N_STEADY + model.N_HEBB for i in model.T_STIM_OFF]).to(model.device)
+
+    model.random_shifts = torch.zeros((model.N_BATCH,)).to(model.device)
+    model.start_indices = (model.N_STIM_ON.unsqueeze(-1) + model.random_shifts)
+    model.end_indices = (model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts)
+
+    if model.RANDOM_DELAY:
+        model.N_STIM_ON[1] = model.N_STIM_OFF[0] + 1
+        model.N_STIM_OFF[1] = model.N_STIM_ON[1] + int(1.0 / model.DT)
+
+        N_MAX_DELAY = model.MAX_DELAY / model.DT
+        N_MIN_DELAY = model.MIN_DELAY / model.DT
+
+        model.N_STEPS += int(N_MAX_DELAY - N_MIN_DELAY)
+
+        if model.DELAY_LIST is not None:
+            idx_delay = torch.randint(low=0, high=len(model.DELAY_LIST), size=(model.N_BATCH,)).to(model.device)
+            chosen_delays = torch.tensor(model.DELAY_LIST, device=model.device)[idx_delay]
+            model.random_shifts = (chosen_delays / model.DT).to(int)
+        else:
+            model.random_shifts = torch.randint(low=int(N_MIN_DELAY), high=int(N_MAX_DELAY), size=(model.N_BATCH,)).to(model.device)
+
+        model.start_indices = (model.N_STIM_ON.unsqueeze(-1) + model.random_shifts)
+        model.end_indices = (model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts)
+
+        if 'odr' in model.TASK:
+            model.start_indices[0] = model.N_STIM_ON[0]
+            model.end_indices[0] = model.N_STIM_OFF[0]
+
+        if 'dual' in model.TASK:
+            # random DPA delay
+            model.start_indices[:-1] = model.N_STIM_ON[:-1].unsqueeze(-1)
+            model.end_indices[:-1] = model.N_STIM_OFF[:-1].unsqueeze(-1)
+
+    # used in sequential serial bias with random iti
+    model.start_idx = ((model.start_indices - model.N_STEADY - model.N_HEBB) / model.N_WINDOW).to(int)
+    model.end_idx = ((model.end_indices - model.N_STEADY - model.N_HEBB) / model.N_WINDOW).to(int)
+
+
+
+def init_const(model):
+    ##########################################
+    # defining N and K per population
+    ##########################################
+    model.Na = []
+    model.Ka = []
+
+    # K is set to 1 in all2all nets
+    if "all2all" in model.CON_TYPE:
+        model.K = 1.0
+
+    for i_pop in range(model.N_POP):
+        dum = int(model.N_NEURON * model.frac[i_pop])
+        model.Na.append(dum)
+
+        if model.FRAC_K:
+            model.Ka.append(model.K * model.frac[i_pop])
+        else:
+            model.Ka.append(model.K)
+
+    model.Na = torch.tensor(model.Na, dtype=torch.int, device=model.device)
+    model.Ka = torch.tensor(model.Ka, device=model.device)
+    model.csumNa = torch.cat(
+        (torch.tensor([0], device=model.device), torch.cumsum(model.Na, dim=0))
+    )
+
+    # slices[i] contains neurons' idx for population i
+    model.slices = []
+    for i_pop in range(model.N_POP):
+        model.slices.append(slice(model.csumNa[i_pop], model.csumNa[i_pop + 1]))
+
+    if model.TRAIN_SCALE == 'all':
+        model.train_scale = model.Na
+
+    elif model.TRAIN_SCALE == 'sparse':
+        model.train_scale = torch.sqrt(model.Ka)
+
+    elif model.TRAIN_SCALE == 'dense':
+        model.train_scale = torch.sqrt(model.Na.float())
+
+    else:
+        model.train_scale = torch.ones_like(model.Na, dtype=torch.float32)
+
+    if model.VERBOSE:
+        print("Na", model.Na, "Ka", model.Ka, "csumNa", model.csumNa)
+
+    ##########################################
+    # defining integration constants
+    ##########################################
+
+    # rate dynamics
+    model.TAU = torch.tensor(model.TAU, device=model.device)
+    model.EXP_DT_TAU = torch.ones(model.N_NEURON, device=model.device)
+    model.DT_TAU = torch.ones(model.N_NEURON, device=model.device)
+
+    for i_pop in range(model.N_POP):
+        model.EXP_DT_TAU[model.slices[i_pop]] = torch.exp(-model.DT / model.TAU[i_pop])
+        model.DT_TAU[model.slices[i_pop]] = model.DT / model.TAU[i_pop]
+
+    # Adaptation
+    model.THRESH = torch.tensor(model.THRESH, device=model.device)
+    model.thresh = torch.ones(model.N_BATCH, model.N_NEURON, device=model.device)
+
+    for i_pop in range(model.N_POP):
+        model.thresh[:, model.slices[i_pop]] = model.THRESH[i_pop]
+
+    if model.IF_HEBB:
+        model.TAU_HEBB = torch.tensor(model.TAU_HEBB, device=model.device)
+        model.EXP_HEBB = torch.exp(-model.DT / model.TAU_HEBB)
+
+    if model.IF_FF_DYN:
+        model.TAU_FF = torch.tensor(model.TAU_FF, device=model.device)
+        model.EXP_FF = torch.exp(-model.DT / model.TAU_FF)
+
+    if model.IF_FF_ADAPT:
+        model.TAU_FF_ADAPT = torch.tensor(model.TAU_FF_ADAPT, device=model.device)
+        model.EXP_FF_ADAPT = torch.exp(-model.DT / model.TAU_FF_ADAPT)
+
+    if model.IF_ADAPT:
+        model.TAU_ADAPT = torch.tensor(model.TAU_ADAPT, device=model.device)
+        model.EXP_ADAPT = torch.exp(-model.DT / model.TAU_ADAPT)
+
+    # synaptic dynamics
+    model.TAU_SYN = torch.tensor(model.TAU_SYN, device=model.device)
+    model.EXP_DT_TAU_SYN = torch.ones(model.N_NEURON, device=model.device)
+    model.DT_TAU_SYN = torch.ones(model.N_NEURON, device=model.device)
+
+    for i_pop in range(model.N_POP):
+        model.EXP_DT_TAU_SYN[model.slices[i_pop]] = torch.exp(
+            -model.DT / model.TAU_SYN[i_pop]
+        )
+        model.DT_TAU_SYN[model.slices[i_pop]] = model.DT / model.TAU_SYN[i_pop]
+
+    # NMDA dynamics
+    if model.IF_NMDA:
+        model.TAU_NMDA = torch.tensor(model.TAU_NMDA, device=model.device)
+        model.EXP_DT_TAU_NMDA = torch.ones(model.N_NEURON, device=model.device)
+        model.DT_TAU_NMDA = torch.ones(model.N_NEURON, device=model.device)
+
+        for i_pop in range(model.N_POP):
+            model.EXP_DT_TAU_NMDA[model.slices[i_pop]] = torch.exp(
+                -model.DT / model.TAU_NMDA[i_pop]
+            )
+            model.DT_TAU_NMDA[model.slices[i_pop]] = model.DT / model.TAU_NMDA[i_pop]
+
+
+    ##########################################
+    # defining models' Parameters
+    ##########################################
+    model.Jab = (
+        model.GAIN * torch.tensor(model.Jab, device=model.device).reshape(model.N_POP, model.N_POP)
+    )
+
+    for i_pop in range(model.N_POP):
+        model.Jab[:, i_pop] = model.Jab[:, i_pop] / torch.sqrt(model.Ka[i_pop])
+
+    model.Ja0 = torch.tensor(model.Ja0, device=model.device)
+
+    model.Ja0 = model.Ja0.unsqueeze(0)  # add batch dim
+    model.Ja0 = model.Ja0.unsqueeze(-1)  # add neural dim
+
+    model.VAR_FF = torch.sqrt(torch.tensor(model.VAR_FF, device=model.device))
+    model.VAR_RATE = torch.sqrt(torch.tensor(model.VAR_RATE, device=model.device)) / torch.sqrt(model.Ka[0])
+
+    model.VAR_FF.mul_(model.M0)
+    model.VAR_FF = model.VAR_FF.unsqueeze(0)  # add batch dim
+    model.VAR_FF = model.VAR_FF.unsqueeze(-1)  # add neural dim
+
+    ##########################################
+    # defining connectivity constants
+    ##########################################
+    model.PROBA_TYPE = np.array(model.PROBA_TYPE).reshape(model.N_POP, model.N_POP)
+    model.SIGMA = torch.tensor(model.SIGMA, device=model.device).view(
+        model.N_POP, model.N_POP
+    )
+    model.KAPPA = torch.tensor(model.KAPPA, device=model.device).view(
+        model.N_POP, model.N_POP
+    )
+
+    model.PHASE = torch.tensor(model.PHASE * torch.pi / 180.0, device=model.device)
+
+    if isinstance(model.PHI0, list):
+        model.PHI0 = torch.tensor(model.PHI0, device=model.device).unsqueeze(0)
+
+    model.IS_TRAIN = torch.tensor(model.IS_TRAIN, device=model.device).view(
+        model.N_POP, model.N_POP
+    )
+
+    if "dual" in model.TASK:
+        mean_ = torch.tensor(model.LR_MEAN, device=model.device, dtype=torch.float32)
+        cov_ = torch.tensor(model.LR_COV, device=model.device, dtype=torch.float32)
+
+        if cov_[0, 0] == cov_[0, 1]:
+            mean_ = mean_[[0, 2]]
+            cov_ = torch.tensor(
+                ([cov_[0, 0], cov_[0, 2]], [cov_[2, 0], cov_[2, 2]]),
+                device=model.device,
+                dtype=torch.float32,
+            )
+
+            multivariate_normal = MultivariateNormal(mean_, cov_)
+            model.PHI0 = multivariate_normal.sample((model.Na[0],)).T
+            model.PHI0 = torch.stack(
+                (model.PHI0[0], model.PHI0[0], model.PHI0[1], model.PHI0[1])
+            ).type(model.FLOAT)
+        else:
+            multivariate_normal = MultivariateNormal(mean_, cov_)
+            model.PHI0 = multivariate_normal.sample((model.Na[0],)).T.type(model.FLOAT)
+
+        model.odors = torch.randn((10, model.Na[0]), device=model.device)
+        # the cue is the same as go
+        model.odors[2] = model.odors[1]
+#+end_src
+
+#+begin_src python :tangle ../activation.py
+import torch
+from torch import nn
+
+_SQRT2 = None
+
+
+def _get_sqrt2(device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    """Cached rsqrt(2) constant."""
+    global _SQRT2
+    if _SQRT2 is None or _SQRT2.device != device or _SQRT2.dtype != dtype:
+        _SQRT2 = torch.rsqrt(torch.tensor(2.0, device=device, dtype=dtype))
+    return _SQRT2
+
+
+class Activation(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x, func_name="relu", thresh=0.0):
+        if func_name == "relu":
+            return torch.relu(x - thresh)
+        elif func_name == "erf":
+            rsqrt2 = _get_sqrt2(x.device, x.dtype)
+            return torch.erf((x - thresh) * rsqrt2)
+        elif func_name == "sqrt":
+            return (x >= 1.0) * torch.sqrt(torch.abs(4.0 * x - 3.0)) + x * x * (
+                x >= 0
+            ) * (x < 1.0)
+        else:
+            rsqrt2 = _get_sqrt2(x.device, x.dtype)
+            return thresh * 0.5 * (1.0 + torch.erf(x * rsqrt2))
+#+end_src
+
+#+begin_src python :tangle ../stimuli.py
+import torch
+from torch import nn
+
+
+def circular_gaussian(degrees, mu=0, sigma=30):
+    """
+    Wrapped Gaussian on the circle (unnormalized).
+
+    Parameters
+    ----------
+    degrees : Tensor
+        Angles in radians.
+    mu : float
+        Mean angle in radians.
+    sigma : float
+        Standard deviation in radians.
+    """
+    delta = (degrees - mu + torch.pi) % (2.0 * torch.pi) - torch.pi
+    return torch.exp(-0.5 * (delta / sigma) ** 2)
+
+
+class Stimuli:
+    def __init__(self, task, size, device):
+        self.task = task
+        self.size = size
+        self.device = device
+
+    def odrCosStim(self, strength, footprint, phase, rnd_phase=0, theta=None):
+        """
+        Cosine-shaped stimulus for ODR tasks.
+
+        Parameters
+        ----------
+        strength : float
+            Amplitude of the stimulus.
+        footprint : float
+            Tuning width (cosine modulation depth).
+        phase : Tensor
+            Location(s) of the stimulus on the ring.
+        rnd_phase : int
+            If nonzero, randomize phase per batch element.
+        theta : Tensor or None
+            Preferred directions; auto-generated if None.
+        """
+        if rnd_phase:
+            phase = torch.rand((self.size[0], 1), device=self.device) * 2.0 * torch.pi
+
+        if theta is None:
+            theta = torch.linspace(0, 2.0 * torch.pi, self.size[-1] + 1, device=self.device)[:-1]
+            theta = theta.unsqueeze(0).expand((1, self.size[-1]))
+
+        return strength * nn.ReLU()(1.0 + footprint * torch.cos(theta - phase)) / (1.0 + footprint)
+
+    def odrGaussStim(self, strength, footprint, phase, rnd_phase=0, theta=None):
+        """
+        Wrapped-Gaussian-shaped stimulus for ODR tasks.
+
+        Parameters
+        ----------
+        strength : float
+            Amplitude of the stimulus.
+        footprint : float
+            Width (sigma) of the wrapped Gaussian in radians.
+        phase : Tensor
+            Location(s) of the stimulus on the ring.
+        rnd_phase : int
+            If nonzero, randomize phase per batch element.
+        theta : Tensor or None
+            Preferred directions; auto-generated if None.
+        """
+        if rnd_phase:
+            phase = torch.rand((self.size[0], 1), device=self.device) * 2.0 * torch.pi
+
+        if theta is None:
+            theta = torch.linspace(
+                0,
+                2.0 * torch.pi,
+                self.size[-1] + 1,
+                device=self.device,
+            )[:-1]
+            theta = theta.unsqueeze(0).expand((1, self.size[-1]))
+
+        return strength * circular_gaussian(theta - phase, sigma=footprint)
+
+    def dualStim(self, strength, footprint, phase):
+        """
+        Stimulus for the Dual Task.
+
+        Parameters
+        ----------
+        strength : float
+            Amplitude of the stimulus.
+        footprint : float
+            Variance/scaling of the stimulus.
+        phase : Tensor
+            Stimulus Gaussian vector.
+        """
+        return strength * (footprint * phase)
+
+    def forward(self, strength, footprint, phase, **kwargs):
+        if "gauss" in self.task:
+            return self.odrGaussStim(strength, footprint, phase, **kwargs)
+
+        if "odr" in self.task:
+            return self.odrCosStim(strength, footprint, phase, **kwargs)
+
+        if "dual" in self.task:
+            return self.dualStim(strength, footprint, phase)
+
+        return 0
+
+    def __call__(self, strength, footprint, phase, **kwargs):
+        return self.forward(strength, footprint, phase, **kwargs)
+#+end_src
+
+#+begin_src python :tangle ../plasticity.py
+import torch
+
+
+class Plasticity:
+    """
+    Short-Term Plasticity (STP) model supporting Markram-Tsodyks
+    and Mato formulations.
+    """
+
+    def __init__(self, USE, TAU_FAC, TAU_REC, DT, size, device, STP_TYPE="markram", IF_INIT=1):
+        N_BATCH = size[0]
+        N_NEURON = size[1]
+
+        self.DT = DT
+        self.stp_type = STP_TYPE
+        self.device = device
+
+        self.TAU_FAC = TAU_FAC
+        self.TAU_REC = TAU_REC
+        self.USE = torch.tensor(USE, device=device, dtype=torch.float32).unsqueeze(-1)
+
+        if TAU_FAC > 0:
+            self.DT_TAU_FAC = torch.tensor(DT / TAU_FAC, device=device).unsqueeze(-1)
+        else:
+            self.DT_TAU_FAC = torch.tensor(0.0, device=device).unsqueeze(-1)
+
+        if TAU_REC > 0:
+            self.DT_TAU_REC = torch.tensor(DT / TAU_REC, device=device).unsqueeze(-1)
+        else:
+            self.DT_TAU_REC = torch.tensor(0.0, device=device).unsqueeze(-1)
+
+        self.EXP_REC = torch.exp(-self.DT_TAU_REC)
+        self.EXP_FAC = torch.exp(-self.DT_TAU_FAC)
+
+        if IF_INIT:
+            self.u_stp = self.USE.expand(N_BATCH, N_NEURON).clone()
+            self.x_stp = torch.ones((N_BATCH, N_NEURON), device=device)
+
+    def to(self, device):
+        """Move all internal tensors to the specified device."""
+        self.device = device
+        self.USE = self.USE.to(device)
+        self.DT_TAU_FAC = self.DT_TAU_FAC.to(device)
+        self.DT_TAU_REC = self.DT_TAU_REC.to(device)
+        self.EXP_REC = self.EXP_REC.to(device)
+        self.EXP_FAC = self.EXP_FAC.to(device)
+        if hasattr(self, 'u_stp'):
+            self.u_stp = self.u_stp.to(device)
+        if hasattr(self, 'x_stp'):
+            self.x_stp = self.x_stp.to(device)
+        return self
+
+    def markram_stp(self, rates):
+        # Depression
+        self.x_stp = (
+            self.x_stp
+            + (1.0 - self.x_stp) * self.DT_TAU_REC
+            - self.DT * self.u_stp * self.x_stp * rates
+        )
+        # Facilitation
+        self.u_stp = (
+            self.u_stp
+            + self.DT_TAU_FAC * (self.USE - self.u_stp)
+            + self.DT * self.USE * (1.0 - self.u_stp) * rates
+        )
+
+        return (self.u_stp * self.x_stp) * rates
+
+    def markram_stp_exp(self, rates):
+        if self.TAU_FAC == 0:
+            self.u_stp = self.USE.expand_as(self.u_stp)
+
+        if self.TAU_REC != 0:
+            self.x_stp = (
+                1.0
+                + (self.x_stp - 1.0) * self.EXP_REC
+                - self.DT * self.u_stp * self.x_stp * rates
+            )
+
+        if self.TAU_FAC != 0.0:
+            self.u_stp = (
+                self.USE
+                + (self.u_stp - self.USE) * self.EXP_FAC
+                + self.DT * self.USE * (1.0 - self.u_stp) * rates
+            )
+
+        return (self.u_stp * self.x_stp) * rates
+
+    def mato_stp(self, isi):
+        self.u_stp = self.u_stp * torch.exp(-isi / self.TAU_FAC) + self.USE * (
+            1.0 - self.u_stp * torch.exp(-isi / self.TAU_FAC)
+        )
+        self.x_stp = (
+            self.x_stp * (1.0 - self.u_stp) * torch.exp(-isi / self.TAU_REC)
+            + 1.0
+            - torch.exp(-isi / self.TAU_REC)
+        )
+        return self.u_stp * self.x_stp
+
+    def forward(self, rates):
+        if self.stp_type == "mato":
+            return self.mato_stp(rates)
+
+        if self.stp_type == "markram_exp":
+            return self.markram_stp_exp(rates)
+
+        return self.markram_stp(rates)
+
+    def __call__(self, rates):
+        return self.forward(rates)
+#+end_src
+
+#+begin_src python :tangle ../hebbian.py
+import torch
+import torch.nn.functional as F
+
+
+class Hebbian:
+    """
+    Hebbian learning rule supporting covariance, correlation, BCM, and
+    plain Hebbian variants.
+    """
+
+    def __init__(self, ETA, DT, HEBB_TYPE="bcm", CORR_FRAC=0.1):
+        self.DT = DT
+        self.HEBB_TYPE = HEBB_TYPE
+        self.ETA_DT = ETA * DT
+        self.CORR_FRAC = CORR_FRAC
+
+        # Cached convolution kernel for spatial_sum
+        self._kernel: torch.Tensor | None = None
+        self._kernel_n: int = -1
+
+    def _get_kernel(self, N: int, device: torch.device) -> torch.Tensor:
+        """Return cached 1D averaging kernel, rebuilding only when N changes."""
+        if self._kernel is not None and self._kernel_n == N and self._kernel.device == device:
+            return self._kernel
+
+        neighborhood = int(N * self.CORR_FRAC)
+        if neighborhood < 1:
+            neighborhood = 1
+        if neighborhood % 2 == 0:
+            neighborhood += 1
+
+        self._kernel = torch.ones(1, 1, neighborhood, device=device) / neighborhood
+        self._kernel_n = N
+        return self._kernel
+
+    def spatial_sum(self, rates):
+        # rates: [N_BATCH, N_NEURONS]
+        N = rates.shape[-1]
+        neighborhood = int(N * self.CORR_FRAC)
+        if neighborhood < 1:
+            return rates
+
+        # Force odd kernel size so it's symmetric
+        if neighborhood % 2 == 0:
+            neighborhood += 1
+
+        pad = neighborhood // 2
+        kernel = self._get_kernel(N, rates.device)
+
+        # [N_BATCH, 1, N_NEURONS]
+        x = rates.unsqueeze(1)
+
+        # circular pad: take last =pad= and first =pad= elements
+        x_padded = torch.cat([x[..., -pad:], x, x[..., :pad]], dim=-1)
+
+        # conv without padding; output length stays N_NEURONS
+        summed = F.conv1d(x_padded, kernel, padding=0)
+
+        return summed.squeeze(1)  # [N_BATCH, N_NEURONS]
+
+    def hebbian_learning(self, pre, post, avg_pre=None, avg_post=None):
+
+        if self.HEBB_TYPE == 'cov':
+            delta_pre = pre - avg_pre
+            delta_post = post - avg_post
+            return self.ETA_DT * (delta_pre.unsqueeze(2) * delta_post.unsqueeze(1))
+
+        if self.HEBB_TYPE == 'corr':
+            spatial_pre = self.spatial_sum(pre)
+            spatial_post = self.spatial_sum(post)
+
+            mean_pre = spatial_pre.mean(dim=-1, keepdim=True)
+            mean_post = spatial_post.mean(dim=-1, keepdim=True)
+
+            std_pre = spatial_pre.std(dim=1, unbiased=False, keepdim=True) + 1e-9
+            std_post = spatial_post.std(dim=1, unbiased=False, keepdim=True) + 1e-9
+
+            spatial_pre = (spatial_pre - mean_pre) / std_pre
+            spatial_post = (spatial_post - mean_post) / std_post
+
+            return self.ETA_DT * spatial_pre.unsqueeze(2) * spatial_post.unsqueeze(1)
+
+        wij = pre.unsqueeze(2) * post.unsqueeze(1)
+
+        if self.HEBB_TYPE == 'bcm':
+            delta_pre = pre - avg_pre
+            return self.ETA_DT * delta_pre.unsqueeze(2) * wij
+
+        return self.ETA_DT * wij
+
+    def forward(self, pre, post, avg_pre=None, avg_post=None):
+        return self.hebbian_learning(pre, post, avg_pre, avg_post)
+
+    def __call__(self, pre, post, avg_pre=None, avg_post=None):
+        return self.forward(pre, post, avg_pre, avg_post)
+#+end_src
+
+#+begin_src python :tangle ../connectivity.py
+import torch
+from torch.distributions import MultivariateNormal
+
+
+class Connectivity:
+    def __init__(self, Na, Nb, Kb, device, verbose=0):
+        """
+        Creates a connectivity matrix (sparse or all-to-all) with tuned
+        connection profiles.
+
+        Parameters
+        ----------
+        Na : int
+            Number of postsynaptic neurons.
+        Nb : int
+            Number of presynaptic neurons.
+        Kb : float
+            Average in-degree.
+        device : torch.device
+            Target device.
+        verbose : int
+            Verbosity level.
+        """
+
+        self.Na = torch.tensor(Na).detach().clone()
+        self.Nb = torch.tensor(Nb).detach().clone()
+        self.Kb = torch.tensor(Kb).detach().clone()
+
+        self.verbose = verbose
+        self.device = device
+
+    def low_rank_proba(self, kappa, lr_mean, lr_cov, ksi=None, **kwargs):
+        """Returns low-rank probability of connection."""
+
+        if ksi is None:
+            if self.verbose:
+                print("Generating low rank vectors")
+
+            mean_ = torch.tensor(lr_mean, device=self.device)
+            cov_ = torch.tensor(lr_cov, device=self.device)
+
+            if mean_.shape[0] > 1:
+                mv_normal = MultivariateNormal(mean_, cov_)
+                self.ksi = mv_normal.sample((self.Nb,)).T
+            else:
+                self.ksi = torch.randn((1, self.Nb), device=self.device)
+        else:
+            self.ksi = ksi
+
+        if self.verbose:
+            print("ksi", self.ksi.shape)
+
+        if self.ksi.shape[0] == 4:
+            Lij = torch.outer(self.ksi[0], self.ksi[1])
+            Lij = Lij + torch.outer(self.ksi[2], self.ksi[3])
+
+            Pij = 1.0 + kappa * Lij / torch.sqrt(self.Kb)
+        else:
+            Pij = 1.0 + kappa * (self.ksi.T @ self.ksi) / torch.sqrt(self.Kb)
+
+        return Pij
+
+    def cosine_proba(self, kappa, phase=0):
+        """Returns cosine probability of connection."""
+
+        theta_list = torch.linspace(
+            0, 2.0 * torch.pi, self.Na + 1, device=self.device
+        )[:-1]
+        phi_list = torch.linspace(
+            0, 2.0 * torch.pi, self.Nb + 1, device=self.device
+        )[:-1]
+
+        theta_i, theta_j = torch.meshgrid(theta_list, phi_list, indexing="ij")
+        theta_diff = theta_i - theta_j
+
+        return 1.0 + kappa * torch.cos(theta_diff - phase)
+
+    def von_mises_proba(self, kappa):
+        theta_list = torch.linspace(
+            0, 2.0 * torch.pi, self.Na + 1, device=self.device
+        )[:-1]
+        phi_list = torch.linspace(
+            0, 2.0 * torch.pi, self.Nb + 1, device=self.device
+        )[:-1]
+
+        theta_i, theta_j = torch.meshgrid(theta_list, phi_list, indexing="ij")
+        theta_diff = theta_i - theta_j
+
+        return (
+            torch.exp(kappa * torch.cos(theta_diff))
+            / torch.special.i0(torch.tensor(kappa, device=self.device))
+            / 2.0
+            / torch.pi
+        )
+
+    def get_con_proba(self, proba_type, **kwargs):
+        """Returns probability of connection of type proba_type."""
+
+        if "cos" in proba_type:
+            if "spec" in proba_type:
+                Pij = self.cosine_proba(kwargs["kappa"] / torch.sqrt(self.Kb))
+                if self.verbose:
+                    print("weak cosine probability")
+            else:
+                Pij = self.cosine_proba(kwargs["kappa"], kwargs["phase"])
+                if self.verbose:
+                    print("strong cosine probability")
+        elif "lr" == proba_type:
+            Pij = self.low_rank_proba(**kwargs)
+            if self.verbose:
+                print("low rank probability")
+        elif "von_mises" in proba_type:
+            Pij = self.von_mises_proba(kwargs["kappa"])
+            if self.verbose:
+                print("von Mises probability")
+        elif "gaussian" in proba_type:
+            Pij = torch.randn((self.Na, self.Nb), device=self.device)
+        else:
+            Pij = torch.tensor(1.0, device=self.device)
+            if self.verbose:
+                print("uniform probability")
+
+        return Pij
+
+    def forward(self, con_type, proba_type, **kwargs):
+        """
+        Returns connectivity matrix Cij.
+
+        Parameters
+        ----------
+        con_type : str
+            Either 'all2all' or 'sparse'.
+        proba_type : str
+            Connection probability profile type.
+        **kwargs
+            Additional arguments (kappa, phase, sigma, lr_mean, lr_cov, ksi).
+        """
+
+        Pij = self.get_con_proba(proba_type=proba_type, **kwargs)
+
+        # sparse network with probability of connection Kb/Nb * Pij
+        if "sparse" in con_type:
+            if self.verbose:
+                print("Sparse random connectivity")
+
+            Cij = torch.rand(self.Na, self.Nb, device=self.device) <= (
+                self.Kb / float(self.Nb) * Pij
+            ).clamp_(min=0, max=1)
+
+        # fully connected network that scales as 1/Nb
+        else:
+            if self.verbose:
+                print("All to all connectivity")
+
+            if "dense" in proba_type:
+                Cij = Pij / torch.sqrt(1.0 * self.Nb)
+            else:
+                Cij = Pij / (1.0 * self.Nb)
+
+        if self.verbose:
+            if "cos" in proba_type:
+                if "spec" in proba_type:
+                    print("with weak cosine structure, KAPPA %.2f" % kwargs["kappa"])
+                else:
+                    print("with strong cosine structure, KAPPA", kwargs["kappa"])
+            elif "lr" in proba_type:
+                print("with weak low rank structure, KAPPA %.2f" % kwargs["kappa"])
+
+        return Cij
+
+    def __call__(self, con_type="sparse", proba_type="unif", **kwargs):
+        return self.forward(con_type, proba_type, **kwargs)
+#+end_src
+
+#+begin_src python :tangle ../lr_utils.py
+import torch
+from torch import nn
+from math import floor
+
+
+def normalize_tensor(tensor, pop_idx, slices, scale):
+    """Normalize columns corresponding to population *pop_idx* by *scale[pop_idx]*."""
+    norm_tensor = tensor.clone()
+    norm_tensor[:, slices[pop_idx]] = tensor[:, slices[pop_idx]] / scale[pop_idx]
+    return norm_tensor
+
+
+def clamp_tensor(tensor, idx, slices):
+    clamped_tensor = tensor.clone()
+
+    if idx == 0:
+        clamped_tensor[slices[0]] = tensor[slices[0]].clamp(min=0.0)
+    elif idx == 'lr':
+        clamped_tensor[slices[0]] = tensor[slices[0]].clamp(min=-1.0)
+    else:
+        clamped_tensor[slices[1]] = tensor[slices[1]].clamp(max=0.0)
+
+    return clamped_tensor
+
+
+def masked_normalize(tensor):
+    mask = tensor != 0
+    normalized_tensor = tensor.clone()
+
+    if mask.any():
+        masked_tensor = tensor[mask]
+        mean = masked_tensor.mean()
+        std = masked_tensor.std(unbiased=False) + 1e-6
+        normalized_tensor[mask] = (masked_tensor - mean) / std
+
+    return normalized_tensor
+
+
+class LowRankWeights(nn.Module):
+    """
+    Standard low-rank parametrization:
+        W = U V^T    if LR_MN
+        W = V V^T    otherwise
+
+    U and V are neuron-wise free parameters.
+    """
+
+    def __init__(
+        self,
+        N_NEURON,
+        RANK=1,
+        LR_MN=1,
+        LR_READOUT=0,
+        LR_INI=.001,
+        LR_UeqV=1,
+        DEVICE="cuda",
+        LR_READOUT_DIM=1,
+    ):
+        super().__init__()
+
+        self.N_NEURON = int(N_NEURON)
+
+        self.RANK = int(RANK)
+        self.LR_MN = int(LR_MN)
+        self.LR_READOUT = int(LR_READOUT)
+
+        self.LR_INI = LR_INI
+        self.LR_UeqV = int(LR_UeqV)
+        self.LR_READOUT_DIM = int(LR_READOUT_DIM)
+
+        self.device = DEVICE
+
+        self.V = nn.Parameter(
+            torch.randn((self.N_NEURON, self.RANK), device=self.device) * self.LR_INI
+        )
+
+        if self.LR_MN:
+            self.U = nn.Parameter(
+                torch.randn((self.N_NEURON, self.RANK), device=self.device) * self.LR_INI
+            )
+
+            if self.LR_UeqV:
+                with torch.no_grad():
+                    self.U.copy_(self.V)
+        else:
+            self.U = None
+
+        if self.LR_READOUT:
+            self.readout_linear = nn.Linear(
+                self.N_NEURON,
+                self.LR_READOUT_DIM,
+                device=self.device,
+                bias=True,
+            )
+
+        self.lr = None
+
+    def get_U(self):
+        if self.LR_MN:
+            return self.U
+        return self.V
+
+    def get_V(self):
+        return self.V
+
+    def get_readout(self):
+        return self.get_V()
+
+    def resample_basis(self):
+        return
+
+    def forward(self, LR_NORM=0):
+        U = self.get_U()
+        V = self.get_V()
+
+        U_norm, V_norm = 1.0, 1.0
+
+        if LR_NORM:
+            U_norm = U.norm(p='fro') + 1e-6
+            V_norm = V.norm(p='fro') + 1e-6
+
+        self.lr = (U / U_norm) @ (V.T / V_norm)
+
+        return self.lr
+
+
+class SupportLowRankWeights(nn.Module):
+    """
+    Support / gaussian-mixture low-rank parametrization.
+
+    Instead of learning neuron-wise U and V directly, learn support-specific
+    projections from a gaussian basis.
+    """
+
+    def __init__(
+        self,
+        N_NEURON,
+        RANK=1,
+        LR_MN=1,
+        LR_READOUT=0,
+        LR_INI=.001,
+        LR_UeqV=1,
+        DEVICE="cuda",
+        N_SUPPORTS=1,
+        SUPPORT_WEIGHTS=None,
+        BASIS_DIM=None,
+        TRAIN_BIASES=False,
+        LR_READOUT_DIM=1,
+        INIT_GAUSSIAN_BASIS=None,
+    ):
+        super().__init__()
+
+        self.N_NEURON = int(N_NEURON)
+
+        self.RANK = int(RANK)
+        self.LR_MN = int(LR_MN)
+        self.LR_READOUT = int(LR_READOUT)
+
+        self.LR_INI = LR_INI
+        self.LR_UeqV = int(LR_UeqV)
+        self.LR_READOUT_DIM = int(LR_READOUT_DIM)
+
+        self.N_SUPPORTS = int(N_SUPPORTS)
+        self.BASIS_DIM = 2 * self.RANK if BASIS_DIM is None else int(BASIS_DIM)
+        self.TRAIN_BIASES = TRAIN_BIASES
+
+        self.device = DEVICE
+
+        if INIT_GAUSSIAN_BASIS is None:
+            basis = torch.randn((self.BASIS_DIM, self.N_NEURON), device=self.device)
+        else:
+            basis = INIT_GAUSSIAN_BASIS.to(self.device)
+
+        self.gaussian_basis = nn.Parameter(basis, requires_grad=False)
+        self.supports = nn.Parameter(
+            torch.zeros((self.N_SUPPORTS, self.N_NEURON), device=self.device),
+            requires_grad=False,
+        )
+
+        if SUPPORT_WEIGHTS is None:
+            self.support_weights = nn.Parameter(
+                torch.ones(self.N_SUPPORTS, device=self.device) / self.N_SUPPORTS,
+                requires_grad=False,
+            )
+
+            l_support = self.N_NEURON // self.N_SUPPORTS
+            for i in range(self.N_SUPPORTS):
+                if i < self.N_SUPPORTS - 1:
+                    self.supports.data[i, l_support * i:l_support * (i + 1)] = 1
+                else:
+                    self.supports.data[i, l_support * i:] = 1
+        else:
+            support_weights = torch.tensor(
+                SUPPORT_WEIGHTS, device=self.device, dtype=torch.float32
+            )
+            support_weights = support_weights / support_weights.sum()
+
+            self.support_weights = nn.Parameter(
+                support_weights,
+                requires_grad=False,
+            )
+
+            k = 0
+            for i in range(self.N_SUPPORTS):
+                if i < self.N_SUPPORTS - 1:
+                    width = floor(float(self.support_weights[i]) * self.N_NEURON)
+                    self.supports.data[i, k:k + width] = 1
+                    k += width
+                else:
+                    self.supports.data[i, k:] = 1
+
+        self.V_weights = nn.Parameter(
+            torch.randn((self.RANK, self.N_SUPPORTS, self.BASIS_DIM), device=self.device) * self.LR_INI
+        )
+        self.V_biases = nn.Parameter(
+            torch.zeros((self.RANK, self.N_SUPPORTS), device=self.device),
+            requires_grad=self.TRAIN_BIASES,
+        )
+
+        if self.LR_MN:
+            self.U_weights = nn.Parameter(
+                torch.randn((self.RANK, self.N_SUPPORTS, self.BASIS_DIM), device=self.device) * self.LR_INI
+            )
+            self.U_biases = nn.Parameter(
+                torch.zeros((self.RANK, self.N_SUPPORTS), device=self.device),
+                requires_grad=self.TRAIN_BIASES,
+            )
+
+            if self.LR_UeqV:
+                with torch.no_grad():
+                    self.U_weights.copy_(self.V_weights)
+                    self.U_biases.copy_(self.V_biases)
+        else:
+            self.U_weights = None
+            self.U_biases = None
+
+        if self.LR_READOUT:
+            self.readout_weights = nn.Parameter(
+                torch.randn((self.LR_READOUT_DIM, self.N_SUPPORTS, self.BASIS_DIM), device=self.device) * self.LR_INI
+            )
+            self.readout_biases = nn.Parameter(
+                torch.zeros((self.LR_READOUT_DIM, self.N_SUPPORTS), device=self.device),
+                requires_grad=self.TRAIN_BIASES,
+            )
+
+            self.readout_linear = nn.Linear(
+                self.N_NEURON,
+                self.LR_READOUT_DIM,
+                device=self.device,
+                bias=True,
+            )
+
+        self.U = None
+        self.V = None
+        self.readout = None
+        self.lr = None
+
+        self.define_proxy_parameters()
+
+    def support_to_neurons(self, weights, biases=None):
+        """
+        weights: (dim, n_supports, basis_dim)
+        returns: (N_NEURON, dim)
+        """
+
+        vec = weights @ self.gaussian_basis
+        vec = torch.sum(vec * self.supports.unsqueeze(0), dim=1)
+
+        if biases is not None:
+            vec = vec + biases @ self.supports
+
+        return vec.T
+
+    def define_proxy_parameters(self):
+        self.V = self.support_to_neurons(self.V_weights, self.V_biases)
+
+        if self.LR_MN:
+            self.U = self.support_to_neurons(self.U_weights, self.U_biases)
+        else:
+            self.U = self.V
+
+        if self.LR_READOUT:
+            self.readout = self.support_to_neurons(
+                self.readout_weights,
+                self.readout_biases,
+            )
+        else:
+            self.readout = self.V
+
+    def get_U(self):
+        self.define_proxy_parameters()
+        return self.U
+
+    def get_V(self):
+        self.define_proxy_parameters()
+        return self.V
+
+    def get_readout(self):
+        self.define_proxy_parameters()
+        return self.readout
+
+    def resample_basis(self):
+        with torch.no_grad():
+            self.gaussian_basis.normal_()
+
+        self.define_proxy_parameters()
+
+    def forward(self, LR_NORM=0):
+        U = self.get_U()
+        V = self.get_V()
+
+        U_norm, V_norm = 1.0, 1.0
+        if LR_NORM:
+            U_norm = U.norm(p='fro') + 1e-6
+            V_norm = V.norm(p='fro') + 1e-6
+
+        self.lr = (U / U_norm) @ (V.T / V_norm)
+
+        return self.lr
+
+
+def init_low_rank(
+    N_NEURON,
+    RANK=1,
+    LR_MN=1,
+    LR_READOUT=0,
+    LR_INI=.001,
+    LR_UeqV=1,
+    DEVICE="cuda",
+    LR_TYPE='standard',
+    LR_N_SUPPORTS=1,
+    LR_SUPPORT_WEIGHTS=None,
+    LR_BASIS_DIM=None,
+    LR_TRAIN_BIASES=False,
+    LR_READOUT_DIM=1,
+    LR_INIT_GAUSSIAN_BASIS=None,
+):
+    if LR_TYPE in ['support', 'gaussian_mixture', 'gmm']:
+        return SupportLowRankWeights(
+            N_NEURON=N_NEURON,
+            RANK=RANK,
+            LR_MN=LR_MN,
+            LR_READOUT=LR_READOUT,
+            LR_INI=LR_INI,
+            LR_UeqV=LR_UeqV,
+            DEVICE=DEVICE,
+            N_SUPPORTS=LR_N_SUPPORTS,
+            SUPPORT_WEIGHTS=LR_SUPPORT_WEIGHTS,
+            BASIS_DIM=LR_BASIS_DIM,
+            TRAIN_BIASES=LR_TRAIN_BIASES,
+            LR_READOUT_DIM=LR_READOUT_DIM,
+            INIT_GAUSSIAN_BASIS=LR_INIT_GAUSSIAN_BASIS,
+        )
+
+    return LowRankWeights(
+        N_NEURON=N_NEURON,
+        RANK=RANK,
+        LR_MN=LR_MN,
+        LR_READOUT=LR_READOUT,
+        LR_INI=LR_INI,
+        LR_UeqV=LR_UeqV,
+        DEVICE=DEVICE,
+        LR_READOUT_DIM=LR_READOUT_DIM,
+    )
+
+
+def get_theta(a, b, IF_NORM=0):
+    u, v = a, b
+
+    if IF_NORM:
+        u = a / torch.norm(a, p="fro")
+        v = b / torch.norm(b, p="fro")
+
+    return torch.atan2(v, u)
+
+
+def get_idx(ksi, ksi1):
+    theta = get_theta(ksi, ksi1, IF_NORM=0)
+    return theta.argsort()
+
+
+def get_overlap(model, rates):
+    """Compute overlap between rates and model's preferred directions.
+
+    Parameters
+    ----------
+    model : object
+        Must have a ``PHI0`` attribute (Tensor).
+    rates : Tensor
+        Firing rates, shape ``(..., N)``.
+
+    Returns
+    -------
+    Tensor
+        Overlap values.
+    """
+    ksi = model.PHI0
+    if not isinstance(ksi, torch.Tensor):
+        ksi = torch.as_tensor(ksi, device=rates.device, dtype=rates.dtype)
+    else:
+        ksi = ksi.to(device=rates.device, dtype=rates.dtype)
+    return rates @ ksi.T / rates.shape[-1]
+#+end_src
+
+**** Configuration
+
+#+begin_src yml :tangle ../../conf/defaults.yml
+###############################################
+# General
+###############################################
+VERBOSE: 0
+DEVICE: 'cpu'
+FLOAT_PRECISION: 32
+
+###############################################
+# Simulation
+###############################################
+N_BATCH: 1
+DT: 0.01
+DURATION: 6.0
+T_STEADY: 1.0
+T_WINDOW: 0.1
+TRAINING: 0
+
+###############################################
+# Task / stimulus
+###############################################
+TASK: 'dual'
+
+T_STIM_ON: [1.0, 3.0, 5.0]
+T_STIM_OFF: [2.0, 4.0, 6.0]
+
+I0: [0.2, 0.0, 0.0]
+SIGMA0: [1.0, 1.0, 1.0]
+
+PHI0: [180.0, 90.0, 0.0]
+PHI1: [180.0, 90.0, 0.0]
+
+ODR_TRAIN: 0
+STIM_EI: 0
+
+REP_BIAS: 0.0
+REP_VAR: 1.0
+
+###############################################
+# Random task timing
+###############################################
+RANDOM_DELAY: 0
+DELAY_LIST: [0, 1, 2]
+MIN_DELAY: 1
+MAX_DELAY: 2
+
+RANDOM_ITI: 0
+ITI_LIST: [0, 1, 2]
+MIN_ITI: 1
+MAX_ITI: 2
+
+###############################################
+# Network architecture
+###############################################
+N_POP: 2
+N_NEURON: 2000
+frac: [0.8, 0.2]
+
+# number of average presynaptic inputs
+# set to 1 for all-to-all networks
+K: 200.0
+FRAC_K: 0
+
+###############################################
+# LIF-like placeholders / voltage params
+###############################################
+V_THRESH: -50.0
+V_REST: -70.0
+
+###############################################
+# Rate transfer function
+###############################################
+TF_TYPE: 'relu'
+THRESH: [1.0, 1.0]
+
+###############################################
+# Rate dynamics
+###############################################
+RATE_DYN: 0
+TAU: [0.04, 0.04]
+
+RATE_NOISE: 0
+VAR_RATE: 1.0
+
+###############################################
+# Recurrent synaptic dynamics
+###############################################
+SYN_DYN: 1
+TAU_SYN: [0.2, 0.1]
+
+###############################################
+# NMDA
+###############################################
+IF_NMDA: 1
+R_NMDA: 1.0
+TAU_NMDA: [0.40, 0.40]
+
+###############################################
+# Adaptation
+###############################################
+IF_ADAPT: 0
+A_ADAPT: 0.01
+TAU_ADAPT: 50.0
+
+###############################################
+# Feedforward input
+###############################################
+LIVE_FF_UPDATE: 0
+
+Ja0: [2.0, 1.0]
+M0: 2.0
+VAR_FF: [0.0, 0.0]
+
+# If BUMP_SWITCH[i] == 1, set Iext[i] to zero before stimulus onset
+BUMP_SWITCH: [0, 0]
+
+###############################################
+# Feedforward adaptation / dynamics
+###############################################
+IF_FF_ADAPT: 0
+A_FF_ADAPT: 0.1
+TAU_FF_ADAPT: 150.0
+
+IF_FF_DYN: 0
+TAU_FF: 0.2
+
+###############################################
+# Connectivity
+###############################################
+SEED: 1
+SPARSE: None
+
+# 'all2all' or 'sparse'
+CON_TYPE: 'sparse'
+
+# each block: 'None', 'cosine', 'cosine_spec', 'lr', ...
+PROBA_TYPE: ['None', 'None', 'None', 'None']
+
+SIGMA: [0.0, 0.0, 0.0, 0.0]
+KAPPA: [0.0, 0.0, 0.0, 0.0]
+PHASE: 0.0
+
+###############################################
+# Synaptic strengths
+###############################################
+GAIN: 0.5
+Jab: [1.0, -1.5, 1.0, -1.0]
+
+# batch-dependent recurrent coupling
+IF_BATCH_J: 0
+
+###############################################
+# Short-term plasticity
+###############################################
+IF_STP: 0
+IS_STP: [1, 0, 0, 0]
+
+USE: [0.03]
+TAU_FAC: [1.0]
+TAU_REC: [0.2]
+J_STP: 10.0
+STP_TYPE: 'markram'
+
+TEST_I_STP: 0
+
+###############################################
+# Feedforward short-term plasticity
+###############################################
+IF_FF_STP: 0
+FF_USE: 0.3
+TAU_FF_FAC: 0.2
+TAU_FF_REC: 1.0
+
+###############################################
+# Hebbian plasticity
+###############################################
+IF_HEBB: 0
+IS_HEBB: [1, 1, 1, 1]
+
+HEBB_FRAC: 0.3
+TAU_HEBB: 1.0
+T_HEBB: 0.0
+ETA: 0.1
+HEBB_TYPE: 'bcm'
+
+###############################################
+# Built-in low-rank structured connectivity
+# used when PROBA_TYPE includes 'lr'
+###############################################
+RANK: 2
+LR_MEAN: [0.0, 0.0, 0.0, 0.0]
+LR_COV:
+  - [1.0, 0.9, 0.0, 0.0]
+  - [0.9, 1.0, 0.0, 0.0]
+  - [0.0, 0.0, 1.0, 0.9]
+  - [0.0, 0.0, 0.9, 1.0]
+
+###############################################
+# Trainable low-rank perturbation
+# used by network.py / lr_utils.py
+###############################################
+LR_TRAIN: 0
+
+# 'standard' | 'support' | 'gaussian_mixture' | 'gmm'
+LR_TYPE: 'standard'
+
+LR_INI: 0.001
+LR_MN: 1
+LR_UeqV: 1
+LR_NORM: 0
+LR_MASK: 0
+
+# readout from low-rank vectors
+LR_READOUT: 0
+LR_READOUT_DIM: 1
+
+# support / gaussian-mixture parametrization
+LR_N_SUPPORTS: 1
+LR_SUPPORT_WEIGHTS: null
+LR_BASIS_DIM: null
+LR_TRAIN_BIASES: False
+LR_INIT_GAUSSIAN_BASIS: null
+LR_RESAMPLE_BASIS: 0
+
+###############################################
+# Training / constrained recurrent training
+###############################################
+TRAIN_SCALE: 'all'
+CLAMP: 0
+
+TRAIN_EI: 0
+IS_TRAIN: [0, 0, 0, 0]
+
+###############################################
+# Reinforcement / reward
+###############################################
+IF_RL: 0
+RWD: -1
+
+###############################################
+# Flow / grid probing
+###############################################
+GRID_SIZE: 30
+GRID_RANGE: 5
+GRID_TEST: 0
+GRID_INPUT: 0
+
+###############################################
+# Optogenetics
+###############################################
+IF_OPTO: 0
+#+end_src
+
+#+begin_src yml :tangle ../conf/config_test.yml
+# config_test.yml — small, fast configuration for smoke-testing
+#
+# Overrides only what is needed to keep tests quick.
+# Everything else inherits from defaults.yml.
+
+N_NEURON: 200
+N_BATCH: 2
+K: 50.0
+
+DURATION: 1.0
+T_STEADY: 0.5
+T_WINDOW: 0.1
+DT: 0.01
+
+N_POP: 2
+frac: [0.8, 0.2]
+
+TASK: 'odr'
+T_STIM_ON:  [0.5, 1.0, 1.5]
+T_STIM_OFF: [0.8, 1.3, 1.8]
+I0: [0.2, 0.0, 0.0]
+SIGMA0: [1.0, 1.0, 1.0]
+
+Jab: [1.0, -1.5, 1.0, -1.0]
+GAIN: 0.5
+
+TF_TYPE: 'relu'
+SYN_DYN: 1
+IF_NMDA: 1
+
+IF_STP: 0
+IF_HEBB: 0
+IF_ADAPT: 0
+IF_FF_DYN: 0
+IF_FF_ADAPT: 0
+IF_FF_STP: 0
+IF_OPTO: 0
+IF_BATCH_J: 0
+RATE_DYN: 0
+RATE_NOISE: 0
+LR_TRAIN: 0
+TRAIN_EI: 0
+TRAINING: 1
+
+VERBOSE: 0
+SEED: 0
+#+end_src
+
+
+
+
+
+*** I am a emacs user. I want to use mcp.el with gptel.el to run a mcp server on that project.
+
+This is my config
+
+#+begin_src emacs-lisp
+       ;;;; --- gptel ---
+(use-package gptel
+  :straight '(gptel :host github
+                    :repo "karthink/gptel"
+                    :branch "master")
+  :init
+  (setq lc/gptel-openai
+        (gptel-make-openai "OpenAI"
+                           :host "api.openai.com"
+                           :key (lc/authinfo-get-password "api.openai.com" "apikey")))
+
+  (setq lc/gptel-anthropic
+        (gptel-make-anthropic "Anthropic"
+                              :key (lc/authinfo-get-password "api.anthropic.com" "apikey")))
+
+  (setq gptel-backend lc/gptel-openai)
+
+  (require 'gptel-integrations)
+  :config
+  (setq gptel-model 'gpt-5.4)
+  (setq gptel-default-mode 'org-mode)
+  )
+
+
+(defun gptel-fix-response-levels (beg end)
+  "Correctly shifts heading levels ONLY within the gptel response."
+  (save-excursion
+    (let ((parent-level
+           ;; 1. Find the parent level by looking BEFORE the response (beg)
+           (save-excursion
+             (goto-char beg)
+             (if (re-search-backward org-heading-regexp nil t)
+                 (org-current-level)
+               0)))) ;; Default to 0 if at top of file
+
+      (save-restriction
+        ;; 2. CRITICAL: Lock operations to ONLY the response text
+        (narrow-to-region beg end)
+        (goto-char (point-min))
+
+        ;; 3. Check if the response actually has headings
+        (when (re-search-forward org-heading-regexp nil t)
+          (let* ((current-level (org-current-level))
+                 ;; We want the response to be 1 level deeper than parent
+                 (target-level (1+ parent-level))
+                 (diff (- target-level current-level)))
+
+            (unless (zerop diff)
+              ;; Apply shift to ALL headings in the narrowed response
+              (goto-char (point-min))
+              (while (re-search-forward "^\\(\\*+\\) " nil t)
+                (let* ((stars (match-string 1))
+                       (new-level (max 1 (+ (length stars) diff))))
+                  (replace-match (concat (make-string new-level ?*) " ") t t)))
+              (message "Gptel: Adjusted response depth by %d." diff))))))))
+
+(add-hook 'gptel-post-response-functions #'gptel-fix-response-levels)
+
+(use-package gptel-agent
+  :config (gptel-agent-update))         ;Read files from agents directories
+#+end_src
+
+#+RESULTS:
+: t
+
+#+begin_src emacs-lisp
+(use-package mcp
+  :ensure t
+  :after gptel
+  :custom (mcp-hub-servers nil)
+
+  :config (require 'mcp-hub)
+  :hook (after-init . mcp-hub-start-all-server))
+
+(use-package gptel-mcp
+  :after gptel mcp
+  :ensure t
+  :straight '(gptel-mcp :host github
+                    :repo "lizqwerscott/gptel-mcp"
+                    :branch "master")
+  :bind (:map gptel-mode-map
+              ("C-c m" . gptel-mcp-dispatch)))
+#+end_src
+
+#+RESULTS:
+: gptel-mcp-dispatch
+
+
+*** I want to use MCP with this project. The core idea is to be able to run a basic simulation from a config file, and get claude to plot the results.
+
+
+Great goal. You want an MCP server that lets Claude:
+
+1. *List available configs*
+2. *Run a simulation* given a config name
+3. *Return results* (rates, overlaps, etc.) in a plottable format
+4. *Generate plots* via matplotlib
+
+Here's the MCP server:
+
+#+begin_src python :tangle ./mcp_server.py
+"""MCP server for running NeuroFlame simulations."""
+from __future__ import annotations
+
+import io
+import sys
+import json
+import base64
+from hashlib import md5
+from pathlib import Path
+
+import torch
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+from mcp.server.fastmcp import FastMCP
+
+# ── project root ────────────────────────────────────────────────────
+PROJECT_ROOT = Path('.').resolve().parent
+CONF_DIR = PROJECT_ROOT / "conf"
+PLOT_DIR = PROJECT_ROOT / "plots"
+PLOT_DIR.mkdir(exist_ok=True)
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.network import Network
+from src.lr_utils import get_overlap
+
+mcp = FastMCP("neuroflame", log_level="WARNING")
+
+
+def _save_and_encode(fig, tag: str) -> dict:
+    """Save figure to plots/ and return both filepath and base64."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150)
+    plt.close(fig)
+
+    # Save to disk
+    filename = f"{tag}.png"
+    filepath = PLOT_DIR / filename
+    buf.seek(0)
+    filepath.write_bytes(buf.read())
+
+    # Base64
+    buf.seek(0)
+    img_b64 = base64.b64encode(buf.read()).decode()
+
+    return {"image_base64": img_b64, "filepath": str(filepath)}
+
+
+# ── Tools ───────────────────────────────────────────────────────────
+
+@mcp.tool()
+def list_configs() -> str:
+    """List all available YAML configuration files."""
+    configs = sorted(p.name for p in CONF_DIR.glob("*.yml") if p.name != "defaults.yml")
+    return json.dumps(configs)
+
+
+@mcp.tool()
+def get_config(config_name: str) -> str:
+    """Return the contents of a configuration file.
+
+    Parameters
+    ----------
+    config_name : str
+        Filename inside the conf/ directory (e.g. 'config_test.yml').
+    """
+    path = CONF_DIR / config_name
+    if not path.exists():
+        return json.dumps({"error": f"Config '{config_name}' not found."})
+    return path.read_text()
+
+
+@mcp.tool()
+def get_defaults() -> str:
+    """Return the contents of the defaults.yml configuration."""
+    path = CONF_DIR / "defaults.yml"
+    return path.read_text()
+
+
+@mcp.tool()
+def run_simulation(
+    config_name: str,
+    overrides: str = "{}",
+    return_overlap: bool = False,
+) -> str:
+    """Run a simulation and return results as JSON.
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename (e.g. 'config_test.yml').
+    overrides : str
+        JSON string of parameter overrides, e.g. '{"N_BATCH": 4, "GAIN": 0.6}'.
+    return_overlap : bool
+        If True, also compute and return overlap with PHI0.
+
+    Returns
+    -------
+    str
+        JSON with keys: shape, rates_mean, rates_std, time_axis,
+        and optionally overlap.
+    """
+    try:
+        ovr = json.loads(overrides) if overrides else {}
+    except json.JSONDecodeError as e:
+        return json.dumps({"error": f"Invalid overrides JSON: {e}"})
+
+    try:
+        model = Network(config_name, str(PROJECT_ROOT), **ovr)
+        cfg = model.cfg
+
+        with torch.no_grad():
+            rates = model(init_state=True)
+
+        rates_np = rates.cpu().numpy()
+
+        t0 = (cfg.N_STEADY + cfg.N_HEBB) * cfg.DT
+        dt_window = cfg.T_WINDOW
+        n_windows = rates_np.shape[1]
+        time_axis = (t0 + np.arange(n_windows) * dt_window).tolist()
+
+        result = {
+            "shape": list(rates_np.shape),
+            "time_axis": time_axis,
+            "rates_mean": rates_np.mean(axis=(0, 2)).tolist(),
+            "rates_std": rates_np.std(axis=(0, 2)).tolist(),
+        }
+
+        if return_overlap:
+            overlap = get_overlap(cfg, rates)
+            result["overlap"] = overlap.cpu().numpy().tolist()
+
+        return json.dumps(result)
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+@mcp.tool()
+def plot_rates(
+    config_name: str,
+    overrides: str = "{}",
+    neuron_indices: str = "[]",
+    plot_type: str = "mean",
+) -> str:
+    """Run a simulation and return a base64-encoded PNG plot of firing rates.
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    overrides : str
+        JSON string of parameter overrides.
+    neuron_indices : str
+        JSON list of neuron indices to plot individually.
+        Ignored when plot_type='mean'.
+    plot_type : str
+        'mean' — population mean ± std across neurons.
+        'neurons' — individual neuron traces (uses neuron_indices).
+        'heatmap' — batch-averaged heatmap of all neurons over time.
+
+    Returns
+    -------
+    str
+        JSON with key 'image_base64' containing the PNG.
+    """
+    try:
+        ovr = json.loads(overrides) if overrides else {}
+        idx = json.loads(neuron_indices) if neuron_indices else []
+    except json.JSONDecodeError as e:
+        return json.dumps({"error": f"Invalid JSON argument: {e}"})
+
+    try:
+        model = Network(config_name, str(PROJECT_ROOT), **ovr)
+        cfg = model.cfg
+
+        with torch.no_grad():
+            rates = model(init_state=True).cpu().numpy()
+
+        t0 = (cfg.N_STEADY + cfg.N_HEBB) * cfg.DT
+        n_win = rates.shape[1]
+        time = t0 + np.arange(n_win) * cfg.T_WINDOW
+
+        fig, ax = plt.subplots(figsize=(8, 4))
+
+        if plot_type == "heatmap":
+            avg = rates.mean(axis=0)
+            im = ax.imshow(
+                avg.T, aspect="auto", origin="lower",
+                extent=[time[0], time[-1], 0, avg.shape[1]],
+            )
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Neuron index")
+            fig.colorbar(im, ax=ax, label="Rate")
+
+        elif plot_type == "neurons":
+            avg = rates.mean(axis=0)
+            if not idx:
+                idx = list(range(min(5, avg.shape[1])))
+            for i in idx:
+                ax.plot(time, avg[:, i], label=f"n{i}")
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Rate")
+            ax.legend(fontsize=7)
+
+        else:
+            pop_mean = rates.mean(axis=(0, 2))
+            pop_std = rates.std(axis=(0, 2))
+            ax.plot(time, pop_mean, color="C0")
+            ax.fill_between(
+                time, pop_mean - pop_std, pop_mean + pop_std,
+                alpha=0.25, color="C0",
+            )
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Population mean rate")
+
+        for i, (on, off) in enumerate(zip(cfg.T_STIM_ON, cfg.T_STIM_OFF)):
+            ax.axvspan(float(on), float(off), alpha=0.08, color=f"C{i + 1}")
+
+        ax.set_title(f"{config_name} — {plot_type}")
+        fig.tight_layout()
+
+        tag = md5(f"{config_name}{overrides}{plot_type}".encode()).hexdigest()[:8]
+        result = _save_and_encode(fig, f"rates_{plot_type}_{tag}")
+        return json.dumps(result)
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+@mcp.tool()
+def plot_overlap(
+    config_name: str,
+    overrides: str = "{}",
+) -> str:
+    """Run a simulation and return a base64-encoded PNG of the overlap with PHI0.
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    overrides : str
+        JSON string of parameter overrides.
+    """
+    try:
+        ovr = json.loads(overrides) if overrides else {}
+    except json.JSONDecodeError as e:
+        return json.dumps({"error": f"Invalid JSON: {e}"})
+
+    try:
+        model = Network(config_name, str(PROJECT_ROOT), **ovr)
+        cfg = model.cfg
+
+        with torch.no_grad():
+            rates = model(init_state=True)
+
+        overlap = get_overlap(cfg, rates).cpu().numpy()
+
+        t0 = (cfg.N_STEADY + cfg.N_HEBB) * cfg.DT
+        n_win = overlap.shape[1]
+        time = t0 + np.arange(n_win) * cfg.T_WINDOW
+
+        fig, ax = plt.subplots(figsize=(8, 4))
+        avg = overlap.mean(axis=0)
+
+        for k in range(avg.shape[1]):
+            ax.plot(time, avg[:, k], label=f"mode {k}")
+
+        for i, (on, off) in enumerate(zip(cfg.T_STIM_ON, cfg.T_STIM_OFF)):
+            ax.axvspan(float(on), float(off), alpha=0.08, color=f"C{i + 1}")
+
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Overlap")
+        ax.set_title(f"Overlap — {config_name}")
+        ax.legend(fontsize=7)
+        fig.tight_layout()
+
+        tag = md5(f"{config_name}{overrides}overlap".encode()).hexdigest()[:8]
+        result = _save_and_encode(fig, f"overlap_{tag}")
+        return json.dumps(result)
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
+#+end_src
+
+Now update your Emacs config to point at it:
+
+#+begin_src emacs-lisp
+(use-package mcp
+  :ensure t
+  :after gptel
+  :custom (mcp-hub-servers
+           `(("neuroflame"
+              . (:command "python"
+                 :args ("-u" ,(expand-file-name "~/Projects/NeuroFlame/mcp_server.py"))
+                 ))
+             ("fetch"
+              . (:command "uvx"
+                 :args ("mcp-server-fetch")))))
+  :config (require 'mcp-hub)
+  :hook (after-init . mcp-hub-start-all-server))
+#+end_src
+
+#+RESULTS:
+| mcp-hub-start-all-server | org-persist-load-all | dashboard-insert-startupify-lists | pgtk-use-im-context-handler | tramp-register-archive-autoload-file-name-handler | table--make-cell-map | magit-maybe-define-global-key-bindings |
+
+*Key points:*
+
+1. *=-u= flag* — unbuffered stdout, required for stdio MCP transport
+2. *=:env=* — sets =PYTHONPATH= so =from src.network import ...= resolves
+3. *5 tools exposed:*
+   - =list_configs= — discover available configs
+   - =get_config= / =get_defaults= — inspect parameters before running
+   - =run_simulation= — returns JSON with rates, time axis, optional overlap
+   - =plot_rates= — returns base64 PNG (mean / individual neurons / heatmap)
+   - =plot_overlap= — returns base64 PNG of overlap with preferred directions
+
+*Usage from gptel:* Once =mcp-hub-start-all-server= runs, press =C-c m= in a gptel buffer and ask something like:
+
+> "Run config_test.yml with GAIN=0.8 and plot the mean firing rates as a heatmap"
+
+Claude will call =plot_rates= with =config_name="config_test.yml"=, =overrides='{"GAIN": 0.8}'=, =plot_type="heatmap"= and return the image.
+
+*Install dependency* if you don't have it:
+
+#+begin_src bash
+pip install mcp
+#+end_src
+
+*** Can you add functions to the mcp server? Make these relevant to the python project.
+
+
+Looking at your project, here are the most useful additions — tools for *inspecting network structure*, *parameter sweeps*, *comparing configs*, *probing dynamics in detail*, and *writing/modifying configs programmatically*.
+
+#+begin_src python :tangle ./mcp_server.py
+"""MCP server for running NeuroFlame simulations."""
+from __future__ import annotations
+
+import io
+import sys
+import json
+import base64
+from hashlib import md5
+from pathlib import Path
+
+import torch
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+from mcp.server.fastmcp import FastMCP
+
+# ── project root ────────────────────────────────────────────────────
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CONF_DIR = PROJECT_ROOT / "conf"
+PLOT_DIR = PROJECT_ROOT / "plots"
+PLOT_DIR.mkdir(exist_ok=True)
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.network import Network
+from src.lr_utils import get_overlap
+
+mcp = FastMCP("neuroflame", log_level="WARNING")
+
+
+# ── Helpers ─────────────────────────────────────────────────────────
+
+def _build_model(config_name: str, overrides: dict | None = None):
+    ovr = overrides or {}
+    model = Network(config_name, str(PROJECT_ROOT), **ovr)
+    return model
+
+
+def _save_and_encode(fig, tag: str) -> dict:
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    filename = f"{tag}.png"
+    filepath = PLOT_DIR / filename
+    buf.seek(0)
+    filepath.write_bytes(buf.read())
+    buf.seek(0)
+    img_b64 = base64.b64encode(buf.read()).decode()
+    return {"image_base64": img_b64, "filepath": str(filepath)}
+
+
+def _time_axis(cfg, n_windows: int):
+    t0 = (cfg.N_STEADY + cfg.N_HEBB) * cfg.DT
+    return t0 + np.arange(n_windows) * cfg.T_WINDOW
+
+
+def _parse_json(s: str, default):
+    if not s:
+        return default
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON: {e}")
+
+
+def _add_stim_shading(ax, cfg):
+    for i, (on, off) in enumerate(zip(cfg.T_STIM_ON, cfg.T_STIM_OFF)):
+        ax.axvspan(float(on), float(off), alpha=0.08, color=f"C{i + 1}")
+
+
+def _run_one(config_name: str, overrides: dict):
+    model = _build_model(config_name, overrides)
+    cfg = model.cfg
+    with torch.no_grad():
+        rates = model(init_state=True)
+    return model, cfg, rates
+
+
+# ── 1. Discovery & inspection ──────────────────────────────────────
+
+@mcp.tool()
+def list_configs() -> str:
+    """List all available YAML configuration files (excluding defaults)."""
+    configs = sorted(
+        p.name for p in CONF_DIR.glob("*.yml") if p.name != "defaults.yml"
+    )
+    return json.dumps(configs)
+
+
+@mcp.tool()
+def get_config(config_name: str) -> str:
+    """Return the raw contents of a configuration file.
+
+    Parameters
+    ----------
+    config_name : str
+        Filename inside conf/ (e.g. 'config_test.yml').
+    """
+    path = CONF_DIR / config_name
+    if not path.exists():
+        return json.dumps({"error": f"Config '{config_name}' not found."})
+    return path.read_text()
+
+
+@mcp.tool()
+def get_defaults() -> str:
+    """Return the contents of defaults.yml."""
+    return (CONF_DIR / "defaults.yml").read_text()
+
+
+@mcp.tool()
+def describe_model(config_name: str, overrides: str = "{}") -> str:
+    """Return a structural summary of the network for a given config.
+
+    Includes: population sizes, connectivity type, active plasticity
+    mechanisms, time constants, number of simulation steps, and stimulus
+    timing.
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    overrides : str
+        JSON string of parameter overrides.
+    """
+    try:
+        ovr = _parse_json(overrides, {})
+        model = _build_model(config_name, ovr)
+        cfg = model.cfg
+
+        pop_info = []
+        for i in range(cfg.N_POP):
+            pop_info.append({
+                "population": i,
+                "N": int(cfg.Na[i]),
+                "K": float(cfg.Ka[i]),
+                "tau": float(cfg.TAU[i]),
+                "tau_syn": float(cfg.TAU_SYN[i]),
+                "thresh": float(cfg.THRESH[i]),
+            })
+
+        jab = cfg.Jab.cpu().numpy().tolist()
+
+        mechanisms = {
+            "STP": bool(cfg.IF_STP),
+            "NMDA": bool(cfg.IF_NMDA),
+            "Hebbian": bool(cfg.IF_HEBB),
+            "Adaptation": bool(cfg.IF_ADAPT),
+            "FF_Adaptation": bool(cfg.IF_FF_ADAPT),
+            "FF_Dynamics": bool(cfg.IF_FF_DYN),
+            "FF_STP": bool(cfg.IF_FF_STP),
+            "Rate_Dynamics": bool(cfg.RATE_DYN),
+            "Synaptic_Dynamics": bool(cfg.SYN_DYN),
+            "Low_Rank_Train": bool(cfg.LR_TRAIN),
+        }
+
+        timing = {
+            "DT": float(cfg.DT),
+            "N_STEPS": int(cfg.N_STEPS),
+            "N_STEADY": int(cfg.N_STEADY),
+            "N_HEBB": int(cfg.N_HEBB),
+            "N_WINDOW": int(cfg.N_WINDOW),
+            "T_STIM_ON": [float(t) for t in cfg.T_STIM_ON],
+            "T_STIM_OFF": [float(t) for t in cfg.T_STIM_OFF],
+            "output_windows": int(
+                (cfg.N_STEPS - cfg.N_STEADY - cfg.N_HEBB) // cfg.N_WINDOW
+            ),
+        }
+
+        stp_info = None
+        if cfg.IF_STP:
+            stp_info = {
+                "blocks": [
+                    {
+                        "pre": int(pre), "post": int(post), "block_id": int(bid),
+                        "USE": float(cfg.USE[bid]) if hasattr(cfg.USE, '__getitem__') else float(cfg.USE),
+                        "TAU_FAC": float(cfg.TAU_FAC[bid]) if hasattr(cfg.TAU_FAC, '__getitem__') else float(cfg.TAU_FAC),
+                        "TAU_REC": float(cfg.TAU_REC[bid]) if hasattr(cfg.TAU_REC, '__getitem__') else float(cfg.TAU_REC),
+                    }
+                    for pre, post, bid in model.weight_builder.stp_block_specs
+                ],
+                "J_STP": float(model.weight_builder.J_STP_param)
+                if model.weight_builder.J_STP_param is not None
+                and model.weight_builder.J_STP_param.dim() == 0
+                else (
+                    model.weight_builder.J_STP_param.cpu().tolist()
+                    if model.weight_builder.J_STP_param is not None
+                    else None
+                ),
+                "STP_TYPE": cfg.STP_TYPE,
+            }
+
+        return json.dumps({
+            "config": config_name,
+            "TASK": cfg.TASK,
+            "N_NEURON": int(cfg.N_NEURON),
+            "N_POP": int(cfg.N_POP),
+            "N_BATCH": int(cfg.N_BATCH),
+            "CON_TYPE": cfg.CON_TYPE,
+            "GAIN": float(cfg.GAIN),
+            "TF_TYPE": cfg.TF_TYPE,
+            "populations": pop_info,
+            "Jab": jab,
+            "mechanisms": mechanisms,
+            "timing": timing,
+            "STP": stp_info,
+        }, indent=2)
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+@mcp.tool()
+def get_weight_stats(config_name: str, overrides: str = "{}") -> str:
+    """Return statistics of the recurrent weight matrix (per population block).
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    overrides : str
+        JSON parameter overrides.
+    """
+    try:
+        ovr = _parse_json(overrides, {})
+        model = _build_model(config_name, ovr)
+        cfg = model.cfg
+        weights = model.weight_builder.build_all(batch_size=cfg.N_BATCH)
+        W = weights.W_rec
+        if W.dim() == 3:
+            W = W[0]
+        W_np = W.cpu().numpy()
+
+        blocks = {}
+        for post in range(cfg.N_POP):
+            for pre in range(cfg.N_POP):
+                sl_pre = slice(int(cfg.csumNa[pre]), int(cfg.csumNa[pre + 1]))
+                sl_post = slice(int(cfg.csumNa[post]), int(cfg.csumNa[post + 1]))
+                block = W_np[sl_pre, sl_post]
+                blocks[f"{pre}->{post}"] = {
+                    "shape": list(block.shape),
+                    "mean": float(block.mean()),
+                    "std": float(block.std()),
+                    "min": float(block.min()),
+                    "max": float(block.max()),
+                    "sparsity": float((block == 0).mean()),
+                    "frac_positive": float((block > 0).mean()),
+                    "frac_negative": float((block < 0).mean()),
+                }
+
+        return json.dumps({
+            "full_shape": list(W_np.shape),
+            "full_mean": float(W_np.mean()),
+            "full_std": float(W_np.std()),
+            "blocks": blocks,
+        }, indent=2)
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+# ── 2. Simulation ──────────────────────────────────────────────────
+
+@mcp.tool()
+def run_simulation(
+    config_name: str,
+    overrides: str = "{}",
+    return_overlap: bool = False,
+) -> str:
+    """Run a simulation and return summary statistics as JSON.
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    overrides : str
+        JSON string of parameter overrides.
+    return_overlap : bool
+        If True, also compute overlap with PHI0.
+
+    Returns
+    -------
+    str
+        JSON with keys: shape, rates_mean, rates_std, time_axis,
+        and optionally overlap.
+    """
+    try:
+        ovr = _parse_json(overrides, {})
+        model, cfg, rates = _run_one(config_name, ovr)
+        rates_np = rates.cpu().numpy()
+        time = _time_axis(cfg, rates_np.shape[1])
+
+        result = {
+            "shape": list(rates_np.shape),
+            "time_axis": time.tolist(),
+            "rates_mean": rates_np.mean(axis=(0, 2)).tolist(),
+            "rates_std": rates_np.std(axis=(0, 2)).tolist(),
+            "rates_max": float(rates_np.max()),
+            "rates_min": float(rates_np.min()),
+        }
+
+        if return_overlap:
+            overlap = get_overlap(cfg, rates).cpu().numpy()
+            result["overlap_shape"] = list(overlap.shape)
+            result["overlap"] = overlap.mean(axis=0).tolist()
+
+        return json.dumps(result)
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+@mcp.tool()
+def run_simulation_detailed(
+    config_name: str,
+    overrides: str = "{}",
+) -> str:
+    """Run a simulation and return full per-neuron, per-batch rate data.
+
+    Warning: can be large for big networks. Use run_simulation for summaries.
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    overrides : str
+        JSON parameter overrides.
+
+    Returns
+    -------
+    str
+        JSON with shape and the full rates tensor (B, T, N) as nested lists.
+    """
+    try:
+        ovr = _parse_json(overrides, {})
+        _, cfg, rates = _run_one(config_name, ovr)
+        rates_np = rates.cpu().numpy()
+        time = _time_axis(cfg, rates_np.shape[1])
+
+        return json.dumps({
+            "shape": list(rates_np.shape),
+            "time_axis": time.tolist(),
+            "rates": rates_np.tolist(),
+        })
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+@mcp.tool()
+def parameter_sweep(
+    config_name: str,
+    param_name: str,
+    param_values: str,
+    overrides: str = "{}",
+    metric: str = "mean_rate",
+) -> str:
+    """Sweep a single parameter and return a metric for each value.
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    param_name : str
+        Parameter name to sweep (e.g. 'GAIN', 'K').
+    param_values : str
+        JSON list of values to sweep over (e.g. '[0.3, 0.5, 0.7, 1.0]').
+    overrides : str
+        JSON string of additional fixed overrides.
+    metric : str
+        What to measure:
+        - 'mean_rate': time-averaged population mean rate
+        - 'max_rate': peak population mean rate
+        - 'final_rate': last-window population mean rate
+        - 'rate_std': time-averaged population std
+
+    Returns
+    -------
+    str
+        JSON with param_name, values, and metric arrays.
+    """
+    try:
+        values = _parse_json(param_values, [])
+        base_ovr = _parse_json(overrides, {})
+        results = []
+
+        for val in values:
+            ovr = {**base_ovr, param_name: val}
+            try:
+                _, cfg, rates = _run_one(config_name, ovr)
+                rates_np = rates.cpu().numpy()
+                pop_mean = rates_np.mean(axis=(0, 2))
+
+                if metric == "max_rate":
+                    m = float(pop_mean.max())
+                elif metric == "final_rate":
+                    m = float(pop_mean[-1])
+                elif metric == "rate_std":
+                    m = float(rates_np.std(axis=(0, 2)).mean())
+                else:
+                    m = float(pop_mean.mean())
+
+                results.append({"value": val, "metric": m, "error": None})
+            except Exception as e:
+                results.append({"value": val, "metric": None, "error": str(e)})
+
+        return json.dumps({
+            "config": config_name,
+            "param_name": param_name,
+            "metric_name": metric,
+            "results": results,
+        }, indent=2)
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+@mcp.tool()
+def compare_configs(
+    config_names: str,
+    overrides: str = "{}",
+) -> str:
+    """Run multiple configs and return summary stats for comparison.
+
+    Parameters
+    ----------
+    config_names : str
+        JSON list of config filenames, e.g. '["config_a.yml", "config_b.yml"]'.
+    overrides : str
+        JSON overrides applied to ALL configs.
+    """
+    try:
+        names = _parse_json(config_names, [])
+        ovr = _parse_json(overrides, {})
+        comparisons = []
+
+        for name in names:
+            try:
+                _, cfg, rates = _run_one(name, ovr)
+                rates_np = rates.cpu().numpy()
+                pop_mean = rates_np.mean(axis=(0, 2))
+                comparisons.append({
+                    "config": name,
+                    "mean_rate": float(pop_mean.mean()),
+                    "max_rate": float(pop_mean.max()),
+                    "final_rate": float(pop_mean[-1]),
+                    "rate_std": float(rates_np.std(axis=(0, 2)).mean()),
+                    "shape": list(rates_np.shape),
+                    "error": None,
+                })
+            except Exception as e:
+                comparisons.append({"config": name, "error": str(e)})
+
+        return json.dumps(comparisons, indent=2)
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+# ── 3. Plotting ─────────────────────────────────────────────────────
+
+@mcp.tool()
+def plot_rates(
+    config_name: str,
+    overrides: str = "{}",
+    neuron_indices: str = "[]",
+    plot_type: str = "mean",
+) -> str:
+    """Run a simulation and return a PNG plot of firing rates.
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    overrides : str
+        JSON parameter overrides.
+    neuron_indices : str
+        JSON list of neuron indices (for plot_type='neurons').
+    plot_type : str
+        'mean' — population mean ± std.
+        'neurons' — individual neuron traces.
+        'heatmap' — batch-averaged neuron×time heatmap.
+
+    Returns
+    -------
+    str
+        JSON with image_base64 and filepath.
+    """
+    try:
+        ovr = _parse_json(overrides, {})
+        idx = _parse_json(neuron_indices, [])
+        _, cfg, rates = _run_one(config_name, ovr)
+        rates_np = rates.cpu().numpy()
+        time = _time_axis(cfg, rates_np.shape[1])
+
+        fig, ax = plt.subplots(figsize=(8, 4))
+
+        if plot_type == "heatmap":
+            avg = rates_np.mean(axis=0)
+            im = ax.imshow(
+                avg.T, aspect="auto", origin="lower",
+                extent=[time[0], time[-1], 0, avg.shape[1]],
+            )
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Neuron index")
+            fig.colorbar(im, ax=ax, label="Rate")
+
+        elif plot_type == "neurons":
+            avg = rates_np.mean(axis=0)
+            if not idx:
+                idx = list(range(min(5, avg.shape[1])))
+            for i in idx:
+                ax.plot(time, avg[:, i], label=f"n{i}")
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Rate")
+            ax.legend(fontsize=7)
+
+        else:
+            pop_mean = rates_np.mean(axis=(0, 2))
+            pop_std = rates_np.std(axis=(0, 2))
+            ax.plot(time, pop_mean, color="C0")
+            ax.fill_between(
+                time, pop_mean - pop_std, pop_mean + pop_std,
+                alpha=0.25, color="C0",
+            )
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Population mean rate")
+
+        _add_stim_shading(ax, cfg)
+        ax.set_title(f"{config_name} — {plot_type}")
+        fig.tight_layout()
+
+        tag = md5(f"{config_name}{overrides}{plot_type}".encode()).hexdigest()[:8]
+        return json.dumps(_save_and_encode(fig, f"rates_{plot_type}_{tag}"))
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+@mcp.tool()
+def plot_overlap(config_name: str, overrides: str = "{}") -> str:
+    """Run a simulation and plot overlap with PHI0 modes.
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    overrides : str
+        JSON parameter overrides.
+    """
+    try:
+        ovr = _parse_json(overrides, {})
+        model, cfg, rates = _run_one(config_name, ovr)
+        overlap = get_overlap(cfg, rates).cpu().numpy()
+        time = _time_axis(cfg, overlap.shape[1])
+
+        fig, ax = plt.subplots(figsize=(8, 4))
+        avg = overlap.mean(axis=0)
+        for k in range(avg.shape[1]):
+            ax.plot(time, avg[:, k], label=f"mode {k}")
+        _add_stim_shading(ax, cfg)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Overlap")
+        ax.set_title(f"Overlap — {config_name}")
+        ax.legend(fontsize=7)
+        fig.tight_layout()
+
+        tag = md5(f"{config_name}{overrides}overlap".encode()).hexdigest()[:8]
+        return json.dumps(_save_and_encode(fig, f"overlap_{tag}"))
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+@mcp.tool()
+def plot_weight_matrix(
+    config_name: str,
+    overrides: str = "{}",
+    block: str = "full",
+) -> str:
+    """Plot the recurrent weight matrix (or a specific population block).
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    overrides : str
+        JSON parameter overrides.
+    block : str
+        'full' — entire W_rec.
+        'EE', 'EI', 'IE', 'II' — specific population block (for 2-pop).
+        '0->1' format also accepted (pre->post).
+    """
+    try:
+        ovr = _parse_json(overrides, {})
+        model = _build_model(config_name, ovr)
+        cfg = model.cfg
+        weights = model.weight_builder.build_all(batch_size=cfg.N_BATCH)
+        W = weights.W_rec
+        if W.dim() == 3:
+            W = W[0]
+        W_np = W.cpu().numpy()
+
+        block_map = {"EE": (0, 0), "EI": (0, 1), "IE": (1, 0), "II": (1, 1)}
+
+        if block != "full":
+            if block in block_map:
+                pre, post = block_map[block]
+            elif "->" in block:
+                pre, post = [int(x) for x in block.split("->")]
+            else:
+                return json.dumps({"error": f"Unknown block: {block}"})
+
+            sl_pre = slice(int(cfg.csumNa[pre]), int(cfg.csumNa[pre + 1]))
+            sl_post = slice(int(cfg.csumNa[post]), int(cfg.csumNa[post + 1]))
+            W_np = W_np[sl_pre, sl_post]
+            title = f"W_rec [{block}] — {config_name}"
+        else:
+            title = f"W_rec — {config_name}"
+
+        fig, ax = plt.subplots(figsize=(6, 5))
+        vmax = max(abs(W_np.min()), abs(W_np.max()))
+        im = ax.imshow(W_np, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto")
+        fig.colorbar(im, ax=ax)
+        ax.set_title(title)
+        ax.set_xlabel("Post")
+        ax.set_ylabel("Pre")
+        fig.tight_layout()
+
+        tag = md5(f"{config_name}{overrides}{block}wmat".encode()).hexdigest()[:8]
+        return json.dumps(_save_and_encode(fig, f"wmat_{block}_{tag}"))
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+@mcp.tool()
+def plot_sweep(
+    config_name: str,
+    param_name: str,
+    param_values: str,
+    overrides: str = "{}",
+    metric: str = "mean_rate",
+) -> str:
+    """Run a parameter sweep and return a plot of metric vs parameter.
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    param_name : str
+        Parameter to sweep.
+    param_values : str
+        JSON list of values.
+    overrides : str
+        JSON additional fixed overrides.
+    metric : str
+        'mean_rate', 'max_rate', 'final_rate', or 'rate_std'.
+    """
+    try:
+        values = _parse_json(param_values, [])
+        base_ovr = _parse_json(overrides, {})
+
+        vals_ok, metrics_ok = [], []
+        for val in values:
+            ovr = {**base_ovr, param_name: val}
+            try:
+                _, cfg, rates = _run_one(config_name, ovr)
+                rates_np = rates.cpu().numpy()
+                pop_mean = rates_np.mean(axis=(0, 2))
+
+                if metric == "max_rate":
+                    m = float(pop_mean.max())
+                elif metric == "final_rate":
+                    m = float(pop_mean[-1])
+                elif metric == "rate_std":
+                    m = float(rates_np.std(axis=(0, 2)).mean())
+                else:
+                    m = float(pop_mean.mean())
+
+                vals_ok.append(val)
+                metrics_ok.append(m)
+            except Exception:
+                pass
+
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.plot(vals_ok, metrics_ok, "o-", color="C0")
+        ax.set_xlabel(param_name)
+        ax.set_ylabel(metric)
+        ax.set_title(f"Sweep {param_name} — {config_name}")
+        fig.tight_layout()
+
+        tag = md5(f"{config_name}{param_name}{param_values}{metric}".encode()).hexdigest()[:8]
+        return json.dumps(_save_and_encode(fig, f"sweep_{param_name}_{tag}"))
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+@mcp.tool()
+def plot_comparison(
+    config_names: str,
+    overrides: str = "{}",
+    plot_type: str = "mean",
+) -> str:
+    """Run multiple configs and overlay their rate traces on one plot.
+
+    Parameters
+    ----------
+    config_names : str
+        JSON list of config filenames.
+    overrides : str
+        JSON overrides applied to all configs.
+    plot_type : str
+        'mean' — overlaid population mean traces.
+        'heatmap' — side-by-side heatmaps.
+    """
+    try:
+        names = _parse_json(config_names, [])
+        ovr = _parse_json(overrides, {})
+
+        if plot_type == "heatmap":
+            n = len(names)
+            fig, axes = plt.subplots(1, n, figsize=(5 * n, 4), squeeze=False)
+            for i, name in enumerate(names):
+                try:
+                    _, cfg, rates = _run_one(name, ovr)
+                    rates_np = rates.cpu().numpy().mean(axis=0)
+                    time = _time_axis(cfg, rates_np.shape[0])
+                    ax = axes[0, i]
+                    im = ax.imshow(
+                        rates_np.T, aspect="auto", origin="lower",
+                        extent=[time[0], time[-1], 0, rates_np.shape[1]],
+                    )
+                    ax.set_title(name, fontsize=9)
+                    ax.set_xlabel("Time (s)")
+                    if i == 0:
+                        ax.set_ylabel("Neuron")
+                    fig.colorbar(im, ax=ax, shrink=0.7)
+                except Exception as e:
+                    axes[0, i].text(0.5, 0.5, str(e), transform=axes[0, i].transAxes,
+                                    ha="center", fontsize=7)
+        else:
+            fig, ax = plt.subplots(figsize=(8, 4))
+            for i, name in enumerate(names):
+                try:
+                    _, cfg, rates = _run_one(name, ovr)
+                    rates_np = rates.cpu().numpy()
+                    time = _time_axis(cfg, rates_np.shape[1])
+                    pop_mean = rates_np.mean(axis=(0, 2))
+                    ax.plot(time, pop_mean, label=name, color=f"C{i}")
+                except Exception as e:
+                    ax.plot([], [], label=f"{name} (err)", color=f"C{i}")
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Population mean rate")
+            ax.legend(fontsize=7)
+
+        fig.suptitle("Config comparison", fontsize=11)
+        fig.tight_layout()
+
+        tag = md5(f"{config_names}{overrides}{plot_type}".encode()).hexdigest()[:8]
+        return json.dumps(_save_and_encode(fig, f"compare_{plot_type}_{tag}"))
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+@mcp.tool()
+def plot_eigenspectrum(config_name: str, overrides: str = "{}") -> str:
+    """Plot the eigenvalue spectrum of the effective recurrent weight matrix.
+
+    Useful for assessing stability and oscillatory modes.
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    overrides : str
+        JSON parameter overrides.
+    """
+    try:
+        ovr = _parse_json(overrides, {})
+        model = _build_model(config_name, ovr)
+        cfg = model.cfg
+        weights = model.weight_builder.build_all(batch_size=cfg.N_BATCH)
+        W = weights.W_rec
+        if W.dim() == 3:
+            W = W[0]
+        W_np = W.cpu().numpy()
+
+        eigs = np.linalg.eigvals(W_np)
+
+        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+        ax = axes[0]
+        ax.scatter(eigs.real, eigs.imag, s=3, alpha=0.5)
+        circle = plt.Circle((0, 0), 1.0, fill=False, linestyle="--", color="gray")
+        ax.add_patch(circle)
+        ax.set_xlabel("Re(λ)")
+        ax.set_ylabel("Im(λ)")
+        ax.set_title("Eigenspectrum")
+        ax.set_aspect("equal")
+        ax.axhline(0, color="gray", lw=0.5)
+        ax.axvline(0, color="gray", lw=0.5)
+
+        ax = axes[1]
+        moduli = np.abs(eigs)
+        ax.hist(moduli, bins=50, color="C0", alpha=0.7)
+        ax.axvline(1.0, color="red", ls="--", label="|λ|=1")
+        ax.set_xlabel("|λ|")
+        ax.set_ylabel("Count")
+        ax.set_title("Eigenvalue moduli")
+        ax.legend()
+
+        fig.suptitle(f"Eigenspectrum — {config_name}", fontsize=11)
+        fig.tight_layout()
+
+        tag = md5(f"{config_name}{overrides}eig".encode()).hexdigest()[:8]
+        return json.dumps(_save_and_encode(fig, f"eigenspectrum_{tag}"))
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+@mcp.tool()
+def plot_stp_dynamics(
+    config_name: str,
+    overrides: str = "{}",
+) -> str:
+    """Run a simulation with STP enabled and plot u_stp and x_stp traces.
+
+    Returns an error if IF_STP is not enabled.
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    overrides : str
+        JSON parameter overrides.
+    """
+    try:
+        ovr = _parse_json(overrides, {})
+        model = _build_model(config_name, ovr)
+        cfg = model.cfg
+
+        if not cfg.IF_STP:
+            return json.dumps({"error": "IF_STP is disabled in this config."})
+
+        with torch.no_grad():
+            out = model(init_state=True, return_stp=True, return_outputs=True)
+
+        if out.stp_u is None or out.stp_x is None:
+            return json.dumps({"error": "STP outputs were not collected."})
+
+        u = out.stp_u.cpu().numpy()
+        x = out.stp_x.cpu().numpy()
+        time = _time_axis(cfg, u.shape[1])
+
+        u_mean = u.mean(axis=(0, 2))
+        x_mean = x.mean(axis=(0, 2))
+        ux_mean = (u * x).mean(axis=(0, 2))
+
+        fig, axes = plt.subplots(3, 1, figsize=(8, 8), sharex=True)
+
+        axes[0].plot(time, u_mean, color="C0")
+        axes[0].set_ylabel("u (facilitation)")
+        axes[0].set_title(f"STP dynamics — {config_name}")
+
+        axes[1].plot(time, x_mean, color="C1")
+        axes[1].set_ylabel("x (depression)")
+
+        axes[2].plot(time, ux_mean, color="C2")
+        axes[2].set_ylabel("u·x (effective)")
+        axes[2].set_xlabel("Time (s)")
+
+        for ax in axes:
+            _add_stim_shading(ax, cfg)
+
+        fig.tight_layout()
+
+        tag = md5(f"{config_name}{overrides}stp".encode()).hexdigest()[:8]
+        return json.dumps(_save_and_encode(fig, f"stp_{tag}"))
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+# ── 4. Config authoring ────────────────────────────────────────────
+
+@mcp.tool()
+def write_config(config_name: str, content: str) -> str:
+    """Write or overwrite a YAML configuration file.
+
+    Parameters
+    ----------
+    config_name : str
+        Filename to write inside conf/ (e.g. 'my_experiment.yml').
+    content : str
+        Full YAML content to write.
+
+    Returns
+    -------
+    str
+        JSON with the filepath written.
+    """
+    try:
+        if ".." in config_name or "/" in config_name:
+            return json.dumps({"error": "Config name must be a plain filename."})
+
+        path = CONF_DIR / config_name
+        path.write_text(content)
+        return json.dumps({"filepath": str(path), "status": "written"})
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def diff_configs(config_a: str, config_b: str) -> str:
+    """Show parameter differences between two config files.
+
+    Parameters loaded from defaults + each config, then compared.
+
+    Parameters
+    ----------
+    config_a : str
+        First config filename.
+    config_b : str
+        Second config filename.
+    """
+    try:
+        from yaml import safe_load
+
+        defaults_path = CONF_DIR / "defaults.yml"
+        with open(defaults_path) as f:
+            defaults = safe_load(f)
+
+        def _load(name):
+            path = CONF_DIR / name
+            if not path.exists():
+                raise FileNotFoundError(f"Config '{name}' not found.")
+            with open(path) as f:
+                specific = safe_load(f)
+            merged = {**defaults, **(specific or {})}
+            return merged
+
+        params_a = _load(config_a)
+        params_b = _load(config_b)
+
+        all_keys = sorted(set(params_a.keys()) | set(params_b.keys()))
+        diffs = {}
+        for k in all_keys:
+            va = params_a.get(k)
+            vb = params_b.get(k)
+            if va != vb:
+                diffs[k] = {"a": va, "b": vb}
+
+        return json.dumps({
+            "config_a": config_a,
+            "config_b": config_b,
+            "n_differences": len(diffs),
+            "differences": diffs,
+        }, indent=2, default=str)
+
+    except Exception as e:
+        import traceback
+        return json.dumps({"error": str(e), "traceback": traceback.format_exc()})
+
+
+# ── 5. Utilities ────────────────────────────────────────────────────
+
+@mcp.tool()
+def list_source_files() -> str:
+    """List all Python source files in the src/ directory."""
+    src_dir = PROJECT_ROOT / "src"
+    files = sorted(p.name for p in src_dir.glob("*.py"))
+    return json.dumps(files)
+
+
+@mcp.tool()
+def read_source_file(filename: str) -> str:
+    """Return the contents of a source file from src/.
+
+    Parameters
+    ----------
+    filename : str
+        Python filename in src/ (e.g. 'network.py').
+    """
+    if ".." in filename or "/" in filename:
+        return json.dumps({"error": "Filename must be a plain name."})
+    path = PROJECT_ROOT / "src" / filename
+    if not path.exists():
+        return json.dumps({"error": f"File '{filename}' not found in src/."})
+    return path.read_text()
+
+
+@mcp.tool()
+def validate_config(config_name: str, overrides: str = "{}") -> str:
+    """Try to instantiate a Network from a config and report any errors.
+
+    Does NOT run a simulation — just checks that the config parses,
+    weights build, and initial state can be created.
+
+    Parameters
+    ----------
+    config_name : str
+        Config filename.
+    overrides : str
+        JSON parameter overrides.
+    """
+    try:
+        ovr = _parse_json(overrides, {})
+        model = _build_model(config_name, ovr)
+        cfg = model.cfg
+
+        # Try building weights
+        weights = model.weight_builder.build_all(batch_size=cfg.N_BATCH)
+
+        # Try building ff_input and initial state
+        ff_input = model.ff_input_builder.build().to(cfg.device)
+        state = model.state_manager.initialize(ff_input)
+
+        return json.dumps({
+            "status": "ok",
+            "N_NEURON": int(cfg.N_NEURON),
+            "N_STEPS": int(cfg.N_STEPS),
+            "W_rec_shape": list(weights.W_rec.shape),
+            "ff_input_shape": list(ff_input.shape),
+            "rates_shape": list(state.rates.shape),
+        })
+
+    except Exception as e:
+        import traceback
+        return json.dumps({
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+        })
+
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
+#+end_src
+
+*Summary of all 19 tools:*
+
+| Category | Tool | Purpose |
+|---|---|---|
+| Discovery | =list_configs= | List available YAML configs |
+| | =get_config= | Read a config file |
+| | =get_defaults= | Read defaults.yml |
+| | =describe_model= | Structural summary (populations, mechanisms, timing) |
+| | =get_weight_stats= | Per-block statistics of W_rec |
+| | =diff_configs= | Show differences between two configs |
+| Simulation | =run_simulation= | Summary stats (mean/std/time axis) |
+| | =run_simulation_detailed= | Full rates tensor as JSON |
+| | =parameter_sweep= | Sweep one param, return metric per value |
+| | =compare_configs= | Run multiple configs, return stats table |
+| Plotting | =plot_rates= | Mean / neurons / heatmap of rates |
+| | =plot_overlap= | Overlap with PHI0 modes |
+| | =plot_weight_matrix= | W_rec as colored matrix (full or per-block) |
+| | =plot_sweep= | Metric vs parameter curve |
+| | =plot_comparison= | Overlay or side-by-side multi-config |
+| | =plot_eigenspectrum= | Stability analysis (complex plane + moduli) |
+| | =plot_stp_dynamics= | u, x, u·x traces over time |
+| Authoring | =write_config= | Create/overwrite a YAML config |
+| | =validate_config= | Check config parses and network builds |
+| Utility | =list_source_files= | List src/*.py files |
+| | =read_source_file= | Read any source file (lets Claude inspect code) |
+
+***

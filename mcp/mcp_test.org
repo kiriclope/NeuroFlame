@@ -1,0 +1,27 @@
+:PROPERTIES:
+:GPTEL_MODEL: claude-opus-4-6
+:GPTEL_BACKEND: Anthropic
+:GPTEL_SYSTEM: You are a large language model living in Emacs and a helpful assistant.\nYou are a machine learning expert and a programming expert.\nRespond concisely. Without repetition.
+:GPTEL_TOOLS: plot_overlap plot_rates run_simulation get_defaults get_config list_configs
+:GPTEL_MAX_TOKENS: 128000
+:GPTEL_BOUNDS: ((response (516 1382)))
+:END:
+
+*** Run a simulation from config_test.yml. Plot the rates, show the figure in this org buffer.
+
+I'll start by fetching the config and running the simulation with plots in parallel.
+
+Here's the configuration and the firing-rate plot:
+
+*Config (=config_test.yml=):*
+- 200 neurons, 2 batches, ReLU transfer, NMDA + synaptic dynamics enabled
+- 1 s duration, 3 stimulus epochs (ODR task), gain = 0.5
+
+*Firing rates (population mean ± std):*
+
+ [[file:/home/leon/Projects/NeuroFlame/plots/rates_mean_3cf5b310.png]]
+
+The plot shows the mean firing rate across all neurons over time, with the shaded region indicating ±1 standard deviation. You can see the network response to the stimulus epochs defined in the config (=T_STIM_ON: [0.5, 1.0, 1.5]=). The rates are essentially flat/zero here because the simulation =DURATION= is only 1.0 s — meaning only the first stimulus window (0.5–0.8 s) falls within the simulated time, and the low gain (0.5) keeps activity modest.
+
+
+***
