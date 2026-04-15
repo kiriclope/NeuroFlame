@@ -17,14 +17,17 @@ import matplotlib.pyplot as plt
 from mcp.server.fastmcp import FastMCP
 
 # ── project root ────────────────────────────────────────────────────
-PROJECT_ROOT = Path('.').resolve().parent
+PROJECT_ROOT = Path('/home/leon/models/NeuroFlame')
+print(PROJECT_ROOT)
+
 CONF_DIR = PROJECT_ROOT / "conf"
-PLOT_DIR = PROJECT_ROOT / "plots"
+PLOT_DIR = PROJECT_ROOT / "mcp/plots"
 PLOT_DIR.mkdir(exist_ok=True)
 sys.path.insert(0, str(PROJECT_ROOT))
 
+
 from src.network import Network
-from src.lr_utils import get_overlap
+from src.weights.lr import get_overlap
 
 mcp = FastMCP("neuroflame", log_level="WARNING")
 

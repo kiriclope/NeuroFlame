@@ -1,0 +1,1265 @@
+:PROPERTIES:
+:GPTEL_MODEL: claude-opus-4-6
+:GPTEL_BACKEND: Anthropic
+:GPTEL_SYSTEM: You are a large language model living in Emacs and a helpful assistant. Respond concisely.
+:GPTEL_TOOLS:
+:GPTEL_BOUNDS: ((response (31681 34063) (34226 35924) (36022 37104) (37137 38894)))
+:END:
+#+Startup: fold
+#+TITLE: Training Recurrent Neural Networks
+#+PROPERTY: header-args:ipython :results both :exports both :async yes :session rnn_last :kernel python3 :exports results :output-dir ./figures/rnn :file (lc/org-babel-tangle-figure-filename)
+
+* Settings
+
+#+begin_src ipython
+import sys
+import matplotlib
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
+print("Python exe")
+print(sys.executable)
+
+sns.set_context("notebook")
+sns.set_style("ticks")
+plt.rc("axes.spines", top=False, right=False)
+
+golden_ratio = (5**.5 - 1) / 2
+width = 6
+height = width * golden_ratio
+
+matplotlib.rcParams['figure.figsize'] = [width, height]
+matplotlib.rcParams['lines.markersize'] = 5
+matplotlib.rcParams['axes.labelsize'] = 18
+matplotlib.rcParams['axes.titlesize'] = 20
+matplotlib.rcParams['xtick.labelsize'] = 16
+matplotlib.rcParams['ytick.labelsize'] = 16
+matplotlib.rcParams['lines.linewidth'] = 3
+#+end_src
+
+#+RESULTS:
+: Python exe
+: /home/leon/mambaforge/bin/python
+
+* Imports
+
+#+begin_src ipython
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import matplotlib.pyplot as plt
+import numpy as np
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+torch.manual_seed(2)
+np.random.seed(2)
+#+end_src
+
+#+RESULTS:
+
+* 🧠 Dynamical RNNs
+
+** 🧠 1. All to all RNN
+
+Let:
+- \( x_t \): feedforward input at time step \( t \)
+- \( r_t \): rate at time \( t \)
+- \( y_t \): output at time \( t \)
+
+\[
+r_t = (1 - \frac{\delta t}{\tau}) r_{t-1} + \frac{\Delta t}{\tau} \tanh(W_{ih} x_t + b_{ih} + W_{hh} r_{t-1})
+\]
+
+\[
+y_t = \sigma(W_{ho} r_t + b_o)
+\]
+
+#+begin_src ipython
+class BioRNNModel(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size, dt=0.1, tau=1.0):
+        super().__init__()
+        # input layer
+        self.wi = nn.Linear(input_size, hidden_size)
+        # recurrent layer
+        self.wrec = nn.Parameter(torch.Tensor(hidden_size, hidden_size))
+        nn.init.xavier_uniform_(self.wrec)
+        # output layer
+        self.wo = nn.Linear(hidden_size, output_size)
+        # non linearity
+        self.nonlinearity = torch.tanh
+        # time constant
+        self.DT_TAU = dt / tau
+
+    def update_dynamics(self, ff_inputs, rates):
+        # updating the recurrent inputs and rates
+        rec_inputs = rates @ self.wrec.T # / rates.shape[-1]
+        nonlinear = self.nonlinearity(self.wi(ff_inputs) + rec_inputs)
+        rates = (1-self.DT_TAU) * rates + self.DT_TAU * nonlinear
+
+        return rates, rec_inputs
+
+
+    def forward(self, ff_inputs):
+        # ff_input is (n_trials, seq_len, input_size)
+        # rates and rec_inputs are (n_trials, hidden_size)
+        rec_inputs = torch.randn(ff_inputs.shape[0], self.wrec.shape[0])
+        rates = self.nonlinearity(self.wi(ff_inputs[:, -1]) + rec_inputs)
+
+        readout_list = []
+
+        for step in range(ff_inputs.shape[1]):
+            rates, rec_inputs = self.update_dynamics(ff_inputs[:, step], rates)
+            readout = self.wo(rates)
+            readout_list.append(readout)
+
+        readout_list = torch.stack(readout_list, dim=1)
+
+        return readout_list
+#+end_src
+
+#+RESULTS:
+
+---
+
+** 🧠 2. Low Rank RNN
+
+The Vanilla RNN updates its hidden state based on the previous hidden state and the current input:
+
+
+Let:
+- \( x_t \): feedforward input at time step \( t \)
+- \( h_t \): recurrent input at time \( t \)
+- \( r_t \): rate at time \( t \)
+- \( y_t \): output at time \( t \)
+
+\[
+h_t = (1- \alpha) h_{t-1} + \alpha m n.T r_{t-1}
+\]
+
+\[
+r_t = \tanh(W_{ih} x_t + b_{ih} + h_{t-1})
+\]
+
+\[
+y_t = \sigma(W_{ho} r_t + b_o)
+\]
+
+
+#+begin_src ipython
+class LowRankModel(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size, rank=1, alpha=0.01, device='cuda'):
+        super().__init__()
+        # input layer
+        self.wi = nn.Linear(input_size, hidden_size)
+
+        # low rank vectors
+        self.m = nn.Parameter(torch.randn((hidden_size, rank)))
+        self.n = nn.Parameter(torch.randn((hidden_size, rank)))
+
+        # output layer
+
+        if output_size>0:
+            self.wo = nn.Linear(hidden_size, output_size)
+        else:
+            self.wo = None
+
+        # non linearity
+        self.nonlinearity = torch.tanh
+
+        self.device = device
+        # time constants
+        self.alpha = alpha
+
+    def get_readout(self, rates):
+        if self.wo is not None:
+            return self.wo(rates)
+        return rates @ self.n[:, -1] / rates.shape[-1]
+
+    def update_dynamics(self, ff_inputs, rec_inputs, rates):
+        # updating the recurrent inputs
+        hidden = rates @ (self.m @ self.n.T) / rates.shape[-1]
+        rec_inputs = (1.0 - self.alpha) * rec_inputs + self.alpha * hidden
+        # updating the rates
+        rates = self.nonlinearity(self.wi(ff_inputs) + rec_inputs)
+
+        return rates, rec_inputs
+
+
+    def forward(self, ff_inputs, ret_rates=False):
+        # rates and rec_inputs are (n_trials, hidden_size)
+        rec_inputs = torch.randn(ff_inputs.shape[0], self.m.shape[0])
+        rates = self.nonlinearity(self.wi(ff_inputs[:, 0]) + rec_inputs)
+
+        readout_list = []
+        rates_list = []
+
+        for step in range(ff_inputs.shape[1]):
+            rates, rec_inputs = self.update_dynamics(ff_inputs[:, step], rec_inputs, rates)
+            readout = self.get_readout(rates)
+
+            rates_list.append(rates)
+            readout_list.append(readout)
+
+        rates_list = torch.stack(rates_list, dim=1)
+        readout_list = torch.stack(readout_list, dim=1)
+
+        if ret_rates:
+            return readout_list, rates_list
+
+        return readout_list
+#+end_src
+
+#+RESULTS:
+
+---
+
+* Initializing the model
+
+#+begin_src ipython
+input_size = 2
+hidden_size = 128
+output_size = 0
+rank = 2
+
+# model = BioRNNModel(input_size, hidden_size, output_size)
+model = LowRankModel(input_size, hidden_size, output_size, rank)
+#+end_src
+
+#+RESULTS:
+
+* Generating a 2AFC task
+
+#+begin_src ipython
+DT = 0.1
+stim_onset = int(1 / DT)
+stim_offset = int(2/ DT)
+response_onset = int(4 / DT)
+
+seq_len = int(5 / DT)
+x_time = np.linspace(0, 5, seq_len)
+noise = 0.1
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+    model.random_shifts = torch.zeros((model.N_BATCH,)).to(model.device)
+    model.start_indices = model.N_STIM_ON.unsqueeze(-1) + model.random_shifts
+    model.end_indices = model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts
+
+    if model.RANDOM_DELAY:
+        model.N_STIM_ON[1] = model.N_STIM_OFF[0] + 1
+        model.N_STIM_OFF[1] = model.N_STIM_ON[1] + int(1.0 / model.DT)
+
+        N_MAX_DELAY = model.MAX_DELAY / model.DT
+        N_MIN_DELAY = model.MIN_DELAY / model.DT
+        model.N_STEPS += int(N_MAX_DELAY - N_MIN_DELAY)
+
+        if model.DELAY_LIST is not None:
+            idx_delay = torch.randint(
+                low=0, high=len(model.DELAY_LIST), size=(model.N_BATCH,)
+            ).to(model.device)
+            chosen_delays = torch.tensor(model.DELAY_LIST, device=model.device)[idx_delay]
+            model.random_shifts = (chosen_delays / model.DT).to(int)
+        else:
+            model.random_shifts = torch.randint(
+                low=int(N_MIN_DELAY), high=int(N_MAX_DELAY), size=(model.N_BATCH,)
+            ).to(model.device)
+
+        model.start_indices = model.N_STIM_ON.unsqueeze(-1) + model.random_shifts
+        model.end_indices = model.N_STIM_OFF.unsqueeze(-1) + model.random_shifts
+
+        if "odr" in model.TASK:
+            model.start_indices[0] = model.N_STIM_ON[0]
+            model.end_indices[0] = model.N_STIM_OFF[0]
+
+        if "dual" in model.TASK:
+            model.start_indices[:-1] = model.N_STIM_ON[:-1].unsqueeze(-1)
+            model.end_indices[:-1] = model.N_STIM_OFF[:-1].unsqueeze(-1)
+
+    model.start_idx = (
+        (model.start_indices - model.N_STEADY - model.N_HEBB) / model.N_WINDOW
+    ).to(int)
+    model.end_idx = (
+        (model.end_indices - model.N_STEADY - model.N_HEBB) / model.N_WINDOW
+    ).to(int)
+
+    def _apply_random_delay_stimulus(self, ff_input, index, stimulus):
+        cfg = self.cfg
+        geo = cfg.geo
+        for batch_idx in range(cfg.N_BATCH):
+            time_slice = slice(
+                int(cfg.start_indices[index, batch_idx]),
+                int(cfg.end_indices[index, batch_idx]),
+            )
+                ff_input[batch_idx, time_slice, geo.slices[0]].add_(stimulus[batch_idx])
+
+#+end_src
+
+ #+begin_src ipython
+def generate_gng_trials(n_trials, seq_len, input_size=2, noise=0.1):
+    """Generates one trial of Delayed Right/No-Right."""
+    inputs = noise * torch.randn((n_trials, seq_len, input_size))
+    targets = torch.zeros((n_trials, seq_len))
+    mask = torch.zeros((1, seq_len))
+
+    # Decide if it's a Right (1) or Left (0) trial
+    is_go = torch.rand(n_trials) > 0.5
+    # Apply input stimulus early in sequence
+    inputs[is_go, stim_onset:stim_offset, 0] += 1.0
+    inputs[~is_go, stim_onset:stim_offset, 0] -= 1.0
+
+    inputs[:, response_onset:, 1] += 1.0
+
+    # Output only during Right time
+    targets[is_go, response_onset:] += 1.0
+    targets[~is_go, response_onset:] -= 1.0
+
+    mask[0, response_onset:] += 1.0
+
+    return inputs, targets, mask
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+n_trials = 512
+inputs, targets, mask = generate_gng_trials(n_trials, seq_len, input_size, noise)
+print(inputs.shape, targets.shape, mask.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([512, 50, 2]) torch.Size([512, 50]) torch.Size([1, 50])
+
+#+begin_src ipython
+plt.hist(targets[..., -1].reshape(-1), bins='auto')
+plt.xlabel('Targets')
+plt.ylabel('Count')
+plt.xticks([0, 1])
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_9.png]]
+
+#+begin_src ipython
+idx_nogo = torch.argwhere(targets[:, -1] == -1).reshape(-1)[:32]
+idx_go = torch.argwhere(targets[:, -1] == 1).reshape(-1)[:32]
+print(idx_go.shape, idx_nogo.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([32]) torch.Size([32])
+
+#+BEGIN_SRC ipython
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, inputs[idx_nogo, :, 0].mT.cpu().numpy(), alpha=.2)
+ax[0].plot(x_time, targets[idx_nogo[0]].cpu().numpy(), 'k', label='Target')
+ax[0].set_title('Left trials')
+
+ax[1].plot(x_time, inputs[idx_go, :, 0].mT.cpu().numpy(), alpha=.2)
+ax[1].plot(x_time, targets[idx_go[0]].cpu().numpy(), 'k', label='Target')
+ax[1].set_title('Right trials')
+
+for i in range(2):
+    ax[i].axvspan(stim_onset * DT, stim_offset * DT, alpha=0.3)
+    ax[i].axvspan(response_onset * DT, seq_len * DT, alpha=0.3, color='g')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('FF Inputs')
+    ax[i].legend(fontsize=14)
+plt.show()
+#+END_SRC
+
+#+RESULTS:
+[[file:./figures/rnn/figure_11.png]]
+
+#+begin_src ipython
+predictions, rates = model(inputs, ret_rates=True)
+predictions = predictions.squeeze((0, -1)).detach().cpu()
+rates = rates.squeeze((0, -1)).detach().cpu()
+print('inputs', inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: inputs torch.Size([512, 50, 2]) predictions torch.Size([512, 50]) rates torch.Size([512, 50, 128])
+
+#+begin_src ipython
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(x_time, predictions[idx_nogo].T, alpha=.2)
+ax[0].set_title('Left trials')
+
+ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(x_time, predictions[idx_go].T, alpha=.2)
+ax[1].set_title('Right trials')
+
+for i in range(2):
+    ax[i].axvspan(stim_onset * DT, stim_offset * DT, alpha=0.3)
+    ax[i].axvspan(response_onset * DT, seq_len * DT, alpha=0.3, color='g')
+    ax[i].set_xlabel("Time (s)")
+    ax[i].set_ylabel("Readout")
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_13.png]]
+
+* Training the model
+
+#+begin_src ipython
+learning_rate = 0.01
+epochs = 100
+batch_size = 32
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def optimization(model, X, Y, criterion, optimizer, mask=1, epochs=30, batch_size=32, verbose=1):
+
+    loss_list = []
+    for epoch in range(epochs):
+        permutation = torch.randperm(X.size(0))
+        total_loss = 0
+        for i in range(0, X.size(0), batch_size):
+            indices = permutation[i:i+batch_size]
+            batch_x, batch_y = X[indices], Y[indices]
+
+            output = model(batch_x).squeeze(-1)
+
+            loss = torch.sum(criterion(output, batch_y) * mask) / torch.sum(mask) / 2
+            loss += torch.sum(criterion(output, batch_y*0) * (1-mask)) / torch.sum(1-mask) / 2
+
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            total_loss += loss.item()
+
+        loss_list.append(total_loss)
+
+        if (verbose) and (((epoch+1) % 5==0) or (epoch==epochs-1) or (epoch==0)):
+            print(f'Epoch {epoch+1}/{epochs}, Training Loss: {loss:.4f}')
+
+    return loss_list
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+criterion = nn.MSELoss(reduction='none')
+optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+loss = optimization(model, inputs, targets, criterion, optimizer, mask, epochs)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Epoch 20/100, Training Loss: 3.0141
+Epoch 25/100, Training Loss: 1.9511
+Epoch 30/100, Training Loss: 1.1653
+Epoch 35/100, Training Loss: 0.5198
+Epoch 40/100, Training Loss: 0.3066
+Epoch 45/100, Training Loss: 0.1912
+Epoch 50/100, Training Loss: 0.1790
+Epoch 55/100, Training Loss: 0.1521
+Epoch 60/100, Training Loss: 0.1483
+Epoch 65/100, Training Loss: 0.1151
+Epoch 70/100, Training Loss: 0.1422
+Epoch 75/100, Training Loss: 0.1102
+Epoch 80/100, Training Loss: 0.1484
+Epoch 85/100, Training Loss: 0.0904
+Epoch 90/100, Training Loss: 0.0989
+Epoch 95/100, Training Loss: 0.0828
+Epoch 100/100, Training Loss: 0.0973
+#+end_example
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+* Testing the model
+
+#+begin_src ipython
+inputs, targets, mask = generate_gng_trials(n_trials, seq_len, input_size)
+predictions, rates = model(inputs, ret_rates=True)
+
+predictions = predictions.squeeze((0, -1)).detach().cpu()
+rates = rates.squeeze((0, -1)).detach().cpu()
+
+print('inputs', inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: inputs torch.Size([512, 50, 2]) predictions torch.Size([512, 50]) rates torch.Size([512, 50, 128])
+
+#+begin_src ipython
+inputs, targets, mask = generate_gng_trials(n_trials, seq_len, input_size, noise)
+predictions, rates = model(inputs, ret_rates=True)
+
+predictions = predictions.squeeze((0, -1)).detach().cpu()
+rates = rates.squeeze((0, -1)).detach().cpu()
+
+print('inputs', inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: inputs torch.Size([512, 50, 2]) predictions torch.Size([512, 50]) rates torch.Size([512, 50, 128])
+
+#+begin_src ipython
+idx_nogo = torch.argwhere(targets[:, -1] == -1).reshape(-1)[:32]
+idx_go = torch.argwhere(targets[:, -1] == 1).reshape(-1)[:32]
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+kappa = (rates @ model.n).cpu().detach().numpy() / rates.shape[-1]
+print(kappa.shape)
+#+end_src
+
+#+RESULTS:
+: (512, 50, 2)
+
+#+begin_src ipython
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(x_time, kappa[idx_nogo, :, 0].T, alpha=.2)
+ax[0].set_title('Left trial')
+
+ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(x_time, kappa[idx_go, :, 0].T, alpha=.2)
+ax[1].set_title('Right trial')
+
+for i in range(2):
+    ax[i].axvspan(stim_onset * DT, stim_offset * DT, alpha=0.3)
+    ax[i].axvspan(response_onset * DT, seq_len * DT, alpha=0.3, color='g')
+    ax[i].set_xlabel("Time (s)")
+    ax[i].set_ylabel("$\\kappa$")
+    # ax[i].set_ylim([-1.5, 1.5])
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_22.png]]
+
+#+begin_src ipython
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(x_time, predictions[idx_nogo].T, alpha=.2)
+ax[0].set_title('Left trial')
+
+ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(x_time, predictions[idx_go].T, alpha=.2)
+ax[1].set_title('Right trial')
+
+for i in range(2):
+    ax[i].axvspan(stim_onset * DT, stim_offset * DT, alpha=0.3)
+    ax[i].axvspan(response_onset * DT, seq_len * DT, alpha=0.3, color='g')
+    ax[i].set_xlabel("Time (s)")
+    ax[i].set_ylabel("Readout")
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_23.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+* Flow
+
+#+begin_src ipython
+from scipy.interpolate import griddata
+import matplotlib as mpl
+from sklearn.cluster import KMeans
+
+
+def create_mesh(x, y, size=100):
+    x_min, x_max = x.min() - 0.5, x.max() + 0.5
+    y_min, y_max = y.min() - 0.5, y.max() + 0.5
+
+    dx = np.gradient(x, axis=1)
+    dy = np.gradient(y, axis=1)
+
+    xg = np.arange(size) * (x_max - x_min) / (size - 1) + x_min
+    yg = np.arange(size) * (y_max - y_min) / (size - 1) + y_min
+
+    xi, yi = np.meshgrid(xg, yg)
+
+    points = np.vstack((x.flatten(), y.flatten())).T
+
+    ui = griddata(points, dx.flatten(), (xi, yi), method='linear', fill_value=np.nan)
+    vi = griddata(points, dy.flatten(), (xi, yi), method='linear', fill_value=np.nan)
+
+    return xg, yg, xi, yi, ui, vi
+
+
+def get_overlaps_from_rates(rates, model):
+    n = model.n.detach().cpu()
+    N = n.shape[0]
+
+    n1 = n[:, 0].clone()
+    n2 = n[:, 1].clone()
+    n2 = n2 - (n2 @ n1) * n1 / (n1 @ n1)
+
+    vec = torch.stack((n1, n2), dim=1)
+    overlaps = rates.cpu() @ vec / N
+
+    return overlaps.numpy()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def create_grid_initial_conditions(model, grid_range=3, grid_size=20):
+    """Create rates on an equally spaced grid in (kappa1, kappa2).
+
+    Set rates = kappa1 * v1 + kappa2 * v2 where v1, v2 are chosen so
+    that rates @ n_orth / N = kappa exactly. Uses pseudoinverse of the
+    orthogonalized n vectors, then clamps to [-1, 1].
+    """
+    n = model.n.detach().cpu().float()
+    N = n.shape[0]
+
+    n1 = n[:, 0].clone()
+    n2 = n[:, 1].clone()
+    n2 = n2 - (n2 @ n1) * n1 / (n1 @ n1)
+    V = torch.stack((n1, n2), dim=1)  # (N, 2)
+
+    V_pinv = torch.linalg.pinv(V)  # (2, N)
+
+    k1 = torch.linspace(-grid_range, grid_range, grid_size)
+    k2 = torch.linspace(-grid_range, grid_range, grid_size)
+    K1, K2 = torch.meshgrid(k1, k2, indexing='ij')
+
+    kappa_target = torch.stack((K1.flatten(), K2.flatten()), dim=1)  # (n_points, 2)
+
+    # rates such that rates @ V / N = kappa_target
+    rates = kappa_target @ (N * V_pinv)  # (n_points, N)
+    rates = torch.clamp(rates, -1.0, 1.0)
+
+    # Consistent rec_inputs: h = m n^T r / N (what recurrence would produce)
+    rec_inputs = rates @ (model.m @ model.n.T).detach().cpu() / N
+
+    # Verify
+    kappa_check = rates @ V / N
+    print(f'Max kappa error: {(kappa_check - kappa_target).abs().max().item():.6f}')
+    print(f'Rates range: [{rates.min().item():.3f}, {rates.max().item():.3f}]')
+
+    return rates, rec_inputs, K1, K2
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def run_dynamics(model, rates_init, rec_inputs_init, input_type='none', n_steps=50):
+    n_points = rates_init.shape[0]
+    input_size = model.wi.in_features
+
+    ff_input = torch.zeros(n_points, input_size)
+
+    if input_type == 'go':
+        ff_input[:, 0] = 1.0
+    elif input_type == 'nogo':
+        ff_input[:, 0] = -1.0
+    elif input_type == 'response':
+        ff_input[:, 1] = 1.0
+    elif input_type == 'go_response':
+        ff_input[:, 0] = 1.0
+        ff_input[:, 1] = 1.0
+    elif input_type == 'nogo_response':
+        ff_input[:, 0] = -1.0
+        ff_input[:, 1] = 1.0
+
+    rates = rates_init.clone()
+    rec_inputs = rec_inputs_init.clone()
+
+    rates_list = [rates.detach().clone()]
+
+    with torch.no_grad():
+        for step in range(n_steps):
+            rates, rec_inputs = model.update_dynamics(ff_input, rec_inputs, rates)
+            rates_list.append(rates.detach().clone())
+
+    return torch.stack(rates_list, dim=1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def get_fixed_points(overlaps, window=0, n_clusters=3):
+    x = overlaps[:, window:, 0]
+    y = overlaps[:, window:, 1]
+    fp = np.stack((x[:, -1], y[:, -1])).T
+    kmeans = KMeans(n_clusters=n_clusters, random_state=0, n_init=10)
+    kmeans.fit(fp)
+    return np.array(kmeans.cluster_centers_)
+
+
+def plot_flow_grid(overlaps, ax, window=0, IF_STREAM=True, IF_CBAR=False,
+                   IF_FP=True, n_clusters=3):
+    x = overlaps[:, window:, 0]
+    y = overlaps[:, window:, 1]
+
+    xg, yg, xi, yi, ui, vi = create_mesh(x, y, size=300)
+
+    speed = np.sqrt(ui**2 + vi**2)
+    speed_norm = (speed - np.nanmean(speed)) / (np.nanstd(speed) + 1e-6)
+
+    vmin, vmax = np.nanpercentile(speed_norm, [5, 95])
+    norm = mpl.colors.Normalize(vmin, vmax)
+
+    heatmap = ax.pcolormesh(xi, yi, speed_norm, cmap='coolwarm', shading='auto', norm=norm)
+
+    if IF_STREAM:
+        step = 10
+        Xq = xi[::step, ::step]
+        Yq = yi[::step, ::step]
+        Uq = ui[::step, ::step]
+        Vq = vi[::step, ::step]
+
+        mask = np.isfinite(Uq) & np.isfinite(Vq)
+        ax.quiver(
+            Xq[mask], Yq[mask], Uq[mask], Vq[mask],
+            color=(1, 1, 1, 0.7),
+            angles='xy', scale_units='xy',
+            scale=None, width=0.003
+        )
+
+    if IF_FP:
+        try:
+            centers = get_fixed_points(overlaps, window, n_clusters=n_clusters)
+            ax.plot(centers[:, 0], centers[:, 1], 'o', color='w', ms=14,
+                    markeredgecolor='k', markeredgewidth=1.5, zorder=5)
+        except:
+            pass
+
+    if IF_CBAR:
+        cbar = plt.colorbar(heatmap, ax=ax)
+        cbar.set_label('Norm. Speed')
+
+    ax.set_xlabel('$\\kappa_1$')
+    ax.set_ylabel('$\\kappa_2$')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+n_steps = 100
+grid_range = 4.0
+grid_size = 50
+
+rates_init, rec_inputs_init, K1, K2 = create_grid_initial_conditions(
+    model, grid_range=grid_range, grid_size=grid_size
+)
+
+# Verify equal spacing
+overlaps_init = get_overlaps_from_rates(rates_init.unsqueeze(1), model).squeeze(1)
+#+end_src
+
+#+RESULTS:
+: Max kappa error: 2.607358
+: Rates range: [-1.000, 1.000]
+
+#+begin_src ipython
+fig, ax = plt.subplots(figsize=(width, width))
+ax.scatter(overlaps_init[:, 0], overlaps_init[:, 1], s=5)
+ax.set_xlabel('$\\kappa_1$')
+ax.set_ylabel('$\\kappa_2$')
+ax.set_title('Initial conditions')
+ax.set_aspect('equal')
+plt.show()
+#+end_src
+#+RESULTS:
+[[file:./figures/rnn/figure_30.png]]
+
+#+begin_src ipython
+conditions = {
+    'none': ('Autonomous', 3),
+    'go': ('Right stimulus ON', 2),
+    'nogo': ('Left stimulus ON', 2),
+    'response': ('Response cue ON', 2),
+}
+
+fig, axes = plt.subplots(2, 2, figsize=(2*width, 2*width))
+
+for ax, (cond, (title, nc)) in zip(axes.flat, conditions.items()):
+    rates_out = run_dynamics(model, rates_init, rec_inputs_init,
+                             input_type=cond, n_steps=n_steps)
+    overlaps = get_overlaps_from_rates(rates_out, model)
+    is_last = (cond == 'response')
+    plot_flow_grid(overlaps, ax, IF_STREAM=True, IF_CBAR=is_last,
+                   n_clusters=nc)
+    ax.set_title(title)
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+conditions = {
+    'none': ('Autonomous', 3),
+    'go': ('Right stimulus ON', 2),
+    'nogo': ('Left stimulus ON', 2),
+    'response': ('Response cue ON', 2),
+}
+
+fig, axes = plt.subplots(1, 4, figsize=(4*width, 1*width))
+
+for ax, (cond, (title, nc)) in zip(axes.flat, conditions.items()):
+    rates_out = run_dynamics(model, rates_init, rec_inputs_init,
+                             input_type=cond, n_steps=n_steps)
+    overlaps = get_overlaps_from_rates(rates_out, model)
+    is_last = (cond == 'response')
+    plot_flow_grid(overlaps, ax, IF_STREAM=True, IF_CBAR=is_last,
+                   n_clusters=nc)
+    ax.set_title(title)
+
+plt.tight_layout()
+plt.show()
+
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_32.png]]
+
+#+begin_src ipython
+def plot_flow_raw(model, rates_init, rec_inputs_init, K1, K2, ax,
+                  input_type='none', n_steps=1, scale=None,
+                  IF_FP=True, n_clusters=3):
+    """Plot raw flow vectors on the grid without interpolation."""
+    n = model.n.detach().cpu().float()
+    N = n.shape[0]
+
+    n1 = n[:, 0].clone()
+    n2 = n[:, 1].clone()
+    n2 = n2 - (n2 @ n1) * n1 / (n1 @ n1)
+    V = torch.stack((n1, n2), dim=1)
+
+    # Initial overlaps
+    kappa0 = (rates_init @ V / N).numpy()
+
+    # Run dynamics for n_steps
+    rates = rates_init.clone()
+    rec_inputs = rec_inputs_init.clone()
+    input_size = model.wi.in_features
+    ff_input = torch.zeros(rates.shape[0], input_size)
+
+    if input_type == 'go':
+        ff_input[:, 0] = 1.0
+    elif input_type == 'nogo':
+        ff_input[:, 0] = -1.0
+    elif input_type == 'response':
+        ff_input[:, 1] = 1.0
+    elif input_type == 'go_response':
+        ff_input[:, 0] = 1.0; ff_input[:, 1] = 1.0
+    elif input_type == 'nogo_response':
+        ff_input[:, 0] = -1.0; ff_input[:, 1] = 1.0
+
+    with torch.no_grad():
+        for _ in range(n_steps):
+            rates, rec_inputs = model.update_dynamics(ff_input, rec_inputs, rates)
+
+    kappa1 = (rates @ V / N).numpy()
+
+    # Raw displacement
+    dk = kappa1 - kappa0
+    speed = np.sqrt(dk[:, 0]**2 + dk[:, 1]**2)
+
+    # Reshape to grid
+    gs = K1.shape[0]
+    X = kappa0[:, 0].reshape(gs, gs)
+    Y = kappa0[:, 1].reshape(gs, gs)
+    U = dk[:, 0].reshape(gs, gs)
+    Vf = dk[:, 1].reshape(gs, gs)
+    S = speed.reshape(gs, gs)
+
+    # Speed heatmap
+    speed_norm = (S - np.nanmean(S)) / (np.nanstd(S) + 1e-6)
+    vmin, vmax = np.nanpercentile(speed_norm, [5, 95])
+    norm = mpl.colors.Normalize(vmin, vmax)
+    ax.pcolormesh(X, Y, speed_norm, cmap='coolwarm', shading='auto', norm=norm)
+
+    # Quiver — raw, no interpolation
+    ax.quiver(X, Y, U, Vf, color=(1, 1, 1, 0.7),
+              angles='xy', scale_units='xy', scale=scale, width=0.004)
+
+    if IF_FP:
+        centers = find_fixed_points(model, rates_init, rec_inputs_init,
+                                    input_type=input_type, n_steps=500,
+                                    n_clusters=n_clusters)
+        if len(centers) > 0:
+            ax.plot(centers[:, 0], centers[:, 1], 'o', color='w', ms=14,
+                    markeredgecolor='k', markeredgewidth=1.5, zorder=5)
+
+    # if IF_FP:
+    #     # Find fixed points as grid points with smallest speed
+    #     flat_speed = speed.copy()
+    #     try:
+    #         from scipy.ndimage import minimum_filter
+    #         S_filt = minimum_filter(S, size=3)
+    #         local_min = (S == S_filt) & (S < np.percentile(speed, 10))
+    #         fp_x = X[local_min]
+    #         fp_y = Y[local_min]
+    #         if len(fp_x) > 0:
+    #             # Cluster them
+    #             from sklearn.cluster import KMeans
+    #             pts = np.stack((fp_x, fp_y), axis=1)
+    #             nc = min(n_clusters, len(pts))
+    #             km = KMeans(n_clusters=nc, random_state=0, n_init=10).fit(pts)
+    #             ax.plot(km.cluster_centers_[:, 0], km.cluster_centers_[:, 1],
+    #                     'o', color='w', ms=14, markeredgecolor='k',
+    #                     markeredgewidth=1.5, zorder=5)
+    #     except Exception:
+    #         pass
+
+    ax.set_xlabel('$\\kappa_1$')
+    ax.set_ylabel('$\\kappa_2$')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+conditions = {
+    'none': ('Autonomous', 2),
+    'go': ('Right stimulus ON', 2),
+    'nogo': ('Left stimulus ON', 2),
+    'response': ('Response cue ON', 2),
+}
+
+fig, axes = plt.subplots(1, 4, figsize=(4*width, 1*width))
+
+for ax, (cond, (title, nc)) in zip(axes.flat, conditions.items()):
+    plot_flow_raw(model, rates_init, rec_inputs_init, K1, K2, ax,
+                  input_type=cond, n_steps=1, n_clusters=nc)
+    ax.set_title(title)
+    ax.set_aspect('equal')
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_33.png]]
+
+#+begin_src ipython
+def create_grid_from_rec_inputs(model, grid_range=3, grid_size=20):
+    """Create initial conditions on a grid in rec_input space: h = α*n1 + β*n2."""
+    n = model.n.detach().cpu().float()
+    N = n.shape[0]
+
+    # Orthogonalize for visualization
+    n1 = n[:, 0].clone()
+    n2 = n[:, 1].clone()
+    n2_orth = n2 - (n2 @ n1) * n1 / (n1 @ n1)
+
+    k1 = torch.linspace(-grid_range, grid_range, grid_size)
+    k2 = torch.linspace(-grid_range, grid_range, grid_size)
+    K1, K2 = torch.meshgrid(k1, k2, indexing='ij')
+
+    # rec_inputs = alpha * n1 + beta * n2_orth  (in N-dimensional space)
+    alphas = K1.flatten()  # (n_points,)
+    betas = K2.flatten()
+
+    rec_inputs = alphas.unsqueeze(1) * n1.unsqueeze(0) + betas.unsqueeze(1) * n2_orth.unsqueeze(0)
+    # (n_points, N)
+
+    # Rates from rec_inputs (no ff input)
+    rates = torch.tanh(rec_inputs)
+
+    # Verify overlaps
+    V = torch.stack((n1, n2_orth), dim=1)
+    kappa_check = rates @ V / N
+    print(f'Rates range: [{rates.min().item():.3f}, {rates.max().item():.3f}]')
+    print(f'Kappa range: [{kappa_check.min().item():.3f}, {kappa_check.max().item():.3f}]')
+
+    return rates, rec_inputs, K1, K2
+
+
+def run_dynamics_bypass(model, rates_init, rec_inputs_init, ff_bypass=None, n_steps_input=50, n_steps_free=50):
+    """Run dynamics, optionally injecting ff input directly into rec_inputs (bypassing wi),
+    then run free (autonomous) dynamics.
+
+    ff_bypass: (n_points, N) tensor added to rec_inputs at each input step, or None.
+    """
+    rates = rates_init.clone()
+    rec_inputs = rec_inputs_init.clone()
+    N = rates.shape[-1]
+
+    input_size = model.wi.in_features
+    ff_zero = torch.zeros(rates.shape[0], input_size)
+
+    rates_list = [rates.detach().clone()]
+
+    with torch.no_grad():
+        # Phase 1: input ON (bypass wi, add directly to rec_inputs)
+        for step in range(n_steps_input):
+            hidden = rates @ (model.m @ model.n.T).detach() / N
+            rec_inputs = (1.0 - model.alpha) * rec_inputs + model.alpha * hidden
+            if ff_bypass is not None:
+                rec_inputs = rec_inputs + model.alpha * ff_bypass
+            rates = torch.tanh(rec_inputs)  # no wi contribution
+            rates_list.append(rates.detach().clone())
+
+        # Phase 2: autonomous (no input)
+        for step in range(n_steps_free):
+            rates, rec_inputs = model.update_dynamics(ff_zero, rec_inputs, rates)
+            rates_list.append(rates.detach().clone())
+
+    return torch.stack(rates_list, dim=1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+n_steps = 10
+grid_range = 5.0
+grid_size = 200
+
+rates_init, rec_inputs_init, K1, K2 = create_grid_from_rec_inputs(
+    model, grid_range=grid_range, grid_size=grid_size
+)
+
+# Verify grid
+overlaps_init = get_overlaps_from_rates(rates_init.unsqueeze(1), model).squeeze(1)
+
+#+end_src
+
+#+RESULTS:
+: Rates range: [-1.000, 1.000]
+: Kappa range: [-3.713, 3.713]
+
+#+begin_src ipython
+fig, ax = plt.subplots(figsize=(width, width))
+ax.scatter(overlaps_init[:, 0], overlaps_init[:, 1], s=5)
+ax.set_xlabel('$\\kappa_1$')
+ax.set_ylabel('$\\kappa_2$')
+ax.set_title('Initial conditions (from rec_inputs grid)')
+ax.set_aspect('equal')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_36.png]]
+
+#+begin_src ipython
+import warnings
+warnings.filterwarnings("ignore", message=".*pcolormesh.*monotonically.*")
+
+conditions = {
+    'none': ('Autonomous', 3),
+    'go': ('Right stimulus ON', 2),
+    'nogo': ('Left stimulus ON', 2),
+    'response': ('Response cue ON', 2),
+}
+
+fig, axes = plt.subplots(1, 4, figsize=(4*width, 1.5*width))
+
+for ax, (cond, (title, nc)) in zip(axes.flat, conditions.items()):
+    plot_flow_raw(model, rates_init, rec_inputs_init, K1, K2, ax,
+                  input_type=cond, n_steps=1, n_clusters=nc)
+    ax.set_title(title)
+    ax.set_aspect('equal')
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_37.png]]
+
+#+begin_src ipython
+def find_fixed_points(model, rates_init, rec_inputs_init, input_type='none',
+                      n_steps=500, speed_thr=1e-4, n_clusters=3):
+    """Find fixed points by running dynamics to convergence under a specific input."""
+    n = model.n.detach().cpu().float()
+    N = n.shape[0]
+    n1 = n[:, 0].clone()
+    n2 = n[:, 1].clone()
+    n2 = n2 - (n2 @ n1) * n1 / (n1 @ n1)
+    V = torch.stack((n1, n2), dim=1)
+
+    rates = rates_init.clone()
+    rec_inputs = rec_inputs_init.clone()
+    input_size = model.wi.in_features
+    ff_input = torch.zeros(rates.shape[0], input_size)
+
+    if input_type == 'go':
+        ff_input[:, 0] = 1.0
+    elif input_type == 'nogo':
+        ff_input[:, 0] = -1.0
+    elif input_type == 'response':
+        ff_input[:, 1] = 1.0
+    elif input_type == 'go_response':
+        ff_input[:, 0] = 1.0; ff_input[:, 1] = 1.0
+    elif input_type == 'nogo_response':
+        ff_input[:, 0] = -1.0; ff_input[:, 1] = 1.0
+
+    with torch.no_grad():
+        for _ in range(n_steps):
+            rates_old = rates.clone()
+            rates, rec_inputs = model.update_dynamics(ff_input, rec_inputs, rates)
+
+    # Speed at convergence
+    kappa_final = (rates @ V / N).numpy()
+    kappa_old = (rates_old @ V / N).numpy()
+    speed = np.sqrt(((kappa_final - kappa_old)**2).sum(axis=1))
+
+    # Keep only converged points
+    mask = speed < speed_thr
+    if mask.sum() == 0:
+        mask = speed < np.percentile(speed, 5)
+
+    pts = kappa_final[mask]
+    nc = min(n_clusters, len(pts))
+    if nc > 0 and len(pts) > 0:
+        km = KMeans(n_clusters=nc, random_state=0, n_init=10).fit(pts)
+        return km.cluster_centers_
+    return np.array([])
+#+end_src
+
+#+RESULTS:
+
+*** Why are the flows different when created from the inputs or from the rates? These should be the same
+
+The flows look different because the two grid methods produce *different initial =rec_inputs=* for the same overlap coordinates, and the dynamics depend on *both* =rates= and =rec_inputs= independently.
+
+**** The core issue
+
+Your dynamical system has *two state variables*: =rates= and =rec_inputs=. The update rule is:
+
+#+begin_src python
+rec_inputs = (1 - α) * rec_inputs + α * (rates @ M @ N.T / N)
+rates = tanh(wi(ff_input) + rec_inputs)
+#+end_src
+
+So the next state depends on the *current =rec_inputs=*, not just the current =rates=. Two points with identical =rates= (and thus identical overlaps κ) but different =rec_inputs= will evolve differently.
+
+**** What each method does
+
+*Method 1: =create_grid_initial_conditions=* (grid on rates)
+- Sets =rates= via pseudoinverse so that =rates @ V / N = κ_target=
+- Sets =rec_inputs = rates @ (m @ n.T) / N= — the *steady-state recurrent input* assuming no feedforward drive
+
+*Method 2: =create_grid_from_rec_inputs=* (grid on rec_inputs)
+- Sets =rec_inputs = α₁·n₁ + α₂·n₂_orth= on a uniform grid
+- Sets =rates = tanh(rec_inputs)= — consistent with zero feedforward input
+
+These give *different (rates, rec_inputs) pairs* even at the same κ values because:
+
+1. *Method 1*: =rec_inputs= is determined by =rates= through the recurrent weight matrix — it's what the recurrence /would produce/, but =rates= themselves were constructed algebraically and aren't necessarily consistent with =rates = tanh(wi(0) + rec_inputs)=.
+
+2. *Method 2*: =rates = tanh(rec_inputs)= is self-consistent for zero ff input, but =rec_inputs= lives only in the span of ={n₁, n₂}=, whereas in Method 1 it lives in the span of =m @ n.T= applied to rates (which can have components in many directions).
+
+**** The fix
+
+To get consistent flows, you need to initialize from points on the *correct manifold* — where both state variables are consistent with each other. The cleanest approach:
+
+1. *Run autonomous dynamics to convergence* from many initial conditions to find the slow manifold
+2. *Sample initial conditions from that manifold*
+3. Then compute single-step flows
+
+Alternatively, if you want a grid in κ-space, pick one method and stick with it, but understand that the flow field is really a projection of a higher-dimensional (rates, rec_inputs) system onto 2D, and the projection depends on which 2D slice of the full state space you're sampling.
+
+*** I tought that to get a flow field, I needed to start the network on the grid and let it evolve to a fixed point. Then compute the speed of the trajectories
+
+You're absolutely right about the procedure — the issue isn't the method (start on grid → evolve → compute velocity), it's that *the grid defines a 2D slice of a much higher-dimensional state space*, and the two methods pick /different slices/.
+
+**** The key point
+
+Your state space is *(rates, rec_inputs)* — that's 2×N = 256 dimensions. The overlap κ = (κ₁, κ₂) is a 2D projection. Many different (rates, rec_inputs) configurations project to the *same* (κ₁, κ₂) point but have *different dynamics*.
+
+When you create a grid in κ-space, you must choose /how to lift/ each 2D point back to the full 256D state. The two methods make different choices → different full states → different dynamics → different flows.
+
+**** What to do
+
+The most principled approach: *initialize from actual network trajectories*, not from an artificial grid. Your trial data already lives on the correct manifold:
+
+#+begin_src python
+# Use rates from actual trials as initial conditions
+# These are self-consistent (rates, rec_inputs) pairs
+inputs_grid, targets_grid, _ = generate_gng_trials(2000, seq_len, input_size, noise=0.5)
+_, rates_all = model(inputs_grid, ret_rates=True)
+#+end_src
+
+Then pick a specific time point, use those (rates, rec_inputs) as initial conditions, and compute the flow from there. The trajectories will live on the manifold the network actually uses.
+
+Alternatively, if you want the grid approach, just *pick one method and use it consistently* — the flows will be self-consistent within that slice. The "correct" one depends on what question you're asking. Method 2 (grid on rec_inputs, rates = tanh(rec_inputs)) is arguably more natural since it satisfies the instantaneous rate equation.
+
+*** but still you are just running one step instead of the full trajectory to the fixed points
+
+You're right — I see the confusion now. In =plot_flow_raw=, the flow is computed from just =n_steps=1=:
+
+#+begin_src python
+plot_flow_raw(model, rates_init, rec_inputs_init, K1, K2, ax,
+              input_type=cond, n_steps=1, n_clusters=nc)
+#+end_src
+
+This computes the /instantaneous velocity/ (single-step displacement), which is perfectly valid for a flow field — it shows the direction and speed of the dynamics at each point. You don't need to run to the fixed point for this.
+
+**** Two different things
+
+1. *Flow field (velocity field)*: Run 1 step (or a few), compute displacement. This shows /where the dynamics push you/ from each point. This is what =plot_flow_raw= does and it's correct.
+
+2. *Trajectories to fixed points*: Run many steps, watch where each initial condition ends up. This is what =run_dynamics= with large =n_steps= does, and what =plot_flow_grid= uses with the interpolated mesh.
+
+Both are valid visualizations. The single-step flow field is actually the more standard way to show a phase portrait — it's the vector field $\dot{\kappa} = f(\kappa)$.
+
+
+**** what is the othere method
+
+The other method (=plot_flow_grid= / =create_mesh=) does something different:
+
+1. Runs /full trajectories/ (=n_steps=100=) from each initial condition
+2. Computes velocities /along the entire trajectory/ via =np.gradient=
+3. /Interpolates/ all those velocities onto a regular mesh using =griddata=
+
+#+begin_src python
+# In create_mesh:
+dx = np.gradient(x, axis=1)  # velocity along trajectory
+dy = np.gradient(y, axis=1)
+# Then interpolate ALL (x,y,dx,dy) points from ALL timesteps onto a grid
+points = np.vstack((x.flatten(), y.flatten())).T
+ui = griddata(points, dx.flatten(), (xi, yi), method='linear')
+#+end_src
+
+***** Why it looks different
+
+- It mixes velocities from /different times and locations/ along the trajectories. A trajectory that passes through point (κ₁, κ₂) early (moving fast) and another that passes through the same point late (moving slow) both contribute — and =griddata= averages them.
+- This gives a /smoothed-out average flow/ across the visited manifold, rather than the instantaneous velocity from a specific initial state.
+
+***** Summary
+
+| Method | What it computes | Pros | Cons |
+|---|---|---|---|
+| =plot_flow_raw= (1 step) | Instantaneous velocity at each grid point | Clean, exact, standard phase portrait | Depends on choice of initial (rates, rec_inputs) |
+| =plot_flow_grid= (many steps + interpolation) | Averaged velocity from trajectories passing through each region | Samples the actual manifold | Mixes velocities from different times, can be noisy/misleading |
+
+The single-step method (=plot_flow_raw=) is the more standard and interpretable one for phase portraits. The trajectory-based method is useful for seeing where the dynamics /actually go/, but the interpolated velocity field can be hard to interpret.
+
+***
