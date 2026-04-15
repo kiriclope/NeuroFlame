@@ -1,0 +1,1116 @@
+:PROPERTIES:
+:GPTEL_MODEL: gpt-5.4
+:GPTEL_BACKEND: OpenAI
+:GPTEL_SYSTEM: You are a large language model living in Emacs and a helpful assistant. Respond concisely.
+:GPTEL_TOOLS:
+:GPTEL_BOUNDS: ((response (9252 9325) (12796 12869)))
+:END:
+#+Startup: fold
+#+TITLE: Training Recurrent Neural Networks
+#+PROPERTY: header-args:ipython :results both :exports both :async "yes" :session rnn_last :kernel python3 :exports results :output-dir ./figures/rnn :file (lc/org-babel-tangle-figure-filename)
+
+* Settings
+
+#+begin_src ipython
+import sys
+import matplotlib
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
+print("Python exe")
+print(sys.executable)
+
+sns.set_context("notebook")
+sns.set_style("ticks")
+plt.rc("axes.spines", top=False, right=False)
+
+golden_ratio = (5**.5 - 1) / 2
+width = 6
+height = width * golden_ratio
+
+matplotlib.rcParams['figure.figsize'] = [width, height]
+matplotlib.rcParams['lines.markersize'] = 5
+matplotlib.rcParams['axes.labelsize'] = 18
+matplotlib.rcParams['axes.titlesize'] = 20
+matplotlib.rcParams['xtick.labelsize'] = 16
+matplotlib.rcParams['ytick.labelsize'] = 16
+matplotlib.rcParams['lines.linewidth'] = 3
+#+end_src
+
+#+RESULTS:
+: Python exe
+: /home/leon/mambaforge/bin/python
+
+* Imports
+
+#+begin_src ipython
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import matplotlib.pyplot as plt
+import numpy as np
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+torch.manual_seed(2)
+np.random.seed(2)
+#+end_src
+
+#+RESULTS:
+
+* 🧠 Dynamical RNNs
+** 🧠 1. All to all RNN
+
+Let:
+- \( x_t \): feedforward input at time step \( t \)
+- \( r_t \): rate at time \( t \)
+- \( y_t \): output at time \( t \)
+
+\[
+r_t = (1 - \frac{\delta t}{\tau}) r_{t-1} + \frac{\Delta t}{\tau} \tanh(W_{ih} x_t + b_{ih} + W_{hh} r_{t-1})
+\]
+
+\[
+y_t = \sigma(W_{ho} r_t + b_o)
+\]
+
+#+begin_src ipython
+class BioRNNModel(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size, dt=0.1, tau=1.0):
+        super().__init__()
+        # input layer
+        self.wi = nn.Linear(input_size, hidden_size)
+        # recurrent layer
+        self.wrec = nn.Parameter(torch.Tensor(hidden_size, hidden_size))
+        nn.init.xavier_uniform_(self.wrec)
+        # output layer
+        self.wo = nn.Linear(hidden_size, output_size)
+        # non linearity
+        self.nonlinearity = torch.tanh
+        # time constant
+        self.DT_TAU = dt / tau
+
+    def update_dynamics(self, ff_inputs, rates):
+        # updating the recurrent inputs and rates
+        rec_inputs = rates @ self.wrec.T # / rates.shape[-1]
+        nonlinear = self.nonlinearity(self.wi(ff_inputs) + rec_inputs)
+        rates = (1-self.DT_TAU) * rates + self.DT_TAU * nonlinear
+
+        return rates, rec_inputs
+
+
+    def forward(self, ff_inputs):
+        # ff_input is (n_trials, seq_len, input_size)
+        # rates and rec_inputs are (n_trials, hidden_size)
+        rec_inputs = torch.randn(ff_inputs.shape[0], self.wrec.shape[0])
+        rates = self.nonlinearity(self.wi(ff_inputs[:, -1]) + rec_inputs)
+
+        readout_list = []
+
+        for step in range(ff_inputs.shape[1]):
+            rates, rec_inputs = self.update_dynamics(ff_inputs[:, step], rates)
+            readout = self.wo(rates)
+            readout_list.append(readout)
+
+        readout_list = torch.stack(readout_list, dim=1)
+
+        return readout_list
+#+end_src
+
+#+RESULTS:
+
+---
+
+** 🧠 2. Low Rank RNN
+
+The Vanilla RNN updates its hidden state based on the previous hidden state and the current input:
+
+
+Let:
+- \( x_t \): feedforward input at time step \( t \)
+- \( h_t \): recurrent input at time \( t \)
+- \( r_t \): rate at time \( t \)
+- \( y_t \): output at time \( t \)
+
+\[
+h_t = (1- \alpha) h_{t-1} + \alpha m n.T r_{t-1}
+\]
+
+\[
+r_t = \tanh(W_{ih} x_t + b_{ih} + h_{t-1})
+\]
+
+\[
+y_t = \sigma(W_{ho} r_t + b_o)
+\]
+
+
+#+begin_src ipython
+class LowRankModel(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size, rank=1, alpha=0.01, device='cuda'):
+        super().__init__()
+        # input layer
+        self.wi = nn.Linear(input_size, hidden_size)
+
+        # low rank vectors
+        self.m = nn.Parameter(torch.randn((hidden_size, rank)))
+        self.n = nn.Parameter(torch.randn((hidden_size, rank)))
+
+        # output layer
+
+        if output_size>0:
+            self.wo = nn.Linear(hidden_size, output_size)
+        else:
+            self.wo = None
+
+        # non linearity
+        self.nonlinearity = torch.tanh
+
+        self.device = device
+        # time constants
+        self.alpha = alpha
+
+    def get_readout(self, rates):
+        if self.wo is not None:
+            return self.wo(rates)
+        return rates @ self.n[:, -1] / rates.shape[-1]
+
+    def update_dynamics(self, ff_inputs, rec_inputs, rates):
+        # updating the recurrent inputs
+        hidden = rates @ (self.m @ self.n.T) / rates.shape[-1]
+        rec_inputs = (1.0 - self.alpha) * rec_inputs + self.alpha * hidden
+        # updating the rates
+        rates = self.nonlinearity(self.wi(ff_inputs) + rec_inputs)
+
+        return rates, rec_inputs
+
+
+    def forward(self, ff_inputs, ret_rates=False):
+        # rates and rec_inputs are (n_trials, hidden_size)
+        rec_inputs = torch.randn(ff_inputs.shape[0], self.m.shape[0], device=self.device)
+        rates = self.nonlinearity(self.wi(ff_inputs[:, 0]) + rec_inputs)
+
+        readout_list = []
+        rates_list = []
+
+        for step in range(ff_inputs.shape[1]):
+            rates, rec_inputs = self.update_dynamics(ff_inputs[:, step], rec_inputs, rates)
+            readout = self.get_readout(rates)
+
+            rates_list.append(rates)
+            readout_list.append(readout)
+
+        rates_list = torch.stack(rates_list, dim=1)
+        readout_list = torch.stack(readout_list, dim=1)
+
+        if ret_rates:
+            return readout_list, rates_list
+
+        return readout_list
+#+end_src
+
+#+RESULTS:
+
+---
+
+* Initializing the model
+
+#+begin_src ipython
+DT = 0.05
+TAU = 0.5
+
+input_size = 2
+hidden_size = 128
+output_size = 0
+rank = 2
+
+alpha = DT / TAU
+# model = BioRNNModel(input_size, hidden_size, output_size)
+model = LowRankModel(input_size, hidden_size, output_size, rank, alpha)
+#+end_src
+
+#+RESULTS:
+
+* Generating a 2AFC task
+
+#+begin_src ipython
+N_BATCH = 512
+
+# Stimuli onsets and offsets and trial length
+T_STIM_ON = [1.0, 3.0]
+T_STIM_OFF = [2.0, 4.0]
+T_STEPS = 5
+
+N_STIM_ON = torch.tensor([int(i / DT) for i in T_STIM_ON])
+N_STIM_OFF = torch.tensor([int(i / DT) for i in T_STIM_OFF])
+
+# delay lentgh
+T_MAX_DELAY = 5
+T_MIN_DELAY = 1
+DELAY_LIST = None
+
+N_MAX_DELAY = int(T_MAX_DELAY / DT)
+N_MIN_DELAY = int(T_MIN_DELAY / DT)
+N_STEPS = int(T_STEPS/DT) + int(N_MAX_DELAY - N_MIN_DELAY)
+
+x_time = np.linspace(0, N_STEPS*DT, N_STEPS)
+print(x_time.shape)
+#+end_src
+
+#+RESULTS:
+: (180,)
+
+#+begin_src ipython
+def generate_random_delays(N_MIN_DELAY, N_MAX_DELAY, DELAY_LIST=None):
+    # random delays in T_MIN_DELAY, T_MAX_DELAY
+    random_shifts = torch.randint(low=int(N_MIN_DELAY), high=int(N_MAX_DELAY), size=(N_BATCH,))
+
+    # random delays in DELAY_LIST
+    if DELAY_LIST is not None:
+           idx_delay = torch.randint(low=0, high=len(DELAY_LIST), size=(N_BATCH,))
+           random_shifts = torch.tensor(DELAY_LIST, device=device)[idx_delay]
+
+    start_indices = N_STIM_ON.unsqueeze(-1) + random_shifts
+    end_indices = N_STIM_OFF.unsqueeze(-1) + random_shifts
+
+    # restart first stimulus
+    start_indices[0] = N_STIM_ON[0]
+    end_indices[0] = N_STIM_OFF[0]
+
+    return start_indices, end_indices
+
+def generate_2AFC_RD_trials(n_trials, n_steps, start_indices, end_indices, input_size=2, noise=0.1):
+    """Generates one trial of Random Delayed 2AFC."""
+
+    inputs = noise * torch.randn((n_trials, n_steps, input_size))
+    targets = torch.zeros((n_trials, n_steps))
+    mask = torch.zeros((n_trials, n_steps))
+
+    # Decide if it's a Right (1) or Left (0) trial
+    is_right = torch.rand(n_trials) > 0.5
+
+    for batch_idx in range(n_trials):
+        for index in range(input_size):
+            time_slice = slice(int(start_indices[index, batch_idx]),int(end_indices[index, batch_idx]),)
+            inputs[batch_idx, time_slice, index] += 1.0
+
+            # set targets
+            if index==1:
+                targets[batch_idx, time_slice] = 1.0
+                # targets[batch_idx, end_indices[index, batch_idx]:] = torch.nan
+                mask[batch_idx, time_slice] = 1.0
+                mask[batch_idx, end_indices[index, batch_idx]:] = torch.nan
+                # inputs[batch_idx, end_indices[index, batch_idx]:] = torch.nan
+
+    # revert sign for left stimuli
+    inputs[~is_right, :, 0] *= -1.0
+    targets[~is_right, :] *= -1.0
+
+    return inputs, targets, mask
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+noise = 0.1
+start_idx, end_idx = generate_random_delays(N_MIN_DELAY, N_MAX_DELAY, DELAY_LIST=None)
+print(start_idx.shape, end_idx.shape)
+inputs, targets, mask = generate_2AFC_RD_trials(N_BATCH, N_STEPS, start_idx, end_idx, input_size, noise)
+print(inputs.shape, targets.shape, mask.shape)
+print(np.unique(targets))
+#+end_src
+
+#+RESULTS:
+: torch.Size([2, 512]) torch.Size([2, 512])
+: torch.Size([512, 180, 2]) torch.Size([512, 180]) torch.Size([512, 180])
+: [-1.  0.  1.]
+
+#+begin_src ipython
+idx_go = (targets == 1).any(dim=1)
+idx_nogo = (targets == -1).any(dim=1)
+
+print(targets[idx_go].shape, idx_go.shape, idx_nogo.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([283, 180]) torch.Size([512]) torch.Size([512])
+
+#+begin_src ipython
+plt.hist(1.0 * idx_go, bins='auto')
+plt.xlabel('Targets')
+plt.ylabel('Count')
+plt.xticks([0, 1])
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_10.png]]
+
+#+begin_src ipython
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, inputs[idx_nogo, :, 0][:5].mT.cpu().numpy(), alpha=.4)
+ax[0].plot(x_time, targets[idx_nogo].T[:,:5].cpu().numpy(),  alpha=.4)
+ax[0].set_title('Left trials')
+
+ax[1].plot(x_time, inputs[idx_go, :, 0][:5].mT.cpu().numpy(), alpha=.4)
+ax[1].plot(x_time, targets[idx_go].T[:,:5].cpu().numpy(), alpha=.4)
+ax[1].set_title('Right trials')
+
+for i in range(2):
+    # ax[i].axvspan(stim_onset * DT, stim_offset * DT, alpha=0.3)
+    # ax[i].axvspan(response_onset * DT, seq_len * DT, alpha=0.3, color='g')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('FF Inputs')
+    # ax[i].legend(fontsize=14)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_11.png]]
+
+* Training the model
+
+#+begin_src ipython
+learning_rate = 0.01
+epochs = 30
+batch_size = 32
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def optimization(model, X, Y, criterion, optimizer, mask=1, epochs=30, batch_size=32, verbose=1, device='cuda'):
+
+    model.to(device)
+
+    loss_list = []
+    for epoch in range(epochs):
+        permutation = torch.randperm(X.size(0))
+        total_loss = 0
+        for i in range(0, X.size(0), batch_size):
+            indices = permutation[i:i+batch_size]
+            batch_x, batch_y, batch_mask = X[indices].to(device), Y[indices].to(device), mask[indices].to(device)
+
+            output = model(batch_x).squeeze(-1)
+
+            idx_mask = (batch_mask==1)
+            loss = torch.sum(criterion(output, batch_y) * idx_mask) / torch.sum(idx_mask) / 2
+
+            idx_mask = (batch_mask==0)
+            loss += torch.sum(criterion(output, batch_y*0) * idx_mask) / torch.sum(idx_mask) / 2
+
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            total_loss += loss.item()
+
+        loss_list.append(total_loss)
+
+        if (verbose) and (((epoch+1) % 5==0) or (epoch==epochs-1) or (epoch==0)):
+            print(f'Epoch {epoch+1}/{epochs}, Training Loss: {loss:.4f}')
+
+    return loss_list
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+criterion = nn.MSELoss(reduction='none')
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+loss = optimization(model, inputs, targets, criterion, optimizer, mask, epochs)
+#+end_src
+
+#+RESULTS:
+: Epoch 1/30, Training Loss: 0.4956
+: Epoch 5/30, Training Loss: 0.4995
+: Epoch 10/30, Training Loss: 0.4982
+: Epoch 15/30, Training Loss: 0.4780
+: Epoch 20/30, Training Loss: 0.2335
+: Epoch 25/30, Training Loss: 0.1306
+: Epoch 30/30, Training Loss: 0.0480
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+* Testing the model
+
+#+begin_src ipython
+start_idx, end_idx = generate_random_delays(N_MIN_DELAY, N_MAX_DELAY, DELAY_LIST=None)
+print(start_idx.shape, end_idx.shape)
+
+inputs, targets, mask = generate_2AFC_RD_trials(N_BATCH, N_STEPS, start_idx, end_idx, input_size, noise)
+print(inputs.shape, targets.shape, mask.shape)
+
+predictions, rates = model(inputs.to('cuda'), ret_rates=True)
+
+predictions = predictions.squeeze((0, -1)).detach().cpu()
+rates = rates.squeeze((0, -1)).detach().cpu()
+
+print('inputs', inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([2, 512]) torch.Size([2, 512])
+: torch.Size([512, 180, 2]) torch.Size([512, 180]) torch.Size([512, 180])
+: inputs torch.Size([512, 180, 2]) predictions torch.Size([512, 180]) rates torch.Size([512, 180, 128])
+
+#+begin_src ipython
+idx_go = (targets == 1).any(dim=1)
+idx_nogo = (targets == -1).any(dim=1)
+
+print(targets[idx_go].shape, idx_go.shape, idx_nogo.shape)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+idx_go = (targets == 1).any(dim=1)
+idx_nogo = (targets == -1).any(dim=1)
+
+print(targets[idx_go].shape, idx_go.shape, idx_nogo.shape)
+
+#+end_src
+
+#+RESULTS:
+: torch.Size([246, 180]) torch.Size([512]) torch.Size([512])
+
+#+begin_src ipython
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, inputs[idx_nogo, :, 0][:4].mT.cpu().numpy(), alpha=.2)
+ax[0].plot(x_time, targets[idx_nogo].T[:,:4].cpu().numpy(), label='Target', alpha=1)
+ax[0].set_title('Left trials')
+
+ax[1].plot(x_time, inputs[idx_go, :, 0][:4].mT.cpu().numpy(), alpha=.2)
+ax[1].plot(x_time, targets[idx_go].T[:,:4].cpu().numpy(),  label='Target', alpha=1)
+ax[1].set_title('Right trials')
+
+for i in range(2):
+    # ax[i].axvspan(stim_onset * DT, stim_offset * DT, alpha=0.3)
+    # ax[i].axvspan(response_onset * DT, seq_len * DT, alpha=0.3, color='g')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('FF Inputs')
+    # ax[i].legend(fontsize=14)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_19.png]]
+
+#+begin_src ipython
+kappa = (rates @ model.n.detach().cpu()) / rates.shape[-1]
+print(kappa.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([512, 180, 2])
+
+#+begin_src ipython
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+idx = np.random.randint(N_BATCH/4)
+
+ax[0].plot(x_time, targets[idx_nogo][idx].T, alpha=.4)
+ax[0].plot(x_time, kappa[idx_nogo, :, 0][idx].T, alpha=.4)
+ax[0].set_title('Left trial')
+
+ax[1].plot(x_time, targets[idx_go][idx].T, alpha=.4)
+ax[1].plot(x_time, kappa[idx_go, :, 0][idx].T, alpha=.4)
+ax[1].set_title('Right trial')
+
+for i in range(2):
+    # ax[i].axvspan(stim_onset * DT, stim_offset * DT, alpha=0.3)
+    # ax[i].axvspan(response_onset * DT, seq_len * DT, alpha=0.3, color='g')
+    ax[i].set_xlabel("Time (s)")
+    ax[i].set_ylabel("$\\kappa$")
+    # ax[i].set_ylim([-1.5, 1.5])
+    # ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_21.png]]
+
+#+begin_src ipython
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo][idx].T, alpha=.4)
+ax[0].plot(x_time, predictions[idx_nogo][idx].T, alpha=.4)
+ax[0].set_title('Left trial')
+
+ax[1].plot(x_time, targets[idx_go][idx].T, alpha=.4)
+ax[1].plot(x_time, predictions[idx_go][idx].T, alpha=.4)
+ax[1].set_title('Right trial')
+
+for i in range(2):
+    # ax[i].axvspan(stim_onset * DT, stim_offset * DT, alpha=0.3)
+    # ax[i].axvspan(response_onset * DT, seq_len * DT, alpha=0.3, color='g')
+    ax[i].set_xlabel("Time (s)")
+    ax[i].set_ylabel("Readout")
+    ax[i].set_ylim([-1.5, 1.5])
+    # ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_22.png]]
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+
+* Flow
+
+#+begin_src ipython
+from scipy.interpolate import griddata
+import matplotlib as mpl
+from sklearn.cluster import KMeans
+
+def create_mesh(x, y, size=100):
+    x_min, x_max = x.min() - 0.5, x.max() + 0.5
+    y_min, y_max = y.min() - 0.5, y.max() + 0.5
+
+    dx = np.gradient(x, axis=1)
+    dy = np.gradient(y, axis=1)
+
+    xg = np.arange(size) * (x_max - x_min) / (size - 1) + x_min
+    yg = np.arange(size) * (y_max - y_min) / (size - 1) + y_min
+
+    xi, yi = np.meshgrid(xg, yg)
+
+    points = np.vstack((x.flatten(), y.flatten())).T
+
+    ui = griddata(points, dx.flatten(), (xi, yi), method='linear', fill_value=np.nan)
+    vi = griddata(points, dy.flatten(), (xi, yi), method='linear', fill_value=np.nan)
+
+    return xg, yg, xi, yi, ui, vi
+
+
+def get_overlaps_from_rates(rates, model):
+    n = model.n.detach().cpu()
+    N = n.shape[0]
+
+    n1 = n[:, 0].clone()
+    n2 = n[:, 1].clone()
+    n2 = n2 - (n2 @ n1) * n1 / (n1 @ n1)
+
+    vec = torch.stack((n1, n2), dim=1)
+    overlaps = rates.cpu() @ vec / N
+
+    return overlaps.numpy()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def create_grid_initial_conditions(model, grid_range=3, grid_size=20):
+    """Create rates on an equally spaced grid in (kappa1, kappa2).
+
+    Set rates = kappa1 * v1 + kappa2 * v2 where v1, v2 are chosen so
+    that rates @ n_orth / N = kappa exactly. Uses pseudoinverse of the
+    orthogonalized n vectors, then clamps to [-1, 1].
+    """
+    n = model.n.detach().cpu().float()
+    N = n.shape[0]
+
+    n1 = n[:, 0].clone()
+    n2 = n[:, 1].clone()
+    n2 = n2 - (n2 @ n1) * n1 / (n1 @ n1)
+    V = torch.stack((n1, n2), dim=1)  # (N, 2)
+
+    V_pinv = torch.linalg.pinv(V)  # (2, N)
+
+    k1 = torch.linspace(-grid_range, grid_range, grid_size)
+    k2 = torch.linspace(-grid_range, grid_range, grid_size)
+    K1, K2 = torch.meshgrid(k1, k2, indexing='ij')
+
+    kappa_target = torch.stack((K1.flatten(), K2.flatten()), dim=1)  # (n_points, 2)
+
+    # rates such that rates @ V / N = kappa_target
+    rates = kappa_target @ (N * V_pinv)  # (n_points, N)
+    rates = torch.clamp(rates, -1.0, 1.0)
+
+    # Consistent rec_inputs: h = m n^T r / N (what recurrence would produce)
+    rec_inputs = rates @ (model.m @ model.n.T).detach().cpu() / N
+
+    # Verify
+    kappa_check = rates @ V / N
+    print(f'Max kappa error: {(kappa_check - kappa_target).abs().max().item():.6f}')
+    print(f'Rates range: [{rates.min().item():.3f}, {rates.max().item():.3f}]')
+
+    return rates, rec_inputs, K1, K2
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def run_dynamics(model, rates_init, rec_inputs_init, input_type='none', n_steps=50, device='cuda'):
+    n_points = rates_init.shape[0]
+    input_size = model.wi.in_features
+
+    ff_input = torch.zeros(n_points, input_size)
+    rates = rates_init.clone()
+    rec_inputs = rec_inputs_init.clone()
+
+    rates_list = [rates.detach().clone()]
+
+    if input_type == 'go':
+        ff_input[:, 0] = 1.0
+    elif input_type == 'nogo':
+        ff_input[:, 0] = -1.0
+    elif input_type == 'response':
+        ff_input[:, 1] = 1.0
+    elif input_type == 'go_response':
+        ff_input[:, 0] = 1.0; ff_input[:, 1] = 1.0
+    elif input_type == 'nogo_response':
+        ff_input[:, 0] = -1.0; ff_input[:, 1] = 1.0
+
+    with torch.no_grad():
+        for step in range(n_steps):
+            rates, rec_inputs = model.update_dynamics(ff_input.to(device), rec_inputs.to(device), rates.to(device))
+            rates_list.append(rates.detach().cpu().clone())
+
+    return torch.stack(rates_list, dim=1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+def get_fixed_points(overlaps, window=0, n_clusters=3):
+    x = overlaps[:, window:, 0]
+    y = overlaps[:, window:, 1]
+    fp = np.stack((x[:, -1], y[:, -1])).T
+    kmeans = KMeans(n_clusters=n_clusters, random_state=0, n_init=10)
+    kmeans.fit(fp)
+    return np.array(kmeans.cluster_centers_)
+
+
+def plot_flow_grid(overlaps, ax, window=0, IF_STREAM=True, IF_CBAR=False,
+                   IF_FP=True, n_clusters=3):
+    x = overlaps[:, window:, 0]
+    y = overlaps[:, window:, 1]
+
+    xg, yg, xi, yi, ui, vi = create_mesh(x, y, size=300)
+
+    speed = np.sqrt(ui**2 + vi**2)
+    speed_norm = speed # = (speed - np.nanmean(speed)) / (np.nanstd(speed) + 1e-6)
+
+    vmin, vmax = np.nanpercentile(speed_norm, [5, 95])
+    norm = mpl.colors.Normalize(vmin, vmax)
+
+    heatmap = ax.pcolormesh(xi, yi, speed_norm, cmap='coolwarm', shading='auto', norm=norm)
+
+    if IF_STREAM:
+        step = 10
+        Xq = xi[::step, ::step]
+        Yq = yi[::step, ::step]
+        Uq = ui[::step, ::step]
+        Vq = vi[::step, ::step]
+
+        mask = np.isfinite(Uq) & np.isfinite(Vq)
+        ax.quiver(
+            Xq[mask], Yq[mask], Uq[mask], Vq[mask],
+            color=(1, 1, 1, 0.7),
+            angles='xy', scale_units='xy',
+            scale=None, width=0.003
+        )
+
+    if IF_FP:
+        try:
+            centers = get_fixed_points(overlaps, window, n_clusters=n_clusters)
+            ax.plot(centers[:, 0], centers[:, 1], 'o', color='w', ms=14,
+                    markeredgecolor='k', markeredgewidth=1.5, zorder=5)
+        except:
+            pass
+
+    if IF_CBAR:
+        cbar = plt.colorbar(heatmap, ax=ax)
+        cbar.set_label('Norm. Speed')
+
+    ax.set_xlabel('$\\kappa_1$')
+    ax.set_ylabel('$\\kappa_2$')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+n_steps = 100
+grid_range = 4.0
+grid_size = 50
+
+rates_init, rec_inputs_init, K1, K2 = create_grid_initial_conditions(
+    model, grid_range=grid_range, grid_size=grid_size
+)
+
+# Verify equal spacing
+overlaps_init = get_overlaps_from_rates(rates_init.unsqueeze(1), model).squeeze(1)
+#+end_src
+
+#+RESULTS:
+: Max kappa error: 3.217757
+: Rates range: [-1.000, 1.000]
+
+#+begin_src ipython
+fig, ax = plt.subplots(figsize=(width, width))
+ax.scatter(overlaps_init[:, 0], overlaps_init[:, 1], s=5)
+ax.set_xlabel('$\\kappa_1$')
+ax.set_ylabel('$\\kappa_2$')
+ax.set_title('Initial conditions')
+ax.set_aspect('equal')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_29.png]]
+
+#+begin_src ipython
+conditions = {
+    'none': ('Autonomous', 3),
+    'go': ('Right stimulus ON', 2),
+    'nogo': ('Left stimulus ON', 2),
+    'response': ('Response cue ON', 2),
+}
+
+fig, axes = plt.subplots(1, 4, figsize=(4*width, width))
+
+for ax, (cond, (title, nc)) in zip(axes.flat, conditions.items()):
+    rates_out = run_dynamics(model, rates_init, rec_inputs_init,
+                             input_type=cond, n_steps=n_steps)
+    overlaps = get_overlaps_from_rates(rates_out, model)
+    is_last = (cond == 'response')
+    plot_flow_grid(overlaps, ax, IF_STREAM=True, IF_CBAR=is_last,
+                   n_clusters=nc)
+    ax.set_title(title)
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_30.png]]
+
+#+begin_src ipython
+def plot_flow_raw(model, rates_init, rec_inputs_init, K1, K2, ax,
+                  input_type='none', n_steps=1, scale=None,
+                  IF_FP=True, n_clusters=3):
+    """Plot raw flow vectors on the grid without interpolation."""
+    device = model.device
+
+    n = model.n.detach().cpu().float()
+    N = n.shape[0]
+
+    n1 = n[:, 0].clone()
+    n2 = n[:, 1].clone()
+    n2 = n2 - (n2 @ n1) * n1 / (n1 @ n1)
+
+    V = torch.stack((n1, n2), dim=1)
+
+    # Initial overlaps
+    kappa0 = (rates_init @ V / N).numpy()
+
+    # Run dynamics for n_steps
+    rates = rates_init.clone()
+    rec_inputs = rec_inputs_init.clone()
+    input_size = model.wi.in_features
+    ff_input = torch.zeros(rates.shape[0], input_size)
+
+    if input_type == 'go':
+        ff_input[:, 0] = 1.0
+    elif input_type == 'nogo':
+        ff_input[:, 0] = -1.0
+    elif input_type == 'response':
+        ff_input[:, 1] = 1.0
+    elif input_type == 'go_response':
+        ff_input[:, 0] = 1.0; ff_input[:, 1] = 1.0
+    elif input_type == 'nogo_response':
+        ff_input[:, 0] = -1.0; ff_input[:, 1] = 1.0
+
+    with torch.no_grad():
+        for _ in range(n_steps):
+            rates, rec_inputs = model.update_dynamics(ff_input.to(device), rec_inputs.to(device), rates.to(device))
+
+    kappa1 = (rates.cpu() @ V / N).numpy()
+
+    # Raw displacement
+    dk = kappa1 - kappa0
+    speed = np.sqrt(dk[:, 0]**2 + dk[:, 1]**2)
+
+    # Reshape to grid
+    gs = K1.shape[0]
+    X = kappa0[:, 0].reshape(gs, gs)
+    Y = kappa0[:, 1].reshape(gs, gs)
+    U = dk[:, 0].reshape(gs, gs)
+    Vf = dk[:, 1].reshape(gs, gs)
+    S = speed.reshape(gs, gs)
+
+    # Speed heatmap
+    speed_norm = (S - np.nanmean(S)) / (np.nanstd(S) + 1e-6)
+    vmin, vmax = np.nanpercentile(speed_norm, [5, 95])
+    norm = mpl.colors.Normalize(vmin, vmax)
+    ax.pcolormesh(X, Y, speed_norm, cmap='coolwarm', shading='auto', norm=norm)
+
+    # Quiver — raw, no interpolation
+    ax.quiver(X, Y, U, Vf, color=(1, 1, 1, 0.7),
+              angles='xy', scale_units='xy', scale=scale, width=0.004)
+
+    # if IF_FP:
+    #     centers = find_fixed_points(model, rates_init, rec_inputs_init,
+    #                                 input_type=input_type, n_steps=500,
+    #                                 n_clusters=n_clusters)
+    #     if len(centers) > 0:
+    #         ax.plot(centers[:, 0], centers[:, 1], 'o', color='w', ms=14,
+    #                 markeredgecolor='k', markeredgewidth=1.5, zorder=5)
+
+    if IF_FP:
+        # Find fixed points as grid points with smallest speed
+        flat_speed = speed.copy()
+        try:
+            from scipy.ndimage import minimum_filter
+            S_filt = minimum_filter(S, size=3)
+            local_min = (S == S_filt) & (S < np.percentile(speed, 10))
+            fp_x = X[local_min]
+            fp_y = Y[local_min]
+            if len(fp_x) > 0:
+                # Cluster them
+                from sklearn.cluster import KMeans
+                pts = np.stack((fp_x, fp_y), axis=1)
+                nc = min(n_clusters, len(pts))
+                km = KMeans(n_clusters=nc, random_state=0, n_init=10).fit(pts)
+                ax.plot(km.cluster_centers_[:, 0], km.cluster_centers_[:, 1],
+                        'o', color='w', ms=14, markeredgecolor='k',
+                        markeredgewidth=1.5, zorder=5)
+        except Exception:
+            pass
+
+    ax.set_xlabel('$\\kappa_1$')
+    ax.set_ylabel('$\\kappa_2$')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+conditions = {
+    'none': ('Autonomous', 2),
+    'go': ('Right stimulus ON', 2),
+    'nogo': ('Left stimulus ON', 2),
+    'response': ('Response cue ON', 2),
+}
+
+fig, axes = plt.subplots(1, 4, figsize=(4*width, 1*width))
+
+for ax, (cond, (title, nc)) in zip(axes.flat, conditions.items()):
+    plot_flow_raw(model, rates_init, rec_inputs_init, K1, K2, ax,
+                  input_type=cond, n_steps=1, n_clusters=nc)
+    ax.set_title(title)
+    ax.set_aspect('equal')
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_33.png]]
+
+#+begin_src ipython
+def create_grid_from_rec_inputs(model, grid_range=3, grid_size=20):
+    """Create initial conditions on a grid in rec_input space: h = α*n1 + β*n2."""
+    n = model.n.detach().cpu().float()
+    N = n.shape[0]
+
+    # Orthogonalize for visualization
+    n1 = n[:, 0].clone()
+    n2 = n[:, 1].clone()
+    n2_orth = n2 - (n2 @ n1) * n1 / (n1 @ n1)
+
+    k1 = torch.linspace(-grid_range, grid_range, grid_size)
+    k2 = torch.linspace(-grid_range, grid_range, grid_size)
+    K1, K2 = torch.meshgrid(k1, k2, indexing='ij')
+
+    # rec_inputs = alpha * n1 + beta * n2_orth  (in N-dimensional space)
+    alphas = K1.flatten()  # (n_points,)
+    betas = K2.flatten()
+
+    rec_inputs = alphas.unsqueeze(1) * n1.unsqueeze(0) + betas.unsqueeze(1) * n2_orth.unsqueeze(0)
+    # (n_points, N)
+
+    # Rates from rec_inputs (no ff input)
+    rates = torch.tanh(rec_inputs)
+
+    # Verify overlaps
+    V = torch.stack((n1, n2_orth), dim=1)
+    kappa_check = rates @ V / N
+    print(f'Rates range: [{rates.min().item():.3f}, {rates.max().item():.3f}]')
+    print(f'Kappa range: [{kappa_check.min().item():.3f}, {kappa_check.max().item():.3f}]')
+
+    return rates, rec_inputs, K1, K2
+
+
+def run_dynamics_bypass(model, rates_init, rec_inputs_init, ff_bypass=None, n_steps_input=50, n_steps_free=50, device='cuda'):
+    """Run dynamics, optionally injecting ff input directly into rec_inputs (bypassing wi),
+    then run free (autonomous) dynamics.
+
+    ff_bypass: (n_points, N) tensor added to rec_inputs at each input step, or None.
+    """
+    rates = rates_init.clone().to(device)
+    rec_inputs = rec_inputs_init.clone().to(device)
+    N = rates.shape[-1]
+
+    input_size = model.wi.in_features
+    ff_zero = torch.zeros(rates.shape[0], input_size).to(device)
+
+    rates_list = [rates.detach().clone()]
+
+    with torch.no_grad():
+        # Phase 1: input ON (bypass wi, add directly to rec_inputs)
+        for step in range(n_steps_input):
+            hidden = rates @ (model.m @ model.n.T).detach() / N
+            rec_inputs = (1.0 - model.alpha) * rec_inputs + model.alpha * hidden
+            if ff_bypass is not None:
+                rec_inputs = rec_inputs + model.alpha * ff_bypass.to(device)
+            rates = torch.tanh(rec_inputs)  # no wi contribution
+            rates_list.append(rates.detach().clone())
+
+        # Phase 2: autonomous (no input)
+        for step in range(n_steps_free):
+            rates, rec_inputs = model.update_dynamics(ff_zero.to(device), rec_inputs, rates)
+            rates_list.append(rates.detach().clone())
+
+    return torch.stack(rates_list, dim=1)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+n_steps = 10
+grid_range = 5.0
+grid_size = 200
+
+rates_init, rec_inputs_init, K1, K2 = create_grid_from_rec_inputs(
+    model, grid_range=grid_range, grid_size=grid_size
+)
+
+# Verify grid
+overlaps_init = get_overlaps_from_rates(rates_init.unsqueeze(1), model).squeeze(1)
+
+#+end_src
+
+#+RESULTS:
+: Rates range: [-1.000, 1.000]
+: Kappa range: [-1.348, 1.348]
+
+#+begin_src ipython
+fig, ax = plt.subplots(figsize=(width, width))
+ax.scatter(overlaps_init[:, 0], overlaps_init[:, 1], s=5)
+ax.set_xlabel('$\\kappa_1$')
+ax.set_ylabel('$\\kappa_2$')
+ax.set_title('Initial conditions (from rec_inputs grid)')
+ax.set_aspect('equal')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/rnn/figure_36.png]]
+
+#+begin_src ipython
+import warnings
+warnings.filterwarnings("ignore", message=".*pcolormesh.*monotonically.*")
+
+conditions = {
+    'none': ('Autonomous', 3),
+    'go': ('Right stimulus ON', 2),
+    'nogo': ('Left stimulus ON', 2),
+    'response': ('Response cue ON', 2),
+}
+
+fig, axes = plt.subplots(1, 4, figsize=(4*width, 1.5*width))
+
+for ax, (cond, (title, nc)) in zip(axes.flat, conditions.items()):
+    plot_flow_raw(model, rates_init, rec_inputs_init, K1, K2, ax,
+                  input_type=cond, n_steps=1, n_clusters=nc)
+    ax.set_title(title)
+    ax.set_aspect('equal')
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+
+[[file:./figures/rnn/figure_37.png]]
+:END:
+
+
+#+begin_src ipython
+def find_fixed_points(model, rates_init, rec_inputs_init, input_type='none',
+                      n_steps=500, speed_thr=1e-4, n_clusters=3):
+    """Find fixed points by running dynamics to convergence under a specific input."""
+
+
+    n = model.n.detach().cpu().float()
+    N = n.shape[0]
+    n1 = n[:, 0].clone()
+    n2 = n[:, 1].clone()
+    n2 = n2 - (n2 @ n1) * n1 / (n1 @ n1)
+    V = torch.stack((n1, n2), dim=1)
+
+    rates = rates_init.clone()
+    rec_inputs = rec_inputs_init.clone()
+    input_size = model.wi.in_features
+    ff_input = torch.zeros(rates.shape[0], input_size)
+
+    if input_type == 'go':
+        ff_input[:, 0] = 1.0
+    elif input_type == 'nogo':
+        ff_input[:, 0] = -1.0
+    elif input_type == 'response':
+        ff_input[:, 1] = 1.0
+    elif input_type == 'go_response':
+        ff_input[:, 0] = 1.0; ff_input[:, 1] = 1.0
+    elif input_type == 'nogo_response':
+        ff_input[:, 0] = -1.0; ff_input[:, 1] = 1.0
+
+    with torch.no_grad():
+        for _ in range(n_steps):
+            rates_old = rates.clone()
+            rates, rec_inputs = model.update_dynamics(ff_input, rec_inputs, rates)
+
+    # Speed at convergence
+    kappa_final = (rates @ V / N).numpy()
+    kappa_old = (rates_old @ V / N).numpy()
+    speed = np.sqrt(((kappa_final - kappa_old)**2).sum(axis=1))
+
+    # Keep only converged points
+    mask = speed < speed_thr
+    if mask.sum() == 0:
+        mask = speed < np.percentile(speed, 5)
+
+    pts = kappa_final[mask]
+    nc = min(n_clusters, len(pts))
+    if nc > 0 and len(pts) > 0:
+        km = KMeans(n_clusters=nc, random_state=0, n_init=10).fit(pts)
+        return km.cluster_centers_
+    return np.array([])
+#+end_src
+
+#+RESULTS:
+
+#+begin_src ipython
+
+#+end_src
+
+#+RESULTS:
+: dfa299a8-3a02-4ea8-bb55-7930d5b4c419
