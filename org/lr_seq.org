@@ -1,0 +1,6066 @@
+:PROPERTIES:
+:GPTEL_MODEL: gpt-5.5
+:GPTEL_BACKEND: OpenAI
+:GPTEL_SYSTEM: You are a large language model living in Emacs and a helpful assistant. Respond concisely.
+:GPTEL_TOOLS:
+:GPTEL_BOUNDS: ((response (31074 35404) (35454 35556) (36059 38636) (38815 40707) (40826 42601) (43217 43319) (43925 45709) (79323 93074) (93192 109529) (111657 119269) (119328 129225) (129576 137271) (141588 143243) (143281 151130)))
+:END:
+#+Startup: fold
+#+TITLE: Training Recurrent Neural Networks
+#+PROPERTY: header-args:jupyter-python :session lr_seq :kernel python3 :exports results :output-dir ./figures/ :file (lc/org-babel-tangle-figure-filename)
+
+* Settings
+
+#+begin_src jupyter-python
+import sys
+import matplotlib
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
+print("Python exe")
+print(sys.executable)
+
+sns.set_context("notebook")
+sns.set_style("ticks")
+plt.rc("axes.spines", top=False, right=False)
+
+golden_ratio = (5**.5 - 1) / 2
+width = 6
+height = width * golden_ratio
+
+matplotlib.rcParams['figure.figsize'] = [width, height]
+matplotlib.rcParams['lines.markersize'] = 5
+matplotlib.rcParams['axes.labelsize'] = 18
+matplotlib.rcParams['axes.titlesize'] = 20
+matplotlib.rcParams['xtick.labelsize'] = 16
+matplotlib.rcParams['ytick.labelsize'] = 16
+matplotlib.rcParams['lines.linewidth'] = 3
+#+end_src
+
+#+RESULTS:
+: Python exe
+: /home/leon/mambaforge/bin/python
+
+* Imports
+
+#+begin_src jupyter-python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import matplotlib.pyplot as plt
+import numpy as np
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+torch.manual_seed(2)
+np.random.seed(2)
+#+end_src
+
+#+RESULTS:
+
+* Low Rank RNNs
+
+The Vanilla RNN updates its hidden state based on the previous hidden state and the current input:
+
+Let:
+- \( x_t \): feedforward input at time step \( t \)
+- \( h_t \): recurrent input at time \( t \)
+- \( r_t \): rate at time \( t \)
+- \( y_t \): output at time \( t \)
+
+\[h_t = (1-\alpha)h_{t-1} + \alpha \frac{1}{N} m n^\top r_{t-1}.\]
+
+\[
+r_t = \tanh(W_{ih} x_t + b_{ih} + h_{t-1})
+\]
+
+\[
+y_t = \sigma(W_{ho} r_t + b_o)
+\]
+
+#+begin_src jupyter-python
+class LowRankModel(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size, rank=1, alpha=0.01, device='cpu'):
+        super().__init__()
+        # input layer
+        self.wi = nn.Linear(input_size, hidden_size)
+
+        # low rank vectors
+        self.m = nn.Parameter(torch.randn((hidden_size, rank)))
+        self.n = nn.Parameter(torch.randn((hidden_size, rank)))
+
+        with torch.no_grad():
+            self.m.copy_(self.n)
+
+        # output layer
+        if output_size>0:
+            print('linear readout')
+            self.wo = nn.Linear(hidden_size, output_size)
+        else:
+            self.wo = None
+
+        # non linearity
+        self.nonlinearity = torch.tanh
+
+        self.device = device
+        # time constants
+        self.alpha = alpha
+
+    def get_readout(self, rates, rec_inputs, is_internal=False):
+        if self.wo is not None:
+            return self.wo(rates).squeeze(-1)
+        if is_internal: # ostojic
+            return rec_inputs @ self.m[:, -1] / torch.norm(self.m[:, -1])
+        # vreeswijk
+        return rates @ self.n[:, -1] / rates.shape[-1]
+
+
+    def update_dynamics(self, ff_inputs, rec_inputs, rates):
+        # updating the recurrent inputs
+        hidden = (rates @ self.n) @ self.m.T / rates.shape[-1]
+        # hidden = rates @ (self.m @ self.n.T) / rates.shape[-1]
+        rec_inputs = (1.0 - self.alpha) * rec_inputs + self.alpha * hidden
+        # updating the rates
+        rates = self.nonlinearity(self.wi(ff_inputs) + rec_inputs)
+
+        return rates, rec_inputs
+
+
+    def forward(self, ff_inputs, ret_rates=False):
+        # rates and rec_inputs are (n_trials, hidden_size)
+        rec_inputs = torch.randn(ff_inputs.shape[0], self.m.shape[0])
+        rates = self.nonlinearity(self.wi(ff_inputs[:, 0]) + rec_inputs)
+
+        readout_list = []
+        rates_list = []
+        inputs_list = []
+
+        for step in range(ff_inputs.shape[1]):
+            rates, rec_inputs = self.update_dynamics(ff_inputs[:, step], rec_inputs, rates)
+            readout = self.get_readout(rates, rec_inputs)
+
+            rates_list.append(rates)
+            inputs_list.append(rec_inputs)
+            readout_list.append(readout)
+
+        rates_list = torch.stack(rates_list, dim=1)
+        inputs_list = torch.stack(inputs_list, dim=1)
+        readout_list = torch.stack(readout_list, dim=1)
+
+
+        if ret_rates:
+            return readout_list, rates_list, inputs_list
+
+        return readout_list
+#+end_src
+
+#+RESULTS:
+
+---
+
+* Initializing the model
+
+#+begin_src jupyter-python
+TAU = 1
+DT = 0.1
+alpha = DT / TAU
+
+# 4 inputs dimensions: for 2 samples, 2 tests, 2 distractors, 1 cue
+input_size = 7
+hidden_size = 256
+output_size = 0
+noise = 0.05
+rank = 2
+
+model = LowRankModel(input_size, hidden_size, output_size, rank, alpha)
+#+end_src
+
+#+RESULTS:
+
+* DPA task
+** DPA trials
+
+#+begin_src jupyter-python
+N_BATCH = 512
+
+# Stimuli onsets and offsets and trial length
+T_STIM_ON = [1.0, 7.0]
+T_STIM_OFF = [2.0, 8.0]
+T_STEPS = 9
+
+N_STIM_ON = torch.tensor([int(i / DT) for i in T_STIM_ON])
+N_STIM_OFF = torch.tensor([int(i / DT) for i in T_STIM_OFF])
+N_STEPS = int(T_STEPS/DT)
+
+x_time = np.linspace(0, N_STEPS*DT, N_STEPS)
+print(x_time.shape)
+#+end_src
+
+#+RESULTS:
+: (90,)
+
+#+begin_src jupyter-python
+def generate_dpa_trials(n_trials, seq_len, input_size=2, noise=0.1):
+    inputs = noise * torch.randn(n_trials, seq_len, input_size)
+    targets = torch.zeros(n_trials, seq_len)
+    mask = torch.zeros(1, seq_len)
+
+    # first cue: A vs B
+    idx_A = torch.rand(n_trials) > 0.5
+    idx_B = ~idx_A
+
+    # second cue: C vs D
+    idx_C = torch.rand(n_trials) > 0.5
+    idx_D = ~idx_C
+
+    # cue 1 encoding
+    inputs[idx_A, N_STIM_ON[0]:N_STIM_OFF[0], 0] += 1.0
+    inputs[idx_B, N_STIM_ON[0]:N_STIM_OFF[0], 1] += 1.0
+
+    # cue 2 encoding
+    inputs[idx_C, N_STIM_ON[1]:N_STIM_OFF[1], 2] += 1.0
+    inputs[idx_D, N_STIM_ON[1]:N_STIM_OFF[1], 3] += 1.0
+
+    # rewarded pairs: AC and BD
+    idx_pair = (idx_A & idx_C) | (idx_B & idx_D)
+    targets[idx_pair, N_STIM_OFF[1]:] = 1.0
+    targets[~idx_pair, N_STIM_OFF[1]:] = -1.0
+    mask[0, N_STIM_ON[1]:] = 1.0
+
+    return inputs, targets, mask
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+inputs, targets, mask = generate_dpa_trials(N_BATCH, N_STEPS, input_size, noise)
+print(inputs.shape, targets.shape, mask.shape)
+print(np.unique(targets))
+#+end_src
+
+#+RESULTS:
+: torch.Size([512, 90, 7]) torch.Size([512, 90]) torch.Size([1, 90])
+: [-1.  0.  1.]
+
+#+begin_src jupyter-python
+plt.hist(targets[:, -1].reshape(-1), bins='auto')
+plt.xlabel('Targets')
+plt.ylabel('Count')
+plt.xticks([0, 1])
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_8.png]]
+
+#+begin_src jupyter-python
+idx_nogo = torch.argwhere(targets[:, -1] == -1).reshape(-1)[:32]
+idx_go   = torch.argwhere(targets[:, -1] == 1).reshape(-1)[:32]
+
+print(idx_go.shape, idx_nogo.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([32]) torch.Size([32])
+
+#+begin_src jupyter-python
+fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+if len(idx_nogo) > 0:
+    ax[0].plot(x_time, inputs[idx_go, :, 1].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(x_time, inputs[idx_go, :, 3].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(x_time, targets[idx_nogo[0]].cpu().numpy(), 'k', label='Target')
+ax[0].set_title('Unpaired trials')
+
+if len(idx_go) > 0:
+    ax[1].plot(x_time, inputs[idx_go, :, 0].mT.cpu().numpy(), alpha=.2)
+    ax[1].plot(x_time, inputs[idx_go, :, 2].mT.cpu().numpy(), alpha=.2)
+
+    ax[1].plot(x_time, targets[idx_go[0]].cpu().numpy(), 'k', label='Target')
+ax[1].set_title('Paired trials')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Target')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_10.png]]
+
+#+begin_src jupyter-python
+predictions, rates, rec_inputs = model(inputs, ret_rates=True)
+predictions = predictions.detach().cpu()
+rates = rates.squeeze((0, -1)).detach().cpu()
+print('inputs', inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: inputs torch.Size([512, 90, 7]) predictions torch.Size([512, 90]) rates torch.Size([512, 90, 256])
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(x_time, predictions[idx_nogo].T, alpha=.2)
+ax[0].set_title('Unpaired trials')
+
+ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(x_time, predictions[idx_go].T, alpha=.2)
+ax[1].set_title('Paired trials')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Readout')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_12.png]]
+
+** DPA Training
+
+#+begin_src jupyter-python
+learning_rate = 0.05
+epochs = 200
+batch_size = 64
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+def optimization(model, X, Y, criterion, optimizer, mask=1, epochs=30, batch_size=32, verbose=1):
+
+    loss_list = []
+    for epoch in range(epochs):
+        permutation = torch.randperm(X.size(0))
+        total_loss = 0
+        for i in range(0, X.size(0), batch_size):
+            indices = permutation[i:i+batch_size]
+            batch_x, batch_y = X[indices], Y[indices]
+
+            output = model(batch_x)
+
+            loss = torch.sum(criterion(output, batch_y) * mask) / torch.sum(mask) / 2
+            loss += torch.sum(criterion(output, batch_y*0) * (1-mask)) / torch.sum(1-mask) / 2
+
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            total_loss += loss.item()
+
+        loss_list.append(total_loss / batch_size)
+
+        if (verbose) and (((epoch+1) % 5==0) or (epoch==epochs-1) or (epoch==0)):
+            print(f'Epoch {epoch+1}/{epochs}, Training Loss: {loss:.4f}')
+
+    return loss_list
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+criterion = nn.MSELoss(reduction='none')
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+loss = optimization(model, inputs, targets, criterion, optimizer, mask, epochs)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Epoch 1/200, Training Loss: 8.0663
+Epoch 5/200, Training Loss: 8.0524
+Epoch 10/200, Training Loss: 5.5053
+Epoch 15/200, Training Loss: 3.0093
+Epoch 20/200, Training Loss: 1.5168
+Epoch 25/200, Training Loss: 1.2400
+Epoch 30/200, Training Loss: 0.9588
+Epoch 35/200, Training Loss: 0.8192
+Epoch 40/200, Training Loss: 0.8609
+Epoch 45/200, Training Loss: 0.6172
+Epoch 50/200, Training Loss: 1.4258
+Epoch 55/200, Training Loss: 0.6121
+Epoch 60/200, Training Loss: 0.4109
+Epoch 65/200, Training Loss: 0.4140
+Epoch 70/200, Training Loss: 0.3268
+Epoch 75/200, Training Loss: 0.4133
+Epoch 80/200, Training Loss: 0.3186
+Epoch 85/200, Training Loss: 0.2935
+Epoch 90/200, Training Loss: 0.2730
+Epoch 95/200, Training Loss: 0.2240
+Epoch 100/200, Training Loss: 0.1750
+Epoch 105/200, Training Loss: 0.2249
+Epoch 110/200, Training Loss: 0.1439
+Epoch 115/200, Training Loss: 0.2254
+Epoch 120/200, Training Loss: 0.1951
+Epoch 125/200, Training Loss: 0.1952
+Epoch 130/200, Training Loss: 0.2177
+Epoch 135/200, Training Loss: 0.1681
+Epoch 140/200, Training Loss: 0.1741
+Epoch 145/200, Training Loss: 0.1712
+Epoch 150/200, Training Loss: 0.3567
+Epoch 155/200, Training Loss: 0.1089
+Epoch 160/200, Training Loss: 0.1023
+Epoch 165/200, Training Loss: 0.1287
+Epoch 170/200, Training Loss: 3.0993
+Epoch 175/200, Training Loss: 0.5645
+Epoch 180/200, Training Loss: 0.1830
+Epoch 185/200, Training Loss: 0.3018
+Epoch 190/200, Training Loss: 0.1570
+Epoch 195/200, Training Loss: 0.1400
+Epoch 200/200, Training Loss: 0.0937
+#+end_example
+
+#+begin_src jupyter-python
+print(loss[-1])
+#+end_src
+
+#+RESULTS:
+
+
+** DPA Testing
+
+#+begin_src jupyter-python
+inputs, targets, mask = generate_dpa_trials(N_BATCH, N_STEPS, input_size, 0.1)
+print(inputs.shape, targets.shape, mask.shape)
+print(np.unique(targets))
+#+end_src
+
+#+RESULTS:
+: torch.Size([512, 90, 7]) torch.Size([512, 90]) torch.Size([1, 90])
+: [-1.  0.  1.]
+
+#+begin_src jupyter-python
+predictions, rates, rec_inputs = model(inputs, ret_rates=True)
+predictions = predictions.squeeze((0, -1)).detach().cpu()
+rates = rates.squeeze((0, -1)).detach().cpu()
+
+print('rec_inputs', rec_inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: rec_inputs torch.Size([512, 90, 256]) predictions torch.Size([512, 90]) rates torch.Size([512, 90, 256])
+
+#+begin_src jupyter-python
+idx_nogo = torch.argwhere(targets[:, -1] == -1).reshape(-1)[:32]
+idx_go   = torch.argwhere(targets[:, -1] == 1).reshape(-1)[:32]
+
+print(idx_go.shape, idx_nogo.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([32]) torch.Size([32])
+
+#+begin_src jupyter-python
+fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+if len(idx_nogo) > 0:
+    ax[0].plot(x_time, inputs[idx_go, :, 1].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(x_time, inputs[idx_go, :, 3].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(x_time, targets[idx_nogo[0]].cpu().numpy(), 'k', label='Target')
+ax[0].set_title('Unpaired trials')
+
+if len(idx_go) > 0:
+    ax[1].plot(x_time, inputs[idx_go, :, 0].mT.cpu().numpy(), alpha=.2)
+    ax[1].plot(x_time, inputs[idx_go, :, 2].mT.cpu().numpy(), alpha=.2)
+
+    ax[1].plot(x_time, targets[idx_go[0]].cpu().numpy(), 'k', label='Target')
+ax[1].set_title('Paired trials')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Target')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_20.png]]
+
+#+begin_src jupyter-python
+kappa_rec = (rates @ model.n)/ rates.shape[-1]
+kappa_rec = kappa_rec.cpu().detach().numpy()
+print('rates', rates.shape, 'm', model.n.shape, 'kappa_rec', kappa_rec.shape)
+#+end_src
+
+#+RESULTS:
+: rates torch.Size([512, 90, 256]) m torch.Size([256, 2]) kappa_rec (512, 90, 2)
+
+#+begin_src jupyter-python
+kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)
+kappa = kappa.cpu().detach().numpy()
+print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
+#+end_src
+
+#+RESULTS:
+: rec torch.Size([512, 90, 256]) m torch.Size([256, 2]) kappa (512, 90, 2)
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(x_time, kappa_rec[idx_nogo, :, 0].T, alpha=.2)
+ax[0].set_title('Unpaired trial')
+
+ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(x_time, kappa_rec[idx_go, :, 0].T, alpha=.2)
+ax[1].set_title('Paired trial')
+
+ax[2].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
+ax[2].plot(x_time, kappa_rec[idx_nogo, :, 1].T, alpha=.2)
+ax[2].set_title('Unpaired trial')
+
+ax[3].plot(x_time, targets[idx_go][0], 'k', label='Target')
+ax[3].plot(x_time, kappa_rec[idx_go, :, 1].T, alpha=.2)
+ax[3].set_title('Paired trial')
+
+for i in range(4):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('$ \\kappa^{rec}_%d$' % (i//2+1))
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_23.png]]
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(x_time, kappa[idx_nogo, :, 0].T, alpha=.2)
+ax[0].set_title('Unpaired trial')
+
+ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(x_time, kappa[idx_go, :, 0].T, alpha=.2)
+ax[1].set_title('Paired trial')
+
+ax[2].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
+ax[2].plot(x_time, kappa[idx_nogo, :, 1].T, alpha=.2)
+ax[2].set_title('Unpaired trial')
+
+ax[3].plot(x_time, targets[idx_go][0], 'k', label='Target')
+ax[3].plot(x_time, kappa[idx_go, :, 1].T, alpha=.2)
+ax[3].set_title('Paired trial')
+
+for i in range(4):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('$ \\kappa_%d$' % (i//2+1))
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_24.png]]
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(x_time, predictions[idx_nogo].T, alpha=.2)
+ax[0].set_title('Unpaired trial')
+
+ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(x_time, predictions[idx_go].T, alpha=.2)
+ax[1].set_title('Paired trial')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Readout')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_25.png]]
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
+
+m_ = model.m.cpu().detach().numpy().T
+n_ = model.n.cpu().detach().numpy().T
+
+for i in range(2):
+    for j in range(2):
+        ax[i+2*j].scatter(m_[j], n_[i])
+        ax[i+2*j].set_xlabel('$m_%d$' % j)
+        ax[i+2*j].set_ylabel('$n_%d$' % i)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_26.png]]
+
+* GNG task
+** GNG trial
+
+#+begin_src jupyter-python
+N_BATCH = 512
+
+# Stimuli onsets and offsets and trial length
+T_STIM_ON = [1.0, 3.0]
+T_STIM_OFF = [2.0, 4.0]
+T_STEPS = 5
+
+N_STIM_ON = torch.tensor([int(i / DT) for i in T_STIM_ON])
+N_STIM_OFF = torch.tensor([int(i / DT) for i in T_STIM_OFF])
+N_STEPS = int(T_STEPS/DT)
+
+x_time = np.linspace(0, N_STEPS*DT, N_STEPS)
+print(x_time.shape)
+#+end_src
+
+#+RESULTS:
+: (50,)
+
+#+begin_src jupyter-python
+def generate_gng_trials(n_trials, seq_len, input_size=3, noise=0.1):
+    inputs = noise * torch.randn(n_trials, seq_len, input_size)
+    targets = torch.zeros(n_trials, seq_len)
+    mask = torch.zeros(1, seq_len)
+
+    # Go no go
+    idx_go = torch.rand(n_trials) > 0.5
+    idx_nogo = ~idx_go
+
+    # Go noGo
+    inputs[idx_go, N_STIM_ON[0]:N_STIM_OFF[0], 4] += 1.0
+    inputs[idx_nogo, N_STIM_ON[0]:N_STIM_OFF[0], 5] += 1.0
+
+    # cue
+    inputs[:, N_STIM_ON[1]:N_STIM_OFF[1], 6] += 1.0
+
+    # rewarded go
+    targets[idx_go, N_STIM_OFF[1]:] = 1.0
+    targets[idx_nogo, N_STIM_OFF[1]:] = -1.0
+    mask[0, N_STIM_ON[1]:] = 1.0
+
+    return inputs, targets, mask
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+inputs, targets, mask = generate_gng_trials(N_BATCH, N_STEPS, input_size, noise)
+print(inputs.shape, targets.shape, mask.shape)
+print(np.unique(targets))
+#+end_src
+
+#+RESULTS:
+: torch.Size([512, 50, 7]) torch.Size([512, 50]) torch.Size([1, 50])
+: [-1.  0.  1.]
+
+#+begin_src jupyter-python
+plt.hist(targets[:, -1].reshape(-1), bins='auto')
+plt.xlabel('Targets')
+plt.ylabel('Count')
+plt.xticks([0, 1])
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_30.png]]
+
+#+begin_src jupyter-python
+idx_nogo = torch.argwhere(targets[:, -1] == -1).reshape(-1)[:32]
+idx_go   = torch.argwhere(targets[:, -1] == 1).reshape(-1)[:32]
+
+print(idx_go.shape, idx_nogo.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([32]) torch.Size([32])
+
+#+begin_src jupyter-python
+fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+if len(idx_nogo) > 0:
+    ax[0].plot(x_time, inputs[idx_nogo, :, 5].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(x_time, inputs[idx_nogo, :, 6].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(x_time, targets[idx_nogo[0]].cpu().numpy(), 'k', label='Target')
+ax[0].set_title('Nogo trials')
+
+if len(idx_go) > 0:
+    ax[1].plot(x_time, inputs[idx_go, :, 4].mT.cpu().numpy(), alpha=.2)
+    ax[1].plot(x_time, inputs[idx_go, :, 6].mT.cpu().numpy(), alpha=.2)
+
+    ax[1].plot(x_time, targets[idx_go[0]].cpu().numpy(), 'k', label='Target')
+ax[1].set_title('Go trials')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Target')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_32.png]]
+
+#+begin_src jupyter-python
+predictions, rates, rec_inputs = model(inputs, ret_rates=True)
+predictions = predictions.detach().cpu()
+rates = rates.squeeze((0, -1)).detach().cpu()
+print('inputs', inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: inputs torch.Size([512, 50, 7]) predictions torch.Size([512, 50]) rates torch.Size([512, 50, 256])
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(x_time, predictions[idx_nogo].T, alpha=.2)
+ax[0].set_title('Unpaired trials')
+
+ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(x_time, predictions[idx_go].T, alpha=.2)
+ax[1].set_title('Paired trials')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Readout')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_34.png]]
+
+** GNG Training
+
+#+begin_src jupyter-python
+learning_rate = 0.05
+epochs = 100
+batch_size = 64
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+def optimization(model, X, Y, criterion, optimizer, mask=1, epochs=30, batch_size=32, verbose=1):
+
+    loss_list = []
+    for epoch in range(epochs):
+        permutation = torch.randperm(X.size(0))
+        total_loss = 0
+        for i in range(0, X.size(0), batch_size):
+            indices = permutation[i:i+batch_size]
+            batch_x, batch_y = X[indices], Y[indices]
+
+            output = model(batch_x)
+
+            loss = torch.sum(criterion(output, batch_y) * mask) / torch.sum(mask) / 2
+            loss += torch.sum(criterion(output, batch_y*0) * (1-mask)) / torch.sum(1-mask) / 2
+
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            total_loss += loss.item()
+
+        loss_list.append(total_loss / batch_size)
+
+        if (verbose) and (((epoch+1) % 5==0) or (epoch==epochs-1) or (epoch==0)):
+            print(f'Epoch {epoch+1}/{epochs}, Training Loss: {loss:.4f}')
+
+    return loss_list
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+criterion = nn.MSELoss(reduction='none')
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+loss = optimization(model, inputs, targets, criterion, optimizer, mask, epochs)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Epoch 1/100, Training Loss: 0.2205
+Epoch 5/100, Training Loss: 0.1403
+Epoch 10/100, Training Loss: 0.0587
+Epoch 15/100, Training Loss: 0.0341
+Epoch 20/100, Training Loss: 0.0157
+Epoch 25/100, Training Loss: 0.0105
+Epoch 30/100, Training Loss: 0.0086
+Epoch 35/100, Training Loss: 0.0071
+Epoch 40/100, Training Loss: 0.0074
+Epoch 45/100, Training Loss: 0.0070
+Epoch 50/100, Training Loss: 0.0058
+Epoch 55/100, Training Loss: 0.0050
+Epoch 60/100, Training Loss: 0.0067
+Epoch 65/100, Training Loss: 0.0039
+Epoch 70/100, Training Loss: 0.0044
+Epoch 75/100, Training Loss: 0.0038
+Epoch 80/100, Training Loss: 0.0040
+Epoch 85/100, Training Loss: 0.0032
+Epoch 90/100, Training Loss: 0.0034
+Epoch 95/100, Training Loss: 0.0032
+Epoch 100/100, Training Loss: 0.0032
+#+end_example
+
+#+begin_src jupyter-python
+print(loss[-1])
+#+end_src
+
+#+RESULTS:
+: 0.001367454751743935
+
+** GNG Testing
+
+#+begin_src jupyter-python
+inputs, targets, mask = generate_gng_trials(N_BATCH, N_STEPS, input_size, noise)
+print(inputs.shape, targets.shape, mask.shape)
+print(np.unique(targets))
+#+end_src
+
+#+RESULTS:
+: torch.Size([512, 50, 7]) torch.Size([512, 50]) torch.Size([1, 50])
+: [-1.  0.  1.]
+
+#+begin_src jupyter-python
+plt.hist(targets[:, -1].reshape(-1), bins='auto')
+plt.xlabel('Targets')
+plt.ylabel('Count')
+plt.xticks([0, 1])
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_40.png]]
+
+#+begin_src jupyter-python
+idx_nogo = torch.argwhere(targets[:, -1] == -1).reshape(-1)[:32]
+idx_go   = torch.argwhere(targets[:, -1] == 1).reshape(-1)[:32]
+
+print(idx_go.shape, idx_nogo.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([32]) torch.Size([32])
+
+#+begin_src jupyter-python
+fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+if len(idx_nogo) > 0:
+    ax[0].plot(x_time, inputs[idx_nogo, :, 5].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(x_time, inputs[idx_nogo, :, 6].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(x_time, targets[idx_nogo[0]].cpu().numpy(), 'k', label='Target')
+ax[0].set_title('Nogo trials')
+
+if len(idx_go) > 0:
+    ax[1].plot(x_time, inputs[idx_go, :, 4].mT.cpu().numpy(), alpha=.2)
+    ax[1].plot(x_time, inputs[idx_go, :, 6].mT.cpu().numpy(), alpha=.2)
+
+    ax[1].plot(x_time, targets[idx_go[0]].cpu().numpy(), 'k', label='Target')
+ax[1].set_title('Go trials')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Target')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_42.png]]
+
+#+begin_src jupyter-python
+predictions, rates, rec_inputs = model(inputs, ret_rates=True)
+predictions = predictions.detach().cpu()
+rates = rates.squeeze((0, -1)).detach().cpu()
+print('inputs', inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: inputs torch.Size([512, 50, 7]) predictions torch.Size([512, 50]) rates torch.Size([512, 50, 256])
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(x_time, predictions[idx_nogo].T, alpha=.2)
+ax[0].set_title('Nogo trials')
+
+ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(x_time, predictions[idx_go].T, alpha=.2)
+ax[1].set_title('Go trials')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Readout')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_44.png]]
+
+* Dual Talk
+** Dual Task Trial
+
+#+begin_src jupyter-python
+N_BATCH = 512
+
+# Stimuli onsets and offsets and trial length
+T_STIM_ON = [1.0, 3.0, 5.0, 7.0]
+T_STIM_OFF = [2.0, 4.0, 6.0, 8.0]
+T_STEPS = 9
+
+N_STIM_ON = torch.tensor([int(i / DT) for i in T_STIM_ON])
+N_STIM_OFF = torch.tensor([int(i / DT) for i in T_STIM_OFF])
+N_STEPS = int(T_STEPS/DT)
+
+x_time = np.linspace(0, N_STEPS*DT, N_STEPS)
+print(x_time.shape)
+#+end_src
+
+#+RESULTS:
+: (90,)
+
+#+begin_src jupyter-python
+def generate_dual_trials(n_trials, seq_len, input_size=7, noise=0.1):
+    """
+    Sequence:
+      A/B -> None/Go/NoGo -> None/cue -> C/D
+
+    Outputs:
+      targets[0]: DPA decision after C/D
+      targets[1]: GNG decision only for Go/NoGo trials
+
+    Trial types balanced across 6 concrete conditions:
+      0: DPA-only, A, C
+      1: DPA-only, A, D
+      2: Go,       A, C
+      3: Go,       A, D
+      4: NoGo,     B, C
+      5: NoGo,     B, D
+    """
+    inputs = noise * torch.randn(n_trials, seq_len, input_size)
+    targets = torch.zeros(2, n_trials, seq_len)
+    mask = torch.zeros(2, 1, seq_len)
+
+    perm = torch.randperm(n_trials)
+    trial_type = torch.empty(n_trials, dtype=torch.long)
+
+    n_types = 6
+    base = n_trials // n_types
+    rem = n_trials % n_types
+
+    start = 0
+    for k in range(n_types):
+        nk = base + (1 if k < rem else 0)
+        trial_type[perm[start:start+nk]] = k
+        start += nk
+
+    idx0 = trial_type == 0
+    idx1 = trial_type == 1
+    idx2 = trial_type == 2
+    idx3 = trial_type == 3
+    idx4 = trial_type == 4
+    idx5 = trial_type == 5
+
+    idx_A = idx0 | idx1 | idx2 | idx3
+    idx_B = idx4 | idx5
+    idx_C = idx0 | idx2 | idx4
+    idx_D = idx1 | idx3 | idx5
+
+    idx_dpa_only = idx0 | idx1
+    idx_go = idx2 | idx3
+    idx_nogo = idx4 | idx5
+    idx_gng = idx_go | idx_nogo
+
+    # A/B
+    inputs[idx_A, N_STIM_ON[0]:N_STIM_OFF[0], 0] += 1.0
+    inputs[idx_B, N_STIM_ON[0]:N_STIM_OFF[0], 1] += 1.0
+
+    # None / Go / NoGo
+    inputs[idx_go,   N_STIM_ON[1]:N_STIM_OFF[1], 4] += 1.0
+    inputs[idx_nogo, N_STIM_ON[1]:N_STIM_OFF[1], 5] += 1.0
+
+    # None / cue
+    inputs[idx_gng, N_STIM_ON[2]:N_STIM_OFF[2], 6] += 1.0
+
+    # C/D
+    inputs[idx_C, N_STIM_ON[3]:N_STIM_OFF[3], 2] += 1.0
+    inputs[idx_D, N_STIM_ON[3]:N_STIM_OFF[3], 3] += 1.0
+
+    # DPA target after final stimulus
+    idx_pair = (idx_A & idx_C) | (idx_B & idx_D)
+    targets[0, idx_pair, N_STIM_OFF[3]:] = 1.0
+    targets[0, ~idx_pair, N_STIM_OFF[3]:] = -1.0
+    mask[0, 0, N_STIM_ON[3]:] = 1.0
+
+    # GNG target only for Go/NoGo trials, during cue epoch
+    targets[1, idx_go,   N_STIM_ON[2]:N_STIM_OFF[2]] = 1.0
+    targets[1, idx_nogo, N_STIM_ON[2]:N_STIM_OFF[2]] = -1.0
+    mask[1, 0, N_STIM_ON[2]:N_STIM_OFF[2]] = 1.0
+
+    return inputs, targets, mask, trial_type
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+inputs, targets, mask, trial_type = generate_dual_trials(N_BATCH, N_STEPS, input_size=7, noise=noise)
+
+groups = {
+    'DPA only': torch.where((trial_type == 0) | (trial_type == 1))[0],
+    'Go':       torch.where((trial_type == 2) | (trial_type == 3))[0],
+    'NoGo':     torch.where((trial_type == 4) | (trial_type == 5))[0],
+}
+
+fig, ax = plt.subplots(3, 3, figsize=(3*width, 3*height), sharex=True)
+
+for row, (name, idxs) in enumerate(groups.items()):
+    idx = idxs[0].item()
+
+    # Inputs
+    ax[row, 0].plot(x_time, inputs[idx, :, 0].cpu(), label='A')
+    ax[row, 0].plot(x_time, inputs[idx, :, 1].cpu(), label='B')
+    ax[row, 0].plot(x_time, inputs[idx, :, 2].cpu(), label='C')
+    ax[row, 0].plot(x_time, inputs[idx, :, 3].cpu(), label='D')
+    ax[row, 0].plot(x_time, inputs[idx, :, 4].cpu(), '--', label='Go')
+    ax[row, 0].plot(x_time, inputs[idx, :, 5].cpu(), '--', label='NoGo')
+    ax[row, 0].plot(x_time, inputs[idx, :, 6].cpu(), ':', label='cue')
+    ax[row, 0].set_ylabel(name)
+    ax[row, 0].set_title('Inputs')
+
+    # DPA target
+    ax[row, 1].plot(x_time, targets[0, idx].cpu(), 'k', label='target')
+    ax[row, 1].plot(x_time, mask[0, 0].cpu(), color='gray', alpha=.7, label='mask')
+    ax[row, 1].set_title('DPA')
+
+    # GNG target
+    ax[row, 2].plot(x_time, targets[1, idx].cpu(), 'k', label='target')
+    ax[row, 2].plot(x_time, mask[1, 0].cpu(), color='gray', alpha=.7, label='mask')
+    ax[row, 2].set_title('GNG')
+
+    for col in range(3):
+        for j in range(4):
+            ax[row, col].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.15, color='tab:blue')
+        ax[row, col].set_ylim([-1.5, 1.5])
+
+for col in range(3):
+    ax[-1, col].set_xlabel('Time (s)')
+
+ax[0, 0].legend(ncol=4, fontsize=9, loc='upper right')
+ax[0, 1].legend(fontsize=9, loc='upper right')
+ax[0, 2].legend(fontsize=9, loc='upper right')
+
+plt.tight_layout()
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_47.png]]
+
+** Naive Dual Testing
+
+#+begin_src jupyter-python
+inputs, targets, mask, trial_type = generate_dual_trials(N_BATCH, N_STEPS, input_size=7, noise=noise)
+print(inputs.shape, targets.shape, mask.shape)
+print(np.unique(targets))
+#+end_src
+
+#+RESULTS:
+: torch.Size([512, 90, 7]) torch.Size([2, 512, 90]) torch.Size([2, 1, 90])
+: [-1.  0.  1.]
+
+#+begin_src jupyter-python
+predictions, rates, rec_inputs = model(inputs, ret_rates=True)
+predictions = predictions.squeeze((0, -1)).detach().cpu()
+rates = rates.squeeze((0, -1)).detach().cpu()
+
+print('rec_inputs', rec_inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: rec_inputs torch.Size([512, 90, 256]) predictions torch.Size([512, 90]) rates torch.Size([512, 90, 256])
+
+#+begin_src jupyter-python
+def plot_dynamics_by_trial_type(trial_type, trial_ids, kappa, predictions, targets, x_time, title=''):
+    idx = torch.where(torch.isin(trial_type, torch.tensor(trial_ids)))[0][:32]
+
+    fig, ax = plt.subplots(1, 3, figsize=(3*width, height), sharex=True)
+
+    if len(idx) > 0:
+        idx0 = idx[0].item()
+
+        ax[0].plot(x_time, kappa[idx, :, 0].T, alpha=.2)
+        ax[0].set_title(f'{title}: $\\kappa_1$')
+
+        ax[1].plot(x_time, kappa[idx, :, 1].T, alpha=.2)
+        ax[1].set_title(f'{title}: $\\kappa_2$')
+
+        ax[2].plot(x_time, predictions[idx].T, alpha=.2)
+        ax[2].plot(x_time, targets[0, idx0].cpu().numpy(), 'k', lw=2, label='DPA target')
+        ax[2].plot(x_time, targets[1, idx0].cpu().numpy(), color='gray', lw=2, ls='--', label='GNG target')
+        ax[2].set_title(f'{title}: readout')
+
+    for i in range(3):
+        for j in range(len(T_STIM_ON)):
+            ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.15)
+        ax[i].set_xlabel('Time (s)')
+
+    ax[0].set_ylabel('Amplitude')
+    ax[2].set_ylabel('Readout')
+    ax[2].legend(fontsize=10)
+
+    plt.tight_layout()
+    plt.show()
+#+end_src
+
+#+RESULTS:
+
+And call it like this:
+
+#+begin_src jupyter-python
+plot_dynamics_by_trial_type(trial_type, [0, 1], kappa, predictions, targets, x_time, title='DPA only')
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_51.png]]
+
+#+begin_src jupyter-python
+plot_dynamics_by_trial_type(trial_type, [2, 3], kappa, predictions, targets, x_time, title='Go')
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_52.png]]
+
+#+begin_src jupyter-python
+plot_dynamics_by_trial_type(trial_type, [4, 5], kappa, predictions, targets, x_time, title='NoGo')
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_53.png]]
+
+
+** Dual Training
+
+#+begin_src jupyter-python
+learning_rate = 0.05
+epochs = 200
+batch_size = 64
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+def optimization(model, X, Y, criterion, optimizer, mask, epochs=30, batch_size=32, verbose=1):
+    """
+    Shared readout trained on multiple task targets.
+
+    X:    (n_trials, seq_len, input_size)
+    Y:    (n_tasks, n_trials, seq_len)
+    mask: (n_tasks, 1, seq_len)
+    model(X) -> (n_trials, seq_len)
+    """
+    loss_list = []
+    n_tasks = Y.shape[0]
+
+    for epoch in range(epochs):
+        permutation = torch.randperm(X.size(0))
+        total_loss = 0.0
+
+        for i in range(0, X.size(0), batch_size):
+            indices = permutation[i:i+batch_size]
+            batch_x = X[indices]      # (B, T, in)
+            batch_y = Y[:, indices]   # (n_tasks, B, T)
+
+            output = model(batch_x)   # (B, T)
+
+            loss = 0.0
+            for task in range(n_tasks):
+                task_loss = torch.sum(criterion(output, batch_y[task]) * mask[task]) / torch.sum(mask[task]) / 2
+                base_loss = torch.sum(criterion(output, torch.zeros_like(batch_y[task])) * (1 - mask[task])) / torch.sum(1 - mask[task]) / 2
+                loss = loss + task_loss + base_loss
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+
+        loss_list.append(total_loss / max(1, X.size(0) // batch_size))
+
+        if verbose and (((epoch + 1) % 5 == 0) or (epoch == 0) or (epoch == epochs - 1)):
+            print(f'Epoch {epoch+1}/{epochs}, Training Loss: {loss:.4f}')
+
+    return loss_list
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+criterion = nn.MSELoss(reduction='none')
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+loss = optimization(model, inputs, targets, criterion, optimizer, mask, epochs, batch_size)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Epoch 1/200, Training Loss: 11.0579
+Epoch 5/200, Training Loss: 6.6578
+Epoch 10/200, Training Loss: 6.0152
+Epoch 15/200, Training Loss: 6.0391
+Epoch 20/200, Training Loss: 6.0728
+Epoch 25/200, Training Loss: 6.2368
+Epoch 30/200, Training Loss: 5.9105
+Epoch 35/200, Training Loss: 5.7230
+Epoch 40/200, Training Loss: 6.1585
+Epoch 45/200, Training Loss: 5.8393
+Epoch 50/200, Training Loss: 5.8271
+Epoch 55/200, Training Loss: 5.6995
+Epoch 60/200, Training Loss: 6.2045
+Epoch 65/200, Training Loss: 6.0082
+Epoch 70/200, Training Loss: 5.8775
+Epoch 75/200, Training Loss: 6.3169
+Epoch 80/200, Training Loss: 5.5575
+Epoch 85/200, Training Loss: 6.0717
+Epoch 90/200, Training Loss: 6.0593
+Epoch 95/200, Training Loss: 5.7467
+Epoch 100/200, Training Loss: 5.9951
+Epoch 105/200, Training Loss: 5.9304
+Epoch 110/200, Training Loss: 5.4897
+Epoch 115/200, Training Loss: 5.7421
+Epoch 120/200, Training Loss: 5.9868
+Epoch 125/200, Training Loss: 6.1176
+Epoch 130/200, Training Loss: 5.6095
+Epoch 135/200, Training Loss: 6.1104
+Epoch 140/200, Training Loss: 5.9210
+Epoch 145/200, Training Loss: 6.1691
+Epoch 150/200, Training Loss: 5.8561
+Epoch 155/200, Training Loss: 5.7306
+Epoch 160/200, Training Loss: 5.9184
+Epoch 165/200, Training Loss: 5.5410
+Epoch 170/200, Training Loss: 6.1719
+Epoch 175/200, Training Loss: 5.9180
+Epoch 180/200, Training Loss: 6.3562
+Epoch 185/200, Training Loss: 6.3552
+Epoch 190/200, Training Loss: 6.1619
+Epoch 195/200, Training Loss: 6.1646
+Epoch 200/200, Training Loss: 6.1000
+#+end_example
+
+#+begin_src jupyter-python
+print(loss[-1])
+#+end_src
+
+#+RESULTS:
+
+** Expert Dual Testing
+
+#+begin_src jupyter-python
+inputs, targets, mask, trial_type = generate_dual_trials(N_BATCH, N_STEPS, input_size=7, noise=noise)
+print(inputs.shape, targets.shape, mask.shape)
+print(np.unique(targets))
+#+end_src
+
+#+RESULTS:
+: torch.Size([512, 90, 7]) torch.Size([2, 512, 90]) torch.Size([2, 1, 90])
+: [-1.  0.  1.]
+
+#+begin_src jupyter-python
+predictions, rates, rec_inputs = model(inputs, ret_rates=True)
+predictions = predictions.squeeze((0, -1)).detach().cpu()
+rates = rates.squeeze((0, -1)).detach().cpu()
+
+print('rec_inputs', rec_inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: rec_inputs torch.Size([512, 90, 256]) predictions torch.Size([512, 90]) rates torch.Size([512, 90, 256])
+
+#+begin_src jupyter-python
+def plot_dynamics_by_trial_type(trial_type, trial_ids, kappa, predictions, targets, x_time, title=''):
+    idx = torch.where(torch.isin(trial_type, torch.tensor(trial_ids)))[0][:32]
+
+    fig, ax = plt.subplots(1, 3, figsize=(3*width, height), sharex=True)
+
+    if len(idx) > 0:
+        idx0 = idx[0].item()
+
+        ax[0].plot(x_time, kappa[idx, :, 0].T, alpha=.2)
+        ax[0].set_title(f'{title}: $\\kappa_1$')
+
+        ax[1].plot(x_time, kappa[idx, :, 1].T, alpha=.2)
+        ax[1].set_title(f'{title}: $\\kappa_2$')
+
+        ax[2].plot(x_time, predictions[idx].T, alpha=.2)
+        ax[2].plot(x_time, targets[0, idx0].cpu().numpy(), 'k', lw=2, label='DPA target')
+        ax[2].plot(x_time, targets[1, idx0].cpu().numpy(), color='gray', lw=2, ls='--', label='GNG target')
+        ax[2].set_title(f'{title}: readout')
+
+    for i in range(3):
+        for j in range(len(T_STIM_ON)):
+            ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.15)
+        ax[i].set_xlabel('Time (s)')
+
+    ax[0].set_ylabel('Amplitude')
+    ax[2].set_ylabel('Readout')
+    ax[2].legend(fontsize=10)
+
+    plt.tight_layout()
+    plt.show()
+#+end_src
+
+#+RESULTS:
+
+And call it like this:
+
+#+begin_src jupyter-python
+plot_dynamics_by_trial_type(trial_type, [0, 1], kappa, predictions, targets, x_time, title='DPA only')
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_61.png]]
+
+#+begin_src jupyter-python
+plot_dynamics_by_trial_type(trial_type, [2, 3], kappa, predictions, targets, x_time, title='Go')
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_62.png]]
+
+#+begin_src jupyter-python
+plot_dynamics_by_trial_type(trial_type, [4, 5], kappa, predictions, targets, x_time, title='NoGo')
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_63.png]]
+
+* Phase portrait
+*** Kappa_M field
+
+#+begin_src jupyter-python
+# ---- Imports and utilities ----
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
+
+
+def _as_int(x):
+    return int(x.item()) if hasattr(x, "item") else int(x)
+
+
+def infer_dpa_conditions(inputs):
+    """Infer AC/AD/BC/BD labels from cue-channel means."""
+    t1_on, t1_off = _as_int(N_STIM_ON[0]), _as_int(N_STIM_OFF[0])
+    t2_on, t2_off = _as_int(N_STIM_ON[1]), _as_int(N_STIM_OFF[1])
+
+    s1 = inputs[:, t1_on:t1_off, :2].mean(dim=1)
+    s2 = inputs[:, t2_on:t2_off, 2:4].mean(dim=1)
+
+    is_A = s1[:, 0] > s1[:, 1]
+    is_C = s2[:, 0] > s2[:, 1]
+
+    return np.array([
+        ("A" if a else "B") + ("C" if c else "D")
+        for a, c in zip(is_A.cpu().numpy(), is_C.cpu().numpy())
+    ])
+
+
+def internal_readout_matrix(model):
+    """
+    Return P such that kappa = h @ P.T.
+
+    For M = [m_1, ..., m_R],
+        kappa_k = h dot m_k / ||m_k||^2.
+    """
+    M = model.m
+    col_norm2 = torch.sum(M**2, dim=0).clamp_min(1e-12)
+    return M.T / col_norm2[:, None]
+
+
+def h_from_internal_kappa(model, kappa_grid, ridge=1e-6):
+    """
+    Construct h in span(M) whose internal M-readouts equal kappa_grid.
+
+    Coordinate:
+        kappa = D^{-1} M^T h,
+        D = diag(||m_k||^2).
+
+    For non-orthogonal M:
+        h = M a,
+        a = (M^T M)^(-1) D kappa.
+    """
+    M = model.m
+    _, R = M.shape
+
+    G = M.T @ M
+    D = torch.diag(torch.diag(G))
+    G_reg = G + ridge * torch.eye(R, device=M.device, dtype=M.dtype)
+
+    a_T = torch.linalg.solve(G_reg, D @ kappa_grid.T)
+    a = a_T.T
+
+    return a @ M.T
+
+
+def internal_latent_vector_field(model, kappa_grid, ff_input=None, ridge=1e-6):
+    """
+    Vector field in internal M-readout coordinates.
+
+    Recurrent-input dynamics:
+        dh/dt = -h + M psi(h, x)
+
+    where
+        psi = N^T tanh(h + W_i x + b_i) / H.
+
+    Internal coordinate:
+        kappa_k = h dot m_k / ||m_k||^2.
+    """
+    device = next(model.parameters()).device
+    dtype = next(model.parameters()).dtype
+
+    kappa_grid = kappa_grid.to(device=device, dtype=dtype)
+    Pn, _ = kappa_grid.shape
+    H = model.m.shape[0]
+
+    if ff_input is None:
+        ff_input = torch.zeros(model.wi.in_features, device=device, dtype=dtype)
+    else:
+        ff_input = torch.as_tensor(ff_input, device=device, dtype=dtype)
+
+    ff_input = ff_input[None, :].expand(Pn, -1)
+
+    M = model.m
+    N = model.n
+
+    h = h_from_internal_kappa(model, kappa_grid, ridge=ridge)
+    rates = model.nonlinearity(model.wi(ff_input) + h)
+
+    psi = rates @ N / H
+    h_drive = psi @ M.T
+
+    P_int = internal_readout_matrix(model)
+    kappa_drive = h_drive @ P_int.T
+
+    d_kappa = kappa_drive - kappa_grid
+
+    return d_kappa, kappa_drive
+
+
+@torch.no_grad()
+def run_model_with_internal_readouts(model, ff_inputs, rec_init="zero"):
+    """
+    Run model and return internal M-readout trajectories.
+
+    kappa_k(t) = h_t dot m_k / ||m_k||^2.
+
+    Returns
+    -------
+    kappa : np.ndarray, shape (B, T, R)
+    readout : np.ndarray, shape (B, T) or (B, T, O)
+    """
+    was_training = model.training
+    model.eval()
+
+    device = next(model.parameters()).device
+    dtype = next(model.parameters()).dtype
+
+    x = ff_inputs.to(device=device, dtype=dtype)
+    B, T, _ = x.shape
+    H, _ = model.m.shape
+
+    if rec_init == "zero":
+        rec_inputs = torch.zeros(B, H, device=device, dtype=dtype)
+    elif rec_init == "random":
+        rec_inputs = torch.randn(B, H, device=device, dtype=dtype)
+    else:
+        raise ValueError("rec_init must be 'zero' or 'random'.")
+
+    rates = model.nonlinearity(model.wi(x[:, 0]) + rec_inputs)
+    P_int = internal_readout_matrix(model)
+
+    kappa_list = []
+    readout_list = []
+
+    for t in range(T):
+        rates, rec_inputs = model.update_dynamics(x[:, t], rec_inputs, rates)
+
+        kappa_t = rec_inputs @ P_int.T
+        readout_t = model.get_readout(rates, rec_inputs)
+
+        kappa_list.append(kappa_t)
+        readout_list.append(readout_t)
+
+    kappa = torch.stack(kappa_list, dim=1)
+    readout = torch.stack(readout_list, dim=1)
+
+    if was_training:
+        model.train()
+
+    return kappa.cpu().numpy(), readout.squeeze(-1).cpu().numpy()
+
+
+def compute_internal_field_for_input(model, K1, K2, ff_input=None):
+    """Compute vector field on a 2D internal-coordinate grid."""
+    kappa_grid_np = np.stack([K1.ravel(), K2.ravel()], axis=1)
+    kappa_grid = torch.tensor(kappa_grid_np, dtype=torch.float32)
+
+    with torch.no_grad():
+        dK, _ = internal_latent_vector_field(
+            model,
+            kappa_grid,
+            ff_input=ff_input,
+        )
+
+    dK_np = dK.cpu().numpy()
+    U = dK_np[:, 0].reshape(K1.shape)
+    V = dK_np[:, 1].reshape(K2.shape)
+    speed = np.sqrt(U**2 + V**2)
+
+    return U, V, speed
+
+
+def pick_one_trial_per_condition(labels, condition_order=("AC", "AD", "BC", "BD")):
+    """Return first available trial index for each condition."""
+    idx_by_condition = {}
+
+    for cond in condition_order:
+        idx = np.flatnonzero(labels == cond)
+        if len(idx) == 0:
+            raise RuntimeError(f"No trials found for condition {cond}.")
+        idx_by_condition[cond] = int(idx[0])
+
+    return idx_by_condition
+
+
+def make_grid_from_trajectories(
+    traj,
+    idx_by_condition,
+    condition_order=("AC", "AD", "BC", "BD"),
+    pad=0.75,
+    expand=2.0,
+    min_lim=5.0,
+    n_grid=121,
+):
+    """Build square grid around selected trajectories."""
+    selected = np.stack([traj[idx_by_condition[c]] for c in condition_order], axis=0)
+    flat = selected.reshape(-1, 2)
+
+    k1_min, k2_min = flat.min(axis=0) - pad
+    k1_max, k2_max = flat.max(axis=0) + pad
+
+    base_lim = np.max(np.abs([k1_min, k1_max, k2_min, k2_max]))
+    lim = max(expand * base_lim, min_lim)
+
+    k1 = np.linspace(-lim, lim, n_grid)
+    k2 = np.linspace(-lim, lim, n_grid)
+    K1, K2 = np.meshgrid(k1, k2)
+
+    return K1, K2, lim
+
+
+def add_task_epoch_spans(ax):
+    """Shade sample, test, and response epochs."""
+    for j in range(2):
+        ax.axvspan(
+            T_STIM_ON[j],
+            T_STIM_OFF[j],
+            color="tab:blue",
+            alpha=0.15,
+            lw=0,
+        )
+
+    ax.axvspan(
+        T_STIM_OFF[1],
+        T_STEPS,
+        color="gold",
+        alpha=0.20,
+        lw=0,
+    )
+
+
+def plot_nullclines(ax, K1, K2, U, V, lw=1.8):
+    """Plot dκ1=0 and dκ2=0 nullclines."""
+    ax.contour(K1, K2, U, levels=[0], colors="tab:red", linewidths=lw)
+    ax.contour(K1, K2, V, levels=[0], colors="tab:blue", linewidths=lw)
+
+
+def plot_speed_field(ax, K1, K2, speed, vmax, cmap="viridis"):
+    """Plot speed field with explicit shape check."""
+    assert K1.shape == K2.shape == speed.shape, (
+        f"K1 {K1.shape}, K2 {K2.shape}, speed {speed.shape}"
+    )
+
+    return ax.pcolormesh(
+        K1,
+        K2,
+        speed,
+        shading="nearest",
+        cmap=cmap,
+        vmin=0,
+        vmax=vmax,
+    )
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+# ---- Summary figure: autonomous + input dynamics with fixed points ----
+
+from scipy.optimize import root
+
+condition_order = ("AC", "AD", "BC", "BD")
+
+condition_colors = {
+    "AC": "tab:green",
+    "AD": "tab:orange",
+    "BC": "tab:purple",
+    "BD": "tab:cyan",
+}
+
+input_vectors = {
+    "A": [1.0, 0.0, 0.0, 0.0],
+    "B": [0.0, 1.0, 0.0, 0.0],
+    "C": [0.0, 0.0, 1.0, 0.0],
+    "D": [0.0, 0.0, 0.0, 1.0],
+}
+
+# Fixed-point marker styling.
+# Increase fp_size to make dots bigger.
+fp_size = 220
+fp_edge_lw = 1.4
+
+
+def find_fixed_points_2d(
+    model,
+    K1,
+    K2,
+    U,
+    V,
+    ff_input=None,
+    n_candidates=120,
+    residual_tol=1e-5,
+    unique_tol=5e-2,
+):
+    """
+    Find fixed points of the 2D projected latent dynamics.
+
+    Roots satisfy
+
+        d kappa^M / dt = 0.
+
+    Uses low-speed grid points as initial guesses and refines with scipy.root.
+
+    Returns
+    -------
+    fixed_points : np.ndarray, shape (n_fixed_points, 2)
+        Rows are [kappa_1, kappa_2].
+    """
+    speed = np.sqrt(U**2 + V**2)
+
+    k1_min, k1_max = K1.min(), K1.max()
+    k2_min, k2_max = K2.min(), K2.max()
+
+    n_candidates = min(n_candidates, speed.size)
+
+    candidate_idx = np.argpartition(
+        speed.ravel(),
+        n_candidates - 1,
+    )[:n_candidates]
+
+    guesses = np.column_stack([
+        K1.ravel()[candidate_idx],
+        K2.ravel()[candidate_idx],
+    ])
+
+    def field_np(kappa_np):
+        kappa = torch.tensor(
+            kappa_np[None, :],
+            dtype=torch.float32,
+        )
+
+        with torch.no_grad():
+            dK, _ = internal_latent_vector_field(
+                model,
+                kappa,
+                ff_input=ff_input,
+            )
+
+        return dK.cpu().numpy().reshape(-1)
+
+    fixed_points = []
+
+    for guess in guesses:
+        sol = root(field_np, guess, method="hybr")
+
+        if not sol.success:
+            continue
+
+        fp = sol.x
+        residual = np.linalg.norm(field_np(fp))
+
+        if residual > residual_tol:
+            continue
+
+        # Keep only fixed points inside plotted region.
+        if not (k1_min <= fp[0] <= k1_max and k2_min <= fp[1] <= k2_max):
+            continue
+
+        # Deduplicate nearby roots.
+        is_new = all(
+            np.linalg.norm(fp - old_fp) > unique_tol
+            for old_fp in fixed_points
+        )
+
+        if is_new:
+            fixed_points.append(fp)
+
+    if len(fixed_points) == 0:
+        return np.empty((0, 2))
+
+    return np.stack(fixed_points, axis=0)
+
+
+# 1. Run model and extract internal trajectories.
+labels = infer_dpa_conditions(inputs)
+idx_by_condition = pick_one_trial_per_condition(labels, condition_order)
+
+traj, readout = run_model_with_internal_readouts(
+    model,
+    inputs,
+    rec_init="zero",
+)
+
+# 2. Build grid around selected trajectories.
+K1, K2, lim = make_grid_from_trajectories(
+    traj,
+    idx_by_condition,
+    condition_order=condition_order,
+    pad=0.75,
+    expand=2.0,
+    min_lim=5,
+    n_grid=121,
+)
+
+# 3. Autonomous vector field.
+U0, V0, speed0 = compute_internal_field_for_input(
+    model,
+    K1,
+    K2,
+    ff_input=None,
+)
+
+# 4. Autonomous fixed points.
+fixed_points_auto = find_fixed_points_2d(
+    model,
+    K1,
+    K2,
+    U0,
+    V0,
+    ff_input=None,
+    n_candidates=160,
+    residual_tol=1e-5,
+    unique_tol=5e-2,
+)
+
+print("Autonomous fixed points:")
+print(fixed_points_auto)
+
+# 5. Fixed-input vector fields and fixed points.
+fields = {}
+fixed_points_inputs = {}
+
+for name, x_vec in input_vectors.items():
+    Ui, Vi, speed_i = compute_internal_field_for_input(
+        model,
+        K1,
+        K2,
+        ff_input=x_vec,
+    )
+
+    fields[name] = {
+        "U": Ui,
+        "V": Vi,
+        "speed": speed_i,
+    }
+
+    fixed_points_inputs[name] = find_fixed_points_2d(
+        model,
+        K1,
+        K2,
+        Ui,
+        Vi,
+        ff_input=x_vec,
+        n_candidates=160,
+        residual_tol=1e-5,
+        unique_tol=5e-2,
+    )
+
+    print(f"Input {name} fixed points:")
+    print(fixed_points_inputs[name])
+
+# 6. Shape checks.
+assert K1.shape == K2.shape == speed0.shape, (
+    K1.shape,
+    K2.shape,
+    speed0.shape,
+)
+
+for name in ("A", "B", "C", "D"):
+    assert fields[name]["speed"].shape == K1.shape, (
+        name,
+        fields[name]["speed"].shape,
+        K1.shape,
+    )
+
+# Shared speed scale across all phase portraits.
+all_speeds = [speed0.ravel()] + [
+    fields[name]["speed"].ravel()
+    for name in ("A", "B", "C", "D")
+]
+
+vmax_phase = np.nanpercentile(np.concatenate(all_speeds), 95)
+
+# 7. Figure layout.
+fig, axd = plt.subplot_mosaic(
+    [
+        ["auto", "auto", "A", "B"],
+        ["auto", "auto", "C", "D"],
+    ],
+    figsize=(3.8 * width, 1.9 * width),
+    constrained_layout=True,
+    gridspec_kw={
+        "width_ratios": [1.25, 1.25, 1.0, 1.0],
+        "height_ratios": [1.0, 1.0],
+    },
+)
+
+ax_auto = axd["auto"]
+ax_inputs = [axd["A"], axd["B"], axd["C"], axd["D"]]
+
+# --------------------
+# A. Autonomous dynamics with task trajectories and autonomous fixed points
+# --------------------
+im_auto = plot_speed_field(
+    ax_auto,
+    K1,
+    K2,
+    speed0,
+    vmax=vmax_phase,
+)
+
+ax_auto.streamplot(
+    K1,
+    K2,
+    U0,
+    V0,
+    color="white",
+    density=0.8,
+    linewidth=1.0,
+    arrowsize=1.0,
+)
+
+plot_nullclines(ax_auto, K1, K2, U0, V0, lw=2.0)
+
+# Overlay one trajectory per condition directly on the autonomous heatmap.
+for cond in condition_order:
+    idx = idx_by_condition[cond]
+    xy = traj[idx]
+    color = condition_colors[cond]
+
+    ax_auto.plot(
+        xy[:, 0],
+        xy[:, 1],
+        color=color,
+        lw=3,
+        alpha=0.95,
+        label=cond,
+        zorder=4,
+    )
+
+    # Start point.
+    ax_auto.scatter(
+        xy[0, 0],
+        xy[0, 1],
+        color=color,
+        s=55,
+        marker="o",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+    # End point.
+    ax_auto.scatter(
+        xy[-1, 0],
+        xy[-1, 1],
+        color=color,
+        s=80,
+        marker="X",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+# Autonomous fixed points: black dots.
+if len(fixed_points_auto) > 0:
+    ax_auto.scatter(
+        fixed_points_auto[:, 0],
+        fixed_points_auto[:, 1],
+        s=fp_size,
+        marker="o",
+        facecolor="black",
+        edgecolor="white",
+        linewidth=fp_edge_lw,
+        zorder=9,
+    )
+
+ax_auto.axhline(0, color="k", lw=1, alpha=0.25)
+ax_auto.axvline(0, color="k", lw=1, alpha=0.25)
+ax_auto.set_xlim(-lim, lim)
+ax_auto.set_ylim(-lim, lim)
+ax_auto.set_aspect("equal", adjustable="box")
+ax_auto.set_xlabel(r"$\kappa^M_1$")
+ax_auto.set_ylabel(r"$\kappa^M_2$")
+ax_auto.set_title("Autonomous dynamics with task trajectories")
+
+# --------------------
+# B-E. Fixed-input dynamics
+# --------------------
+for ax, name in zip(ax_inputs, ("A", "B", "C", "D")):
+    Ui = fields[name]["U"]
+    Vi = fields[name]["V"]
+    speed_i = fields[name]["speed"]
+    fixed_points_i = fixed_points_inputs[name]
+
+    plot_speed_field(
+        ax,
+        K1,
+        K2,
+        speed_i,
+        vmax=vmax_phase,
+    )
+
+    ax.streamplot(
+        K1,
+        K2,
+        Ui,
+        Vi,
+        color="white",
+        density=0.65,
+        linewidth=0.8,
+        arrowsize=0.8,
+    )
+
+    plot_nullclines(ax, K1, K2, Ui, Vi, lw=1.4)
+
+    # Autonomous fixed points overlaid on all input heatmaps: black dots.
+    if len(fixed_points_auto) > 0:
+        ax.scatter(
+            fixed_points_auto[:, 0],
+            fixed_points_auto[:, 1],
+            s=fp_size,
+            marker="o",
+            facecolor="black",
+            edgecolor="white",
+            linewidth=fp_edge_lw,
+            zorder=8,
+        )
+
+    # Fixed points for this held input: white dots.
+    if len(fixed_points_i) > 0:
+        ax.scatter(
+            fixed_points_i[:, 0],
+            fixed_points_i[:, 1],
+            s=fp_size,
+            marker="o",
+            facecolor="white",
+            edgecolor="black",
+            linewidth=fp_edge_lw,
+            zorder=9,
+        )
+
+    ax.axhline(0, color="k", lw=1, alpha=0.25)
+    ax.axvline(0, color="k", lw=1, alpha=0.25)
+
+    ax.set_title(f"Input {name}")
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.tick_params(labelsize=10)
+
+# Reduce repeated labels on small panels.
+for ax in (axd["A"], axd["B"]):
+    ax.set_xticklabels([])
+
+for ax in (axd["B"], axd["D"]):
+    ax.set_yticklabels([])
+
+axd["C"].set_xlabel(r"$\kappa^M_1$")
+axd["D"].set_xlabel(r"$\kappa^M_1$")
+axd["A"].set_ylabel(r"$\kappa^M_2$")
+axd["C"].set_ylabel(r"$\kappa^M_2$")
+
+# Shared colorbar.
+cbar = fig.colorbar(
+    im_auto,
+    ax=[ax_auto] + ax_inputs,
+    shrink=0.85,
+    pad=0.015,
+)
+cbar.set_label(r"$\|\dot{\kappa}^M\|$")
+
+# Legend.
+legend_handles = [
+    mlines.Line2D([], [], color=condition_colors[c], lw=3, label=c)
+    for c in condition_order
+] + [
+    mlines.Line2D([], [], color="tab:red", lw=2, label=r"$\dot{\kappa}^M_1=0$"),
+    mlines.Line2D([], [], color="tab:blue", lw=2, label=r"$\dot{\kappa}^M_2=0$"),
+    mlines.Line2D(
+        [],
+        [],
+        color="white",
+        marker="o",
+        markerfacecolor="black",
+        markeredgecolor="white",
+        linestyle="None",
+        markersize=10,
+        label="autonomous fixed point",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="black",
+        marker="o",
+        markerfacecolor="white",
+        markeredgecolor="black",
+        linestyle="None",
+        markersize=10,
+        label="input fixed point",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="k",
+        marker="o",
+        linestyle="None",
+        markersize=7,
+        label="start",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="k",
+        marker="X",
+        linestyle="None",
+        markersize=8,
+        label="end",
+    ),
+]
+
+ax_auto.legend(
+    handles=legend_handles,
+    fontsize=8.5,
+    frameon=True,
+    loc="best",
+    ncol=2,
+)
+
+# Panel labels.
+panel_labels = {
+    "auto": "A",
+    "A": "B",
+    "B": "C",
+    "C": "D",
+    "D": "E",
+}
+
+for key, label in panel_labels.items():
+    ax = axd[key]
+    ax.text(
+        -0.10,
+        1.08,
+        label,
+        transform=ax.transAxes,
+        fontsize=18,
+        fontweight="bold",
+        va="top",
+        ha="right",
+    )
+
+fig.suptitle(
+    "Low-rank RNN DPA dynamics in internal $M$-readout coordinates",
+    y=1.03,
+)
+
+plt.show()
+
+print(f"Grid limits: [-{lim:.2f}, {lim:.2f}], grid shape: {K1.shape}")
+print("Example trial indices:", idx_by_condition)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Autonomous fixed points:
+[[-6.57601334e-01 -2.03424710e-01]
+ [-1.71640821e-01  4.00508228e-01]
+ [-7.35825852e-01  2.73714249e-01]
+ [-3.41402412e-01  5.71343878e-01]
+ [-1.28839978e+00 -3.92170627e-01]
+ [-6.40920467e-01 -7.10127097e-02]
+ [ 1.22239374e-03  1.07967225e-04]]
+Unexpected exception formatting exception. Falling back to standard exception
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 3508, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/tmp/ipykernel_4137813/3830142509.py", line 167, in <module>
+    Ui, Vi, speed_i = compute_internal_field_for_input(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        model,
+        ^^^^^^
+    ...<2 lines>...
+        ff_input=x_vec,
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/tmp/ipykernel_4137813/1839655462.py", line 169, in compute_internal_field_for_input
+    dK, _ = internal_latent_vector_field(
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        model,
+        ^^^^^^
+        kappa_grid,
+        ^^^^^^^^^^^
+        ff_input=ff_input,
+        ^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/tmp/ipykernel_4137813/1839655462.py", line 97, in internal_latent_vector_field
+    rates = model.nonlinearity(model.wi(ff_input) + h)
+                               ~~~~~~~~^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: mat1 and mat2 shapes cannot be multiplied (14641x4 and 7x256)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 2105, in showtraceback
+    stb = self.InteractiveTB.structured_traceback(
+        etype, value, tb, tb_offset=tb_offset
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1428, in structured_traceback
+    return FormattedTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, evalue, etb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1319, in structured_traceback
+    return VerboseTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, value, tb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1172, in structured_traceback
+    formatted_exception = self.format_exception_as_a_whole(etype, evalue, etb, number_of_lines_of_context,
+                                                           tb_offset)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1062, in format_exception_as_a_whole
+    self.get_records(etb, number_of_lines_of_context, tb_offset) if etb else []
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1159, in get_records
+    res = list(stack_data.FrameInfo.stack_data(etb, options=options))[tb_offset:]
+          ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 597, in stack_data
+    yield from collapse_repeated(
+    ...<4 lines>...
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/utils.py", line 83, in collapse_repeated
+    yield from map(mapper, original_group)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 587, in mapper
+    return cls(f, options)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 551, in __init__
+    self.executing = Source.executing(frame_or_tb)
+                     ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 378, in executing
+    assert_(new_stmts <= stmts)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 154, in assert_
+    raise AssertionError(str(message))
+AssertionError
+#+end_example
+
+#+begin_src jupyter-python
+# ---- Summary figure: autonomous + input dynamics with fixed points ----
+
+from scipy.optimize import root
+
+condition_order = ("AC", "AD", "BC", "BD")
+
+condition_colors = {
+    "AC": "tab:green",
+    "AD": "tab:orange",
+    "BC": "tab:purple",
+    "BD": "tab:cyan",
+}
+
+input_vectors = {
+    "A": [1.0, 0.0, 0.0, 0.0],
+    "B": [0.0, 1.0, 0.0, 0.0],
+    "C": [0.0, 0.0, 1.0, 0.0],
+    "D": [0.0, 0.0, 0.0, 1.0],
+}
+
+# Fixed-point marker styling.
+# Increase fp_size to make dots bigger.
+fp_size = 220
+fp_edge_lw = 1.4
+
+
+def find_fixed_points_2d(
+    model,
+    K1,
+    K2,
+    U,
+    V,
+    ff_input=None,
+    n_candidates=120,
+    residual_tol=1e-5,
+    unique_tol=5e-2,
+):
+    """
+    Find fixed points of the 2D projected latent dynamics.
+
+    Roots satisfy
+
+        d kappa^M / dt = 0.
+
+    Uses low-speed grid points as initial guesses and refines with scipy.root.
+
+    Returns
+    -------
+    fixed_points : np.ndarray, shape (n_fixed_points, 2)
+        Rows are [kappa_1, kappa_2].
+    """
+    speed = np.sqrt(U**2 + V**2)
+
+    k1_min, k1_max = K1.min(), K1.max()
+    k2_min, k2_max = K2.min(), K2.max()
+
+    n_candidates = min(n_candidates, speed.size)
+
+    candidate_idx = np.argpartition(
+        speed.ravel(),
+        n_candidates - 1,
+    )[:n_candidates]
+
+    guesses = np.column_stack([
+        K1.ravel()[candidate_idx],
+        K2.ravel()[candidate_idx],
+    ])
+
+    def field_np(kappa_np):
+        kappa = torch.tensor(
+            kappa_np[None, :],
+            dtype=torch.float32,
+        )
+
+        with torch.no_grad():
+            dK, _ = internal_latent_vector_field(
+                model,
+                kappa,
+                ff_input=ff_input,
+                # ff_input=ff_input,
+            )
+
+        return dK.cpu().numpy().reshape(-1)
+
+    fixed_points = []
+
+    for guess in guesses:
+        sol = root(field_np, guess, method="hybr")
+
+        if not sol.success:
+            continue
+
+        fp = sol.x
+        residual = np.linalg.norm(field_np(fp))
+
+        if residual > residual_tol:
+            continue
+
+        # Keep only fixed points inside plotted region.
+        if not (k1_min <= fp[0] <= k1_max and k2_min <= fp[1] <= k2_max):
+            continue
+
+        # Deduplicate nearby roots.
+        is_new = all(
+            np.linalg.norm(fp - old_fp) > unique_tol
+            for old_fp in fixed_points
+        )
+
+        if is_new:
+            fixed_points.append(fp)
+
+    if len(fixed_points) == 0:
+        return np.empty((0, 2))
+
+    return np.stack(fixed_points, axis=0)
+
+
+# 1. Run model and extract internal trajectories.
+labels = infer_dpa_conditions(inputs)
+idx_by_condition = pick_one_trial_per_condition(labels, condition_order)
+
+traj, readout = run_model_with_internal_readouts(
+    model,
+    inputs,
+    rec_init="zero",
+)
+
+# 2. Build grid around selected trajectories.
+K1, K2, lim = make_grid_from_trajectories(
+    traj,
+    idx_by_condition,
+    condition_order=condition_order,
+    pad=0.75,
+    expand=2.0,
+    min_lim=5,
+    n_grid=121,
+)
+
+# 3. Autonomous vector field.
+U0, V0, speed0 = compute_internal_field_for_input(
+    model,
+    K1,
+    K2,
+    ff_input=None,
+)
+
+# 4. Autonomous fixed points.
+fixed_points_auto = find_fixed_points_2d(
+    model,
+    K1,
+    K2,
+    U0,
+    V0,
+    ff_input=None,
+    n_candidates=160,
+    residual_tol=1e-5,
+    unique_tol=5e-2,
+)
+
+# print("Autonomous fixed points:")
+# print(fixed_points_auto)
+
+# 5. Fixed-input vector fields and fixed points.
+fields = {}
+fixed_points_inputs = {}
+
+for name, x_vec in input_vectors.items():
+    Ui, Vi, speed_i = compute_internal_field_for_input(
+        model,
+        K1,
+        K2,
+        # ff_input=x_vec,
+        ff_input=None,
+    )
+
+    fields[name] = {
+        "U": Ui,
+        "V": Vi,
+        "speed": speed_i,
+    }
+
+    fixed_points_inputs[name] = find_fixed_points_2d(
+        model,
+        K1,
+        K2,
+        Ui,
+        Vi,
+        # ff_input=x_vec,
+        ff_input=None,
+        n_candidates=160,
+        residual_tol=1e-5,
+        unique_tol=5e-2,
+    )
+
+    # print(f"Input {name} fixed points:")
+    # print(fixed_points_inputs[name])
+
+# 6. Shape checks.
+assert K1.shape == K2.shape == speed0.shape, (
+    K1.shape,
+    K2.shape,
+    speed0.shape,
+)
+
+for name in ("A", "B", "C", "D"):
+    assert fields[name]["speed"].shape == K1.shape, (
+        name,
+        fields[name]["speed"].shape,
+        K1.shape,
+    )
+
+# Shared speed scale across all phase portraits.
+all_speeds = [speed0.ravel()] + [
+    fields[name]["speed"].ravel()
+    for name in ("A", "B", "C", "D")
+]
+
+vmax_phase = np.nanpercentile(np.concatenate(all_speeds), 95)
+
+# 7. Figure layout.
+fig, axd = plt.subplot_mosaic(
+    [
+        ["auto", "auto", "A", "B"],
+        ["auto", "auto", "C", "D"],
+    ],
+    figsize=(3.8 * width, 1.9 * width),
+    constrained_layout=True,
+    gridspec_kw={
+        "width_ratios": [1.25, 1.25, 1.0, 1.0],
+        "height_ratios": [1.0, 1.0],
+    },
+)
+
+ax_auto = axd["auto"]
+ax_inputs = [axd["A"], axd["B"], axd["C"], axd["D"]]
+
+# --------------------
+# A. Autonomous dynamics with task trajectories and autonomous fixed points
+# --------------------
+im_auto = plot_speed_field(
+    ax_auto,
+    K1,
+    K2,
+    speed0,
+    vmax=vmax_phase,
+)
+
+ax_auto.streamplot(
+    K1,
+    K2,
+    U0,
+    V0,
+    color="white",
+    density=0.8,
+    linewidth=1.0,
+    arrowsize=1.0,
+)
+
+plot_nullclines(ax_auto, K1, K2, U0, V0, lw=2.0)
+
+# Overlay one trajectory per condition directly on the autonomous heatmap.
+for cond in condition_order:
+    idx = idx_by_condition[cond]
+    xy = traj[idx]
+    color = condition_colors[cond]
+
+    ax_auto.plot(
+        xy[:, 0],
+        xy[:, 1],
+        color=color,
+        lw=3,
+        alpha=0.95,
+        label=cond,
+        zorder=4,
+    )
+
+    # Start point.
+    ax_auto.scatter(
+        xy[0, 0],
+        xy[0, 1],
+        color=color,
+        s=55,
+        marker="o",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+    # End point.
+    ax_auto.scatter(
+        xy[-1, 0],
+        xy[-1, 1],
+        color=color,
+        s=80,
+        marker="X",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+# Autonomous fixed points: black dots.
+if len(fixed_points_auto) > 0:
+    ax_auto.scatter(
+        fixed_points_auto[:, 0],
+        fixed_points_auto[:, 1],
+        s=fp_size,
+        marker="o",
+        facecolor="black",
+        edgecolor="white",
+        linewidth=fp_edge_lw,
+        zorder=9,
+    )
+
+ax_auto.axhline(0, color="k", lw=1, alpha=0.25)
+ax_auto.axvline(0, color="k", lw=1, alpha=0.25)
+ax_auto.set_xlim(-lim, lim)
+ax_auto.set_ylim(-lim, lim)
+ax_auto.set_aspect("equal", adjustable="box")
+ax_auto.set_xlabel(r"$\kappa^M_1$")
+ax_auto.set_ylabel(r"$\kappa^M_2$")
+ax_auto.set_title("Autonomous dynamics with task trajectories")
+
+# --------------------
+# B-E. Fixed-input dynamics
+# --------------------
+for ax, name in zip(ax_inputs, ("A", "B", "C", "D")):
+    Ui = fields[name]["U"]
+    Vi = fields[name]["V"]
+    speed_i = fields[name]["speed"]
+    fixed_points_i = fixed_points_inputs[name]
+
+    plot_speed_field(
+        ax,
+        K1,
+        K2,
+        speed_i,
+        vmax=vmax_phase,
+    )
+
+    ax.streamplot(
+        K1,
+        K2,
+        Ui,
+        Vi,
+        color="white",
+        density=0.65,
+        linewidth=0.8,
+        arrowsize=0.8,
+    )
+
+    plot_nullclines(ax, K1, K2, Ui, Vi, lw=1.4)
+
+    # Autonomous fixed points overlaid on all input heatmaps: black dots.
+    if len(fixed_points_auto) > 0:
+        ax.scatter(
+            fixed_points_auto[:, 0],
+            fixed_points_auto[:, 1],
+            s=fp_size,
+            marker="o",
+            facecolor="black",
+            edgecolor="white",
+            linewidth=fp_edge_lw,
+            zorder=8,
+        )
+
+    # Fixed points for this held input: white dots.
+    if len(fixed_points_i) > 0:
+        ax.scatter(
+            fixed_points_i[:, 0],
+            fixed_points_i[:, 1],
+            s=fp_size,
+            marker="o",
+            facecolor="white",
+            edgecolor="black",
+            linewidth=fp_edge_lw,
+            zorder=9,
+        )
+
+    ax.axhline(0, color="k", lw=1, alpha=0.25)
+    ax.axvline(0, color="k", lw=1, alpha=0.25)
+
+    ax.set_title(f"Input {name}")
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.tick_params(labelsize=10)
+
+# Reduce repeated labels on small panels.
+for ax in (axd["A"], axd["B"]):
+    ax.set_xticklabels([])
+
+for ax in (axd["B"], axd["D"]):
+    ax.set_yticklabels([])
+
+axd["C"].set_xlabel(r"$\kappa^M_1$")
+axd["D"].set_xlabel(r"$\kappa^M_1$")
+axd["A"].set_ylabel(r"$\kappa^M_2$")
+axd["C"].set_ylabel(r"$\kappa^M_2$")
+
+# Shared colorbar.
+cbar = fig.colorbar(
+    im_auto,
+    ax=[ax_auto] + ax_inputs,
+    shrink=0.85,
+    pad=0.015,
+)
+cbar.set_label(r"$\|\dot{\kappa}^M\|$")
+
+# Legend.
+legend_handles = [
+    mlines.Line2D([], [], color=condition_colors[c], lw=3, label=c)
+    for c in condition_order
+] + [
+    mlines.Line2D([], [], color="tab:red", lw=2, label=r"$\dot{\kappa}^M_1=0$"),
+    mlines.Line2D([], [], color="tab:blue", lw=2, label=r"$\dot{\kappa}^M_2=0$"),
+    mlines.Line2D(
+        [],
+        [],
+        color="white",
+        marker="o",
+        markerfacecolor="black",
+        markeredgecolor="white",
+        linestyle="None",
+        markersize=10,
+        label="autonomous fixed point",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="black",
+        marker="o",
+        markerfacecolor="white",
+        markeredgecolor="black",
+        linestyle="None",
+        markersize=10,
+        label="input fixed point",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="k",
+        marker="o",
+        linestyle="None",
+        markersize=7,
+        label="start",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="k",
+        marker="X",
+        linestyle="None",
+        markersize=8,
+        label="end",
+    ),
+]
+
+ax_auto.legend(
+    handles=legend_handles,
+    fontsize=8.5,
+    frameon=True,
+    loc="best",
+    ncol=2,
+)
+
+# Panel labels.
+panel_labels = {
+    "auto": "A",
+    "A": "B",
+    "B": "C",
+    "C": "D",
+    "D": "E",
+}
+
+for key, label in panel_labels.items():
+    ax = axd[key]
+    ax.text(
+        -0.10,
+        1.08,
+        label,
+        transform=ax.transAxes,
+        fontsize=18,
+        fontweight="bold",
+        va="top",
+        ha="right",
+    )
+
+fig.suptitle(
+    "Low-rank RNN DPA dynamics in internal $M$-readout coordinates",
+    y=1.03,
+)
+
+plt.show()
+
+# print(f"Grid limits: [-{lim:.2f}, {lim:.2f}], grid shape: {K1.shape}")
+# print("Example trial indices:", idx_by_condition)
+
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/0a01f1e07b34d2fe414715d1fb037730afad4ef7.png]]
+
+*** Derivation of the phase-portrait flow
+
+We analyze the dynamics in the recurrent-input variable \(h_t \in \mathbb{R}^H\), where \(H\) is the hidden size. In the code, the low-rank recurrent matrix is
+
+\[J = \frac{1}{H} M N^\top,\]
+
+with
+
+\[M = \begin{bmatrix} m_1 & m_2 \end{bmatrix} \in \mathbb{R}^{H \times R}, \qquad N = \begin{bmatrix} n_1 & n_2 \end{bmatrix} \in \mathbb{R}^{H \times R}, \qquad R=2.\]
+
+For a fixed external input \(x \in \mathbb{R}^{d_{\mathrm{in}}}\), the rate vector is
+
+\[r(h,x)=\phi(h + W_i x + b_i),\]
+
+where \(\phi = \tanh\), \(W_i\) and \(b_i\) are the input-layer weights and bias.
+
+The discrete recurrent-input update in the model is approximately
+
+\[h_{t+1}=(1-\alpha)h_t+\alpha \frac{1}{H} M N^\top r_t.\]
+
+Equivalently, using
+
+\[\psi(h,x)=\frac{1}{H}N^\top \phi(h + W_i x + b_i)\in \mathbb{R}^R,\]
+
+the recurrent drive is
+
+\[h_{\mathrm{drive}}(h,x)=M \psi(h,x).\]
+
+Thus
+
+\[
+h_{t+1}
+=
+(1-\alpha)h_t + \alpha h_{\mathrm{drive}}(h_t,x).
+\]
+
+For phase portraits we use the continuous-time vector field corresponding to this Euler update:
+
+\[
+\dot h
+=
+-h + M\psi(h,x).
+\]
+
+The factor \(\alpha\) only rescales time, so it does not change fixed points or streamline directions.
+
+**** Internal \(M\)-readout coordinates
+
+We plot dynamics in the internal coordinates
+
+\[\kappa^M_k=\frac{m_k^\top h}{\|m_k\|^2},\qquadk=1,\dots,R.\]
+
+Define
+
+\[
+D
+=
+\operatorname{diag}
+\left(
+\|m_1\|^2,\dots,\|m_R\|^2
+\right)
+\in \mathbb{R}^{R \times R}.
+\]
+
+Then the internal coordinate vector is
+
+\[\kappa^M=D^{-1}M^\top h.\]
+
+This is what the code computes using
+
+#+begin_src python
+P_int = M.T / torch.sum(M**2, dim=0)[:, None]
+kappa = h @ P_int.T
+#+end_src
+
+#+RESULTS:
+
+because \(h\) is represented as a row vector in PyTorch.
+
+**** Why we need to reconstruct \(h\) from \(\kappa^M\)
+
+A phase portrait requires evaluating the vector field at grid points \(\kappa^M = (\kappa^M_1,\kappa^M_2)\). But the network dynamics are defined in \(h\)-space, not directly in \(\kappa^M\)-space.
+
+If \(M\)'s columns were orthogonal, one could use
+
+\[
+h = M\kappa^M.
+\]
+
+But after training the columns of \(M\) need not be orthogonal. Therefore, \(h=M\kappa^M\) would not generally satisfy
+
+\[
+D^{-1}M^\top h = \kappa^M.
+\]
+
+Instead, for each desired grid point \(\kappa^M\), we construct an \(h\) in the span of \(M\):
+
+\[
+h = M a.
+\]
+
+We require
+
+\[
+\kappa^M
+=
+D^{-1}M^\top h
+=
+D^{-1}M^\top M a.
+\]
+
+Let
+
+\[
+G = M^\top M.
+\]
+
+Then
+
+\[
+\kappa^M
+=
+D^{-1}G a.
+\]
+
+Solving for \(a\),
+
+\[
+a = G^{-1}D\kappa^M.
+\]
+
+Therefore the recurrent input corresponding to an internal-coordinate grid point is
+
+\[h(\kappa^M)=M G^{-1}D\kappa^M.\]
+
+The code implements this in row-vector convention as
+
+#+begin_src python
+G = M.T @ M
+D = torch.diag(torch.diag(G))
+a_T = torch.linalg.solve(G_reg, D @ kappa_grid.T)
+a = a_T.T
+h = a @ M.T
+#+end_src
+
+The small ridge term in \(G_{\mathrm{reg}}\) is only for numerical stability.
+
+**** Flow in internal coordinates
+
+Starting from
+
+\[
+\dot h
+=
+-h + M\psi(h,x),
+\]
+
+we project both sides into internal coordinates:
+
+\[
+\dot \kappa^M
+=
+D^{-1}M^\top \dot h.
+\]
+
+Substituting the \(h\)-dynamics,
+
+\[
+\dot \kappa^M
+=
+D^{-1}M^\top
+\left[
+-h + M\psi(h,x)
+\right].
+\]
+
+Using \(\kappa^M = D^{-1}M^\top h\),
+
+\[
+D^{-1}M^\top h = \kappa^M.
+\]
+
+Therefore,
+
+\[
+\dot \kappa^M = -\kappa^M + D^{-1}M^\top M\psi(h,x).
+\]
+
+Since \(G=M^\top M\),
+
+\[
+\boxed{\dot \kappa^M = -\kappa^M + D^{-1}G\psi(h(\kappa^M),x)}
+\]
+
+with
+
+\[
+\psi(h(\kappa^M),x)
+=
+\frac{1}{H}
+N^\top
+\tanh
+\left[
+h(\kappa^M) + W_i x + b_i
+\right].
+\]
+
+This is the flow plotted in the phase portraits.
+
+If \(M\)'s columns are orthogonal, then \(G=D\), so
+
+\[
+D^{-1}G = I,
+\]
+
+and the flow simplifies to
+
+\[
+\dot \kappa^M = -\kappa^M + \psi(h(\kappa^M),x).
+\]
+
+For non-orthogonal \(M\), the factor \(D^{-1}G\) mixes the low-rank drive components.
+
+**** Autonomous and input-driven flows
+
+The autonomous phase portrait uses zero input:
+
+\[x = 0.\]
+
+Thus
+
+\[
+\dot \kappa^M_{\mathrm{auto}}=-\kappa^M+D^{-1}G\psi(h(\kappa^M),0).
+\]
+
+The fixed-input phase portraits use constant cue inputs:
+
+\[x_A = (1,0,0,0), \qquad x_B = (0,1,0,0), \qquad x_C = (0,0,1,0), \qquad x_D = (0,0,0,1).\]
+
+For each cue \(q \in \{A,B,C,D\}\),
+
+\[
+\dot \kappa^M_q = -\kappa^M + D^{-1}G\psi(h(\kappa^M),x_q).
+\]
+
+These plots therefore show the instantaneous landscape the network would experience if that cue input were held fixed.
+
+**** Nullclines, fixed points, and speed
+
+The plotted vector field is
+
+\[F(\kappa^M;x)=\dot \kappa^M.\]
+
+For rank \(R=2\),
+
+\[
+F(\kappa^M;x)
+=
+\begin{bmatrix}
+F_1(\kappa^M;x) \\
+F_2(\kappa^M;x)
+\end{bmatrix}.
+\]
+
+The red nullcline is
+
+\[
+F_1(\kappa^M;x)=0,
+\]
+
+and the blue nullcline is
+
+\[
+F_2(\kappa^M;x)=0.
+\]
+
+Intersections of the two nullclines are fixed points:
+
+\[
+F(\kappa^M;x)=0.
+\]
+
+The heatmap shows the flow speed
+
+\[\|F(\kappa^M;x)\|=\sqrt{F_1(\kappa^M;x)^2+F_2(\kappa^M;x)^2}.\]
+
+Dark/low-speed regions indicate slow dynamics and possible fixed points or bottlenecks. Bright/high-speed regions indicate fast movement through latent space.
+
+**** Relation to task trajectories
+
+The overlaid trajectories are the actual trial trajectories projected into internal coordinates:
+
+\[\kappa^M_t=D^{-1}M^\top h_t.\]
+
+During cue periods, the trajectories are input-driven. During delay or response periods with no cue input, they are closer to the autonomous dynamics.
+
+Therefore, overlaying trial trajectories on the autonomous phase portrait should be interpreted as:
+
+\[
+\text{where the task trajectory travels through the zero-input landscape}.
+\]
+
+Overlaying them on fixed-input portraits would instead show how the state moves relative to the landscape induced by holding a specific cue input constant.
+
+***
+
+*** Get me the phase portrait for the dual task
+
+#+begin_reasoning
+
+#+end_reasoning
+
+
+
+Use a 7-dimensional fixed-input vector for the dual task. Your previous phase portrait failed because =input_vectors= had length 4, but =model.wi= expects 7 inputs.
+
+Paste this after your phase-portrait helper functions.
+
+#+begin_src jupyter-python
+# ---- Dual-task phase portrait ----
+
+from scipy.optimize import root
+import matplotlib.lines as mlines
+
+# Generate fresh dual-task trials
+inputs, targets, mask, trial_type = generate_dual_trials(
+    N_BATCH,
+    N_STEPS,
+    input_size=7,
+    noise=noise,
+)
+
+# Run model and get internal M-readout trajectories
+traj, readout = run_model_with_internal_readouts(
+    model,
+    inputs,
+    rec_init="zero",
+)
+
+# Dual concrete conditions from generate_dual_trials:
+# 0: DPA-only, A, C
+# 1: DPA-only, A, D
+# 2: Go,       A, C
+# 3: Go,       A, D
+# 4: NoGo,     B, C
+# 5: NoGo,     B, D
+dual_condition_order = (
+    "DPA AC",
+    "DPA AD",
+    "Go AC",
+    "Go AD",
+    "NoGo BC",
+    "NoGo BD",
+)
+
+dual_condition_colors = {
+    "DPA AC":  "tab:green",
+    "DPA AD":  "tab:orange",
+    "Go AC":   "tab:blue",
+    "Go AD":   "tab:cyan",
+    "NoGo BC": "tab:red",
+    "NoGo BD": "tab:purple",
+}
+
+trial_type_to_label = {
+    0: "DPA AC",
+    1: "DPA AD",
+    2: "Go AC",
+    3: "Go AD",
+    4: "NoGo BC",
+    5: "NoGo BD",
+}
+
+idx_by_condition = {}
+
+for tt, label in trial_type_to_label.items():
+    idxs = torch.where(trial_type == tt)[0]
+    if len(idxs) == 0:
+        raise RuntimeError(f"No trials found for {label}.")
+    idx_by_condition[label] = int(idxs[0])
+
+
+def onehot_input(channel, amp=1.0):
+    x = np.zeros(model.wi.in_features, dtype=np.float32)
+    x[channel] = amp
+    return x
+
+
+# Input channels:
+# 0 A, 1 B, 2 C, 3 D, 4 Go, 5 NoGo, 6 cue
+dual_input_vectors = {
+    "A":    onehot_input(0),
+    "B":    onehot_input(1),
+    "C":    onehot_input(2),
+    "D":    onehot_input(3),
+    "Go":   onehot_input(4),
+    "NoGo": onehot_input(5),
+    "Cue":  onehot_input(6),
+}
+
+
+def find_fixed_points_2d(
+    model,
+    K1,
+    K2,
+    U,
+    V,
+    ff_input=None,
+    n_candidates=160,
+    residual_tol=1e-5,
+    unique_tol=5e-2,
+):
+    speed = np.sqrt(U**2 + V**2)
+
+    k1_min, k1_max = K1.min(), K1.max()
+    k2_min, k2_max = K2.min(), K2.max()
+
+    n_candidates = min(n_candidates, speed.size)
+    candidate_idx = np.argpartition(speed.ravel(), n_candidates - 1)[:n_candidates]
+
+    guesses = np.column_stack([
+        K1.ravel()[candidate_idx],
+        K2.ravel()[candidate_idx],
+    ])
+
+    def field_np(kappa_np):
+        kappa = torch.tensor(kappa_np[None, :], dtype=torch.float32)
+
+        with torch.no_grad():
+            dK, _ = internal_latent_vector_field(
+                model,
+                kappa,
+                ff_input=ff_input,
+            )
+
+        return dK.cpu().numpy().reshape(-1)
+
+    fixed_points = []
+
+    for guess in guesses:
+        sol = root(field_np, guess, method="hybr")
+
+        if not sol.success:
+            continue
+
+        fp = sol.x
+        residual = np.linalg.norm(field_np(fp))
+
+        if residual > residual_tol:
+            continue
+
+        if not (k1_min <= fp[0] <= k1_max and k2_min <= fp[1] <= k2_max):
+            continue
+
+        is_new = all(
+            np.linalg.norm(fp - old_fp) > unique_tol
+            for old_fp in fixed_points
+        )
+
+        if is_new:
+            fixed_points.append(fp)
+
+    if len(fixed_points) == 0:
+        return np.empty((0, 2))
+
+    return np.stack(fixed_points, axis=0)
+
+
+# Build grid around selected dual-task trajectories
+K1, K2, lim = make_grid_from_trajectories(
+    traj,
+    idx_by_condition,
+    condition_order=dual_condition_order,
+    pad=0.75,
+    expand=2.0,
+    min_lim=5.0,
+    n_grid=121,
+)
+
+# Autonomous field
+U0, V0, speed0 = compute_internal_field_for_input(
+    model,
+    K1,
+    K2,
+    ff_input=None,
+)
+
+fixed_points_auto = find_fixed_points_2d(
+    model,
+    K1,
+    K2,
+    U0,
+    V0,
+    ff_input=None,
+)
+
+# Fixed-input fields
+fields = {}
+fixed_points_inputs = {}
+
+for name, x_vec in dual_input_vectors.items():
+    Ui, Vi, speed_i = compute_internal_field_for_input(
+        model,
+        K1,
+        K2,
+        ff_input=x_vec,
+    )
+
+    fields[name] = {
+        "U": Ui,
+        "V": Vi,
+        "speed": speed_i,
+    }
+
+    fixed_points_inputs[name] = find_fixed_points_2d(
+        model,
+        K1,
+        K2,
+        Ui,
+        Vi,
+        ff_input=x_vec,
+    )
+
+# Shared speed scale
+all_speeds = [speed0.ravel()] + [
+    fields[name]["speed"].ravel()
+    for name in dual_input_vectors
+]
+
+vmax_phase = np.nanpercentile(np.concatenate(all_speeds), 95)
+
+# ---- Plot ----
+
+fig, axd = plt.subplot_mosaic(
+    [
+        ["auto", "auto", "A",    "B"],
+        ["auto", "auto", "C",    "D"],
+        ["Go",   "NoGo", "Cue",  "blank"],
+    ],
+    figsize=(4.0 * width, 2.8 * width),
+    constrained_layout=True,
+    gridspec_kw={
+        "width_ratios": [1.15, 1.15, 1.0, 1.0],
+        "height_ratios": [1.0, 1.0, 1.0],
+    },
+)
+
+axd["blank"].axis("off")
+
+ax_auto = axd["auto"]
+
+# Autonomous panel
+im_auto = plot_speed_field(
+    ax_auto,
+    K1,
+    K2,
+    speed0,
+    vmax=vmax_phase,
+)
+
+ax_auto.streamplot(
+    K1,
+    K2,
+    U0,
+    V0,
+    color="white",
+    density=0.8,
+    linewidth=1.0,
+    arrowsize=1.0,
+)
+
+plot_nullclines(ax_auto, K1, K2, U0, V0, lw=2.0)
+
+# Overlay dual-task trajectories
+for cond in dual_condition_order:
+    idx = idx_by_condition[cond]
+    xy = traj[idx]
+    color = dual_condition_colors[cond]
+
+    ax_auto.plot(
+        xy[:, 0],
+        xy[:, 1],
+        color=color,
+        lw=3,
+        alpha=0.95,
+        label=cond,
+        zorder=4,
+    )
+
+    ax_auto.scatter(
+        xy[0, 0],
+        xy[0, 1],
+        color=color,
+        s=55,
+        marker="o",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+    ax_auto.scatter(
+        xy[-1, 0],
+        xy[-1, 1],
+        color=color,
+        s=80,
+        marker="X",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+# Autonomous fixed points
+if len(fixed_points_auto) > 0:
+    ax_auto.scatter(
+        fixed_points_auto[:, 0],
+        fixed_points_auto[:, 1],
+        s=180,
+        marker="o",
+        facecolor="black",
+        edgecolor="white",
+        linewidth=1.2,
+        zorder=9,
+    )
+
+ax_auto.axhline(0, color="k", lw=1, alpha=0.25)
+ax_auto.axvline(0, color="k", lw=1, alpha=0.25)
+ax_auto.set_xlim(-lim, lim)
+ax_auto.set_ylim(-lim, lim)
+ax_auto.set_aspect("equal", adjustable="box")
+ax_auto.set_xlabel(r"$\kappa^M_1$")
+ax_auto.set_ylabel(r"$\kappa^M_2$")
+ax_auto.set_title("Dual task: autonomous dynamics with trajectories")
+
+# Fixed-input panels
+for name in dual_input_vectors:
+    ax = axd[name]
+
+    Ui = fields[name]["U"]
+    Vi = fields[name]["V"]
+    speed_i = fields[name]["speed"]
+    fixed_points_i = fixed_points_inputs[name]
+
+    plot_speed_field(
+        ax,
+        K1,
+        K2,
+        speed_i,
+        vmax=vmax_phase,
+    )
+
+    ax.streamplot(
+        K1,
+        K2,
+        Ui,
+        Vi,
+        color="white",
+        density=0.65,
+        linewidth=0.8,
+        arrowsize=0.8,
+    )
+
+    plot_nullclines(ax, K1, K2, Ui, Vi, lw=1.4)
+
+    # Autonomous fixed points: black
+    if len(fixed_points_auto) > 0:
+        ax.scatter(
+            fixed_points_auto[:, 0],
+            fixed_points_auto[:, 1],
+            s=150,
+            marker="o",
+            facecolor="black",
+            edgecolor="white",
+            linewidth=1.0,
+            zorder=8,
+        )
+
+    # Input fixed points: white
+    if len(fixed_points_i) > 0:
+        ax.scatter(
+            fixed_points_i[:, 0],
+            fixed_points_i[:, 1],
+            s=150,
+            marker="o",
+            facecolor="white",
+            edgecolor="black",
+            linewidth=1.0,
+            zorder=9,
+        )
+
+    ax.axhline(0, color="k", lw=1, alpha=0.25)
+    ax.axvline(0, color="k", lw=1, alpha=0.25)
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_title(f"Held input: {name}")
+    ax.tick_params(labelsize=10)
+
+for name in ("C", "D", "Go", "NoGo", "Cue"):
+    axd[name].set_xlabel(r"$\kappa^M_1$")
+
+for name in ("A", "C", "Go"):
+    axd[name].set_ylabel(r"$\kappa^M_2$")
+
+# Colorbar
+cbar = fig.colorbar(
+    im_auto,
+    ax=[ax for key, ax in axd.items() if key != "blank"],
+    shrink=0.85,
+    pad=0.015,
+)
+cbar.set_label(r"$\|\dot{\kappa}^M\|$")
+
+# Legend
+legend_handles = [
+    mlines.Line2D(
+        [],
+        [],
+        color=dual_condition_colors[c],
+        lw=3,
+        label=c,
+    )
+    for c in dual_condition_order
+] + [
+    mlines.Line2D([], [], color="tab:red", lw=2, label=r"$\dot{\kappa}^M_1=0$"),
+    mlines.Line2D([], [], color="tab:blue", lw=2, label=r"$\dot{\kappa}^M_2=0$"),
+    mlines.Line2D(
+        [],
+        [],
+        color="white",
+        marker="o",
+        markerfacecolor="black",
+        markeredgecolor="white",
+        linestyle="None",
+        markersize=9,
+        label="autonomous fixed point",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="black",
+        marker="o",
+        markerfacecolor="white",
+        markeredgecolor="black",
+        linestyle="None",
+        markersize=9,
+        label="input fixed point",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="k",
+        marker="o",
+        linestyle="None",
+        markersize=7,
+        label="start",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="k",
+        marker="X",
+        linestyle="None",
+        markersize=8,
+        label="end",
+    ),
+]
+
+ax_auto.legend(
+    handles=legend_handles,
+    fontsize=8,
+    frameon=True,
+    loc="best",
+    ncol=2,
+)
+
+fig.suptitle(
+    "Low-rank RNN dual-task dynamics in internal $M$-readout coordinates",
+    y=1.02,
+)
+
+plt.show()
+
+print(f"Grid limits: [-{lim:.2f}, {lim:.2f}], grid shape: {K1.shape}")
+print("Dual trial indices:", idx_by_condition)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Unexpected exception formatting exception. Falling back to standard exception
+/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py:3073: SyntaxWarning: 'return' in a 'finally' block
+  return result
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 3508, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/tmp/ipykernel_128204/2804199452.py", line 15, in <module>
+    traj, readout = run_model_with_internal_readouts(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NameError: name 'run_model_with_internal_readouts' is not defined
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 2105, in showtraceback
+    stb = self.InteractiveTB.structured_traceback(
+        etype, value, tb, tb_offset=tb_offset
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1428, in structured_traceback
+    return FormattedTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, evalue, etb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1319, in structured_traceback
+    return VerboseTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, value, tb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1172, in structured_traceback
+    formatted_exception = self.format_exception_as_a_whole(etype, evalue, etb, number_of_lines_of_context,
+                                                           tb_offset)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1062, in format_exception_as_a_whole
+    self.get_records(etb, number_of_lines_of_context, tb_offset) if etb else []
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1159, in get_records
+    res = list(stack_data.FrameInfo.stack_data(etb, options=options))[tb_offset:]
+          ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 597, in stack_data
+    yield from collapse_repeated(
+    ...<4 lines>...
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/utils.py", line 83, in collapse_repeated
+    yield from map(mapper, original_group)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 587, in mapper
+    return cls(f, options)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 551, in __init__
+    self.executing = Source.executing(frame_or_tb)
+                     ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 378, in executing
+    assert_(new_stmts <= stmts)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 154, in assert_
+    raise AssertionError(str(message))
+AssertionError
+#+end_example
+
+The key fix is that the held-input vectors are now 7D:
+
+#+begin_src python
+A    = [1,0,0,0,0,0,0]
+B    = [0,1,0,0,0,0,0]
+C    = [0,0,1,0,0,0,0]
+D    = [0,0,0,1,0,0,0]
+Go   = [0,0,0,0,1,0,0]
+NoGo = [0,0,0,0,0,1,0]
+Cue  = [0,0,0,0,0,0,1]
+#+end_src
+
+*** Fix the error give me the full code into 2 src blocks (routine and figure)
+
+#+begin_reasoning
+
+#+end_reasoning
+
+Run these two blocks in order.
+
+*Routine block*
+
+#+begin_src jupyter-python
+# ---- Dual-task phase-portrait routines ----
+
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
+from scipy.optimize import root
+
+
+def internal_readout_matrix(model):
+    """
+    Return P such that kappa = h @ P.T.
+
+    kappa_k = h dot m_k / ||m_k||^2.
+    """
+    M = model.m
+    col_norm2 = torch.sum(M**2, dim=0).clamp_min(1e-12)
+    return M.T / col_norm2[:, None]
+
+
+def h_from_internal_kappa(model, kappa_grid, ridge=1e-6):
+    """
+    Reconstruct h in span(M) whose internal readout is kappa_grid.
+
+    kappa = D^{-1} M^T h
+    h = M a
+    a = G^{-1} D kappa
+    """
+    M = model.m
+    _, R = M.shape
+
+    G = M.T @ M
+    D = torch.diag(torch.diag(G))
+    eye = torch.eye(R, device=M.device, dtype=M.dtype)
+    G_reg = G + ridge * eye
+
+    a_T = torch.linalg.solve(G_reg, D @ kappa_grid.T)
+    a = a_T.T
+
+    h = a @ M.T
+    return h
+
+
+def internal_latent_vector_field(model, kappa_grid, ff_input=None, ridge=1e-6):
+    """
+    Compute vector field in internal M-readout coordinates.
+
+    d kappa / dt = -kappa + D^{-1} M^T M psi(h, x)
+
+    where psi = N^T tanh(h + W_i x + b_i) / H.
+    """
+    device = next(model.parameters()).device
+    dtype = next(model.parameters()).dtype
+
+    kappa_grid = kappa_grid.to(device=device, dtype=dtype)
+    Pn, R = kappa_grid.shape
+    H = model.m.shape[0]
+
+    if ff_input is None:
+        ff_input = torch.zeros(model.wi.in_features, device=device, dtype=dtype)
+    else:
+        ff_input = torch.as_tensor(ff_input, device=device, dtype=dtype)
+
+    if ff_input.numel() != model.wi.in_features:
+        raise ValueError(
+            f"ff_input has length {ff_input.numel()}, "
+            f"but model expects {model.wi.in_features} inputs."
+        )
+
+    ff_input = ff_input.reshape(1, -1).expand(Pn, -1)
+
+    M = model.m
+    N = model.n
+
+    h = h_from_internal_kappa(model, kappa_grid, ridge=ridge)
+    rates = model.nonlinearity(model.wi(ff_input) + h)
+
+    psi = rates @ N / H
+    h_drive = psi @ M.T
+
+    P_int = internal_readout_matrix(model)
+    kappa_drive = h_drive @ P_int.T
+
+    d_kappa = kappa_drive - kappa_grid
+
+    return d_kappa, kappa_drive
+
+
+@torch.no_grad()
+def run_model_with_internal_readouts(model, ff_inputs, rec_init="zero"):
+    """
+    Run model and return internal M-readout trajectories.
+
+    Returns
+    -------
+    kappa : ndarray, shape (B, T, R)
+    readout : ndarray, shape (B, T)
+    """
+    was_training = model.training
+    model.eval()
+
+    device = next(model.parameters()).device
+    dtype = next(model.parameters()).dtype
+
+    x = ff_inputs.to(device=device, dtype=dtype)
+    B, T, _ = x.shape
+    H, R = model.m.shape
+
+    if rec_init == "zero":
+        rec_inputs = torch.zeros(B, H, device=device, dtype=dtype)
+    elif rec_init == "random":
+        rec_inputs = torch.randn(B, H, device=device, dtype=dtype)
+    else:
+        raise ValueError("rec_init must be 'zero' or 'random'.")
+
+    rates = model.nonlinearity(model.wi(x[:, 0]) + rec_inputs)
+    P_int = internal_readout_matrix(model)
+
+    kappa_list = []
+    readout_list = []
+
+    for t in range(T):
+        rates, rec_inputs = model.update_dynamics(x[:, t], rec_inputs, rates)
+
+        kappa_t = rec_inputs @ P_int.T
+        readout_t = model.get_readout(rates, rec_inputs)
+
+        kappa_list.append(kappa_t)
+        readout_list.append(readout_t)
+
+    kappa = torch.stack(kappa_list, dim=1)
+    readout = torch.stack(readout_list, dim=1)
+
+    if was_training:
+        model.train()
+
+    return kappa.cpu().numpy(), readout.cpu().numpy()
+
+
+def compute_internal_field_for_input(model, K1, K2, ff_input=None):
+    """Compute vector field on a 2D internal-coordinate grid."""
+    kappa_grid_np = np.stack([K1.ravel(), K2.ravel()], axis=1)
+    kappa_grid = torch.tensor(kappa_grid_np, dtype=torch.float32)
+
+    with torch.no_grad():
+        dK, _ = internal_latent_vector_field(
+            model,
+            kappa_grid,
+            ff_input=ff_input,
+        )
+
+    dK_np = dK.cpu().numpy()
+    U = dK_np[:, 0].reshape(K1.shape)
+    V = dK_np[:, 1].reshape(K2.shape)
+    speed = np.sqrt(U**2 + V**2)
+
+    return U, V, speed
+
+
+def make_grid_from_trajectories(
+    traj,
+    idx_by_condition,
+    condition_order,
+    pad=0.75,
+    expand=2.0,
+    min_lim=5.0,
+    n_grid=121,
+):
+    """Build square grid around selected trajectories."""
+    selected = np.stack(
+        [traj[idx_by_condition[c], :, :2] for c in condition_order],
+        axis=0,
+    )
+    flat = selected.reshape(-1, 2)
+
+    k1_min, k2_min = flat.min(axis=0) - pad
+    k1_max, k2_max = flat.max(axis=0) + pad
+
+    base_lim = np.max(np.abs([k1_min, k1_max, k2_min, k2_max]))
+    lim = max(expand * base_lim, min_lim)
+
+    k1 = np.linspace(-lim, lim, n_grid)
+    k2 = np.linspace(-lim, lim, n_grid)
+    K1, K2 = np.meshgrid(k1, k2)
+
+    return K1, K2, lim
+
+
+def plot_nullclines(ax, K1, K2, U, V, lw=1.6):
+    """Plot dκ1=0 and dκ2=0 nullclines."""
+    ax.contour(K1, K2, U, levels=[0], colors="tab:red", linewidths=lw)
+    ax.contour(K1, K2, V, levels=[0], colors="tab:blue", linewidths=lw)
+
+
+def plot_speed_field(ax, K1, K2, speed, vmax, cmap="viridis"):
+    """Plot speed field."""
+    assert K1.shape == K2.shape == speed.shape
+    return ax.pcolormesh(
+        K1,
+        K2,
+        speed,
+        shading="nearest",
+        cmap=cmap,
+        vmin=0,
+        vmax=vmax,
+    )
+
+
+def find_fixed_points_2d(
+    model,
+    K1,
+    K2,
+    U,
+    V,
+    ff_input=None,
+    n_candidates=160,
+    residual_tol=1e-5,
+    unique_tol=5e-2,
+):
+    """Find fixed points of the 2D projected latent vector field."""
+    speed = np.sqrt(U**2 + V**2)
+
+    k1_min, k1_max = K1.min(), K1.max()
+    k2_min, k2_max = K2.min(), K2.max()
+
+    n_candidates = min(n_candidates, speed.size)
+    candidate_idx = np.argpartition(speed.ravel(), n_candidates - 1)[:n_candidates]
+
+    guesses = np.column_stack([
+        K1.ravel()[candidate_idx],
+        K2.ravel()[candidate_idx],
+    ])
+
+    def field_np(kappa_np):
+        kappa = torch.tensor(kappa_np[None, :], dtype=torch.float32)
+
+        with torch.no_grad():
+            dK, _ = internal_latent_vector_field(
+                model,
+                kappa,
+                ff_input=ff_input,
+            )
+
+        return dK.cpu().numpy().reshape(-1)
+
+    fixed_points = []
+
+    for guess in guesses:
+        sol = root(field_np, guess, method="hybr")
+
+        if not sol.success:
+            continue
+
+        fp = sol.x
+        residual = np.linalg.norm(field_np(fp))
+
+        if residual > residual_tol:
+            continue
+
+        if not (k1_min <= fp[0] <= k1_max and k2_min <= fp[1] <= k2_max):
+            continue
+
+        is_new = all(
+            np.linalg.norm(fp - old_fp) > unique_tol
+            for old_fp in fixed_points
+        )
+
+        if is_new:
+            fixed_points.append(fp)
+
+    if len(fixed_points) == 0:
+        return np.empty((0, 2))
+
+    return np.stack(fixed_points, axis=0)
+
+
+def onehot_input(model, channel, amp=1.0):
+    """Create one-hot input vector with correct model input size."""
+    x = np.zeros(model.wi.in_features, dtype=np.float32)
+    x[channel] = amp
+    return x
+
+
+def get_dual_condition_indices(trial_type):
+    """
+    Map dual-task trial_type to first trial index per condition.
+
+    0: DPA-only AC
+    1: DPA-only AD
+    2: Go AC
+    3: Go AD
+    4: NoGo BC
+    5: NoGo BD
+    """
+    trial_type_to_label = {
+        0: "DPA AC",
+        1: "DPA AD",
+        2: "Go AC",
+        3: "Go AD",
+        4: "NoGo BC",
+        5: "NoGo BD",
+    }
+
+    idx_by_condition = {}
+
+    for tt, label in trial_type_to_label.items():
+        idxs = torch.where(trial_type == tt)[0]
+        if len(idxs) == 0:
+            raise RuntimeError(f"No trials found for {label}.")
+        idx_by_condition[label] = int(idxs[0])
+
+    return idx_by_condition
+#+end_src
+
+#+RESULTS:
+
+*Figure block*
+
+#+begin_src jupyter-python
+# ---- Dual-task phase portrait figure ----
+
+# Ensure dual-task timing globals are active.
+T_STIM_ON = [1.0, 3.0, 5.0, 7.0]
+T_STIM_OFF = [2.0, 4.0, 6.0, 8.0]
+T_STEPS = 9
+
+N_STIM_ON = torch.tensor([int(i / DT) for i in T_STIM_ON])
+N_STIM_OFF = torch.tensor([int(i / DT) for i in T_STIM_OFF])
+N_STEPS = int(T_STEPS / DT)
+
+x_time = np.linspace(0, N_STEPS * DT, N_STEPS)
+
+N_BATCH_PHASE = 512
+noise_phase = noise if "noise" in globals() else 0.05
+fig_width = width if "width" in globals() else 6
+
+# Generate dual-task trials.
+inputs, targets, mask, trial_type = generate_dual_trials(
+    N_BATCH_PHASE,
+    N_STEPS,
+    input_size=model.wi.in_features,
+    noise=noise_phase,
+)
+
+# Run network and extract internal trajectories.
+traj, readout = run_model_with_internal_readouts(
+    model,
+    inputs,
+    rec_init="zero",
+)
+
+if traj.shape[-1] < 2:
+    raise RuntimeError("Phase portrait requires rank >= 2.")
+
+# Conditions.
+dual_condition_order = (
+    "DPA AC",
+    "DPA AD",
+    "Go AC",
+    "Go AD",
+    "NoGo BC",
+    "NoGo BD",
+)
+
+dual_condition_colors = {
+    "DPA AC":  "tab:green",
+    "DPA AD":  "tab:orange",
+    "Go AC":   "tab:blue",
+    "Go AD":   "tab:cyan",
+    "NoGo BC": "tab:red",
+    "NoGo BD": "tab:purple",
+}
+
+idx_by_condition = get_dual_condition_indices(trial_type)
+
+# Correct 7D held-input vectors:
+# 0 A, 1 B, 2 C, 3 D, 4 Go, 5 NoGo, 6 Cue.
+dual_input_vectors = {
+    "A":    onehot_input(model, 0),
+    "B":    onehot_input(model, 1),
+    "C":    onehot_input(model, 2),
+    "D":    onehot_input(model, 3),
+    "Go":   onehot_input(model, 4),
+    "NoGo": onehot_input(model, 5),
+    "Cue":  onehot_input(model, 6),
+}
+
+# Grid.
+K1, K2, lim = make_grid_from_trajectories(
+    traj,
+    idx_by_condition,
+    condition_order=dual_condition_order,
+    pad=0.75,
+    expand=2.0,
+    min_lim=5.0,
+    n_grid=121,
+)
+
+# Autonomous field.
+U0, V0, speed0 = compute_internal_field_for_input(
+    model,
+    K1,
+    K2,
+    ff_input=None,
+)
+
+fixed_points_auto = find_fixed_points_2d(
+    model,
+    K1,
+    K2,
+    U0,
+    V0,
+    ff_input=None,
+    n_candidates=160,
+    residual_tol=1e-5,
+    unique_tol=5e-2,
+)
+
+# Fixed-input fields.
+fields = {}
+fixed_points_inputs = {}
+
+for name, x_vec in dual_input_vectors.items():
+    Ui, Vi, speed_i = compute_internal_field_for_input(
+        model,
+        K1,
+        K2,
+        ff_input=x_vec,
+    )
+
+    fields[name] = {
+        "U": Ui,
+        "V": Vi,
+        "speed": speed_i,
+    }
+
+    fixed_points_inputs[name] = find_fixed_points_2d(
+        model,
+        K1,
+        K2,
+        Ui,
+        Vi,
+        ff_input=x_vec,
+        n_candidates=160,
+        residual_tol=1e-5,
+        unique_tol=5e-2,
+    )
+
+# Shared speed scale.
+all_speeds = [speed0.ravel()] + [
+    fields[name]["speed"].ravel()
+    for name in dual_input_vectors
+]
+vmax_phase = np.nanpercentile(np.concatenate(all_speeds), 95)
+
+# Figure layout.
+fig, axd = plt.subplot_mosaic(
+    [
+        ["auto", "auto", "A",    "B"],
+        ["auto", "auto", "C",    "D"],
+        ["Go",   "NoGo", "Cue",  "blank"],
+    ],
+    figsize=(4.0 * fig_width, 2.8 * fig_width),
+    constrained_layout=True,
+    gridspec_kw={
+        "width_ratios": [1.15, 1.15, 1.0, 1.0],
+        "height_ratios": [1.0, 1.0, 1.0],
+    },
+)
+
+axd["blank"].axis("off")
+ax_auto = axd["auto"]
+
+# Autonomous panel.
+im_auto = plot_speed_field(
+    ax_auto,
+    K1,
+    K2,
+    speed0,
+    vmax=vmax_phase,
+)
+
+ax_auto.streamplot(
+    K1,
+    K2,
+    U0,
+    V0,
+    color="white",
+    density=0.8,
+    linewidth=1.0,
+    arrowsize=1.0,
+)
+
+plot_nullclines(ax_auto, K1, K2, U0, V0, lw=2.0)
+
+# Overlay one trajectory per dual condition.
+for cond in dual_condition_order:
+    idx = idx_by_condition[cond]
+    xy = traj[idx, :, :2]
+    color = dual_condition_colors[cond]
+
+    ax_auto.plot(
+        xy[:, 0],
+        xy[:, 1],
+        color=color,
+        lw=3,
+        alpha=0.95,
+        label=cond,
+        zorder=4,
+    )
+
+    # Start.
+    ax_auto.scatter(
+        xy[0, 0],
+        xy[0, 1],
+        color=color,
+        s=55,
+        marker="o",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+    # End.
+    ax_auto.scatter(
+        xy[-1, 0],
+        xy[-1, 1],
+        color=color,
+        s=80,
+        marker="X",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+# Autonomous fixed points.
+if len(fixed_points_auto) > 0:
+    ax_auto.scatter(
+        fixed_points_auto[:, 0],
+        fixed_points_auto[:, 1],
+        s=180,
+        marker="o",
+        facecolor="black",
+        edgecolor="white",
+        linewidth=1.2,
+        zorder=9,
+    )
+
+ax_auto.axhline(0, color="k", lw=1, alpha=0.25)
+ax_auto.axvline(0, color="k", lw=1, alpha=0.25)
+ax_auto.set_xlim(-lim, lim)
+ax_auto.set_ylim(-lim, lim)
+ax_auto.set_aspect("equal", adjustable="box")
+ax_auto.set_xlabel(r"$\kappa^M_1$")
+ax_auto.set_ylabel(r"$\kappa^M_2$")
+ax_auto.set_title("Dual task: autonomous dynamics with trajectories")
+
+# Held-input panels.
+for name in dual_input_vectors:
+    ax = axd[name]
+
+    Ui = fields[name]["U"]
+    Vi = fields[name]["V"]
+    speed_i = fields[name]["speed"]
+    fixed_points_i = fixed_points_inputs[name]
+
+    plot_speed_field(
+        ax,
+        K1,
+        K2,
+        speed_i,
+        vmax=vmax_phase,
+    )
+
+    ax.streamplot(
+        K1,
+        K2,
+        Ui,
+        Vi,
+        color="white",
+        density=0.65,
+        linewidth=0.8,
+        arrowsize=0.8,
+    )
+
+    plot_nullclines(ax, K1, K2, Ui, Vi, lw=1.4)
+
+    # Autonomous fixed points: black.
+    if len(fixed_points_auto) > 0:
+        ax.scatter(
+            fixed_points_auto[:, 0],
+            fixed_points_auto[:, 1],
+            s=150,
+            marker="o",
+            facecolor="black",
+            edgecolor="white",
+            linewidth=1.0,
+            zorder=8,
+        )
+
+    # Input fixed points: white.
+    if len(fixed_points_i) > 0:
+        ax.scatter(
+            fixed_points_i[:, 0],
+            fixed_points_i[:, 1],
+            s=150,
+            marker="o",
+            facecolor="white",
+            edgecolor="black",
+            linewidth=1.0,
+            zorder=9,
+        )
+
+    ax.axhline(0, color="k", lw=1, alpha=0.25)
+    ax.axvline(0, color="k", lw=1, alpha=0.25)
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_title(f"Held input: {name}")
+    ax.tick_params(labelsize=10)
+
+# Axis labels.
+for name in ("C", "D", "Go", "NoGo", "Cue"):
+    axd[name].set_xlabel(r"$\kappa^M_1$")
+
+for name in ("A", "C", "Go"):
+    axd[name].set_ylabel(r"$\kappa^M_2$")
+
+# Colorbar.
+cbar = fig.colorbar(
+    im_auto,
+    ax=[ax for key, ax in axd.items() if key != "blank"],
+    shrink=0.85,
+    pad=0.015,
+)
+cbar.set_label(r"$\|\dot{\kappa}^M\|$")
+
+# Legend.
+legend_handles = [
+    mlines.Line2D(
+        [],
+        [],
+        color=dual_condition_colors[c],
+        lw=3,
+        label=c,
+    )
+    for c in dual_condition_order
+] + [
+    mlines.Line2D([], [], color="tab:red", lw=2, label=r"$\dot{\kappa}^M_1=0$"),
+    mlines.Line2D([], [], color="tab:blue", lw=2, label=r"$\dot{\kappa}^M_2=0$"),
+    mlines.Line2D(
+        [],
+        [],
+        color="white",
+        marker="o",
+        markerfacecolor="black",
+        markeredgecolor="white",
+        linestyle="None",
+        markersize=9,
+        label="autonomous fixed point",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="black",
+        marker="o",
+        markerfacecolor="white",
+        markeredgecolor="black",
+        linestyle="None",
+        markersize=9,
+        label="input fixed point",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="k",
+        marker="o",
+        linestyle="None",
+        markersize=7,
+        label="start",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="k",
+        marker="X",
+        linestyle="None",
+        markersize=8,
+        label="end",
+    ),
+]
+
+ax_auto.legend(
+    handles=legend_handles,
+    fontsize=8,
+    frameon=True,
+    loc="best",
+    ncol=2,
+)
+
+fig.suptitle(
+    "Low-rank RNN dual-task dynamics in internal $M$-readout coordinates",
+    y=1.02,
+)
+
+plt.show()
+
+print(f"Grid limits: [-{lim:.2f}, {lim:.2f}], grid shape: {K1.shape}")
+print("Dual trial indices:", idx_by_condition)
+print("Autonomous fixed points:")
+print(fixed_points_auto)
+
+for name in dual_input_vectors:
+    print(f"{name} fixed points:")
+    print(fixed_points_inputs[name])
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./figures/figure_72.png]]
+#+begin_example
+Grid limits: [-5.02, 5.02], grid shape: (121, 121)
+Dual trial indices: {'DPA AC': 9, 'DPA AD': 5, 'Go AC': 0, 'Go AD': 4, 'NoGo BC': 3, 'NoGo BD': 12}
+Autonomous fixed points:
+[[-7.07907868e-04 -1.83343665e-04]
+ [ 1.14381085e+00 -9.04380940e-01]
+ [ 4.11386714e-01  5.14097786e-01]
+ [ 2.12022166e-01  6.73254530e-01]
+ [-1.28569552e+00 -6.05509293e-01]
+ [ 6.93803371e-01 -4.36415520e-01]
+ [ 1.38035491e+00 -1.65266401e-01]
+ [-1.03864493e-01 -2.72303453e-01]
+ [ 5.89922067e-01  1.33080435e-01]
+ [ 9.35527394e-01 -7.24105957e-01]
+ [ 1.71438492e+00 -6.41057123e-01]]
+A fixed points:
+[[ 1.68327811e+00 -6.90701980e-01]
+ [ 1.25382955e+00 -8.41149694e-01]
+ [-1.34570208e+00 -6.19828716e-01]
+ [-9.63100352e-02 -3.10006305e-01]
+ [ 6.41537942e-01 -1.25235153e-01]
+ [ 1.43013980e+00 -2.02630822e-01]
+ [ 1.62047875e-03  2.09912495e-03]]
+B fixed points:
+[[-3.67319204e-03  6.32340826e-04]
+ [-1.09693763e+00 -5.88696125e-01]
+ [ 1.40053417e+00 -1.42594964e-01]
+ [ 1.65633557e+00 -6.49675765e-01]
+ [ 1.52132673e+00 -8.80350299e-01]
+ [-3.45192654e-02 -2.58679701e-01]
+ [ 6.44440130e-01 -3.49545229e-02]]
+C fixed points:
+[[ 1.90134134  0.04492006]
+ [-0.14509275 -0.06398356]
+ [-0.54970958 -0.25000244]]
+D fixed points:
+[[ 1.31683204 -0.3261248 ]
+ [ 1.28413678 -0.58169888]
+ [-1.36078646 -0.65629701]
+ [ 0.82151317 -0.52286174]
+ [-0.14383335 -0.1126682 ]
+ [-0.65790045 -0.27555331]
+ [ 0.72349536 -0.22998605]]
+Go fixed points:
+[[-1.36227611 -0.65350746]
+ [ 1.60258991  0.2556344 ]
+ [-0.29996865 -0.21320426]]
+NoGo fixed points:
+[[-1.43194459e-03  6.09045340e-04]
+ [ 1.63727447e+00 -7.91264414e-01]
+ [ 6.90799688e-01 -2.81030414e-01]
+ [ 1.35389771e-01  2.36756425e-01]
+ [-1.31239501e+00 -6.54469401e-01]
+ [ 1.95761766e-01 -3.56233768e-01]
+ [ 7.72779941e-01 -1.96245557e-01]
+ [ 1.51918051e+00 -2.61135718e-01]
+ [ 2.79796168e-01  3.47228156e-01]]
+Cue fixed points:
+[[-1.07101116 -0.58747899]
+ [ 1.12637056  0.46379781]
+ [-0.45750844 -0.48201965]]
+#+end_example
+:END:
+
+*** There are three fixed points only. Your algorithm is not finding them
+
+#+begin_reasoning
+
+#+end_reasoning
+
+
+
+You are right: the previous routine was finding /all roots of the 2D projected flow/, including saddles/unstable roots. If you expect the three attractor fixed points, use an attractor-based finder: integrate many initial conditions, cluster converged endpoints, refine with =root=, then keep only stable fixed points.
+
+Replace only the fixed-point routine with this block, then rerun the figure block.
+
+#+begin_src jupyter-python
+# ---- Stable/attractor fixed-point finder ----
+
+def field_np_2d(model, kappa_np, ff_input=None):
+    """Evaluate 2D internal-coordinate vector field at one or many points."""
+    kappa_np = np.asarray(kappa_np, dtype=np.float32)
+
+    if kappa_np.ndim == 1:
+        kappa_np = kappa_np[None, :]
+
+    kappa = torch.tensor(kappa_np, dtype=torch.float32)
+
+    with torch.no_grad():
+        dK, _ = internal_latent_vector_field(
+            model,
+            kappa,
+            ff_input=ff_input,
+        )
+
+    return dK.cpu().numpy()
+
+
+def finite_difference_jacobian_2d(model, fp, ff_input=None, eps=1e-4):
+    """Numerical Jacobian of the 2D kappa vector field."""
+    fp = np.asarray(fp, dtype=np.float64)
+    J = np.zeros((2, 2), dtype=np.float64)
+
+    for j in range(2):
+        step = np.zeros(2)
+        step[j] = eps
+
+        f_plus = field_np_2d(model, fp + step, ff_input=ff_input).reshape(2)
+        f_minus = field_np_2d(model, fp - step, ff_input=ff_input).reshape(2)
+
+        J[:, j] = (f_plus - f_minus) / (2 * eps)
+
+    return J
+
+
+def is_stable_fixed_point_2d(model, fp, ff_input=None, stability_tol=1e-4):
+    """
+    Stable for continuous-time flow if all real eigenvalues of Jacobian are negative.
+    """
+    J = finite_difference_jacobian_2d(model, fp, ff_input=ff_input)
+    eigvals = np.linalg.eigvals(J)
+    max_real = np.max(np.real(eigvals))
+
+    return max_real < -stability_tol, eigvals
+
+
+def cluster_points(points, tol=0.15):
+    """Greedy clustering of nearby 2D points."""
+    points = np.asarray(points)
+
+    if len(points) == 0:
+        return np.empty((0, 2))
+
+    clusters = []
+
+    for p in points:
+        assigned = False
+
+        for cluster in clusters:
+            if np.linalg.norm(p - cluster["center"]) < tol:
+                cluster["points"].append(p)
+                cluster["center"] = np.mean(cluster["points"], axis=0)
+                assigned = True
+                break
+
+        if not assigned:
+            clusters.append({
+                "center": p.copy(),
+                "points": [p.copy()],
+            })
+
+    return np.stack([c["center"] for c in clusters], axis=0)
+
+
+def find_stable_fixed_points_2d(
+    model,
+    K1,
+    K2,
+    ff_input=None,
+    n_starts_per_axis=31,
+    n_steps=2500,
+    dt=0.05,
+    speed_tol=1e-4,
+    root_residual_tol=1e-5,
+    cluster_tol=0.20,
+    stability_tol=1e-4,
+    margin=0.05,
+):
+    """
+    Find stable attracting fixed points only.
+
+    Procedure:
+    1. Start many initial conditions on the plotting grid.
+    2. Integrate the 2D flow forward.
+    3. Keep endpoints with low speed.
+    4. Cluster endpoints.
+    5. Refine each cluster center with scipy.root.
+    6. Keep only stable fixed points.
+    """
+    k1_min, k1_max = float(K1.min()), float(K1.max())
+    k2_min, k2_max = float(K2.min()), float(K2.max())
+
+    k1 = np.linspace(k1_min, k1_max, n_starts_per_axis)
+    k2 = np.linspace(k2_min, k2_max, n_starts_per_axis)
+    S1, S2 = np.meshgrid(k1, k2)
+
+    starts = np.stack([S1.ravel(), S2.ravel()], axis=1).astype(np.float32)
+    z = starts.copy()
+
+    # Batched Euler integration.
+    for _ in range(n_steps):
+        dz = field_np_2d(model, z, ff_input=ff_input)
+        z = z + dt * dz
+
+        # Keep trajectories inside a slightly expanded box.
+        z[:, 0] = np.clip(z[:, 0], k1_min - margin, k1_max + margin)
+        z[:, 1] = np.clip(z[:, 1], k2_min - margin, k2_max + margin)
+
+    final_speed = np.linalg.norm(
+        field_np_2d(model, z, ff_input=ff_input),
+        axis=1,
+    )
+
+    converged = z[final_speed < speed_tol]
+
+    # If threshold is too strict, use the slowest endpoints.
+    if len(converged) == 0:
+        slow_idx = np.argsort(final_speed)[:50]
+        converged = z[slow_idx]
+
+    candidates = cluster_points(converged, tol=cluster_tol)
+
+    refined = []
+
+    def field_for_root(kappa_np):
+        return field_np_2d(model, kappa_np, ff_input=ff_input).reshape(-1)
+
+    for cand in candidates:
+        sol = root(field_for_root, cand, method="hybr")
+
+        if not sol.success:
+            continue
+
+        fp = sol.x
+        residual = np.linalg.norm(field_for_root(fp))
+
+        if residual > root_residual_tol:
+            continue
+
+        if not (k1_min <= fp[0] <= k1_max and k2_min <= fp[1] <= k2_max):
+            continue
+
+        stable, eigvals = is_stable_fixed_point_2d(
+            model,
+            fp,
+            ff_input=ff_input,
+            stability_tol=stability_tol,
+        )
+
+        if not stable:
+            continue
+
+        refined.append(fp)
+
+    stable_fps = cluster_points(refined, tol=cluster_tol)
+
+    return stable_fps
+#+end_src
+
+#+RESULTS:
+
+Then in your figure block, replace every call to =find_fixed_points_2d(...)= with this.
+
+For autonomous fixed points:
+
+#+begin_src jupyter-python
+fixed_points_auto = find_stable_fixed_points_2d(
+    model,
+    K1,
+    K2,
+    ff_input=None,
+    n_starts_per_axis=41,
+    n_steps=3000,
+    dt=0.05,
+    speed_tol=1e-4,
+    cluster_tol=0.20,
+)
+#+end_src
+
+#+RESULTS:
+
+For held-input fixed points:
+
+#+begin_src jupyter-python
+fixed_points_inputs[name] = find_stable_fixed_points_2d(
+    model,
+    K1,
+    K2,
+    ff_input=x_vec,
+    n_starts_per_axis=41,
+    n_steps=3000,
+    dt=0.05,
+    speed_tol=1e-4,
+    cluster_tol=0.20,
+)
+#+end_src
+
+#+RESULTS:
+
+Optional sanity print:
+
+#+begin_src jupyter-python
+print("Number of stable autonomous fixed points:", len(fixed_points_auto))
+print(fixed_points_auto)
+
+for name in dual_input_vectors:
+    print(name, len(fixed_points_inputs[name]))
+    print(fixed_points_inputs[name])
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Number of stable autonomous fixed points: 6
+[[-1.28569558e+00 -6.05509280e-01]
+ [-7.07898710e-04 -1.83339494e-04]
+ [ 4.11386769e-01  5.14097708e-01]
+ [ 1.14381201e+00 -9.04381748e-01]
+ [ 6.93803363e-01 -4.36415480e-01]
+ [ 1.38035490e+00 -1.65266414e-01]]
+A 7
+[[ 1.68327811e+00 -6.90701980e-01]
+ [ 1.25382955e+00 -8.41149694e-01]
+ [-1.34570208e+00 -6.19828716e-01]
+ [-9.63100352e-02 -3.10006305e-01]
+ [ 6.41537942e-01 -1.25235153e-01]
+ [ 1.43013980e+00 -2.02630822e-01]
+ [ 1.62047875e-03  2.09912495e-03]]
+B 7
+[[-3.67319204e-03  6.32340826e-04]
+ [-1.09693763e+00 -5.88696125e-01]
+ [ 1.40053417e+00 -1.42594964e-01]
+ [ 1.65633557e+00 -6.49675765e-01]
+ [ 1.52132673e+00 -8.80350299e-01]
+ [-3.45192654e-02 -2.58679701e-01]
+ [ 6.44440130e-01 -3.49545229e-02]]
+C 3
+[[ 1.90134134  0.04492006]
+ [-0.14509275 -0.06398356]
+ [-0.54970958 -0.25000244]]
+D 7
+[[ 1.31683204 -0.3261248 ]
+ [ 1.28413678 -0.58169888]
+ [-1.36078646 -0.65629701]
+ [ 0.82151317 -0.52286174]
+ [-0.14383335 -0.1126682 ]
+ [-0.65790045 -0.27555331]
+ [ 0.72349536 -0.22998605]]
+Go 3
+[[-1.36227611 -0.65350746]
+ [ 1.60258991  0.2556344 ]
+ [-0.29996865 -0.21320426]]
+NoGo 9
+[[-1.43194459e-03  6.09045340e-04]
+ [ 1.63727447e+00 -7.91264414e-01]
+ [ 6.90799688e-01 -2.81030414e-01]
+ [ 1.35389771e-01  2.36756425e-01]
+ [-1.31239501e+00 -6.54469401e-01]
+ [ 1.95761766e-01 -3.56233768e-01]
+ [ 7.72779941e-01 -1.96245557e-01]
+ [ 1.51918051e+00 -2.61135718e-01]
+ [ 2.79796168e-01  3.47228156e-01]]
+Cue 1
+[[-1.07101118 -0.58747912]]
+#+end_example
+
+This should return only the attracting fixed points, not saddles/unstable intersections of nullclines.
+
+*** plot the figure
+
+#+begin_reasoning
+
+#+end_reasoning
+
+
+
+Run this after the routine block. It plots the dual-task phase portrait and marks only the 3 task-relevant autonomous fixed points reached by the trajectories.
+
+#+begin_src jupyter-python
+# ---- Dual-task phase portrait with 3 task-relevant fixed points ----
+
+from scipy.optimize import root
+import matplotlib.lines as mlines
+
+# Ensure dual-task timing globals are active
+T_STIM_ON = [1.0, 3.0, 5.0, 7.0]
+T_STIM_OFF = [2.0, 4.0, 6.0, 8.0]
+T_STEPS = 9
+
+N_STIM_ON = torch.tensor([int(i / DT) for i in T_STIM_ON])
+N_STIM_OFF = torch.tensor([int(i / DT) for i in T_STIM_OFF])
+N_STEPS = int(T_STEPS / DT)
+
+N_BATCH_PHASE = 512
+noise_phase = noise if "noise" in globals() else 0.05
+fig_width = width if "width" in globals() else 6
+
+
+def field_np_2d(model, kappa_np, ff_input=None):
+    kappa_np = np.asarray(kappa_np, dtype=np.float32)
+
+    if kappa_np.ndim == 1:
+        kappa_np = kappa_np[None, :]
+
+    kappa = torch.tensor(kappa_np, dtype=torch.float32)
+
+    with torch.no_grad():
+        dK, _ = internal_latent_vector_field(
+            model,
+            kappa,
+            ff_input=ff_input,
+        )
+
+    return dK.cpu().numpy()
+
+
+def cluster_points_with_counts(points, tol=0.25):
+    points = np.asarray(points)
+
+    clusters = []
+
+    for p in points:
+        assigned = False
+
+        for c in clusters:
+            if np.linalg.norm(p - c["center"]) < tol:
+                c["points"].append(p)
+                c["center"] = np.mean(c["points"], axis=0)
+                assigned = True
+                break
+
+        if not assigned:
+            clusters.append({
+                "center": p.copy(),
+                "points": [p.copy()],
+            })
+
+    centers = np.stack([c["center"] for c in clusters], axis=0)
+    counts = np.array([len(c["points"]) for c in clusters])
+
+    order = np.argsort(counts)[::-1]
+
+    return centers[order], counts[order]
+
+
+def find_task_relevant_fixed_points(
+    model,
+    starts,
+    ff_input=None,
+    n_expected=3,
+    n_steps=4000,
+    dt=0.05,
+    cluster_tol=0.30,
+    residual_tol=1e-5,
+):
+    """
+    Find fixed points reached by task trajectories.
+
+    This avoids scanning all nullcline intersections and keeps only the
+    attractors reached from actual trial endpoints.
+    """
+    z = np.asarray(starts, dtype=np.float32).copy()
+
+    # Relax under chosen flow
+    for _ in range(n_steps):
+        dz = field_np_2d(model, z, ff_input=ff_input)
+        z = z + dt * dz
+
+    centers, counts = cluster_points_with_counts(z, tol=cluster_tol)
+
+    # Keep largest basins
+    centers = centers[:n_expected]
+
+    refined = []
+
+    def f_root(x):
+        return field_np_2d(model, x, ff_input=ff_input).reshape(-1)
+
+    for c in centers:
+        sol = root(f_root, c, method="hybr")
+
+        if not sol.success:
+            continue
+
+        fp = sol.x
+        residual = np.linalg.norm(f_root(fp))
+
+        if residual < residual_tol:
+            refined.append(fp)
+
+    if len(refined) == 0:
+        return np.empty((0, 2))
+
+    refined, _ = cluster_points_with_counts(np.stack(refined), tol=cluster_tol)
+
+    return refined[:n_expected]
+
+
+# Generate dual-task trials
+inputs, targets, mask, trial_type = generate_dual_trials(
+    N_BATCH_PHASE,
+    N_STEPS,
+    input_size=model.wi.in_features,
+    noise=noise_phase,
+)
+
+# Run network
+traj, readout = run_model_with_internal_readouts(
+    model,
+    inputs,
+    rec_init="zero",
+)
+
+dual_condition_order = (
+    "DPA AC",
+    "DPA AD",
+    "Go AC",
+    "Go AD",
+    "NoGo BC",
+    "NoGo BD",
+)
+
+dual_condition_colors = {
+    "DPA AC":  "tab:green",
+    "DPA AD":  "tab:orange",
+    "Go AC":   "tab:blue",
+    "Go AD":   "tab:cyan",
+    "NoGo BC": "tab:red",
+    "NoGo BD": "tab:purple",
+}
+
+idx_by_condition = get_dual_condition_indices(trial_type)
+
+# Held input vectors: 0 A, 1 B, 2 C, 3 D, 4 Go, 5 NoGo, 6 Cue
+dual_input_vectors = {
+    "A":    onehot_input(model, 0),
+    "B":    onehot_input(model, 1),
+    "C":    onehot_input(model, 2),
+    "D":    onehot_input(model, 3),
+    "Go":   onehot_input(model, 4),
+    "NoGo": onehot_input(model, 5),
+    "Cue":  onehot_input(model, 6),
+}
+
+# Grid
+K1, K2, lim = make_grid_from_trajectories(
+    traj,
+    idx_by_condition,
+    condition_order=dual_condition_order,
+    pad=0.75,
+    expand=2.0,
+    min_lim=5.0,
+    n_grid=121,
+)
+
+# Autonomous field
+U0, V0, speed0 = compute_internal_field_for_input(
+    model,
+    K1,
+    K2,
+    ff_input=None,
+)
+
+# Three task-relevant autonomous fixed points
+# Start relaxation from all trial endpoints
+fixed_points_auto = find_task_relevant_fixed_points(
+    model,
+    starts=traj[:, -1, :2],
+    ff_input=None,
+    n_expected=3,
+    n_steps=4000,
+    dt=0.05,
+    cluster_tol=0.30,
+)
+
+print("Task-relevant autonomous fixed points:")
+print(fixed_points_auto)
+
+# Fixed-input fields only; do not scan their fixed points
+fields = {}
+
+for name, x_vec in dual_input_vectors.items():
+    Ui, Vi, speed_i = compute_internal_field_for_input(
+        model,
+        K1,
+        K2,
+        ff_input=x_vec,
+    )
+
+    fields[name] = {
+        "U": Ui,
+        "V": Vi,
+        "speed": speed_i,
+    }
+
+# Shared speed scale
+all_speeds = [speed0.ravel()] + [
+    fields[name]["speed"].ravel()
+    for name in dual_input_vectors
+]
+
+vmax_phase = np.nanpercentile(np.concatenate(all_speeds), 95)
+
+# Figure
+fig, axd = plt.subplot_mosaic(
+    [
+        ["auto", "auto", "A",    "B"],
+        ["auto", "auto", "C",    "D"],
+        ["Go",   "NoGo", "Cue",  "blank"],
+    ],
+    figsize=(4.0 * fig_width, 2.8 * fig_width),
+    constrained_layout=True,
+    gridspec_kw={
+        "width_ratios": [1.15, 1.15, 1.0, 1.0],
+        "height_ratios": [1.0, 1.0, 1.0],
+    },
+)
+
+axd["blank"].axis("off")
+ax_auto = axd["auto"]
+
+# Autonomous panel
+im_auto = plot_speed_field(
+    ax_auto,
+    K1,
+    K2,
+    speed0,
+    vmax=vmax_phase,
+)
+
+ax_auto.streamplot(
+    K1,
+    K2,
+    U0,
+    V0,
+    color="white",
+    density=0.8,
+    linewidth=1.0,
+    arrowsize=1.0,
+)
+
+plot_nullclines(ax_auto, K1, K2, U0, V0, lw=2.0)
+
+# Overlay trajectories
+for cond in dual_condition_order:
+    idx = idx_by_condition[cond]
+    xy = traj[idx, :, :2]
+    color = dual_condition_colors[cond]
+
+    ax_auto.plot(
+        xy[:, 0],
+        xy[:, 1],
+        color=color,
+        lw=3,
+        alpha=0.95,
+        label=cond,
+        zorder=4,
+    )
+
+    ax_auto.scatter(
+        xy[0, 0],
+        xy[0, 1],
+        color=color,
+        s=55,
+        marker="o",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+    ax_auto.scatter(
+        xy[-1, 0],
+        xy[-1, 1],
+        color=color,
+        s=80,
+        marker="X",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+# Plot only the 3 task-relevant fixed points
+if len(fixed_points_auto) > 0:
+    ax_auto.scatter(
+        fixed_points_auto[:, 0],
+        fixed_points_auto[:, 1],
+        s=220,
+        marker="o",
+        facecolor="black",
+        edgecolor="white",
+        linewidth=1.4,
+        zorder=10,
+    )
+
+ax_auto.axhline(0, color="k", lw=1, alpha=0.25)
+ax_auto.axvline(0, color="k", lw=1, alpha=0.25)
+ax_auto.set_xlim(-lim, lim)
+ax_auto.set_ylim(-lim, lim)
+ax_auto.set_aspect("equal", adjustable="box")
+ax_auto.set_xlabel(r"$\kappa^M_1$")
+ax_auto.set_ylabel(r"$\kappa^M_2$")
+ax_auto.set_title("Dual task: autonomous dynamics with trajectories")
+
+# Held-input panels
+for name in dual_input_vectors:
+    ax = axd[name]
+
+    Ui = fields[name]["U"]
+    Vi = fields[name]["V"]
+    speed_i = fields[name]["speed"]
+
+    plot_speed_field(
+        ax,
+        K1,
+        K2,
+        speed_i,
+        vmax=vmax_phase,
+    )
+
+    ax.streamplot(
+        K1,
+        K2,
+        Ui,
+        Vi,
+        color="white",
+        density=0.65,
+        linewidth=0.8,
+        arrowsize=0.8,
+    )
+
+    plot_nullclines(ax, K1, K2, Ui, Vi, lw=1.4)
+
+    # Same 3 task-relevant autonomous fixed points on every panel
+    if len(fixed_points_auto) > 0:
+        ax.scatter(
+            fixed_points_auto[:, 0],
+            fixed_points_auto[:, 1],
+            s=150,
+            marker="o",
+            facecolor="black",
+            edgecolor="white",
+            linewidth=1.0,
+            zorder=9,
+        )
+
+    ax.axhline(0, color="k", lw=1, alpha=0.25)
+    ax.axvline(0, color="k", lw=1, alpha=0.25)
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_title(f"Held input: {name}")
+    ax.tick_params(labelsize=10)
+
+for name in ("C", "D", "Go", "NoGo", "Cue"):
+    axd[name].set_xlabel(r"$\kappa^M_1$")
+
+for name in ("A", "C", "Go"):
+    axd[name].set_ylabel(r"$\kappa^M_2$")
+
+# Colorbar
+cbar = fig.colorbar(
+    im_auto,
+    ax=[ax for key, ax in axd.items() if key != "blank"],
+    shrink=0.85,
+    pad=0.015,
+)
+cbar.set_label(r"$\|\dot{\kappa}^M\|$")
+
+# Legend
+legend_handles = [
+    mlines.Line2D(
+        [],
+        [],
+        color=dual_condition_colors[c],
+        lw=3,
+        label=c,
+    )
+    for c in dual_condition_order
+] + [
+    mlines.Line2D([], [], color="tab:red", lw=2, label=r"$\dot{\kappa}^M_1=0$"),
+    mlines.Line2D([], [], color="tab:blue", lw=2, label=r"$\dot{\kappa}^M_2=0$"),
+    mlines.Line2D(
+        [],
+        [],
+        color="white",
+        marker="o",
+        markerfacecolor="black",
+        markeredgecolor="white",
+        linestyle="None",
+        markersize=10,
+        label="task fixed point",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="k",
+        marker="o",
+        linestyle="None",
+        markersize=7,
+        label="start",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="k",
+        marker="X",
+        linestyle="None",
+        markersize=8,
+        label="end",
+    ),
+]
+
+ax_auto.legend(
+    handles=legend_handles,
+    fontsize=8,
+    frameon=True,
+    loc="best",
+    ncol=2,
+)
+
+fig.suptitle(
+    "Low-rank RNN dual-task dynamics in internal $M$-readout coordinates",
+    y=1.02,
+)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: Task-relevant autonomous fixed points:
+: [[-1.28569557e+00 -6.05509248e-01]
+:  [ 1.14381176e+00 -9.04381637e-01]
+:  [-7.07891851e-04 -1.83339453e-04]]
+[[file:./figures/figure_77.png]]
+:END:
+
+*** Now increase the input strength so that we see the real effect of the inputs on the landscape
+
+#+begin_reasoning
+
+#+end_reasoning
+
+
+
+Set a larger held-input amplitude. The important change is:
+
+#+begin_src jupyter-python
+input_amp = 5.0
+dual_input_vectors = {
+    "A":    onehot_input(model, 0, amp=input_amp),
+    "B":    onehot_input(model, 1, amp=input_amp),
+    "C":    onehot_input(model, 2, amp=input_amp),
+    "D":    onehot_input(model, 3, amp=input_amp),
+    "Go":   onehot_input(model, 4, amp=input_amp),
+    "NoGo": onehot_input(model, 5, amp=input_amp),
+    "Cue":  onehot_input(model, 6, amp=input_amp),
+}
+#+end_src
+
+#+RESULTS:
+
+Here is the full rerun figure block with stronger input landscapes:
+
+#+begin_src jupyter-python
+# ---- Dual-task phase portrait with stronger held-input landscapes ----
+
+input_amp = 5.0  # increase/decrease this, e.g. 2, 3, 5, 10
+
+# Ensure dual-task timing globals are active
+T_STIM_ON = [1.0, 3.0, 5.0, 7.0]
+T_STIM_OFF = [2.0, 4.0, 6.0, 8.0]
+T_STEPS = 9
+
+N_STIM_ON = torch.tensor([int(i / DT) for i in T_STIM_ON])
+N_STIM_OFF = torch.tensor([int(i / DT) for i in T_STIM_OFF])
+N_STEPS = int(T_STEPS / DT)
+
+N_BATCH_PHASE = 512
+noise_phase = noise if "noise" in globals() else 0.05
+fig_width = width if "width" in globals() else 6
+
+# Generate standard-amplitude task trials for trajectories
+inputs, targets, mask, trial_type = generate_dual_trials(
+    N_BATCH_PHASE,
+    N_STEPS,
+    input_size=model.wi.in_features,
+    noise=noise_phase,
+)
+
+traj, readout = run_model_with_internal_readouts(
+    model,
+    inputs,
+    rec_init="zero",
+)
+
+dual_condition_order = (
+    "DPA AC",
+    "DPA AD",
+    "Go AC",
+    "Go AD",
+    "NoGo BC",
+    "NoGo BD",
+)
+
+dual_condition_colors = {
+    "DPA AC":  "tab:green",
+    "DPA AD":  "tab:orange",
+    "Go AC":   "tab:blue",
+    "Go AD":   "tab:cyan",
+    "NoGo BC": "tab:red",
+    "NoGo BD": "tab:purple",
+}
+
+idx_by_condition = get_dual_condition_indices(trial_type)
+
+# Strong held-input vectors for landscape visualization
+dual_input_vectors = {
+    "A":    onehot_input(model, 0, amp=input_amp),
+    "B":    onehot_input(model, 1, amp=input_amp),
+    "C":    onehot_input(model, 2, amp=input_amp),
+    "D":    onehot_input(model, 3, amp=input_amp),
+    "Go":   onehot_input(model, 4, amp=input_amp),
+    "NoGo": onehot_input(model, 5, amp=input_amp),
+    "Cue":  onehot_input(model, 6, amp=input_amp),
+}
+
+# Grid
+K1, K2, lim = make_grid_from_trajectories(
+    traj,
+    idx_by_condition,
+    condition_order=dual_condition_order,
+    pad=0.75,
+    expand=2.0,
+    min_lim=5.0,
+    n_grid=121,
+)
+
+# Autonomous field
+U0, V0, speed0 = compute_internal_field_for_input(
+    model,
+    K1,
+    K2,
+    ff_input=None,
+)
+
+# Task-relevant autonomous fixed points
+fixed_points_auto = find_task_relevant_fixed_points(
+    model,
+    starts=traj[:, -1, :2],
+    ff_input=None,
+    n_expected=3,
+    n_steps=4000,
+    dt=0.05,
+    cluster_tol=0.30,
+)
+
+print("Task-relevant autonomous fixed points:")
+print(fixed_points_auto)
+
+# Strong fixed-input fields
+fields = {}
+
+for name, x_vec in dual_input_vectors.items():
+    Ui, Vi, speed_i = compute_internal_field_for_input(
+        model,
+        K1,
+        K2,
+        ff_input=x_vec,
+    )
+
+    fields[name] = {
+        "U": Ui,
+        "V": Vi,
+        "speed": speed_i,
+    }
+
+# Shared speed scale
+all_speeds = [speed0.ravel()] + [
+    fields[name]["speed"].ravel()
+    for name in dual_input_vectors
+]
+vmax_phase = np.nanpercentile(np.concatenate(all_speeds), 95)
+
+# Figure
+fig, axd = plt.subplot_mosaic(
+    [
+        ["auto", "auto", "A",    "B"],
+        ["auto", "auto", "C",    "D"],
+        ["Go",   "NoGo", "Cue",  "blank"],
+    ],
+    figsize=(4.0 * fig_width, 2.8 * fig_width),
+    constrained_layout=True,
+    gridspec_kw={
+        "width_ratios": [1.15, 1.15, 1.0, 1.0],
+        "height_ratios": [1.0, 1.0, 1.0],
+    },
+)
+
+axd["blank"].axis("off")
+ax_auto = axd["auto"]
+
+# Autonomous panel
+im_auto = plot_speed_field(
+    ax_auto,
+    K1,
+    K2,
+    speed0,
+    vmax=vmax_phase,
+)
+
+ax_auto.streamplot(
+    K1,
+    K2,
+    U0,
+    V0,
+    color="white",
+    density=0.8,
+    linewidth=1.0,
+    arrowsize=1.0,
+)
+
+plot_nullclines(ax_auto, K1, K2, U0, V0, lw=2.0)
+
+# Overlay trajectories
+for cond in dual_condition_order:
+    idx = idx_by_condition[cond]
+    xy = traj[idx, :, :2]
+    color = dual_condition_colors[cond]
+
+    ax_auto.plot(
+        xy[:, 0],
+        xy[:, 1],
+        color=color,
+        lw=3,
+        alpha=0.95,
+        label=cond,
+        zorder=4,
+    )
+
+    ax_auto.scatter(
+        xy[0, 0],
+        xy[0, 1],
+        color=color,
+        s=55,
+        marker="o",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+    ax_auto.scatter(
+        xy[-1, 0],
+        xy[-1, 1],
+        color=color,
+        s=80,
+        marker="X",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+if len(fixed_points_auto) > 0:
+    ax_auto.scatter(
+        fixed_points_auto[:, 0],
+        fixed_points_auto[:, 1],
+        s=220,
+        marker="o",
+        facecolor="black",
+        edgecolor="white",
+        linewidth=1.4,
+        zorder=10,
+    )
+
+ax_auto.axhline(0, color="k", lw=1, alpha=0.25)
+ax_auto.axvline(0, color="k", lw=1, alpha=0.25)
+ax_auto.set_xlim(-lim, lim)
+ax_auto.set_ylim(-lim, lim)
+ax_auto.set_aspect("equal", adjustable="box")
+ax_auto.set_xlabel(r"$\kappa^M_1$")
+ax_auto.set_ylabel(r"$\kappa^M_2$")
+ax_auto.set_title("Autonomous dynamics")
+
+# Strong held-input panels
+for name in dual_input_vectors:
+    ax = axd[name]
+
+    Ui = fields[name]["U"]
+    Vi = fields[name]["V"]
+    speed_i = fields[name]["speed"]
+
+    plot_speed_field(
+        ax,
+        K1,
+        K2,
+        speed_i,
+        vmax=vmax_phase,
+    )
+
+    ax.streamplot(
+        K1,
+        K2,
+        Ui,
+        Vi,
+        color="white",
+        density=0.75,
+        linewidth=0.9,
+        arrowsize=0.9,
+    )
+
+    plot_nullclines(ax, K1, K2, Ui, Vi, lw=1.5)
+
+    if len(fixed_points_auto) > 0:
+        ax.scatter(
+            fixed_points_auto[:, 0],
+            fixed_points_auto[:, 1],
+            s=150,
+            marker="o",
+            facecolor="black",
+            edgecolor="white",
+            linewidth=1.0,
+            zorder=9,
+        )
+
+    ax.axhline(0, color="k", lw=1, alpha=0.25)
+    ax.axvline(0, color="k", lw=1, alpha=0.25)
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_title(f"Held input: {input_amp:g}× {name}")
+    ax.tick_params(labelsize=10)
+
+for name in ("C", "D", "Go", "NoGo", "Cue"):
+    axd[name].set_xlabel(r"$\kappa^M_1$")
+
+for name in ("A", "C", "Go"):
+    axd[name].set_ylabel(r"$\kappa^M_2$")
+
+# Colorbar
+cbar = fig.colorbar(
+    im_auto,
+    ax=[ax for key, ax in axd.items() if key != "blank"],
+    shrink=0.85,
+    pad=0.015,
+)
+cbar.set_label(r"$\|\dot{\kappa}^M\|$")
+
+# Legend
+legend_handles = [
+    mlines.Line2D([], [], color=dual_condition_colors[c], lw=3, label=c)
+    for c in dual_condition_order
+] + [
+    mlines.Line2D([], [], color="tab:red", lw=2, label=r"$\dot{\kappa}^M_1=0$"),
+    mlines.Line2D([], [], color="tab:blue", lw=2, label=r"$\dot{\kappa}^M_2=0$"),
+    mlines.Line2D(
+        [],
+        [],
+        color="white",
+        marker="o",
+        markerfacecolor="black",
+        markeredgecolor="white",
+        linestyle="None",
+        markersize=10,
+        label="task fixed point",
+    ),
+    mlines.Line2D([], [], color="k", marker="o", linestyle="None", markersize=7, label="start"),
+    mlines.Line2D([], [], color="k", marker="X", linestyle="None", markersize=8, label="end"),
+]
+
+ax_auto.legend(
+    handles=legend_handles,
+    fontsize=8,
+    frameon=True,
+    loc="best",
+    ncol=2,
+)
+
+fig.suptitle(
+    f"Dual-task landscapes with stronger held inputs, amplitude = {input_amp:g}",
+    y=1.02,
+)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+#+begin_example
+Task-relevant autonomous fixed points:
+[[-1.28569557e+00 -6.05509248e-01]
+ [ 1.14381176e+00 -9.04381637e-01]
+ [-7.07891957e-04 -1.83339443e-04]]
+Unexpected exception formatting exception. Falling back to standard exception
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 3508, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/tmp/ipykernel_128204/1962283654.py", line 147, in <module>
+    ax_auto.streamplot(
+    ~~~~~~~~~~~~~~~~~~^
+        K1,
+        ^^^
+    ...<6 lines>...
+        arrowsize=1.0,
+        ^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/matplotlib/__init__.py", line 1524, in inner
+    return func(
+        ax,
+        ,*map(cbook.sanitize_sequence, args),
+        ,**{k: cbook.sanitize_sequence(v) for k, v in kwargs.items()})
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/matplotlib/streamplot.py", line 91, in streamplot
+    grid = Grid(x, y)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/matplotlib/streamplot.py", line 365, in __init__
+    raise ValueError("'x' values must be equally spaced")
+ValueError: 'x' values must be equally spaced
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 2105, in showtraceback
+    stb = self.InteractiveTB.structured_traceback(
+        etype, value, tb, tb_offset=tb_offset
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1428, in structured_traceback
+    return FormattedTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, evalue, etb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1319, in structured_traceback
+    return VerboseTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, value, tb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1172, in structured_traceback
+    formatted_exception = self.format_exception_as_a_whole(etype, evalue, etb, number_of_lines_of_context,
+                                                           tb_offset)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1062, in format_exception_as_a_whole
+    self.get_records(etb, number_of_lines_of_context, tb_offset) if etb else []
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1159, in get_records
+    res = list(stack_data.FrameInfo.stack_data(etb, options=options))[tb_offset:]
+          ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 597, in stack_data
+    yield from collapse_repeated(
+    ...<4 lines>...
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/utils.py", line 83, in collapse_repeated
+    yield from map(mapper, original_group)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 587, in mapper
+    return cls(f, options)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 551, in __init__
+    self.executing = Source.executing(frame_or_tb)
+                     ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 378, in executing
+    assert_(new_stmts <= stmts)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 154, in assert_
+    raise AssertionError(str(message))
+AssertionError
+#+end_example
+[[file:./figures/figure_79.png]]
+:END:
+
+*** fix the error
+
+#+begin_reasoning
+
+#+end_reasoning
+
+
+
+Matplotlib is complaining because =streamplot= is strict about grid spacing. Use 1D =linspace= axes for streamplot instead of passing =K1, K2=.
+
+Add this after =K1, K2, lim = make_grid_from_trajectories(...)=:
+
+#+begin_src jupyter-python
+# streamplot is strict about equal spacing; use exact 1D axes
+k1_axis = np.linspace(float(K1.min()), float(K1.max()), K1.shape[1])
+k2_axis = np.linspace(float(K2.min()), float(K2.max()), K2.shape[0])
+#+end_src
+
+#+RESULTS:
+
+Then replace every:
+
+#+begin_src jupyter-python
+ax.streamplot(
+    K1,
+    K2,
+    U,
+    V,
+    ...
+)
+#+end_src
+
+with:
+
+#+begin_src jupyter-python
+ax.streamplot(
+    k1_axis,
+    k2_axis,
+    U,
+    V,
+    ...
+)
+#+end_src
+
+Specifically, in your current figure block replace the autonomous streamplot with:
+
+#+begin_src jupyter-python
+ax_auto.streamplot(
+    k1_axis,
+    k2_axis,
+    U0,
+    V0,
+    color="white",
+    density=0.8,
+    linewidth=1.0,
+    arrowsize=1.0,
+)
+#+end_src
+
+and replace the held-input panel streamplot with:
+
+#+begin_src jupyter-python
+ax.streamplot(
+    k1_axis,
+    k2_axis,
+    Ui,
+    Vi,
+    color="white",
+    density=0.75,
+    linewidth=0.9,
+    arrowsize=0.9,
+)
+#+end_src
+
+So the fixed section around grid creation should be:
+
+#+begin_src jupyter-python
+# Grid
+K1, K2, lim = make_grid_from_trajectories(
+    traj,
+    idx_by_condition,
+    condition_order=dual_condition_order,
+    pad=0.75,
+    expand=2.0,
+    min_lim=5.0,
+    n_grid=121,
+)
+
+# Exact 1D axes for streamplot
+k1_axis = np.linspace(float(K1.min()), float(K1.max()), K1.shape[1])
+k2_axis = np.linspace(float(K2.min()), float(K2.max()), K2.shape[0])
+#+end_src
+
+Everything else can stay the same.
+
+*** give me the full block to plot
+
+#+begin_src jupyter-python
+# ---- Dual-task phase portrait with stronger held-input landscapes ----
+# Requires the routine block to be already run.
+
+input_amp = 100.0  # try 2, 3, 5, 10
+
+# Ensure dual-task timing globals are active
+T_STIM_ON = [1.0, 3.0, 5.0, 7.0]
+T_STIM_OFF = [2.0, 4.0, 6.0, 8.0]
+T_STEPS = 9
+
+N_STIM_ON = torch.tensor([int(i / DT) for i in T_STIM_ON])
+N_STIM_OFF = torch.tensor([int(i / DT) for i in T_STIM_OFF])
+N_STEPS = int(T_STEPS / DT)
+
+N_BATCH_PHASE = 512
+noise_phase = noise if "noise" in globals() else 0.05
+fig_width = width if "width" in globals() else 6
+
+# Generate standard-amplitude task trials for trajectories
+inputs, targets, mask, trial_type = generate_dual_trials(
+    N_BATCH_PHASE,
+    N_STEPS,
+    input_size=model.wi.in_features,
+    noise=noise_phase,
+)
+
+traj, readout = run_model_with_internal_readouts(
+    model,
+    inputs,
+    rec_init="zero",
+)
+
+dual_condition_order = (
+    "DPA AC",
+    "DPA AD",
+    "Go AC",
+    "Go AD",
+    "NoGo BC",
+    "NoGo BD",
+)
+
+dual_condition_colors = {
+    "DPA AC":  "tab:green",
+    "DPA AD":  "tab:orange",
+    "Go AC":   "tab:blue",
+    "Go AD":   "tab:cyan",
+    "NoGo BC": "tab:red",
+    "NoGo BD": "tab:purple",
+}
+
+idx_by_condition = get_dual_condition_indices(trial_type)
+
+# Strong held-input vectors for landscape visualization.
+# Channels: 0 A, 1 B, 2 C, 3 D, 4 Go, 5 NoGo, 6 Cue.
+dual_input_vectors = {
+    "A":    onehot_input(model, 0, amp=input_amp),
+    "B":    onehot_input(model, 1, amp=input_amp),
+    "C":    onehot_input(model, 2, amp=input_amp),
+    "D":    onehot_input(model, 3, amp=input_amp),
+    "Go":   onehot_input(model, 4, amp=input_amp),
+    "NoGo": onehot_input(model, 5, amp=input_amp),
+    "Cue":  onehot_input(model, 6, amp=input_amp),
+}
+
+# Grid
+K1, K2, lim = make_grid_from_trajectories(
+    traj,
+    idx_by_condition,
+    condition_order=dual_condition_order,
+    pad=0.75,
+    expand=2.0,
+    min_lim=5.0,
+    n_grid=121,
+)
+
+# streamplot is strict about equally spaced coordinates; use exact 1D axes
+k1_axis = np.linspace(float(K1.min()), float(K1.max()), K1.shape[1])
+k2_axis = np.linspace(float(K2.min()), float(K2.max()), K2.shape[0])
+
+# Autonomous field
+U0, V0, speed0 = compute_internal_field_for_input(
+    model,
+    K1,
+    K2,
+    ff_input=None,
+)
+
+# Task-relevant autonomous fixed points
+fixed_points_auto = find_task_relevant_fixed_points(
+    model,
+    starts=traj[:, -1, :2],
+    ff_input=None,
+    n_expected=3,
+    n_steps=4000,
+    dt=0.05,
+    cluster_tol=0.30,
+)
+
+print("Task-relevant autonomous fixed points:")
+print(fixed_points_auto)
+
+# Strong fixed-input fields
+fields = {}
+
+for name, x_vec in dual_input_vectors.items():
+    Ui, Vi, speed_i = compute_internal_field_for_input(
+        model,
+        K1,
+        K2,
+        ff_input=x_vec,
+    )
+
+    fields[name] = {
+        "U": Ui,
+        "V": Vi,
+        "speed": speed_i,
+    }
+
+# Shared speed scale
+all_speeds = [speed0.ravel()] + [
+    fields[name]["speed"].ravel()
+    for name in dual_input_vectors
+]
+vmax_phase = np.nanpercentile(np.concatenate(all_speeds), 95)
+
+# Figure
+fig, axd = plt.subplot_mosaic(
+    [
+        ["auto", "auto", "A",    "B"],
+        ["auto", "auto", "C",    "D"],
+        ["Go",   "NoGo", "Cue",  "blank"],
+    ],
+    figsize=(4.0 * fig_width, 2.8 * fig_width),
+    constrained_layout=True,
+    gridspec_kw={
+        "width_ratios": [1.15, 1.15, 1.0, 1.0],
+        "height_ratios": [1.0, 1.0, 1.0],
+    },
+)
+
+axd["blank"].axis("off")
+ax_auto = axd["auto"]
+
+# --------------------
+# Autonomous panel
+# --------------------
+im_auto = plot_speed_field(
+    ax_auto,
+    K1,
+    K2,
+    speed0,
+    vmax=vmax_phase,
+)
+
+ax_auto.streamplot(
+    k1_axis,
+    k2_axis,
+    U0,
+    V0,
+    color="white",
+    density=0.8,
+    linewidth=1.0,
+    arrowsize=1.0,
+)
+
+plot_nullclines(ax_auto, K1, K2, U0, V0, lw=2.0)
+
+# Overlay trajectories
+for cond in dual_condition_order:
+    idx = idx_by_condition[cond]
+    xy = traj[idx, :, :2]
+    color = dual_condition_colors[cond]
+
+    ax_auto.plot(
+        xy[:, 0],
+        xy[:, 1],
+        color=color,
+        lw=3,
+        alpha=0.95,
+        label=cond,
+        zorder=4,
+    )
+
+    # Start
+    ax_auto.scatter(
+        xy[0, 0],
+        xy[0, 1],
+        color=color,
+        s=55,
+        marker="o",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+    # End
+    ax_auto.scatter(
+        xy[-1, 0],
+        xy[-1, 1],
+        color=color,
+        s=80,
+        marker="X",
+        edgecolor="k",
+        linewidth=0.8,
+        zorder=6,
+    )
+
+# Task-relevant fixed points
+if len(fixed_points_auto) > 0:
+    ax_auto.scatter(
+        fixed_points_auto[:, 0],
+        fixed_points_auto[:, 1],
+        s=220,
+        marker="o",
+        facecolor="black",
+        edgecolor="white",
+        linewidth=1.4,
+        zorder=10,
+    )
+
+ax_auto.axhline(0, color="k", lw=1, alpha=0.25)
+ax_auto.axvline(0, color="k", lw=1, alpha=0.25)
+ax_auto.set_xlim(-lim, lim)
+ax_auto.set_ylim(-lim, lim)
+ax_auto.set_aspect("equal", adjustable="box")
+ax_auto.set_xlabel(r"$\kappa^M_1$")
+ax_auto.set_ylabel(r"$\kappa^M_2$")
+ax_auto.set_title("Autonomous dynamics")
+
+# --------------------
+# Strong held-input panels
+# --------------------
+for name in dual_input_vectors:
+    ax = axd[name]
+
+    Ui = fields[name]["U"]
+    Vi = fields[name]["V"]
+    speed_i = fields[name]["speed"]
+
+    plot_speed_field(
+        ax,
+        K1,
+        K2,
+        speed_i,
+        vmax=vmax_phase,
+    )
+
+    ax.streamplot(
+        k1_axis,
+        k2_axis,
+        Ui,
+        Vi,
+        color="white",
+        density=0.75,
+        linewidth=0.9,
+        arrowsize=0.9,
+    )
+
+    plot_nullclines(ax, K1, K2, Ui, Vi, lw=1.5)
+
+    # Same 3 task-relevant autonomous fixed points on every panel
+    if len(fixed_points_auto) > 0:
+        ax.scatter(
+            fixed_points_auto[:, 0],
+            fixed_points_auto[:, 1],
+            s=150,
+            marker="o",
+            facecolor="black",
+            edgecolor="white",
+            linewidth=1.0,
+            zorder=9,
+        )
+
+    ax.axhline(0, color="k", lw=1, alpha=0.25)
+    ax.axvline(0, color="k", lw=1, alpha=0.25)
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_title(f"Held input: {input_amp:g}× {name}")
+    ax.tick_params(labelsize=10)
+
+# Axis labels
+for name in ("C", "D", "Go", "NoGo", "Cue"):
+    axd[name].set_xlabel(r"$\kappa^M_1$")
+
+for name in ("A", "C", "Go"):
+    axd[name].set_ylabel(r"$\kappa^M_2$")
+
+# Colorbar
+cbar = fig.colorbar(
+    im_auto,
+    ax=[ax for key, ax in axd.items() if key != "blank"],
+    shrink=0.85,
+    pad=0.015,
+)
+cbar.set_label(r"$\|\dot{\kappa}^M\|$")
+
+# Legend
+legend_handles = [
+    mlines.Line2D([], [], color=dual_condition_colors[c], lw=3, label=c)
+    for c in dual_condition_order
+] + [
+    mlines.Line2D([], [], color="tab:red", lw=2, label=r"$\dot{\kappa}^M_1=0$"),
+    mlines.Line2D([], [], color="tab:blue", lw=2, label=r"$\dot{\kappa}^M_2=0$"),
+    mlines.Line2D(
+        [],
+        [],
+        color="white",
+        marker="o",
+        markerfacecolor="black",
+        markeredgecolor="white",
+        linestyle="None",
+        markersize=10,
+        label="task fixed point",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="k",
+        marker="o",
+        linestyle="None",
+        markersize=7,
+        label="start",
+    ),
+    mlines.Line2D(
+        [],
+        [],
+        color="k",
+        marker="X",
+        linestyle="None",
+        markersize=8,
+        label="end",
+    ),
+]
+
+ax_auto.legend(
+    handles=legend_handles,
+    fontsize=8,
+    frameon=True,
+    loc="best",
+    ncol=2,
+)
+
+fig.suptitle(
+    f"Dual-task landscapes with stronger held inputs, amplitude = {input_amp:g}",
+    y=1.02,
+)
+
+plt.show()
+
+print(f"Grid limits: [-{lim:.2f}, {lim:.2f}], grid shape: {K1.shape}")
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: Task-relevant autonomous fixed points:
+: [[-1.28569557e+00 -6.05509248e-01]
+:  [ 1.14381176e+00 -9.04381637e-01]
+:  [-7.07891810e-04 -1.83339454e-04]]
+[[file:./figures/figure_86.png]]
+: Grid limits: [-5.01, 5.01], grid shape: (121, 121)
+:END:
+***
