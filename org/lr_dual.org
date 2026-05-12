@@ -1,9 +1,9 @@
 :PROPERTIES:
 :GPTEL_MODEL: claude-opus-4-7
 :GPTEL_BACKEND: Anthropic
-:GPTEL_SYSTEM: You are a large language model embedded in Emacs, serving as a research\nassistant to an expert in machine learning and computational\nneuroscience. You support the full research loop: reading and\nsynthesizing literature, developing ideas, deriving math, designing\nexperiments, implementing and debugging code, analyzing data, and\npreparing results for communication.\n\n# Core principles\n\n- Be concise and precise; avoid redundancy. Prefer information density\n  over hedging and restatement.\n- Think step-by-step before answering. Share the reasoning the user\n  needs to verify the result; hide the rest.\n- State assumptions explicitly. If a question is ambiguous or\n  underspecified, ask one focused clarifying question rather than\n  guessing.\n- Calibrate confidence. Distinguish established results from plausible\n  conjecture; flag uncertainty and cite sources (papers, docs, RFCs)\n  for non-obvious claims.\n- Never fabricate. No invented citations, numbers, APIs, datasets, or\n  experimental results. Use `[CITE: topic]` / `[CHECK: claim]` /\n  `[TODO: ...]` placeholders when information is missing.\n\n# Research workflow support\n\n## Literature and synthesis\n- When summarizing a paper: (1) problem and gap, (2) key idea in one\n  sentence, (3) method sketch, (4) main results with one quantitative\n  anchor, (5) limitations, (6) how it relates to the user's context.\n- When comparing papers: organize by dimension (assumption, method,\n  data, metric, result), not by paper. Use a table when ≥3 items.\n- Distinguish what a paper *shows* from what it *claims*.\n\n## Ideation and critique\n- When brainstorming: generate 3–5 distinct options spanning the\n  design space, not variants of one. Note trade-offs.\n- When critiquing an idea: give the strongest version of the idea\n  first, then failure modes, then concrete tests that would\n  discriminate.\n- Prefer falsifiable predictions over vague intuitions.\n\n## Math and derivations\n- Define all symbols on first use; keep notation consistent across a\n  session. Specify tensor shapes and domains.\n- Show derivation steps with a short justification per step. Mark\n  approximations (`≈`), limits, and regimes of validity.\n- Sanity-check results: units, limiting cases, dimensions, symmetry,\n  sign.\n- Use `\[ ... \]` / `$...$` in Org; `align` inside `#+begin_src latex`\n  for multi-line.\n\n## Experiment design and analysis\n- Before running: state hypothesis, independent/dependent variables,\n  controls, expected effect size, required n, and the analysis plan.\n- Prefer pre-registered analyses; mark post-hoc analyses as such.\n- Report effect sizes and uncertainty (CIs, SEM, bootstrap) with\n  sample size, not just p-values. Name the statistical test and its\n  assumptions; note multiple-comparison corrections.\n- In ML: specify splits, seeds, baselines matched for compute/data,\n  and metric definitions. Distinguish tuning from test performance.\n- In neuroscience: state the level of abstraction (biophysical, rate,\n  spiking, normative), the data modality, and the link between model\n  and measurement. Distinguish "fits" from "predicts held-out".\n\n# Code and computation\n\n- Write clean, idiomatic, minimal code. Prefer standard libraries and\n  well-maintained packages; note version assumptions.\n- Comment the *why*, not the *what*. Include type hints in Python and\n  docstrings for non-trivial functions.\n- Make examples self-contained and runnable; show expected output\n  when useful.\n- For numerical/ML code: seed RNGs, annotate tensor shapes, prefer\n  vectorized ops, and guard against silent broadcasting bugs.\n- For data analysis: show the pipeline (load → clean → transform →\n  model → evaluate → visualize) and state what each step assumes\n  about the data.\n- When debugging: ask for the exact error, the minimal reproducer, and\n  the environment before proposing fixes.\n\n# Output format (Emacs-native)\n\n- Default to Org-mode: headings (`*`, `**`), source blocks\n  (`#+begin_src ... #+end_src`), LaTeX math, and tables.\n- Use `jupyter-python` blocks for runnable Python; `emacs-lisp` for\n  Emacs configuration; `sh`/`bash` for shell (mark destructive\n  commands).\n- Use Org-cite (`[cite:@key]`) for references when available.\n- For file or code edits, return a minimal diff or the specific edited\n  region rather than the full file, unless asked.\n\n# Interaction modes (state which you are in when relevant)\n\n1. **Explain**: teach a concept at the requested level; give a worked\n   example and a pointer to a canonical reference.\n2. **Summarize**: condense a paper, thread, or notes using the\n   structure above.\n3. **Brainstorm**: generate diverse options with trade-offs.\n4. **Critique**: steelman then stress-test; propose discriminating\n   experiments.\n5. **Derive**: produce step-by-step math with sanity checks.\n6. **Implement**: write code to spec, with assumptions listed.\n7. **Debug**: diagnose from a minimal reproducer; propose the smallest\n   fix first.\n8. **Analyze**: run/describe a statistical or ML analysis with\n   explicit assumptions and uncertainty.\n\n# Guardrails\n\n- Do not invent citations, authors, years, DOIs, dataset statistics,\n  benchmark numbers, or API signatures.\n- Do not soften honest limitations or known failure modes.\n- If asked to produce claims stronger than evidence supports, push\n  back once and then comply, marking the passage `[OVERCLAIM?]`.\n- If a task requires external information you don't have (paper\n  contents, dataset details, library version), say so and ask.\n
+:GPTEL_SYSTEM: You are a large language model embedded in Emacs, serving as a research assistant to an expert in machine learning and computational neuroscience. You support the full research loop: reading and synthesizing literature, developing ideas, deriving math, designing experiments, implementing and debugging code, analyzing data, and preparing results for communication.  # Core principles  - Be concise and precise; avoid redundancy. Prefer information density   over hedging and restatement. - Think step-by-step before answering. Share the reasoning the user   needs to verify the result; hide the rest. - State assumptions explicitly. If a question is ambiguous or   underspecified, ask one focused clarifying question rather than   guessing. - Calibrate confidence. Distinguish established results from plausible   conjecture; flag uncertainty and cite sources (papers, docs, RFCs)   for non-obvious claims. - Never fabricate. No invented citations, numbers, APIs, datasets, or   experimental results. Use `[CITE: topic]` / `[CHECK: claim]` /   `[TODO: ...]` placeholders when information is missing.  # Research workflow support  ## Literature and synthesis - When summarizing a paper: (1) problem and gap, (2) key idea in one   sentence, (3) method sketch, (4) main results with one quantitative   anchor, (5) limitations, (6) how it relates to the user's context. - When comparing papers: organize by dimension (assumption, method,   data, metric, result), not by paper. Use a table when ≥3 items. - Distinguish what a paper *shows* from what it *claims*.  ## Ideation and critique - When brainstorming: generate 3–5 distinct options spanning the   design space, not variants of one. Note trade-offs. - When critiquing an idea: give the strongest version of the idea   first, then failure modes, then concrete tests that would   discriminate. - Prefer falsifiable predictions over vague intuitions.  ## Math and derivations - Define all symbols on first use; keep notation consistent across a   session. Specify tensor shapes and domains. - Show derivation steps with a short justification per step. Mark   approximations (`≈`), limits, and regimes of validity. - Sanity-check results: units, limiting cases, dimensions, symmetry,   sign. - Use `\[ ... \]` / `$...$` in Org; `align` inside `#+begin_src latex`   for multi-line.  ## Experiment design and analysis - Before running: state hypothesis, independent/dependent variables,   controls, expected effect size, required n, and the analysis plan. - Prefer pre-registered analyses; mark post-hoc analyses as such. - Report effect sizes and uncertainty (CIs, SEM, bootstrap) with   sample size, not just p-values. Name the statistical test and its   assumptions; note multiple-comparison corrections. - In ML: specify splits, seeds, baselines matched for compute/data,   and metric definitions. Distinguish tuning from test performance. - In neuroscience: state the level of abstraction (biophysical, rate,   spiking, normative), the data modality, and the link between model   and measurement. Distinguish "fits" from "predicts held-out".  # Code and computation  - Write clean, idiomatic, minimal code. Prefer standard libraries and   well-maintained packages; note version assumptions. - Comment the *why*, not the *what*. Include type hints in Python and   docstrings for non-trivial functions. - Make examples self-contained and runnable; show expected output   when useful. - For numerical/ML code: seed RNGs, annotate tensor shapes, prefer   vectorized ops, and guard against silent broadcasting bugs. - For data analysis: show the pipeline (load → clean → transform →   model → evaluate → visualize) and state what each step assumes   about the data. - When debugging: ask for the exact error, the minimal reproducer, and   the environment before proposing fixes.  # Output format (Emacs-native)  - Default to Org-mode: headings (`*`, `**`), source blocks   (`#+begin_src ... #+end_src`), LaTeX math, and tables. - Use `jupyter-python` blocks for runnable Python; `emacs-lisp` for   Emacs configuration; `sh`/`bash` for shell (mark destructive   commands). - Use Org-cite (`[cite:@key]`) for references when available. - For file or code edits, return a minimal diff or the specific edited   region rather than the full file, unless asked.  # Interaction modes (state which you are in when relevant)  1. **Explain**: teach a concept at the requested level; give a worked    example and a pointer to a canonical reference. 2. **Summarize**: condense a paper, thread, or notes using the    structure above. 3. **Brainstorm**: generate diverse options with trade-offs. 4. **Critique**: steelman then stress-test; propose discriminating    experiments. 5. **Derive**: produce step-by-step math with sanity checks. 6. **Implement**: write code to spec, with assumptions listed. 7. **Debug**: diagnose from a minimal reproducer; propose the smallest    fix first. 8. **Analyze**: run/describe a statistical or ML analysis with    explicit assumptions and uncertainty.  # Guardrails  - Do not invent citations, authors, years, DOIs, dataset statistics,   benchmark numbers, or API signatures. - Do not soften honest limitations or known failure modes. - If asked to produce claims stronger than evidence supports, push   back once and then comply, marking the passage `[OVERCLAIM?]`. - If a task requires external information you don't have (paper   contents, dataset details, library version), say so and ask.
 :GPTEL_TOOLS:
-:GPTEL_BOUNDS: ((response (8073 9593) (9664 10402) (10404 10433) (10435 10462) (10503 10590) (11433 11576) (11584 11790) (12612 13007) (13372 13466) (14293 14297) (14305 14337) (15235 15492) (15500 25292) (25304 25334) (25346 25405) (25417 26231) (26310 26313) (26318 26321) (26388 26436) (26487 26488) (26571 26611) (26612 26781) (26783 26797) (26805 26806) (26807 26808) (26826 26835) (26877 26881) (26942 26943) (26977 26978) (26986 26987) (27034 27035) (27048 27050) (27077 27078) (27094 27095) (27100 27101) (27127 27128) (27166 27217) (27225 27255) (27259 27309) (27313 27483) (27487 27588) (27596 66408) (68646 85314) (86497 86659) (92214 92415)))
+:GPTEL_BOUNDS: ((response (22490 26856) (26888 30452) (30453 30454) (64306 70652) (70719 71301)))
 :END:
 #+Startup: fold
 #+TITLE: Low Rank Recurrent Neural Networks
@@ -299,46 +299,6 @@ import torch
 import torch.nn as nn
 
 class MaskedZeroLoss(nn.Module):
-
-    def __init__(
-        self,
-        criterion: nn.Module | None = None,
-        nonzero_weight: float = 1.0,
-        zero_weight: float = 1.0,
-        baseline_weight: float=0.1,
-        zero_tol: float = 0.0,
-    ):
-        super().__init__()
-        self.criterion = criterion or nn.MSELoss()
-        self.nonzero_weight = nonzero_weight
-        self.zero_weight = zero_weight
-        self.baseline_weight = baseline_weight
-        self.zero_tol = zero_tol
-
-
-    def forward(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-
-        valid_mask = torch.isfinite(y_pred[..., -1]) & torch.isfinite(y) & (y!=0.5)
-        bl_mask = y==0.5
-
-        nonzero_mask = valid_mask & (y.abs() > self.zero_tol)
-        zero_mask = valid_mask & (y.abs() <= self.zero_tol)
-
-        loss_bl = 0
-        for i in range(y_pred.shape[-1]):
-            loss_bl = loss_bl + self.criterion(y_pred[..., i][bl_mask], torch.zeros_like(y[bl_mask]))
-
-        # loss_bl = self.criterion(y_pred[..., -1][bl_mask], torch.zeros_like(y[bl_mask]))
-        loss_nonzero = self.criterion(y_pred[..., -1][nonzero_mask], y[nonzero_mask])
-        loss_zero = self.criterion(y_pred[..., -1][zero_mask], torch.zeros_like(y[zero_mask]))
-
-        return self.baseline_weight * loss_bl + self.nonzero_weight * loss_nonzero + self.zero_weight * loss_zero
-#+end_src
-
-#+RESULTS:
-
-#+begin_src jupyter-python
-class MaskedZeroLoss(nn.Module):
     def __init__(
         self,
         criterion: nn.Module | None = None,
@@ -374,11 +334,7 @@ class MaskedZeroLoss(nn.Module):
 
         loss_bl = 0.0
         for i in range(y_pred.shape[-1]):
-            loss_bl = loss_bl + self._masked_mse(
-                y_pred[..., i],
-                torch.zeros_like(y),
-                bl_mask,
-            )
+            loss_bl = loss_bl + self._masked_mse(y_pred[..., i], torch.zeros_like(y), bl_mask)
 
         # loss_bl = self._masked_mse(pred, torch.zeros_like(y), bl_mask)
         loss_nonzero = self._masked_mse(pred, y, nonzero_mask)
@@ -620,7 +576,6 @@ def generate_dual_trials(
 
 #+RESULTS:
 
-
 * Low Rank RNNs
 ** Description
 The Vanilla RNN updates its hidden state based on the previous hidden state and the current input:
@@ -645,92 +600,88 @@ y_t = \sigma(W_{ho} r_t + b_o)
 
 #+begin_src jupyter-python
 class LowRankModel(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size, rank=1, alpha=0.01, rho=0.8, train_inputs=True, warmup_steps=500, device='cpu'):
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        output_size,
+        rank=1,
+        alpha=0.01,
+        rho=0.8,
+        train_inputs=True,
+        warmup_steps=500,
+        device="cpu",
+    ):
         super().__init__()
 
         self.device = torch.device(device)
         self.warmup_steps = warmup_steps
         self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.rank = rank
 
-        print(f'initializing low rank network')
-        # input layer
+        # --- Input layer -------------------------------------------------
         self.wi = None
-        if input_size>0:
-            print(f'with input layer {input_size} x {hidden_size}')
+        if input_size > 0:
             self.wi = nn.Linear(input_size, hidden_size, device=self.device)
-
             if not train_inputs:
-                with torch.no_grad():
-                    nn.init.normal_(self.wi.weight, mean=0.0, std=1.0)
-                    nn.init.zeros_(self.wi.bias)
-
                 self.wi.weight.requires_grad_(False)
                 self.wi.bias.requires_grad_(False)
 
-        # low rank recurrent layer
-        print(f'with low rank vectors {hidden_size} x {rank}')
-        self.m = nn.Parameter(torch.randn(hidden_size, rank, device=self.device))
-        self.n = nn.Parameter(torch.randn(hidden_size, rank, device=self.device))
+        # --- Low-rank recurrent layer -----------------------------------
+        # Entries O(1); recurrent matrix W = m n^T / N has O(1) singular values.
+        self.m = nn.Parameter(torch.empty(hidden_size, rank, device=self.device))
+        self.n = nn.Parameter(torch.empty(hidden_size, rank, device=self.device))
 
-        # output layer
+        # --- Output layer ------------------------------------------------
+        # If output_size == 0, fall back to the rank-coordinate readout
+        # r @ n / N. This is only meaningful when n is normalized so that
+        # the readout is O(1); we recommend output_size >= 1.
         self.wo = None
         if output_size > 0:
-            print(f'with output layer {hidden_size} x {output_size}')
             self.wo = nn.Linear(hidden_size, output_size, device=self.device)
 
         self.nonlinearity = torch.tanh
         self.alpha = torch.tensor(alpha, device=self.device)
         self.exp_alpha = torch.exp(-self.alpha)
 
-        # with torch.no_grad():
-        #     self.m.copy_(self.n)
-
-        init_low_rank_rnn(self, rho)
+        init_low_rank_rnn(self, rho=rho)
 
     def get_readout(self, rates, rec_inputs, is_internal=False):
         if self.wo is not None:
             return self.wo(rates)
-        if is_internal: # ostojic
-            return rec_inputs @ self.m / torch.norm(self.m[:, -1])**2
-        # vreeswijk
+        # Fallback: project onto n. Note: with O(1) n entries this is O(1/sqrt(N))
+        # at initialization; gradient descent has to grow it. Prefer wo.
         return rates @ self.n / rates.shape[-1]
 
-
     def update_dynamics(self, ff_inputs, rec_inputs, rates):
-        # updating the recurrent inputs
+        # Low-rank recurrent drive: h = (1/N) M N^T r
         hidden = (rates @ self.n) @ self.m.T / rates.shape[-1]
         rec_inputs = self.exp_alpha * rec_inputs + (1.0 - self.exp_alpha) * hidden
-
-        # updating the rates
         rates = self.nonlinearity(self.wi(ff_inputs) + rec_inputs)
-
         return rates, rec_inputs
 
-
     def forward(self, ff_inputs, targets=None, ret_rates=False):
-        # rates and rec_inputs are (n_trials, hidden_size)
         batch_size = ff_inputs.shape[0]
         hidden_size = self.m.shape[0]
 
-        rec_inputs = torch.zeros(batch_size, hidden_size, device=self.device)
+        # Start from small noise rather than random O(1) state.
+        rec_inputs = 0.1 * torch.randn(batch_size, hidden_size, device=self.device)
         rates = self.nonlinearity(rec_inputs)
 
-        # one pass to steady state
+        # Warmup with zero input to reach the spontaneous regime.
         zero_inputs = torch.zeros(batch_size, self.input_size, device=self.device)
         with torch.no_grad():
-            for step in range(self.warmup_steps):
-                rand_inputs = torch.randn(batch_size, hidden_size, device=self.device)
+            for _ in range(self.warmup_steps):
                 rates, rec_inputs = self.update_dynamics(zero_inputs, rec_inputs, rates)
 
         rates = rates.detach()
         rec_inputs = rec_inputs.detach()
 
-        # main pass
         readout_list = []
         rates_list = []
         inputs_list = []
 
-        # Online reward delivered through last input channel on next timestep.
         rwd_next = torch.zeros(batch_size, device=self.device, dtype=ff_inputs.dtype)
 
         for step in range(ff_inputs.shape[1]):
@@ -747,7 +698,8 @@ class LowRankModel(nn.Module):
             readout_list.append(readout)
 
             if targets is not None:
-                rwd_mask = (targets[:, step]==1) & (readout[:, -1]>0.5)
+                # Use last readout channel for reward gating.
+                rwd_mask = (targets[:, step] == 1) & (readout[..., -1] > 0.5)
                 rwd_next = rwd_mask.to(dtype=ff_inputs.dtype)
             else:
                 rwd_next.zero_()
@@ -758,7 +710,6 @@ class LowRankModel(nn.Module):
 
         if ret_rates:
             return readout_list, rates_list, inputs_list
-
         return readout_list
 #+end_src
 
@@ -771,262 +722,99 @@ class LowRankModel(nn.Module):
 def init_low_rank_rnn(
     model: nn.Module,
     rho: float = 0.8,
-    std_m: float = 1.0,
-    std_n: float = 1.0,
-    wi_std: float = 1.0,
-    wi_scale: str = "entry_Oinv_sqrtN",  # {"entry_O1", "entry_Oinv_sqrtN", "entry_OinvN"}
+    g_m: float = 1.0,
+    g_n: float = 1.0,
+    wi_gain: float = 4.0,
+    wo_gain: float = 1.0,
     center: bool = True,
 ) -> None:
     """
-    Initialize low-rank RNN parameters.
+    Initialization compatible with the network's hard-coded 1/N scalings:
 
-    m, n entries are O(1), so recurrent/readout overlaps use 1/N.
+        h_t      = (1/N) m (n^T r_{t-1})
+        y_t      = (1/N) n^T r_t                (when wo is None)
 
-    wi_scale:
-        "entry_O1"          : wi entries O(1), column norm O(sqrt(N))
-        "entry_Oinv_sqrtN"  : wi entries O(1/sqrt(N)), column norm O(1)
-        "entry_OinvN"       : wi entries O(1/N), column norm O(1/sqrt(N))
+    To get O(1) recurrent loop gain AND an O(1) readout at init,
+    we use the asymmetric MO/Beiran scaling:
+
+        m entries  ~ N(0, g_m^2 / N)             ⇒ ‖col(m)‖ ~ g_m
+        n entries  ~ N(0, g_n^2)                 ⇒ ‖col(n)‖ ~ g_n * sqrt(N)
+
+    Then:
+      - W_rec = m n^T / N has top singular value ~ rho * g_m * g_n  → O(1)
+      - kappa = n^T r / N  ~ O(1) when r is O(1)
+      - y     = n^T r / N  ~ O(1) at init  (this is what unlocks learning)
+      - ∂L/∂n_i ~ O(1)/N · O(1) → O(1/N), but n_i itself is O(1), so the
+        *relative* update per entry is O(1/N) — i.e. healthy, not stuck.
+
+    Correlation corr(m_k, n_k) ≈ rho is induced from orthonormal directions
+    so that the singular values of W_rec are controlled.
+
+    Inputs
+    ------
+    W_i entries ~ N(0, wi_gain^2 / input_size). Set wi_gain ~ 3–5 so that the
+    stimulus actually drives tanh out of its linear regime (otherwise the
+    rank-coordinate drive n^T tanh(W_i x)/N is O(1/sqrt(N)) and the task
+    signal stays in the lazy regime).
+
+    Notes
+    -----
+    - This *only* changes init. The network class still divides recurrent
+      drive and readout by N. The scalings of m and n compensate.
+    - If you later add a linear readout wo (output_size > 0), it is given
+      O(1/sqrt(N)) entries so it is also O(1) at init.
     """
     if not -1.0 <= rho <= 1.0:
         raise ValueError(f"rho must be in [-1, 1], got {rho}")
 
     N, rank = model.m.shape
-    device = model.m.device
-    dtype = model.m.dtype
+    device, dtype = model.m.device, model.m.dtype
 
-    if center and N <= 2 * rank:
-        raise ValueError(f"Need N > 2*rank when center=True; got N={N}, rank={rank}")
-    if not center and N < 2 * rank:
-        raise ValueError(f"Need N >= 2*rank; got N={N}, rank={rank}")
-
+    # --- Correlated, orthogonal directions ------------------------------
+    # Q has orthonormal columns: each column has unit norm, entries O(1/sqrt(N)).
     Z = torch.randn(N, 2 * rank, device=device, dtype=dtype)
     if center:
         Z = Z - Z.mean(dim=0, keepdim=True)
 
-    Q, _ = torch.linalg.qr(Z, mode="reduced")
+    Q, _ = torch.linalg.qr(Z, mode="reduced")  # [N, 2R]
 
-    zm = math.sqrt(N) * Q[:, :rank]
-    zp = math.sqrt(N) * Q[:, rank:2 * rank]
+    # Two orthonormal blocks of directions, each [N, rank], ‖col‖ = 1.
+    e_m = Q[:, :rank]
+    e_p = Q[:, rank:2 * rank]
 
-    model.m.copy_(std_m * zm)
-    model.n.copy_(std_n * (rho * zm + math.sqrt(max(0.0, 1.0 - rho**2)) * zp))
+    # m: entries O(1/sqrt(N))  →  column norm ~ 1  →  m direction unscaled.
+    # Multiply by g_m to set the m-side gain.
+    m_init = g_m * e_m
 
+    # n: entries O(1) → column norm ~ sqrt(N). Obtained by scaling unit
+    # directions by sqrt(N). Mix to produce correlation rho with m.
+    sqrtN = math.sqrt(N)
+    n_dir = rho * e_m + math.sqrt(max(0.0, 1.0 - rho ** 2)) * e_p
+    n_init = g_n * sqrtN * n_dir
+
+    model.m.copy_(m_init)
+    model.n.copy_(n_init)
+
+    # --- Input weights --------------------------------------------------
     if getattr(model, "wi", None) is not None:
         input_size = model.wi.weight.shape[1]
-
-        if input_size > N - 2 * rank:
-            raise ValueError(
-                f"Need input_size <= N - 2*rank; got input_size={input_size}, N={N}, rank={rank}"
-            )
-
-        W = torch.randn(N, input_size, device=device, dtype=dtype)
+        std_wi = wi_gain / math.sqrt(input_size)
+        W = torch.randn(N, input_size, device=device, dtype=dtype) * std_wi
         if center:
             W = W - W.mean(dim=0, keepdim=True)
-
-        # Remove low-rank components initially.
-        basis = torch.cat(
-            [
-                model.m / model.m.norm(dim=0, keepdim=True).clamp_min(1e-12),
-                model.n / model.n.norm(dim=0, keepdim=True).clamp_min(1e-12),
-            ],
-            dim=1,
-        )
-        basis, _ = torch.linalg.qr(basis, mode="reduced")
-        W = W - basis @ (basis.T @ W)
-
-        Qw, _ = torch.linalg.qr(W, mode="reduced")
-
-        if wi_scale == "entry_O1":
-            scale = math.sqrt(N)
-        elif wi_scale == "entry_Oinv_sqrtN":
-            scale = 1.0
-        elif wi_scale == "entry_OinvN":
-            scale = 1.0 / math.sqrt(N)
-        else:
-            raise ValueError(f"Unknown wi_scale={wi_scale}")
-
-        model.wi.weight.copy_(wi_std * scale * Qw)
+        model.wi.weight.copy_(W)
         nn.init.zeros_(model.wi.bias)
+
+    # --- Linear readout (only used if output_size > 0) ------------------
+    if getattr(model, "wo", None) is not None:
+        std_wo = wo_gain / math.sqrt(N)
+        nn.init.normal_(model.wo.weight, mean=0.0, std=std_wo)
+        nn.init.zeros_(model.wo.bias)
 #+end_src
-
-
-#+RESULTS:
-
-*** Here I have a problem with the initialization. As is the optimization does not minimize the baseline loss when I use a recurrent readout (overlap). Btw the input weights should scale as 1/hidden_size at least at initialisation
-
-#+begin_reasoning
-
-#+end_reasoning
-
-
-
-- Diagnosis
-
-Your current =init_low_rank_rnn= initializes input columns as
-
-#+begin_src python
-model.wi.weight.copy_(wi_std * math.sqrt(N) * Qw)
-#+end_src
-
-where =Qw= has orthonormal columns, so each input column has norm \(\sqrt{N}\) and entries \(O(1)\). Thus a unit stimulus produces \(O(1)\) current into every neuron.
-
-That is the standard low-rank-RNN convention if input vectors \(I_i\) have \(O(1)\) entries and only overlaps are normalized by \(1/N\). But it is /not/ a \(1/N\)-scaled input initialization.
-
-For a recurrent/readout overlap
-
-\[
-z_t = \frac{1}{N} r_t^\top n,
-\]
-
-baseline noise gives, for small currents,
-
-\[
-z_t \approx \frac{1}{N} x_t^\top W_i^\top n.
-\]
-
-So the baseline readout is small only if either:
-
-1. \(W_i^\top n \approx 0\), i.e. input directions stay orthogonal to readout directions; or
-2. input weights are scaled down; or
-3. the readout explicitly removes the population-mean / readout-overlap component.
-
-Your initialization enforces approximate orthogonality between =wi.weight= and initial =m,n=, but training immediately destroys it unless constrained. Therefore initialization alone will not guarantee low baseline loss with recurrent overlap readout.
-
-- Scaling correction
-
-If =Qw= has orthonormal columns:
-
-| desired entry scale | column norm | assignment |
-|---|---:|---|
-| \(O(1)\) | \(\sqrt{N}\) | =sqrt(N) * Qw= |
-| \(O(N^{-1/2})\) | \(1\) | =Qw= |
-| \(O(N^{-1})\) | \(N^{-1/2}\) | =Qw / sqrt(N)= |
-
-So your current code is the first row.
-
-If you want entries \(O(1/N)\), replace
-
-#+begin_src python
-model.wi.weight.copy_(wi_std * math.sqrt(N) * Qw)
-#+end_src
-
-with
-
-#+begin_src python
-model.wi.weight.copy_(wi_std * Qw / math.sqrt(N))
-#+end_src
-
-If you instead want the more common small random-weight scale \(O(1/\sqrt{N})\), use
-
-#+begin_src python
-model.wi.weight.copy_(wi_std * Qw)
-#+end_src
-
-- Minimal patch: make input scaling explicit
 
 
 
 #+RESULTS:
-
-Then call e.g.
-
-#+begin_src python
-init_low_rank_rnn(self, rho, wi_scale="entry_OinvN")
-#+end_src
-
-or less aggressively:
-
-#+begin_src python
-init_low_rank_rnn(self, rho, wi_scale="entry_Oinv_sqrtN")
-#+end_src
-
-- But: scaling alone may make the task too weak
-
-If =wi= entries are \(O(1/N)\), then a unit input produces single-neuron currents of order \(1/N\). For large \(N\), the network may barely see the stimulus unless you scale stimulus amplitudes up correspondingly.
-
-A safer first experiment is:
-
-#+begin_src python
-wi_scale="entry_Oinv_sqrtN"
-#+end_src
-
-because this reduces baseline fluctuations without completely killing stimulus drive.
-
-- Stabilize recurrent overlap readout
-
-Your recurrent readout is currently
-
-#+begin_src python
-return rates @ self.n / rates.shape[-1]
-#+end_src
-
-This uses the same =n= that is trained for recurrence. During optimization, =n= can acquire a mean component, so even approximately uniform baseline activity can leak into the readout.
-
-Use a centered readout vector:
-
-#+begin_src python
-def get_readout(self, rates, rec_inputs, is_internal=False):
-    if self.wo is not None:
-        return self.wo(rates)
-
-    if is_internal:
-        m = self.m - self.m.mean(dim=0, keepdim=True)
-        denom = m.square().sum(dim=0).clamp_min(1e-12)
-        return rec_inputs @ m / denom
-
-    n = self.n - self.n.mean(dim=0, keepdim=True)
-    return rates @ n / rates.shape[-1]
-#+end_src
-
-This prevents the readout from seeing the population-mean activity mode.
-
-- If baseline loss still does not minimize
-
-Then the issue is no longer initialization; it is that training moves =wi= and =n= away from the zero-baseline subspace. You can enforce the constraint after each optimizer step:
-
-#+begin_src python
-@torch.no_grad()
-def project_inputs_off_readout_(model: nn.Module) -> None:
-    """Keep input columns orthogonal to current readout directions n."""
-    if getattr(model, "wi", None) is None:
-        return
-
-    n = model.n - model.n.mean(dim=0, keepdim=True)
-    q, _ = torch.linalg.qr(n, mode="reduced")  # (N, rank)
-
-    W = model.wi.weight.data  # (N, input_size)
-    W -= q @ (q.T @ W)
-#+end_src
-
-Then inside =_run_epoch=, after
-
-#+begin_src python
-self.optimizer.step()
-self._restore_frozen_input_weights()
-#+end_src
-
-add
-
-#+begin_src python
-project_inputs_off_readout_(self.model)
-#+end_src
-
-This directly preserves
-
-\[
-W_i^\top n = 0,
-\]
-
-so small baseline noise has no first-order projection onto the recurrent readout.
-
-- Recommended order of fixes
-
-1. Change input scaling to =entry_Oinv_sqrtN=.
-2. Center the recurrent readout vector in =get_readout=.
-3. If baseline still leaks, project =wi.weight= off =n= after each optimizer step.
-4. Only use =entry_OinvN= if you also increase input amplitudes or confirm the task remains learnable.
-
-
 
 * Vector fields
 ** Vector field
@@ -2060,7 +1848,7 @@ hidden_size = 512
 output_size = 0
 rank = 2
 
-rho = 1.0
+rho = 0.6
 
 model = LowRankModel(input_size, hidden_size, output_size, rank, alpha, rho, train_inputs =True, device=device)
 # model = EILowRankModel(input_size, hidden_size, output_size, rank, alpha, rho, device=device)
@@ -2072,9 +1860,6 @@ noise = 0.1 * torch.sqrt(1.0 - torch.exp(torch.tensor(-alpha))**2)
 #+end_src
 
 #+RESULTS:
-: initializing low rank network
-: with input layer 8 x 512
-: with low rank vectors 512 x 2
 
 * DPA task
 ** DPA trials
@@ -2119,7 +1904,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_33.png]]
+[[file:./figures/figure_19.png]]
 
 #+begin_src jupyter-python
 idx_nogo = torch.argwhere(targets[:, -1] != 1).reshape(-1)[:32]
@@ -2160,7 +1945,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_35.png]]
+[[file:./figures/figure_21.png]]
 
 #+begin_src jupyter-python
 predictions, rates, rec_inputs = model(inputs.to(device), targets=targets.to(device), ret_rates=True)
@@ -2196,14 +1981,14 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_37.png]]
+[[file:./figures/figure_23.png]]
 
 ** DPA Training
 
 #+begin_src jupyter-python
 learning_rate = 0.01
 epochs = 100
-batch_size = 32
+batch_size = 128
 grad_clip_norm = None
 
 criterion = MaskedZeroLoss(criterion=torch.nn.MSELoss(), nonzero_weight=1.0, zero_weight=1.0)
@@ -2221,28 +2006,12 @@ torch.save(model.state_dict(), '%s/dpa_%d.pth' % (PATH, seed))
 #+end_src
 
 #+RESULTS:
-#+begin_example
-Epoch 005/100 | lr: 0.01000 | train: 0.9974 | val: 0.9996
-Epoch 010/100 | lr: 0.01000 | train: 0.9981 | val: 1.0045
-Epoch 015/100 | lr: 0.01000 | train: 0.9964 | val: 1.0016
-Epoch 020/100 | lr: 0.01000 | train: 0.9968 | val: 1.0011
-Epoch 025/100 | lr: 0.01000 | train: 0.9972 | val: 0.9954
-Epoch 030/100 | lr: 0.01000 | train: 0.9960 | val: 1.0020
-Epoch 035/100 | lr: 0.01000 | train: 0.9956 | val: 0.9977
-Epoch 040/100 | lr: 0.00500 | train: 0.9955 | val: 1.0007
-Epoch 045/100 | lr: 0.00500 | train: 0.9958 | val: 0.9991
-Epoch 050/100 | lr: 0.00250 | train: 0.9950 | val: 0.9997
-Epoch 055/100 | lr: 0.00250 | train: 0.9950 | val: 0.9992
-Epoch 060/100 | lr: 0.00125 | train: 0.9951 | val: 0.9995
-Epoch 065/100 | lr: 0.00125 | train: 0.9948 | val: 1.0002
-Epoch 070/100 | lr: 0.00063 | train: 0.9946 | val: 0.9994
-Epoch 075/100 | lr: 0.00063 | train: 0.9946 | val: 0.9992
-Epoch 080/100 | lr: 0.00031 | train: 0.9947 | val: 0.9996
-Epoch 085/100 | lr: 0.00031 | train: 0.9945 | val: 0.9992
-Epoch 090/100 | lr: 0.00031 | train: 0.9944 | val: 0.9995
-Epoch 095/100 | lr: 0.00016 | train: 0.9944 | val: 0.9993
-Epoch 100/100 | lr: 0.00016 | train: 0.9944 | val: 0.9992
-#+end_example
+: Epoch 005/100 | lr: 0.01000 | train: 0.9998 | val: 0.9987
+: Epoch 010/100 | lr: 0.01000 | train: 0.9998 | val: 1.0008
+: Epoch 015/100 | lr: 0.01000 | train: 0.9986 | val: 1.0000
+: Epoch 020/100 | lr: 0.01000 | train: 0.9980 | val: 1.0026
+: Epoch 025/100 | lr: 0.01000 | train: 0.9975 | val: 0.9989
+: Epoch 030/100 | lr: 0.01000 | train: 0.9973 | val: 1.0023
 
 #+begin_src jupyter-python
 plt.plot(train_losses)
@@ -2255,194 +2024,14 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_40.png]]
 
 #+begin_src jupyter-python
 
 #+end_src
 
-#+RESULTS:
+** With the current initialization the model is not learning the task. Fix the initialization. Give an explanation. Give fixed code in single source block per class. The problem is not the readout (I want to keep the recurrent readout) and is not the baseline loss (it imposes 0 readouts before stim)
 
-** DPA Testing
-
- #+begin_src jupyter-python
-model_state_dict = torch.load('%s/dpa_%d.pth' % (PATH, seed))
-model.load_state_dict(model_state_dict)
-model.eval();
-#+end_src
-
-#+RESULTS:
-
-#+begin_src jupyter-python
-inputs, targets = generate_dpa_trials(N_BATCH, timing=dpa_timing,  input_size=input_size,  noise=noise,)
-x_time = dpa_timing.x_time
-print(inputs.shape, targets.shape)
-#+end_src
-
-#+RESULTS:
-: torch.Size([516, 500, 8]) torch.Size([516, 500])
-
-#+begin_src jupyter-python
-predictions, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
-predictions = predictions.squeeze((0, -1)).detach().cpu()
-rates = rates.squeeze((0, -1))
-
-print('rec_inputs', rec_inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
-#+end_src
-
-#+RESULTS:
-: rec_inputs torch.Size([516, 500, 512]) predictions torch.Size([516, 500, 2]) rates torch.Size([516, 500, 512])
-
-#+begin_src jupyter-python
-idx_nogo = torch.argwhere(targets[:, -1] != 1).reshape(-1)[:32]
-idx_go   = torch.argwhere(targets[:, -1] == 1).reshape(-1)[:32]
-
-print(idx_go.shape, idx_nogo.shape)
-#+end_src
-
-#+RESULTS:
-: torch.Size([32]) torch.Size([32])
-
-#+begin_src jupyter-python
-kappa_rec = (rates @ model.n)/ rates.shape[-1]
-kappa_rec = kappa_rec.cpu().detach().numpy()
-print('rates', rates.shape, 'm', model.n.shape, 'kappa_rec', kappa_rec.shape)
-#+end_src
-
-#+RESULTS:
-: rates torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa_rec (516, 500, 2)
-
-#+begin_src jupyter-python
-kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)**2
-kappa = kappa.cpu().detach().numpy()
-print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
-#+end_src
-
-#+RESULTS:
-: rec torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa (516, 500, 2)
-
-#+begin_src jupyter-python
-fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
-
-ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(x_time, kappa_rec[idx_nogo, :, 0].T, alpha=.2)
-ax[0].set_title('Unpaired trial')
-
-ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(x_time, kappa_rec[idx_go, :, 0].T, alpha=.2)
-ax[1].set_title('Paired trial')
-
-ax[2].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
-ax[2].plot(x_time, kappa_rec[idx_nogo, :, 1].T, alpha=.2)
-ax[2].set_title('Unpaired trial')
-
-ax[3].plot(x_time, targets[idx_go][0], 'k', label='Target')
-ax[3].plot(x_time, kappa_rec[idx_go, :, 1].T, alpha=.2)
-ax[3].set_title('Paired trial')
-
-for i in range(4):
-    for j in range(2):
-        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
-    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
-    ax[i].set_xlabel('Time (s)')
-    ax[i].set_ylabel('$ \\kappa^{rec}_%d$' % (i//2+1))
-    ax[i].legend(fontsize=14)
-
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./figures/figure_47.png]]
-
-#+begin_src jupyter-python
-fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
-
-ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(x_time, kappa[idx_nogo, :, 0].T, alpha=.2)
-ax[0].set_title('Unpaired trial')
-
-ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(x_time, kappa[idx_go, :, 0].T, alpha=.2)
-ax[1].set_title('Paired trial')
-
-ax[2].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
-ax[2].plot(x_time, kappa[idx_nogo, :, 1].T, alpha=.2)
-ax[2].set_title('Unpaired trial')
-
-ax[3].plot(x_time, targets[idx_go][0], 'k', label='Target')
-ax[3].plot(x_time, kappa[idx_go, :, 1].T, alpha=.2)
-ax[3].set_title('Paired trial')
-
-for i in range(4):
-    for j in range(2):
-        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
-    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
-    ax[i].set_xlabel('Time (s)')
-    ax[i].set_ylabel('$ \\kappa_%d$' % (i//2+1))
-    ax[i].legend(fontsize=14)
-
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./figures/figure_48.png]]
-
-#+begin_src jupyter-python
-fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
-
-ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(x_time, predictions[..., -1][idx_nogo].T, alpha=.2)
-ax[0].set_title('Unpaired trial')
-
-ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(x_time, predictions[..., -1][idx_go].T, alpha=.2)
-ax[1].set_title('Paired trial')
-
-for i in range(2):
-    for j in range(2):
-        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
-    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
-    ax[i].set_xlabel('Time (s)')
-    ax[i].set_ylabel('Readout')
-    ax[i].legend(fontsize=14)
-
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./figures/figure_49.png]]
-
-#+begin_src jupyter-python
-fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
-
-m_ = model.m.cpu().detach().numpy().T
-n_ = model.n.cpu().detach().numpy().T
-
-for i in range(2):
-    for j in range(2):
-        ax[i+2*j].scatter(m_[j], n_[i])
-        ax[i+2*j].set_xlabel('$m_%d$' % j)
-        ax[i+2*j].set_ylabel('$n_%d$' % i)
-
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./figures/figure_50.png]]
-
-#+begin_src jupyter-python
-fig, axes, field_cache = plot_task_flow_fields(model, inputs, timing=dpa_timing, task="dpa", targets=targets)
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./figures/figure_51.png]]
-
-#+begin_src jupyter-python
-
-#+end_src
-
-#+RESULTS:
+***
 
 * GNG task
 ** GNG trial
