@@ -3,7 +3,7 @@
 :GPTEL_BACKEND: Anthropic
 :GPTEL_SYSTEM: You are a large language model embedded in Emacs, serving as a research assistant to an expert in machine learning and computational neuroscience. You support the full research loop: reading and synthesizing literature, developing ideas, deriving math, designing experiments, implementing and debugging code, analyzing data, and preparing results for communication.  # Core principles  - Be concise and precise; avoid redundancy. Prefer information density   over hedging and restatement. - Think step-by-step before answering. Share the reasoning the user   needs to verify the result; hide the rest. - State assumptions explicitly. If a question is ambiguous or   underspecified, ask one focused clarifying question rather than   guessing. - Calibrate confidence. Distinguish established results from plausible   conjecture; flag uncertainty and cite sources (papers, docs, RFCs)   for non-obvious claims. - Never fabricate. No invented citations, numbers, APIs, datasets, or   experimental results. Use `[CITE: topic]` / `[CHECK: claim]` /   `[TODO: ...]` placeholders when information is missing.  # Research workflow support  ## Literature and synthesis - When summarizing a paper: (1) problem and gap, (2) key idea in one   sentence, (3) method sketch, (4) main results with one quantitative   anchor, (5) limitations, (6) how it relates to the user's context. - When comparing papers: organize by dimension (assumption, method,   data, metric, result), not by paper. Use a table when ≥3 items. - Distinguish what a paper *shows* from what it *claims*.  ## Ideation and critique - When brainstorming: generate 3–5 distinct options spanning the   design space, not variants of one. Note trade-offs. - When critiquing an idea: give the strongest version of the idea   first, then failure modes, then concrete tests that would   discriminate. - Prefer falsifiable predictions over vague intuitions.  ## Math and derivations - Define all symbols on first use; keep notation consistent across a   session. Specify tensor shapes and domains. - Show derivation steps with a short justification per step. Mark   approximations (`≈`), limits, and regimes of validity. - Sanity-check results: units, limiting cases, dimensions, symmetry,   sign. - Use `\[ ... \]` / `$...$` in Org; `align` inside `#+begin_src latex`   for multi-line.  ## Experiment design and analysis - Before running: state hypothesis, independent/dependent variables,   controls, expected effect size, required n, and the analysis plan. - Prefer pre-registered analyses; mark post-hoc analyses as such. - Report effect sizes and uncertainty (CIs, SEM, bootstrap) with   sample size, not just p-values. Name the statistical test and its   assumptions; note multiple-comparison corrections. - In ML: specify splits, seeds, baselines matched for compute/data,   and metric definitions. Distinguish tuning from test performance. - In neuroscience: state the level of abstraction (biophysical, rate,   spiking, normative), the data modality, and the link between model   and measurement. Distinguish "fits" from "predicts held-out".  # Code and computation  - Write clean, idiomatic, minimal code. Prefer standard libraries and   well-maintained packages; note version assumptions. - Comment the *why*, not the *what*. Include type hints in Python and   docstrings for non-trivial functions. - Make examples self-contained and runnable; show expected output   when useful. - For numerical/ML code: seed RNGs, annotate tensor shapes, prefer   vectorized ops, and guard against silent broadcasting bugs. - For data analysis: show the pipeline (load → clean → transform →   model → evaluate → visualize) and state what each step assumes   about the data. - When debugging: ask for the exact error, the minimal reproducer, and   the environment before proposing fixes.  # Output format (Emacs-native)  - Default to Org-mode: headings (`*`, `**`), source blocks   (`#+begin_src ... #+end_src`), LaTeX math, and tables. - Use `jupyter-python` blocks for runnable Python; `emacs-lisp` for   Emacs configuration; `sh`/`bash` for shell (mark destructive   commands). - Use Org-cite (`[cite:@key]`) for references when available. - For file or code edits, return a minimal diff or the specific edited   region rather than the full file, unless asked.  # Interaction modes (state which you are in when relevant)  1. **Explain**: teach a concept at the requested level; give a worked    example and a pointer to a canonical reference. 2. **Summarize**: condense a paper, thread, or notes using the    structure above. 3. **Brainstorm**: generate diverse options with trade-offs. 4. **Critique**: steelman then stress-test; propose discriminating    experiments. 5. **Derive**: produce step-by-step math with sanity checks. 6. **Implement**: write code to spec, with assumptions listed. 7. **Debug**: diagnose from a minimal reproducer; propose the smallest    fix first. 8. **Analyze**: run/describe a statistical or ML analysis with    explicit assumptions and uncertainty.  # Guardrails  - Do not invent citations, authors, years, DOIs, dataset statistics,   benchmark numbers, or API signatures. - Do not soften honest limitations or known failure modes. - If asked to produce claims stronger than evidence supports, push   back once and then comply, marking the passage `[OVERCLAIM?]`. - If a task requires external information you don't have (paper   contents, dataset details, library version), say so and ask.
 :GPTEL_TOOLS:
-:GPTEL_BOUNDS: ((response (22490 26856) (26888 30452) (30453 30454) (64306 70652) (70719 71301)))
+:GPTEL_BOUNDS: ((response (8023 15287) (23085 23253) (23261 23673) (23681 23920) (23932 24035) (24037 24059) (24060 24071) (24072 24128) (24129 24140) (24141 24637) (24639 24661) (24662 24669) (24670 24718) (24719 24726) (24727 24903) (24915 25196) (25204 28128) (28182 36800) (55510 65135) (65963 66874) (66905 67941) (81678 88621) (88671 98306) (98307 106476) (106611 121730) (125550 125581)))
 :END:
 #+Startup: fold
 #+TITLE: Low Rank Recurrent Neural Networks
@@ -92,7 +92,12 @@ def train_val_split(X, y, batch_size=32, frac=0.8):
 
 #+begin_src jupyter-python
 import math
+import copy
 from typing import Any, Optional
+
+import torch
+from torch.utils.data import DataLoader
+
 
 class Optimization:
     """Small PyTorch train/validation loop."""
@@ -113,6 +118,7 @@ class Optimization:
         zero_low_rank_grad: Any | None = None,
         freeze_input_dims: Any | None = None,
         device: str | torch.device | None = None,
+        keep_best: bool = False,        # FIX: optional best-val checkpointing
         verbose: bool = True,
     ):
         self.model = model
@@ -128,6 +134,7 @@ class Optimization:
         self.zero_low_rank_grad = zero_low_rank_grad
         self.freeze_input_dims = freeze_input_dims
         self.grad_clip_norm = grad_clip_norm
+        self.keep_best = keep_best
         self.verbose = verbose
 
         self.device = torch.device(device) if device is not None else self._infer_device()
@@ -139,59 +146,42 @@ class Optimization:
         self.learning_rates: list[float] = []
         self.learning_rate = self.optimizer.param_groups[0]["lr"]
 
-        # Store frozen input weights so they can be restored after optimizer.step().
-        # This is safer than only zeroing gradients when using Adam/momentum/weight decay.
+        self.best_val_loss = float("inf")
+        self.best_state_dict: dict | None = None
+
+        # Snapshot frozen input columns to restore after each optimizer.step().
         self._frozen_wi_weight = None
         if self.freeze_input_dims is not None:
             self._frozen_wi_weight = self.model.wi.weight.detach().clone()
 
     def _infer_device(self) -> torch.device:
-        if hasattr(self.model, "device"):
-            return torch.device(self.model.device)
+        if hasattr(self.model, "device") and isinstance(self.model.device, torch.device):
+            return self.model.device
         return next(self.model.parameters()).device
 
     def _predict(self, X: torch.Tensor, y: Optional[torch.Tensor] = None) -> torch.Tensor:
-
-        output = self.model(X, y)
-        return self.model.readout if hasattr(self.model, "readout") else output
+        return self.model(X, y)
 
     def _zero_low_rank_grads(self) -> None:
         if self.zero_low_rank_grad is None:
             return
-
         for param in (self.model.m, self.model.n):
             if param.grad is None:
                 continue
-
             if self.zero_low_rank_grad == "all":
                 param.grad.zero_()
             else:
                 param.grad[:, self.zero_low_rank_grad] = 0.0
 
     def _zero_input_grads(self) -> None:
-        """
-        Freeze selected input dimensions of model.wi.weight.
-
-        For nn.Linear(input_size, hidden_size), weight has shape:
-            (hidden_size, input_size)
-
-        Therefore input dimensions are columns.
-        """
         if self.freeze_input_dims is None:
             return
-
         if self.model.wi.weight.grad is not None:
             self.model.wi.weight.grad[:, self.freeze_input_dims] = 0.0
 
     def _restore_frozen_input_weights(self) -> None:
-        """
-        Restore frozen input columns after optimizer.step().
-
-        This prevents Adam momentum or weight decay from changing frozen weights.
-        """
         if self.freeze_input_dims is None:
             return
-
         with torch.no_grad():
             self.model.wi.weight[:, self.freeze_input_dims] = (
                 self._frozen_wi_weight[:, self.freeze_input_dims]
@@ -206,8 +196,8 @@ class Optimization:
 
         with context:
             for X, y in loader:
-                # X = X.to(self.device)
-                # y = y.to(self.device)
+                X = X.to(self.device, non_blocking=True)
+                y = y.to(self.device, non_blocking=True)
                 batch_size = X.size(0)
 
                 if train:
@@ -221,16 +211,12 @@ class Optimization:
 
                 if train:
                     loss.backward()
-
                     self._zero_low_rank_grads()
                     self._zero_input_grads()
-
                     if self.grad_clip_norm is not None:
                         torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(),
-                            self.grad_clip_norm,
+                            self.model.parameters(), self.grad_clip_norm
                         )
-
                     self.optimizer.step()
                     self._restore_frozen_input_weights()
 
@@ -244,20 +230,22 @@ class Optimization:
 
     def _step_scheduler(self, val_loss: float) -> None:
         if self.scheduler is None:
-            self.learning_rate = self.optimizer.param_groups[0]["lr"]
             return
-
         if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             self.scheduler.step(val_loss)
         else:
             self.scheduler.step()
 
-        self.learning_rate = self.scheduler.get_last_lr()[0]
+    def _current_lr(self) -> float:
+        # during warmup and across scheduler types.
+        return self.optimizer.param_groups[0]["lr"]
 
     def fit(self) -> tuple[list[float], list[float], list[float]]:
         self.train_losses.clear()
         self.val_losses.clear()
         self.learning_rates.clear()
+        self.best_val_loss = float("inf")
+        self.best_state_dict = None
 
         for epoch in range(1, self.num_epochs + 1):
             train_loss = self._run_epoch(self.train_loader, train=True)
@@ -266,11 +254,18 @@ class Optimization:
             if epoch >= self.warmup_epochs:
                 self._step_scheduler(val_loss)
 
+            self.learning_rate = self._current_lr()
+
             self.train_losses.append(train_loss)
             self.val_losses.append(val_loss)
             self.learning_rates.append(self.learning_rate)
 
-            if (self.verbose) & (epoch % 5==0):
+            # FIX: optional best-val checkpointing.
+            if self.keep_best and math.isfinite(val_loss) and val_loss < self.best_val_loss:
+                self.best_val_loss = val_loss
+                self.best_state_dict = copy.deepcopy(self.model.state_dict())
+
+            if self.verbose and (epoch % 5 == 0):
                 print(
                     f"Epoch {epoch:03d}/{self.num_epochs} | "
                     f"lr: {self.learning_rate:.5f} | "
@@ -288,6 +283,10 @@ class Optimization:
             if val_loss > self.max_val_loss:
                 print(f"Stopping: validation loss above {self.max_val_loss}.")
                 break
+
+        # FIX: restore best model if requested.
+        if self.keep_best and self.best_state_dict is not None:
+            self.model.load_state_dict(self.best_state_dict)
 
         return self.train_losses, self.val_losses, self.learning_rates
 #+end_src
@@ -326,8 +325,8 @@ class MaskedZeroLoss(nn.Module):
         """
         pred = y_pred[..., -1]
 
-        valid_mask = torch.isfinite(pred) & torch.isfinite(y) & (y != 0.5)
-        bl_mask = torch.isfinite(pred) & torch.isfinite(y) & (y == 0.5)
+        valid_mask = torch.isfinite(pred) & torch.isfinite(y) & (y != 1e-3)
+        bl_mask = torch.isfinite(pred) & torch.isfinite(y) & (y == 1e-3)
 
         nonzero_mask = valid_mask & (y.abs() > self.zero_tol)
         zero_mask = valid_mask & (y.abs() <= self.zero_tol)
@@ -384,19 +383,15 @@ class TaskTiming:
 
 #+RESULTS:
 
-
-
-#+RESULTS:
-
 ** /DPA generator/
 
 #+begin_src jupyter-python
 def generate_dpa_trials(
     n_trials: int,
     timing: TaskTiming,
-    input_size: int = 7,
+    input_size: int = 8,
     noise: float = 0.1,
-    baseline_value: float = 0.5,
+    baseline_value: float = 1e-3,
 ):
     n_steps = timing.n_steps
     n_on = timing.n_stim_on
@@ -429,12 +424,13 @@ def generate_dpa_trials(
 
     targets[idx_pair, n_on[1]:] = 1.0
     targets[~idx_pair, n_on[1]:] = -1.0
-    targets[:, n_on[1]:n_off[1]] = torch.nan
+    # targets[:, n_on[1]:n_off[1]] = torch.nan
 
     return inputs, targets
 #+end_src
 
 #+RESULTS:
+: 7053fd9b-0e03-486c-b642-295424ccc081
 
 ** /GNG generator/
 
@@ -444,7 +440,7 @@ def generate_gng_trials(
     timing: TaskTiming,
     input_size: int = 8,
     noise: float = 0.1,
-    baseline_value: float = 0.5,
+    baseline_value: float = 1e-3,
 ):
     n_steps = timing.n_steps
     n_on = timing.n_stim_on
@@ -469,7 +465,7 @@ def generate_gng_trials(
 
     targets[idx_go, n_off[1]:] = 1.0
     targets[idx_nogo, n_off[1]:] = -1.0
-    targets[:, n_on[1]:n_off[1]] = torch.nan
+    targets[:, n_on[0]:n_off[1]] = torch.nan
 
     return inputs, targets
 #+end_src
@@ -484,7 +480,7 @@ def generate_dual_trials(
     timing: TaskTiming,
     input_size: int = 8,
     noise: float = 0.1,
-    baseline_value: float = 0.5,
+    baseline_value: float = 1e-3,
 ):
     n_steps = timing.n_steps
     n_on = timing.n_stim_on
@@ -492,6 +488,10 @@ def generate_dual_trials(
 
     s_sample = slice(int(n_on[0]), int(n_off[0]))
     s_gng    = slice(int(n_on[1]), int(n_off[1]))
+
+    # gng period
+    s_is_gng    = slice(int(n_on[1]), int(n_on[3]))
+
     s_cue    = slice(int(n_on[2]), int(n_off[2]))
     # s_rwd    = slice(int(n_off[2]), int(n_off[2] + (n_on[3] - n_off[2]) /2))
     s_rwd    = slice(int(n_off[2]), int(n_on[3]))
@@ -565,6 +565,7 @@ def generate_dual_trials(
     # GNG cue-period target.
     targets[idx_go, s_rwd] = 1.0
     targets[idx_nogo, s_rwd] = -1.0
+    targets[idx_gng, s_is_gng] = torch.nan
 
     condition_names = np.array([
         f"{s}_{g}_{t}" if g != "none" else f"{s}_{t}"
@@ -606,218 +607,382 @@ class LowRankModel(nn.Module):
         hidden_size,
         output_size,
         rank=1,
+        gain=1.0,
         alpha=0.01,
-        rho=0.8,
         train_inputs=True,
+        train_outputs=True,
         warmup_steps=500,
+        reward_channel=-1,
+        reward_threshold=0.5,
         device="cpu",
     ):
         super().__init__()
 
         self.device = torch.device(device)
         self.warmup_steps = warmup_steps
+
         self.input_size = input_size
         self.hidden_size = hidden_size
+
         self.rank = rank
+        self.gain = gain
+
+        self.reward_channel = reward_channel
+        self.reward_threshold = reward_threshold
 
         # --- Input layer -------------------------------------------------
         self.wi = None
         if input_size > 0:
+            self.Ai = 1.0
             self.wi = nn.Linear(input_size, hidden_size, device=self.device)
+            # with torch.no_grad():
+            #     nn.init.normal_(self.wi.weight, mean=0.0, std=1.0)
+            #     nn.init.zeros_(self.wi.bias)
+
             if not train_inputs:
+                self.Ai = nn.Parameter(torch.randn(1.0, device=self.device))
                 self.wi.weight.requires_grad_(False)
                 self.wi.bias.requires_grad_(False)
 
         # --- Low-rank recurrent layer -----------------------------------
-        # Entries O(1); recurrent matrix W = m n^T / N has O(1) singular values.
-        self.m = nn.Parameter(torch.empty(hidden_size, rank, device=self.device))
-        self.n = nn.Parameter(torch.empty(hidden_size, rank, device=self.device))
+        self.m = nn.Parameter(torch.randn(hidden_size, rank, device=self.device))
+        self.n = nn.Parameter(torch.randn(hidden_size, rank, device=self.device))
+
+        # with torch.no_grad():
+        #     nn.init.normal_(self.m, mean=0.0, std=1.0)
+        #     nn.init.normal_(self.n, mean=0.0, std=1.0)
 
         # --- Output layer ------------------------------------------------
-        # If output_size == 0, fall back to the rank-coordinate readout
-        # r @ n / N. This is only meaningful when n is normalized so that
-        # the readout is O(1); we recommend output_size >= 1.
         self.wo = None
         if output_size > 0:
+            self.Ao = 1.0
             self.wo = nn.Linear(hidden_size, output_size, device=self.device)
+            with torch.no_grad():
+                nn.init.normal_(self.wo.weight, mean=0.0, std=1.0)
+                nn.init.zeros_(self.wo.bias)
+
+            if not train_outputs:
+                self.Ao = nn.Parameter(torch.randn(1.0, device=self.device))
+                self.wo.weight.requires_grad_(False)
+                self.wo.bias.requires_grad_(False)
 
         self.nonlinearity = torch.tanh
-        self.alpha = torch.tensor(alpha, device=self.device)
-        self.exp_alpha = torch.exp(-self.alpha)
 
-        init_low_rank_rnn(self, rho=rho)
+        # FIX: register as buffers so they follow .to(device)
+        self.register_buffer("alpha", torch.tensor(float(alpha)))
+        self.register_buffer("exp_alpha", torch.exp(-torch.tensor(float(alpha))))
 
-    def get_readout(self, rates, rec_inputs, is_internal=False):
+    def get_readout(self, rates, rec_inputs):
         if self.wo is not None:
-            return self.wo(rates)
-        # Fallback: project onto n. Note: with O(1) n entries this is O(1/sqrt(N))
-        # at initialization; gradient descent has to grow it. Prefer wo.
-        return rates @ self.n / rates.shape[-1]
+            return self.Ao * self.wo(rates)
+        return rates @ self.n / self.hidden_size
 
     def update_dynamics(self, ff_inputs, rec_inputs, rates):
-        # Low-rank recurrent drive: h = (1/N) M N^T r
-        hidden = (rates @ self.n) @ self.m.T / rates.shape[-1]
+        input_drive = self.Ai * self.wi(ff_inputs) if self.wi is not None else 0.0
+        hidden = (rates @ self.n) @ self.m.T / self.hidden_size
         rec_inputs = self.exp_alpha * rec_inputs + (1.0 - self.exp_alpha) * hidden
-        rates = self.nonlinearity(self.wi(ff_inputs) + rec_inputs)
+        rates = self.nonlinearity(input_drive + rec_inputs)
         return rates, rec_inputs
 
     def forward(self, ff_inputs, targets=None, ret_rates=False):
-        batch_size = ff_inputs.shape[0]
+        batch_size, T = ff_inputs.shape[0], ff_inputs.shape[1]
         hidden_size = self.m.shape[0]
 
-        # Start from small noise rather than random O(1) state.
         rec_inputs = 0.1 * torch.randn(batch_size, hidden_size, device=self.device)
-        rates = self.nonlinearity(rec_inputs)
+        rates = self.nonlinearity(self.gain * rec_inputs)
 
-        # Warmup with zero input to reach the spontaneous regime.
-        zero_inputs = torch.zeros(batch_size, self.input_size, device=self.device)
+        # Warmup with zero input.
+        zero_inputs = torch.zeros(batch_size, max(self.input_size, 0), device=self.device)
         with torch.no_grad():
             for _ in range(self.warmup_steps):
                 rates, rec_inputs = self.update_dynamics(zero_inputs, rec_inputs, rates)
-
         rates = rates.detach()
         rec_inputs = rec_inputs.detach()
 
         readout_list = []
-        rates_list = []
-        inputs_list = []
+        rates_list = [] if ret_rates else None     # FIX: only build if requested
+        inputs_list = [] if ret_rates else None
 
         rwd_next = torch.zeros(batch_size, device=self.device, dtype=ff_inputs.dtype)
 
-        for step in range(ff_inputs.shape[1]):
-            x_t = ff_inputs[:, step].clone()
+        for step in range(T):
+            x_t = ff_inputs[:, step]
 
-            if targets is not None:
-                x_t[:, -1] = x_t[:, -1] + rwd_next
+            if targets is not None and self.reward_channel is not None:
+                x_t = x_t.clone()
+                x_t[:, self.reward_channel] = x_t[:, self.reward_channel] + rwd_next
 
             rates, rec_inputs = self.update_dynamics(x_t, rec_inputs, rates)
             readout = self.get_readout(rates, rec_inputs)
 
-            rates_list.append(rates)
-            inputs_list.append(rec_inputs)
             readout_list.append(readout)
 
+            if ret_rates:
+                rates_list.append(rates)
+                inputs_list.append(rec_inputs)
+
             if targets is not None:
-                # Use last readout channel for reward gating.
-                rwd_mask = (targets[:, step] == 1) & (readout[..., -1] > 0.5)
+                rwd_mask = (targets[:, step] == 1) & (readout[..., -1] > self.reward_threshold)
                 rwd_next = rwd_mask.to(dtype=ff_inputs.dtype)
             else:
-                rwd_next.zero_()
+                rwd_next = torch.zeros_like(rwd_next)
 
-        rates_list = torch.stack(rates_list, dim=1)
-        inputs_list = torch.stack(inputs_list, dim=1)
         readout_list = torch.stack(readout_list, dim=1)
 
         if ret_rates:
-            return readout_list, rates_list, inputs_list
+            return readout_list, torch.stack(rates_list, dim=1), torch.stack(inputs_list, dim=1)
         return readout_list
 #+end_src
 
 #+RESULTS:
 
-** initialization
+** Multivariate Gaussian initialization
 
 #+begin_src jupyter-python
-@torch.no_grad()
-def init_low_rank_rnn(
-    model: nn.Module,
-    rho: float = 0.8,
-    g_m: float = 1.0,
-    g_n: float = 1.0,
-    wi_gain: float = 4.0,
-    wo_gain: float = 1.0,
-    center: bool = True,
-) -> None:
+import warnings
+import torch
+import torch.nn as nn
+from typing import Optional
+
+
+class LowRankInitializer:
     """
-    Initialization compatible with the network's hard-coded 1/N scalings:
+    Initialize a LowRankModel's loadings (m, n, wi, wo) as i.i.d. samples
+    from N(0, Sigma) across neurons.
 
-        h_t      = (1/N) m (n^T r_{t-1})
-        y_t      = (1/N) n^T r_t                (when wo is None)
-
-    To get O(1) recurrent loop gain AND an O(1) readout at init,
-    we use the asymmetric MO/Beiran scaling:
-
-        m entries  ~ N(0, g_m^2 / N)             ⇒ ‖col(m)‖ ~ g_m
-        n entries  ~ N(0, g_n^2)                 ⇒ ‖col(n)‖ ~ g_n * sqrt(N)
-
-    Then:
-      - W_rec = m n^T / N has top singular value ~ rho * g_m * g_n  → O(1)
-      - kappa = n^T r / N  ~ O(1) when r is O(1)
-      - y     = n^T r / N  ~ O(1) at init  (this is what unlocks learning)
-      - ∂L/∂n_i ~ O(1)/N · O(1) → O(1/N), but n_i itself is O(1), so the
-        *relative* update per entry is O(1/N) — i.e. healthy, not stuck.
-
-    Correlation corr(m_k, n_k) ≈ rho is induced from orthonormal directions
-    so that the singular values of W_rec are controlled.
-
-    Inputs
-    ------
-    W_i entries ~ N(0, wi_gain^2 / input_size). Set wi_gain ~ 3–5 so that the
-    stimulus actually drives tanh out of its linear regime (otherwise the
-    rank-coordinate drive n^T tanh(W_i x)/N is O(1/sqrt(N)) and the task
-    signal stays in the lazy regime).
-
-    Notes
-    -----
-    - This *only* changes init. The network class still divides recurrent
-      drive and readout by N. The scalings of m and n compensate.
-    - If you later add a linear readout wo (output_size > 0), it is given
-      O(1/sqrt(N)) entries so it is also O(1) at init.
+    Loading vector per neuron:
+        [ m_1..m_R, n_1..n_R, I_1..I_{D_in}, w_1..w_{D_out} ]
     """
-    if not -1.0 <= rho <= 1.0:
-        raise ValueError(f"rho must be in [-1, 1], got {rho}")
 
-    N, rank = model.m.shape
-    device, dtype = model.m.device, model.m.dtype
+    BLOCKS = ("m", "n", "in", "out")
 
-    # --- Correlated, orthogonal directions ------------------------------
-    # Q has orthonormal columns: each column has unit norm, entries O(1/sqrt(N)).
-    Z = torch.randn(N, 2 * rank, device=device, dtype=dtype)
-    if center:
-        Z = Z - Z.mean(dim=0, keepdim=True)
+    def __init__(
+        self,
+        sigma: Optional[torch.Tensor] = None,
+        var_m: float | torch.Tensor = 1.0,
+        var_n: float | torch.Tensor = 1.0,
+        var_in: float | torch.Tensor = 1.0,
+        var_out: float | torch.Tensor = 1.0,
+        overlaps: Optional[dict] = None,
+        jitter: float = 1e-8,
+        zero_biases: bool = True,
+        auto_psd: bool = True,
+        psd_tol: float = 1e-8,
+        psd_warn_threshold: float = 1e-3,
+        preserve_diagonal: bool = True,
+    ):
+        self.sigma = sigma
+        self.var_m = var_m
+        self.var_n = var_n
+        self.var_in = var_in
+        self.var_out = var_out
+        self.overlaps = overlaps or {}
+        self.jitter = jitter
+        self.zero_biases = zero_biases
+        self.auto_psd = auto_psd
+        self.psd_tol = psd_tol
+        self.psd_warn_threshold = psd_warn_threshold
+        self.preserve_diagonal = preserve_diagonal
 
-    Q, _ = torch.linalg.qr(Z, mode="reduced")  # [N, 2R]
+    # ------------------------------------------------------------------
+    def _block_sizes(self, model) -> dict:
+        R = model.rank
+        D_in = model.input_size
+        D_out = model.wo.weight.shape[0] if model.wo is not None else 0
+        return {"m": R, "n": R, "in": D_in, "out": D_out}
 
-    # Two orthonormal blocks of directions, each [N, rank], ‖col‖ = 1.
-    e_m = Q[:, :rank]
-    e_p = Q[:, rank:2 * rank]
+    def _block_offsets(self, sizes: dict) -> dict:
+        offsets, cur = {}, 0
+        for b in self.BLOCKS:
+            offsets[b] = cur
+            cur += sizes[b]
+        return offsets
 
-    # m: entries O(1/sqrt(N))  →  column norm ~ 1  →  m direction unscaled.
-    # Multiply by g_m to set the m-side gain.
-    m_init = g_m * e_m
+    def _expand_var(self, v, size: int) -> torch.Tensor:
+        if size == 0:
+            return torch.zeros(0)
+        if torch.is_tensor(v):
+            v = v.flatten().float()
+            assert v.numel() == size, f"Expected {size} variances, got {v.numel()}"
+            return v
+        return torch.full((size,), float(v))
 
-    # n: entries O(1) → column norm ~ sqrt(N). Obtained by scaling unit
-    # directions by sqrt(N). Mix to produce correlation rho with m.
-    sqrtN = math.sqrt(N)
-    n_dir = rho * e_m + math.sqrt(max(0.0, 1.0 - rho ** 2)) * e_p
-    n_init = g_n * sqrtN * n_dir
+    # ------------------------------------------------------------------
+    def _project_psd(self, Sigma: torch.Tensor) -> torch.Tensor:
+        """
+        Project a symmetric matrix onto the PSD cone via eigenvalue clipping.
 
-    model.m.copy_(m_init)
-    model.n.copy_(n_init)
+        If preserve_diagonal=True, the diagonal of the projected matrix is
+        rescaled to match the input's diagonal (so user-specified variances
+        are preserved up to a final symmetric rescaling).
+        """
+        # Symmetrize defensively
+        S = 0.5 * (Sigma + Sigma.T)
+        d_orig = torch.diag(S).clone()
 
-    # --- Input weights --------------------------------------------------
-    if getattr(model, "wi", None) is not None:
-        input_size = model.wi.weight.shape[1]
-        std_wi = wi_gain / math.sqrt(input_size)
-        W = torch.randn(N, input_size, device=device, dtype=dtype) * std_wi
-        if center:
-            W = W - W.mean(dim=0, keepdim=True)
-        model.wi.weight.copy_(W)
-        nn.init.zeros_(model.wi.bias)
+        evals, evecs = torch.linalg.eigh(S)
+        evals_clipped = evals.clamp_min(self.psd_tol)
+        S_psd = (evecs * evals_clipped) @ evecs.T
 
-    # --- Linear readout (only used if output_size > 0) ------------------
-    if getattr(model, "wo", None) is not None:
-        std_wo = wo_gain / math.sqrt(N)
-        nn.init.normal_(model.wo.weight, mean=0.0, std=std_wo)
-        nn.init.zeros_(model.wo.bias)
+        if self.preserve_diagonal:
+            d_new = torch.diag(S_psd).clamp_min(self.psd_tol)
+            # Rescale so diag(S_psd) == d_orig, preserving correlation structure
+            scale = torch.sqrt(d_orig.clamp_min(0.0) / d_new)
+            S_psd = S_psd * scale.unsqueeze(0) * scale.unsqueeze(1)
+            # Diagonal is now exactly d_orig (up to fp), confirm PSD after rescale
+            # (rescaling by diag(s)·M·diag(s) preserves PSDness)
+
+        # Re-symmetrize against fp drift
+        S_psd = 0.5 * (S_psd + S_psd.T)
+        return S_psd, evals.min().item()
+
+    def _maybe_project(self, Sigma: torch.Tensor) -> torch.Tensor:
+        evals = torch.linalg.eigvalsh(Sigma)
+        min_ev = float(evals.min())
+
+        if min_ev >= -self.psd_tol:
+            return Sigma  # already PSD up to tol
+
+        if not self.auto_psd:
+            raise ValueError(
+                f"Sigma is not PSD (min eigenvalue = {min_ev:.3e}). "
+                "Pass auto_psd=True to project onto the PSD cone, or fix the spec."
+            )
+
+        Sigma_psd, _ = self._project_psd(Sigma)
+
+        # Quantify correction
+        delta = (Sigma_psd - Sigma)
+        rel_change = (
+            torch.linalg.matrix_norm(delta, ord="fro")
+            / torch.linalg.matrix_norm(Sigma, ord="fro").clamp_min(1e-12)
+        ).item()
+
+        msg = (
+            f"Sigma was not PSD (min eigval = {min_ev:.3e}); "
+            f"projected to nearest PSD (Frobenius rel. change = {rel_change:.3e})."
+        )
+        if rel_change > self.psd_warn_threshold:
+            msg += (
+                " Correction is large — consider reducing overlap magnitudes "
+                "or increasing the relevant variances."
+            )
+        warnings.warn(msg, stacklevel=3)
+
+        return Sigma_psd
+
+    # ------------------------------------------------------------------
+    def build_sigma(self, model) -> torch.Tensor:
+        sizes = self._block_sizes(model)
+        offsets = self._block_offsets(sizes)
+        P = sum(sizes.values())
+
+        if self.sigma is not None:
+            assert self.sigma.shape == (P, P), (
+                f"sigma must be ({P},{P}), got {tuple(self.sigma.shape)}"
+            )
+            return self._maybe_project(self.sigma.float().clone())
+
+        diag = torch.cat([
+            self._expand_var(self.var_m,   sizes["m"]),
+            self._expand_var(self.var_n,   sizes["n"]),
+            self._expand_var(self.var_in,  sizes["in"]),
+            self._expand_var(self.var_out, sizes["out"]),
+        ])
+        Sigma = torch.diag(diag)
+
+        for ((ba, ia), (bb, ib)), cov in self.overlaps.items():
+            assert ba in self.BLOCKS and bb in self.BLOCKS, (
+                f"Unknown block: {ba} or {bb}; must be in {self.BLOCKS}"
+            )
+            assert 0 <= ia < sizes[ba], f"Index {ia} out of range for block {ba}"
+            assert 0 <= ib < sizes[bb], f"Index {ib} out of range for block {bb}"
+            a = offsets[ba] + ia
+            b = offsets[bb] + ib
+            Sigma[a, b] = cov
+            Sigma[b, a] = cov
+
+        return self._maybe_project(Sigma)
+
+    # ------------------------------------------------------------------
+    def _sample_loadings(
+        self, Sigma: torch.Tensor, N: int, device, generator=None
+    ) -> torch.Tensor:
+        P = Sigma.shape[0]
+        Sigma_j = Sigma + self.jitter * torch.eye(P)
+
+        try:
+            L = torch.linalg.cholesky(Sigma_j)
+        except RuntimeError as e:
+            warnings.warn(
+                f"Cholesky failed even after PSD projection ({e}); "
+                "falling back to eigendecomposition."
+            )
+            evals, evecs = torch.linalg.eigh(Sigma_j)
+            evals = evals.clamp_min(0.0)
+            L = evecs * evals.sqrt().unsqueeze(0)
+
+        z = torch.randn(N, P, generator=generator)
+        return (z @ L.T).to(device)
+
+    @torch.no_grad()
+    def apply(self, model: nn.Module, seed: Optional[int] = None) -> torch.Tensor:
+        Sigma = self.build_sigma(model)
+        sizes = self._block_sizes(model)
+        offsets = self._block_offsets(sizes)
+        N = model.hidden_size
+        device = model.device
+
+        gen = None
+        if seed is not None:
+            gen = torch.Generator()
+            gen.manual_seed(seed)
+
+        X = self._sample_loadings(Sigma, N, device, generator=gen)
+
+        def slc(b):
+            return slice(offsets[b], offsets[b] + sizes[b])
+
+        model.m.copy_(X[:, slc("m")])
+        model.n.copy_(X[:, slc("n")])
+
+        if sizes["in"] > 0 and model.wi is not None:
+            model.wi.weight.copy_(X[:, slc("in")])
+            if self.zero_biases:
+                model.wi.bias.zero_()
+
+        if sizes["out"] > 0 and model.wo is not None:
+            model.wo.weight.copy_(X[:, slc("out")].T)
+            if self.zero_biases:
+                model.wo.bias.zero_()
+
+        return Sigma
+
+    # ------------------------------------------------------------------
+    def validate(self, model, raise_on_fail: bool = True) -> tuple[bool, float]:
+        """Build Sigma without projection and report PSD status."""
+        old = self.auto_psd
+        self.auto_psd = False
+        try:
+            try:
+                Sigma = self.build_sigma(model)
+                min_ev = float(torch.linalg.eigvalsh(Sigma).min())
+                return True, min_ev
+            except ValueError as e:
+                if raise_on_fail:
+                    raise
+                # Re-extract min eigenvalue
+                self.auto_psd = True  # to actually build it
+                Sigma = self.build_sigma(model)
+                min_ev = float(torch.linalg.eigvalsh(Sigma).min())
+                return False, min_ev
+        finally:
+            self.auto_psd = old
 #+end_src
-
-
 
 #+RESULTS:
 
 * Vector fields
-** Vector field
 
 The low-rank recurrent state lives approximately on the manifold
 
@@ -901,6 +1066,7 @@ def low_rank_numpy_params(model):
         "Nvec": n_eff.detach().cpu().numpy().astype(np.float64),      # [N, R]
         "Wi": model.wi.weight.detach().cpu().numpy().astype(np.float64),
         "bi": model.wi.bias.detach().cpu().numpy().astype(np.float64),
+        "Ai": model.Ai.detach().cpu().numpy().astype(np.float64),
         "beta": 1.0 - np.exp(-alpha),
     }
 
@@ -919,6 +1085,7 @@ def low_rank_field_np(params, kappa, ff_input=None, include_beta=False):
     Nvec = params["Nvec"]
     Wi = params["Wi"]
     bi = params["bi"]
+    Ai = params["Ai"]
 
     kappa = np.asarray(kappa, dtype=np.float64)
     orig_shape = kappa.shape
@@ -930,7 +1097,7 @@ def low_rank_field_np(params, kappa, ff_input=None, include_beta=False):
     else:
         ff_input = np.asarray(ff_input, dtype=np.float64)
 
-    drive = ff_input @ Wi.T + bi                  # [N]
+    drive = Ai * (ff_input @ Wi.T + bi)                  # [N]
     h = kappa_flat @ M.T                          # [B, N]
     r = np.tanh(h + drive[None, :])               # [B, N]
     psi = r @ Nvec / M.shape[0]                   # [B, R]
@@ -948,6 +1115,7 @@ def low_rank_jacobian_flow_np(params, kappa, ff_input=None):
     Nvec = params["Nvec"]
     Wi = params["Wi"]
     bi = params["bi"]
+    Ai = params["Ai"]
 
     kappa = np.asarray(kappa, dtype=np.float64).reshape(-1)
 
@@ -956,7 +1124,7 @@ def low_rank_jacobian_flow_np(params, kappa, ff_input=None):
     else:
         ff_input = np.asarray(ff_input, dtype=np.float64)
 
-    u = M @ kappa + ff_input @ Wi.T + bi
+    u = M @ kappa + Ai * (ff_input @ Wi.T + bi)
     phi_prime = 1.0 - np.tanh(u) ** 2
 
     J = Nvec.T @ (phi_prime[:, None] * M) / M.shape[0]
@@ -1450,6 +1618,13 @@ def add_time_arrows(
             zorder=zorder,
         )
 
+ #+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
 
 def plot_task_flow_fields(
     model,
@@ -1475,10 +1650,12 @@ def plot_task_flow_fields(
     """
     Plot low-rank vector fields with correctly matched trajectory segments.
 
-    Important:
-    - Pass targets=targets if your LowRankModel uses target-gated reward
-      feedback in forward(). Otherwise reward-driven trajectory pieces will not
-      match the effective input.
+    Notes
+    -----
+    - Pass targets=targets if LowRankModel.forward uses target-gated reward
+      feedback in the last input channel.
+    - Layout is fully manual (no tight/constrained layout) to keep the
+      colorbar axis from triggering matplotlib's tight_layout warning.
     """
     task = task.lower()
 
@@ -1497,7 +1674,9 @@ def plot_task_flow_fields(
         default=-1,
     )
     if input_size <= max_dim:
-        raise ValueError(f"Task {task} requires input_size > {max_dim}, got {input_size}.")
+        raise ValueError(
+            f"Task {task} requires input_size > {max_dim}, got {input_size}."
+        )
 
     with torch.no_grad():
         readouts, rates, rec_inputs, effective_x = run_low_rank_with_effective_inputs(
@@ -1613,6 +1792,11 @@ def plot_task_flow_fields(
         sharex=True,
         sharey=True,
     )
+    # FIX: prevent tight/constrained layout from trying to manage a manually
+    # placed colorbar inset axis, which produced the
+    # "Axes that are not compatible with tight_layout" warning.
+    fig.set_layout_engine("none")
+
     axes = np.atleast_1d(axes).ravel()
 
     last_hm = None
@@ -1691,7 +1875,7 @@ def plot_task_flow_fields(
                     label=label,
                 )
 
-        panel_mask = cache["panel_mask"]  # [B, T]
+        panel_mask = cache["panel_mask"]
 
         for cond in spec["conds"]:
             if cond not in cond_idx or len(cond_idx[cond]) == 0:
@@ -1779,16 +1963,19 @@ def plot_task_flow_fields(
         handlelength=1.1,
     )
 
-    fig.subplots_adjust(right=0.92, wspace=0.16)
-    fig.canvas.draw()
+    # FIX: manual layout — no tight/constrained layout, no canvas.draw dance.
+    fig.subplots_adjust(left=0.04, right=0.93, top=0.92, bottom=0.12, wspace=0.16)
 
-    last_ax_pos = axes[-1].get_position()
-    cax = fig.add_axes([
-        last_ax_pos.x1 + 0.010,
-        last_ax_pos.y0,
-        0.012,
-        last_ax_pos.height,
-    ])
+    # FIX: colorbar via inset_axes anchored to the last panel.
+    cax = inset_axes(
+        axes[-1],
+        width="3.5%",
+        height="100%",
+        loc="lower left",
+        bbox_to_anchor=(1.04, 0.0, 1.0, 1.0),
+        bbox_transform=axes[-1].transAxes,
+        borderpad=0.0,
+    )
 
     cbar = fig.colorbar(last_hm, cax=cax)
     if include_beta_in_field:
@@ -1797,28 +1984,15 @@ def plot_task_flow_fields(
         cbar.set_label(r"$\|\Psi(\kappa;x)-\kappa\|$")
 
     return fig, axes, field_cache
-
-
-# Recommended call for your DPA model, because LowRankModel.forward uses targets
-# to create online reward feedback through the last input channel:
-#
-# fig, axes, field_cache = plot_task_flow_fields(
-#     model,
-#     inputs,
-#     timing=dpa_timing,
-#     task="dpa",
-#     targets=targets,
-# )
-# plt.show()
 #+end_src
 
 #+RESULTS:
 
-* Initializing the model
+* Initialization
 
 #+begin_src jupyter-python
 PATH = '../results/dual/vanilla'
-seed = 3
+seed = 0
 device = "cuda:1" if torch.cuda.is_available() else "cpu"
 # device = "cpu"
 print(device)
@@ -1848,11 +2022,8 @@ hidden_size = 512
 output_size = 0
 rank = 2
 
-rho = 0.6
-
-model = LowRankModel(input_size, hidden_size, output_size, rank, alpha, rho, train_inputs =True, device=device)
-# model = EILowRankModel(input_size, hidden_size, output_size, rank, alpha, rho, device=device)
-# model.to(device)
+model = LowRankModel(input_size, hidden_size, output_size, rank, alpha, train_inputs=False, device=device)
+model.to(device)
 
 # model = torch.compile(model)
 
@@ -1861,11 +2032,78 @@ noise = 0.1 * torch.sqrt(1.0 - torch.exp(torch.tensor(-alpha))**2)
 
 #+RESULTS:
 
+#+begin_src jupyter-python
+init = LowRankInitializer(
+    overlaps={
+        (("m", 0), ("n", 0)): 0.8,
+        (("m", 1), ("n", 1)): 0.8,
+
+        # Sample loads readout direction 0
+        (("in", 0), ("n", 0)):  0.8,
+        (("in", 1), ("n", 0)): -0.8,
+
+        # Test loads readout direction 1
+        (("in", 2), ("n", 1)):  0.5,
+        (("in", 3), ("n", 1)): -0.5,
+
+        # Go/NoGo/Cue/Lick on readout 1
+        (("in", 4), ("n", 1)):  0.8,
+        (("in", 5), ("n", 1)): -0.8,
+        (("in", 6), ("n", 1)):  0.8,
+        (("in", 7), ("n", 1)):  0.8,
+    },
+    auto_psd=True,             # default; projects to nearest PSD with warning
+    psd_warn_threshold=1e-3,   # warn loudly if correction > 0.1%
+)
+
+Sigma = init.apply(model, seed)
+print(f"min eigval after projection: {torch.linalg.eigvalsh(Sigma).min().item():.3e}")
+print(f"diag (should match var_*): {torch.diag(Sigma).numpy()}")
+#+end_src
+
+#+RESULTS:
+: min eigval after projection: -1.892e-07
+: diag (should match var_*): [1.         1.         1.         1.         0.99999994 0.99999994
+:  0.9999999  1.0000001  0.99999994 1.0000001  0.99999994 1.0000001 ]
+: /home/leon/tmp/ipykernel_3049353/4005516315.py:189: UserWarning: Sigma was not PSD (min eigval = -9.235e-01); projected to nearest PSD (Frobenius rel. change = 2.571e-01). Correction is large — consider reducing overlap magnitudes or increasing the relevant variances.
+:   Sigma = self.build_sigma(model)
+
+#+begin_src jupyter-python
+import numpy as np
+
+# Compare requested vs. realized overlaps
+labels = (['m0','m1','n0','n1'] + [f'in{i}' for i in range(8)])
+print(f"{'pair':>12}  {'requested':>10}  {'realized':>10}")
+for (ba, ia), (bb, ib) in init.overlaps.keys():
+    sizes = init._block_sizes(model)
+    offs = init._block_offsets(sizes)
+    i = offs[ba] + ia
+    j = offs[bb] + ib
+    req = init.overlaps[((ba, ia), (bb, ib))]
+    real = Sigma[i, j].item()
+    print(f"{labels[i]:>5}-{labels[j]:<5}  {req:+10.3f}  {real:+10.3f}")
+#+end_src
+
+#+RESULTS:
+#+begin_example
+        pair   requested    realized
+   m0-n0         +0.800      +0.611
+   m1-n1         +0.800      +0.484
+  in0-n0         +0.800      +0.611
+  in1-n0         -0.800      -0.611
+  in2-n1         +0.500      +0.309
+  in3-n1         -0.500      -0.309
+  in4-n1         +0.800      +0.484
+  in5-n1         -0.800      -0.484
+  in6-n1         +0.800      +0.484
+  in7-n1         +0.800      +0.484
+#+end_example
+
 * DPA task
 ** DPA trials
 
 #+begin_src jupyter-python
-timing = TaskTiming(
+dpa_timing = TaskTiming(
     stim_on=[2.0, 8.0],
     stim_off=[3.0, 9.0],
     t_steps=10.0,
@@ -1876,19 +2114,19 @@ timing = TaskTiming(
 #+RESULTS:
 
 #+begin_src jupyter-python
-x_time = timing.x_time
-T_STIM_ON = timing.stim_on
-T_STIM_OFF = timing.stim_off
-T_STEPS = timing.t_steps
-N_STEPS = timing.n_steps
-N_STIM_ON = timing.n_stim_on
-N_STIM_OFF = timing.n_stim_off
+dpa_time = dpa_timing.x_time
+T_STIM_ON = dpa_timing.stim_on
+T_STIM_OFF = dpa_timing.stim_off
+T_STEPS = dpa_timing.t_steps
+N_STEPS = dpa_timing.n_steps
+N_STIM_ON = dpa_timing.n_stim_on
+N_STIM_OFF = dpa_timing.n_stim_off
 #+end_src
 
 #+RESULTS:
 
 #+begin_src jupyter-python
-inputs, targets = generate_dpa_trials(N_BATCH, timing=timing,  input_size=input_size,  noise=noise,)
+inputs, targets = generate_dpa_trials(N_BATCH, timing=dpa_timing,  input_size=input_size,  noise=noise,)
 print(inputs.shape, targets.shape)
 #+end_src
 
@@ -1904,7 +2142,8 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_19.png]]
+[[file:./figures/figure_22.png]]
+
 
 #+begin_src jupyter-python
 idx_nogo = torch.argwhere(targets[:, -1] != 1).reshape(-1)[:32]
@@ -1920,16 +2159,16 @@ print(idx_go.shape, idx_nogo.shape)
 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 
 if len(idx_nogo) > 0:
-    ax[0].plot(x_time, inputs[idx_nogo, :, 1].mT.cpu().numpy(), alpha=.2)
-    ax[0].plot(x_time, inputs[idx_nogo, :, 3].mT.cpu().numpy(), alpha=.2)
-    ax[0].plot(x_time, targets[idx_nogo[0]].cpu().numpy(), 'k', label='Target')
+    ax[0].plot(dpa_time, inputs[idx_nogo, :, 1].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(dpa_time, inputs[idx_nogo, :, 3].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(dpa_time, targets[idx_nogo[0]].cpu().numpy(), 'k', label='Target')
 ax[0].set_title('Unpaired trials')
 
 if len(idx_go) > 0:
-    ax[1].plot(x_time, inputs[idx_go, :, 0].mT.cpu().numpy(), alpha=.2)
-    ax[1].plot(x_time, inputs[idx_go, :, 2].mT.cpu().numpy(), alpha=.2)
+    ax[1].plot(dpa_time, inputs[idx_go, :, 0].mT.cpu().numpy(), alpha=.2)
+    ax[1].plot(dpa_time, inputs[idx_go, :, 2].mT.cpu().numpy(), alpha=.2)
 
-    ax[1].plot(x_time, targets[idx_go[0]].cpu().numpy(), 'k', label='Target')
+    ax[1].plot(dpa_time, targets[idx_go[0]].cpu().numpy(), 'k', label='Target')
 ax[1].set_title('Paired trials')
 
 for i in range(2):
@@ -1945,34 +2184,118 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_21.png]]
+[[file:./figures/figure_24.png]]
 
 #+begin_src jupyter-python
-predictions, rates, rec_inputs = model(inputs.to(device), targets=targets.to(device), ret_rates=True)
-predictions = predictions.detach().cpu()
+predictions, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
+predictions = predictions.squeeze((0, -1)).detach().cpu()
 rates = rates.squeeze((0, -1))
-print('inputs', inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+
+print('rec_inputs', rec_inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: inputs torch.Size([516, 500, 8]) predictions torch.Size([516, 500, 2]) rates torch.Size([516, 500, 512])
+: rec_inputs torch.Size([516, 500, 512]) predictions torch.Size([516, 500, 2]) rates torch.Size([516, 500, 512])
+
+#+begin_src jupyter-python
+kappa_rec = (rates @ model.n)/ rates.shape[-1]
+kappa_rec = kappa_rec.cpu().detach().numpy()
+print('rates', rates.shape, 'm', model.n.shape, 'kappa_rec', kappa_rec.shape)
+#+end_src
+
+#+RESULTS:
+: rates torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa_rec (516, 500, 2)
+
+#+begin_src jupyter-python
+kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)**2
+kappa = kappa.cpu().detach().numpy()
+print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
+#+end_src
+
+#+RESULTS:
+: rec torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa (516, 500, 2)
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
+
+ax[0].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(dpa_time, kappa_rec[idx_nogo, :, 0].T, alpha=.2)
+ax[0].set_title('Unpaired trial')
+
+ax[1].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(dpa_time, kappa_rec[idx_go, :, 0].T, alpha=.2)
+ax[1].set_title('Paired trial')
+
+ax[2].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
+ax[2].plot(dpa_time, kappa_rec[idx_nogo, :, 1].T, alpha=.2)
+ax[2].set_title('Unpaired trial')
+
+ax[3].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
+ax[3].plot(dpa_time, kappa_rec[idx_go, :, 1].T, alpha=.2)
+ax[3].set_title('Paired trial')
+
+for i in range(4):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('$ \\kappa^{rec}_%d$' % (i//2+1))
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_28.png]]
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
+
+ax[0].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(dpa_time, kappa[idx_nogo, :, 0].T, alpha=.2)
+ax[0].set_title('Unpaired trial')
+
+ax[1].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(dpa_time, kappa[idx_go, :, 0].T, alpha=.2)
+ax[1].set_title('Paired trial')
+
+ax[2].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
+ax[2].plot(dpa_time, kappa[idx_nogo, :, 1].T, alpha=.2)
+ax[2].set_title('Unpaired trial')
+
+ax[3].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
+ax[3].plot(dpa_time, kappa[idx_go, :, 1].T, alpha=.2)
+ax[3].set_title('Paired trial')
+
+for i in range(4):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('$ \\kappa_%d$' % (i//2+1))
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_29.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
 
-ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(x_time, predictions[..., -1][idx_nogo].T, alpha=.2)
-ax[0].set_title('Unpaired trials')
+ax[0].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(dpa_time, predictions[..., -1][idx_nogo].T, alpha=.2)
+ax[0].set_title('Unpaired trial')
 
-ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(x_time, predictions[..., -1][idx_go].T, alpha=.2)
-ax[1].set_title('Paired trials')
+ax[1].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(dpa_time, predictions[..., -1][idx_go].T, alpha=.2)
+ax[1].set_title('Paired trial')
 
 for i in range(2):
     for j in range(2):
         ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
     ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
-    ax[i].set_ylim([-1.5, 1.5])
     ax[i].set_xlabel('Time (s)')
     ax[i].set_ylabel('Readout')
     ax[i].legend(fontsize=14)
@@ -1981,14 +2304,14 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_23.png]]
+[[file:./figures/figure_30.png]]
 
 ** DPA Training
 
 #+begin_src jupyter-python
 learning_rate = 0.01
-epochs = 100
-batch_size = 128
+epochs = 50
+batch_size = 64
 grad_clip_norm = None
 
 criterion = MaskedZeroLoss(criterion=torch.nn.MSELoss(), nonzero_weight=1.0, zero_weight=1.0)
@@ -2006,61 +2329,1207 @@ torch.save(model.state_dict(), '%s/dpa_%d.pth' % (PATH, seed))
 #+end_src
 
 #+RESULTS:
-: Epoch 005/100 | lr: 0.01000 | train: 0.9998 | val: 0.9987
-: Epoch 010/100 | lr: 0.01000 | train: 0.9998 | val: 1.0008
-: Epoch 015/100 | lr: 0.01000 | train: 0.9986 | val: 1.0000
-: Epoch 020/100 | lr: 0.01000 | train: 0.9980 | val: 1.0026
-: Epoch 025/100 | lr: 0.01000 | train: 0.9975 | val: 0.9989
-: Epoch 030/100 | lr: 0.01000 | train: 0.9973 | val: 1.0023
+#+begin_example
+Epoch 005/50 | lr: 0.01000 | train: 0.0748 | val: 0.0721
+Epoch 010/50 | lr: 0.01000 | train: 0.0744 | val: 0.0699
+Epoch 015/50 | lr: 0.01000 | train: 0.0615 | val: 0.0684
+Epoch 020/50 | lr: 0.01000 | train: 0.0608 | val: 0.0598
+Epoch 025/50 | lr: 0.01000 | train: 0.0649 | val: 0.0544
+Epoch 030/50 | lr: 0.01000 | train: 0.0544 | val: 0.0654
+Epoch 035/50 | lr: 0.01000 | train: 0.0606 | val: 0.0758
+Epoch 040/50 | lr: 0.00500 | train: 0.0481 | val: 0.0485
+Epoch 045/50 | lr: 0.00500 | train: 0.0486 | val: 0.0475
+Epoch 050/50 | lr: 0.00500 | train: 0.0614 | val: 0.0469
+#+end_example
 
 #+begin_src jupyter-python
 plt.plot(train_losses)
 plt.plot(val_losses)
-# plt.plot(learning_rates)
-
 plt.xlabel('epoch')
 plt.ylabel('Loss')
 plt.show()
 #+end_src
 
 #+RESULTS:
+[[file:./figures/figure_33.png]]
 
 #+begin_src jupyter-python
 
 #+end_src
 
-** With the current initialization the model is not learning the task. Fix the initialization. Give an explanation. Give fixed code in single source block per class. The problem is not the readout (I want to keep the recurrent readout) and is not the baseline loss (it imposes 0 readouts before stim)
+#+RESULTS:
 
-***
+** DPA Testing
 
-* GNG task
-** GNG trial
+ #+begin_src jupyter-python
+model_state_dict = torch.load('%s/dpa_%d.pth' % (PATH, seed))
+model.load_state_dict(model_state_dict)
+model.eval();
+#+end_src
+
+#+RESULTS:
 
 #+begin_src jupyter-python
-timing = TaskTiming(
-    stim_on=[2.0, 4.0],
-    stim_off=[3.0, 5.0],
-    t_steps=6.0,
-    dt=DT,
+dpa_time = dpa_timing.x_time
+T_STIM_ON = dpa_timing.stim_on
+T_STIM_OFF = dpa_timing.stim_off
+T_STEPS = dpa_timing.t_steps
+N_STEPS = dpa_timing.n_steps
+N_STIM_ON = dpa_timing.n_stim_on
+N_STIM_OFF = dpa_timing.n_stim_off
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+inputs, targets = generate_dpa_trials(N_BATCH, timing=dpa_timing,  input_size=input_size,  noise=noise,)
+print(inputs.shape, targets.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([516, 500, 8]) torch.Size([516, 500])
+
+#+begin_src jupyter-python
+predictions, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
+predictions = predictions.squeeze((0, -1)).detach().cpu()
+rates = rates.squeeze((0, -1))
+
+print('rec_inputs', rec_inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: rec_inputs torch.Size([516, 500, 512]) predictions torch.Size([516, 500, 2]) rates torch.Size([516, 500, 512])
+
+#+begin_src jupyter-python
+idx_nogo = torch.argwhere(targets[:, -1] != 1).reshape(-1)[:32]
+idx_go   = torch.argwhere(targets[:, -1] == 1).reshape(-1)[:32]
+
+print(idx_go.shape, idx_nogo.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([32]) torch.Size([32])
+
+#+begin_src jupyter-python
+kappa_rec = (rates @ model.n)/ rates.shape[-1]
+kappa_rec = kappa_rec.cpu().detach().numpy()
+print('rates', rates.shape, 'm', model.n.shape, 'kappa_rec', kappa_rec.shape)
+#+end_src
+
+#+RESULTS:
+: rates torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa_rec (516, 500, 2)
+
+#+begin_src jupyter-python
+kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)**2
+kappa = kappa.cpu().detach().numpy()
+print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
+#+end_src
+
+#+RESULTS:
+: rec torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa (516, 500, 2)
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
+
+ax[0].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(dpa_time, kappa_rec[idx_nogo, :, 0].T, alpha=.2)
+ax[0].set_title('Unpaired trial')
+
+ax[1].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(dpa_time, kappa_rec[idx_go, :, 0].T, alpha=.2)
+ax[1].set_title('Paired trial')
+
+ax[2].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
+ax[2].plot(dpa_time, kappa_rec[idx_nogo, :, 1].T, alpha=.2)
+ax[2].set_title('Unpaired trial')
+
+ax[3].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
+ax[3].plot(dpa_time, kappa_rec[idx_go, :, 1].T, alpha=.2)
+ax[3].set_title('Paired trial')
+
+for i in range(4):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('$ \\kappa^{rec}_%d$' % (i//2+1))
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_42.png]]
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
+
+ax[0].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(dpa_time, kappa[idx_nogo, :, 0].T, alpha=.2)
+ax[0].set_title('Unpaired trial')
+
+ax[1].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(dpa_time, kappa[idx_go, :, 0].T, alpha=.2)
+ax[1].set_title('Paired trial')
+
+ax[2].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
+ax[2].plot(dpa_time, kappa[idx_nogo, :, 1].T, alpha=.2)
+ax[2].set_title('Unpaired trial')
+
+ax[3].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
+ax[3].plot(dpa_time, kappa[idx_go, :, 1].T, alpha=.2)
+ax[3].set_title('Paired trial')
+
+for i in range(4):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('$ \\kappa_%d$' % (i//2+1))
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_43.png]]
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(dpa_time, predictions[..., -1][idx_nogo].T, alpha=.2)
+ax[0].set_title('Unpaired trial')
+
+ax[1].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(dpa_time, predictions[..., -1][idx_go].T, alpha=.2)
+ax[1].set_title('Paired trial')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Readout')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_44.png]]
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
+
+m_ = model.m.cpu().detach().numpy().T
+n_ = model.n.cpu().detach().numpy().T
+
+for i in range(2):
+    for j in range(2):
+        ax[i+2*j].scatter(m_[j], n_[i])
+        ax[i+2*j].set_xlabel('$m_%d$' % j)
+        ax[i+2*j].set_ylabel('$n_%d$' % i)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_45.png]]
+
+#+begin_src jupyter-python
+fig, axes, field_cache = plot_task_flow_fields(model, inputs, timing=dpa_timing, task="dpa", targets=targets, xlim=[-2, 2], ylim=[-2, 2])
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_46.png]]
+
+#+begin_src jupyter-python
+
+#+end_src
+
+#+RESULTS:
+
+* How do I interpret the result of the training in terms of populations as in Dubreuil et al.?
+** Interpreting the trained DPA model through the Dubreuil et al. lens
+
+*Mode: Explain.*
+
+*** 1. The Dubreuil framework in one paragraph
+
+Dubreuil, Valente, Beiran, Mastrogiuseppe & Ostojic (2022, /Nat. Neurosci.*) showed that trained low-rank RNNs can be summarized by clustering neurons in the *loading space* — the joint vector
+
+\[
+\ell_i = (m_i^{(1)}, \ldots, m_i^{(R)}, n_i^{(1)}, \ldots, n_i^{(R)}, I_i^{(1)}, \ldots, I_i^{(D_\text{in})}, w_i^{(1)}, \ldots, w_i^{(D_\text{out})}) \in \mathbb{R}^{2R + D_\text{in} + D_\text{out}}
+\]
+
+into *populations* (typically a Gaussian mixture). Each population is then characterized by its *covariance structure* in loading space — specifically the overlaps
+
+\[
+\sigma_{m^a n^b} = \frac{1}{N_p}\sum_{i \in p} m_i^a n_i^b, \qquad \sigma_{I^k n^a} = \frac{1}{N_p}\sum_{i \in p} I_i^k n_i^a, \qquad \text{etc.}
+\]
+
+These overlaps determine, in the mean-field limit, the *effective circuit*: which inputs project onto which latent dimensions, which latent dimensions couple to which others, and which read out. The number of populations needed reflects the minimal circuit complexity required by the task. [cite:@dubreuil2022role]
+
+*** 2. What to look at in /your/ trained model
+
+You have rank \(R=2\), \(D_\text{in}=8\), \(D_\text{out}=0\) (linear readout from \(n\)), \(N=512\). The loading per neuron is 12-dimensional:
+
+\[
+\ell_i = (m_i^1, m_i^2, n_i^1, n_i^2, I_i^1, \ldots, I_i^8).
+\]
+
+**** 2.1 The four-cluster signature in your \((m, n)\) scatter
+
+Your final-figure scatter of \((m_a, n_b)\) shows a clear *bimodal / four-quadrant structure*, most visible in \((m_0, n_0)\), \((m_0, n_1)\), and especially \((m_1, n_1)\) — the latter shows two well-separated blobs along the diagonal. This is the hallmark of a *discrete-population solution* rather than a single-Gaussian (unstructured) solution. In Dubreuil's terms, the network has learned to use ≥2 populations whose loadings differ in sign along specific axes.
+
+A single multivariate Gaussian over \(\ell_i\) cannot produce two disjoint blobs; only a /mixture/ can. The DPA task is one of the cases in [cite:@dubreuil2022role] where a multi-population solution is *necessary* because the task requires a context-dependent (XOR-like) computation: the sign of the readout at test time depends on the /product/ sample × test, which cannot be implemented by a single Gaussian rank-2 network.
+
+**** 2.2 The fixed-point picture confirms it
+
+Your "Autonomous" panel shows *two stable fixed points* roughly at \((\kappa_1,\kappa_2)\approx(\pm 0, \mp 0.8)\) plus additional ones — i.e. a discrete attractor structure carrying the sample memory along \(\kappa_2\). Stimulus panels (A, B, C, D) show that:
+
+- *A vs B* push \(\kappa_1\) in opposite directions (sample axis along \(\kappa_1\)).
+- *C vs D* rotate the flow such that the attractor reached during test depends on the /combination/ with the stored sample.
+
+This is exactly the "selection vector × memory vector" geometry that Dubreuil et al. dissect for context-dependent and DMS-like tasks.
+
+*** 3. How to make the population analysis quantitative
+
+To replicate Dubreuil's analysis on your model:
+
+1. *Standardize* each of the 12 loading coordinates (zero mean, unit variance) so the clustering is not dominated by scale.
+2. *Fit a Gaussian mixture* on \(\{\ell_i\}_{i=1}^{512}\) with \(K=1,2,3,4,\ldots\) components.
+3. *Model selection*: pick \(K\) by BIC, or by the /resampling test/ used in the paper — refit a multivariate Gaussian (\(K=1\)) to the loadings, resimulate the network from this Gaussian, and check whether task performance is preserved. If performance drops, \(K=1\) is insufficient and you need a true mixture. [cite:@dubreuil2022role]
+4. *Per-population overlap matrix*: for each cluster \(p\), compute
+   \[
+   \Sigma^{(p)}_{ab} = \frac{1}{N_p}\sum_{i\in p}\ell_i^a\,\ell_i^b.
+   \]
+   The non-zero off-diagonal entries between \(I^k\) and \(n^r\) tell you /which inputs that population routes to which latent dimension/; between \(m^r\) and \(n^{r'}\) they give the /effective recurrent connectivity/ in the rank-\(R\) reduced dynamics.
+
+*** 4. Likely interpretation given your initialization and your scatter
+
+Given how you initialized — overlaps roughly:
+
+- \(\langle m_1, n_1\rangle\), \(\langle m_2, n_2\rangle > 0\) (positive self-coupling on each rank dimension → bistability)
+- inputs 0/1 (sample A/B) load on \(n_1\) with opposite sign
+- inputs 2/3 (test C/D), 4/5 (Go/NoGo), 6 (cue), 7 (reward) load on \(n_2\)
+
+and given that the scatter clearly shows sign-structured clusters, the trained network most plausibly implements a *two-population* (or small-K) solution where:
+
+- *Population P+*: positive \(m_1\), positive \(n_1\) — supports the "A" attractor on \(\kappa_1\).
+- *Population P−*: negative \(m_1\), negative \(n_1\) — supports the "B" attractor.
+- Within each, the \((m_2, n_2)\) sub-structure plus the input loadings on \(I^{2..7}\) implement the *gating* by the test stimulus (C vs D) and produce the correct sign on the readout via the XOR-like \(\kappa_1 \cdot \kappa_2 \to \) output mapping.
+
+This is the same broad architecture Dubreuil et al. identified for DMS / context-dependent integration: a /memory subspace/ (your \(\kappa_1\)) maintained by within-population self-excitation (\(\langle m\,n\rangle > 0\) per cluster), and a /response subspace/ (your \(\kappa_2\)) into which sample-dependent and test-dependent inputs are routed with population-specific signs. [cite:@dubreuil2022role]
+
+*Caveat / [CHECK]:* the exact \(K\) (2 vs 4 populations) for your network must be determined empirically by the GMM+resampling procedure above — visual inspection of the \((m,n)\) scatter is suggestive but not conclusive, especially because rank-2 ambiguity (the basis \((m_1,m_2)\) can be rotated) can artificially split or merge clusters. Dubreuil et al. recommend rotating loadings to a canonical basis (e.g. one in which input overlaps with \(n\) are diagonal) before clustering.
+
+*** 5. Concrete next analyses (in decreasing order of value)
+
+1. *GMM + BIC on the 12-D loadings* → number of populations.
+2. *Resampling control*: refit \(K=1\) Gaussian, sample new loadings, rerun the model on the DPA test set; report performance drop. This is the key diagnostic distinguishing "structure needed" vs "structure incidental".
+3. *Per-population overlap heatmaps* \(\Sigma^{(p)}\): interpret each cluster as a sub-circuit.
+4. *Ablation by population*: zero out one cluster's loadings (\(m_i, n_i, I_i \to 0\) for \(i\in p\)) and measure which task component (sample memory, test gating, readout sign) breaks. This directly links populations to computational roles.
+5. *Rotate \((m_1,m_2)\)* into a task-aligned basis (e.g. first axis = sample-discriminating, second = test-discriminating) before clustering, so clusters are not basis-artifacts.
+
+Want me to write the GMM + resampling-control analysis as a runnable block against your =model=?
+
+** write the GMM + resampling control analysis
+
+/Mode: Implement./
+
+Below is a self-contained Org block implementing the Dubreuil-style population analysis: (i) extract loadings, (ii) optionally rotate to a task-aligned basis, (iii) fit GMMs with model selection by BIC, (iv) resample loadings from each fitted mixture (and from the K=1 Gaussian null) and rerun the task to test whether the structure is /necessary/ for performance.
+
+/Key design choices and assumptions/ (flag if any are wrong for your setup):
+
+- Readout uses =model.get_readout=, which for =output_size=0= returns \(r \cdot n / N\). Resampling preserves this because we resample \(n\) jointly with \(m\) and \(W_i\).
+- Performance metric: sign-accuracy at the last time step, restricted to non-baseline targets. Easy to swap.
+- I keep biases (=wi.bias=, =wo.bias= if any) fixed when resampling; only loadings are redrawn. This matches the Dubreuil convention.
+- Sample size in resampling = =N= (same hidden size) so the mean-field comparison is apples-to-apples.
+- GMM uses =sklearn.mixture.GaussianMixture= with =full= covariance.
+
+#+begin_src jupyter-python
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
+from sklearn.mixture import GaussianMixture
+from dataclasses import dataclass, field
+from typing import Optional
+
+
+# ----------------------------------------------------------------------
+# 1. Loading extraction
+# ----------------------------------------------------------------------
+
+def extract_loadings(model) -> tuple[np.ndarray, dict]:
+    """
+    Returns
+    -------
+    L : [N, P] loading matrix, columns = [m_1..m_R, n_1..n_R, I_1..I_Din, w_1..w_Dout]
+    meta : dict with block sizes and offsets for interpretation.
+    """
+    m = model.m.detach().cpu().numpy()              # [N, R]
+    n = model.n.detach().cpu().numpy()              # [N, R]
+    wi = model.wi.weight.detach().cpu().numpy()     # [N, Din]
+    D_out = model.wo.weight.shape[0] if model.wo is not None else 0
+    if D_out > 0:
+        wo = model.wo.weight.detach().cpu().numpy().T  # [N, Dout]
+    else:
+        wo = np.zeros((m.shape[0], 0))
+
+    L = np.concatenate([m, n, wi, wo], axis=1)
+    R = m.shape[1]
+    D_in = wi.shape[1]
+
+    sizes = {"m": R, "n": R, "in": D_in, "out": D_out}
+    offsets, cur = {}, 0
+    for b in ["m", "n", "in", "out"]:
+        offsets[b] = cur
+        cur += sizes[b]
+
+    return L, {"sizes": sizes, "offsets": offsets, "P": L.shape[1], "N": L.shape[0]}
+
+
+# ----------------------------------------------------------------------
+# 2. Optional task-aligned rotation of (m, n)
+# ----------------------------------------------------------------------
+# Rank-R loadings have a GL(R) gauge: replacing (M, N_) -> (M Q^{-T}, N_ Q)
+# leaves M N_^T (and hence dynamics) invariant. Clustering is basis-dependent,
+# so we rotate into a canonical basis where input-to-n overlaps are diagonal.
+
+def rotate_loadings_to_input_basis(
+    L: np.ndarray,
+    meta: dict,
+    input_dim_per_rank: list[int],
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Choose Q (R x R) so that <I^{d_r}, n^r> is dominant on the r-th axis,
+    by aligning n's columns to the rows of W_i over the selected input dims.
+
+    Parameters
+    ----------
+    input_dim_per_rank : list of length R
+        For rank r, which input channel is supposed to load primarily on n^r.
+        e.g. for DPA with rank 2 you might pass [0, 2] (sample on n1, test on n2).
+
+    Returns
+    -------
+    L_rot : rotated loadings (same shape)
+    Q     : the rotation applied to n; m is rotated by Q^{-T}
+    """
+    off = meta["offsets"]
+    R = meta["sizes"]["m"]
+    assert len(input_dim_per_rank) == R
+
+    M = L[:, off["m"]:off["m"] + R].copy()
+    N_ = L[:, off["n"]:off["n"] + R].copy()
+    Wi = L[:, off["in"]:off["in"] + meta["sizes"]["in"]].copy()
+
+    # Target directions: rows of Wi at the chosen input dims, normalized.
+    targets = np.stack([Wi[:, d] for d in input_dim_per_rank], axis=1)  # [N, R]
+    targets /= (np.linalg.norm(targets, axis=0, keepdims=True) + 1e-12)
+
+    # Find Q such that N_ @ Q is closest to `targets` (Procrustes).
+    # Solve: min_Q || N_ Q - targets ||_F
+    # => Q = (N_^T N_)^{-1} N_^T targets
+    Q = np.linalg.lstsq(N_, targets, rcond=None)[0]  # [R, R]
+
+    # Apply: n -> n Q, m -> m Q^{-T} (preserves M N_^T)
+    Qinv_T = np.linalg.inv(Q).T
+    M_rot = M @ Qinv_T
+    N_rot = N_ @ Q
+
+    L_rot = L.copy()
+    L_rot[:, off["m"]:off["m"] + R] = M_rot
+    L_rot[:, off["n"]:off["n"] + R] = N_rot
+    return L_rot, Q
+
+
+# ----------------------------------------------------------------------
+# 3. GMM fitting + BIC
+# ----------------------------------------------------------------------
+
+@dataclass
+class GMMFit:
+    K: int
+    gmm: GaussianMixture
+    bic: float
+    labels: np.ndarray            # [N]
+    means: np.ndarray             # [K, P]
+    covariances: np.ndarray       # [K, P, P]
+    weights: np.ndarray           # [K]
+
+
+def fit_gmms(
+    L: np.ndarray,
+    K_range=range(1, 7),
+    standardize: bool = True,
+    n_init: int = 10,
+    random_state: int = 0,
+) -> tuple[list[GMMFit], np.ndarray, np.ndarray]:
+    """
+    Fit GMMs with K in K_range. Standardization is applied to loadings before
+    fitting; means/covariances are returned in the standardized space, with
+    the (mu, sigma) used to standardize so you can map back.
+    """
+    if standardize:
+        mu = L.mean(axis=0)
+        sd = L.std(axis=0) + 1e-12
+        Lz = (L - mu) / sd
+    else:
+        mu = np.zeros(L.shape[1])
+        sd = np.ones(L.shape[1])
+        Lz = L
+
+    fits = []
+    for K in K_range:
+        gmm = GaussianMixture(
+            n_components=K,
+            covariance_type="full",
+            n_init=n_init,
+            random_state=random_state,
+            reg_covar=1e-4,
+        )
+        gmm.fit(Lz)
+        labels = gmm.predict(Lz)
+        fits.append(GMMFit(
+            K=K,
+            gmm=gmm,
+            bic=gmm.bic(Lz),
+            labels=labels,
+            means=gmm.means_,
+            covariances=gmm.covariances_,
+            weights=gmm.weights_,
+        ))
+    return fits, mu, sd
+
+
+# ----------------------------------------------------------------------
+# 4. Resample loadings from a fitted GMM and inject into the model
+# ----------------------------------------------------------------------
+
+def sample_loadings_from_gmm(
+    fit: GMMFit,
+    mu: np.ndarray,
+    sd: np.ndarray,
+    N: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Draw N loading vectors from the fitted mixture, in original (unscaled) units."""
+    component = rng.choice(fit.K, size=N, p=fit.weights)
+    P = mu.size
+    out = np.empty((N, P))
+    for k in range(fit.K):
+        idx = np.where(component == k)[0]
+        if idx.size == 0:
+            continue
+        out[idx] = rng.multivariate_normal(
+            mean=fit.means[k],
+            cov=fit.covariances[k],
+            size=idx.size,
+        )
+    return out * sd + mu  # un-standardize
+
+
+def inject_loadings(model, L_new: np.ndarray, meta: dict):
+    """Overwrite model.m, model.n, model.wi.weight, model.wo.weight from L_new."""
+    off = meta["offsets"]
+    R = meta["sizes"]["m"]
+    D_in = meta["sizes"]["in"]
+    D_out = meta["sizes"]["out"]
+
+    device = model.m.device
+    dtype = model.m.dtype
+
+    with torch.no_grad():
+        model.m.copy_(torch.tensor(
+            L_new[:, off["m"]:off["m"] + R], device=device, dtype=dtype))
+        model.n.copy_(torch.tensor(
+            L_new[:, off["n"]:off["n"] + R], device=device, dtype=dtype))
+        if D_in > 0:
+            model.wi.weight.copy_(torch.tensor(
+                L_new[:, off["in"]:off["in"] + D_in], device=device, dtype=dtype))
+        if D_out > 0 and model.wo is not None:
+            model.wo.weight.copy_(torch.tensor(
+                L_new[:, off["out"]:off["out"] + D_out].T, device=device, dtype=dtype))
+
+
+# ----------------------------------------------------------------------
+# 5. Performance metric
+# ----------------------------------------------------------------------
+
+@torch.no_grad()
+def dpa_accuracy(
+    model,
+    inputs: torch.Tensor,
+    targets: torch.Tensor,
+    eval_window: int = 10,
+) -> float:
+    """
+    Sign-accuracy on the final `eval_window` time steps, averaged per trial,
+    restricted to trials whose target is +/-1 (not baseline).
+    """
+    device = next(model.parameters()).device
+    inputs = inputs.to(device)
+    targets = targets.to(device)
+
+    pred = model(inputs, targets)             # [B, T, R]
+    readout = pred[..., -1]                   # [B, T]
+
+    y_final = readout[:, -eval_window:].mean(dim=1)         # [B]
+    t_final = targets[:, -1]                                # [B]
+
+    mask = (t_final == 1) | (t_final == -1)
+    if mask.sum() == 0:
+        return float("nan")
+
+    correct = (torch.sign(y_final[mask]) == torch.sign(t_final[mask])).float()
+    return correct.mean().item()
+
+
+# ----------------------------------------------------------------------
+# 6. Resampling control
+# ----------------------------------------------------------------------
+
+@dataclass
+class ResamplingResult:
+    K: int
+    acc_mean: float
+    acc_std: float
+    acc_samples: list[float] = field(default_factory=list)
+
+
+def resampling_control(
+    model,
+    fits: list[GMMFit],
+    mu: np.ndarray,
+    sd: np.ndarray,
+    meta: dict,
+    test_inputs: torch.Tensor,
+    test_targets: torch.Tensor,
+    n_resamples: int = 20,
+    seed: int = 0,
+) -> dict[int, ResamplingResult]:
+    """
+    For each fitted K, resample loadings n_resamples times, inject into a copy
+    of the model, and report task accuracy.
+
+    Returns dict K -> ResamplingResult.
+    """
+    # Snapshot original loadings to restore
+    original_state = {
+        "m": model.m.detach().clone(),
+        "n": model.n.detach().clone(),
+        "wi_w": model.wi.weight.detach().clone() if model.wi is not None else None,
+        "wo_w": model.wo.weight.detach().clone() if model.wo is not None else None,
+    }
+
+    rng = np.random.default_rng(seed)
+    results = {}
+
+    try:
+        for fit in fits:
+            accs = []
+            for _ in range(n_resamples):
+                L_new = sample_loadings_from_gmm(fit, mu, sd, N=meta["N"], rng=rng)
+                inject_loadings(model, L_new, meta)
+                acc = dpa_accuracy(model, test_inputs, test_targets)
+                accs.append(acc)
+            accs = np.array(accs)
+            results[fit.K] = ResamplingResult(
+                K=fit.K,
+                acc_mean=float(np.nanmean(accs)),
+                acc_std=float(np.nanstd(accs)),
+                acc_samples=accs.tolist(),
+            )
+    finally:
+        # Restore original loadings no matter what.
+        with torch.no_grad():
+            model.m.copy_(original_state["m"])
+            model.n.copy_(original_state["n"])
+            if original_state["wi_w"] is not None:
+                model.wi.weight.copy_(original_state["wi_w"])
+            if original_state["wo_w"] is not None:
+                model.wo.weight.copy_(original_state["wo_w"])
+
+    return results
+
+
+# ----------------------------------------------------------------------
+# 7. Plotting helpers
+# ----------------------------------------------------------------------
+
+def plot_bic(fits: list[GMMFit], ax=None):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(width, height))
+    Ks = [f.K for f in fits]
+    bics = [f.bic for f in fits]
+    ax.plot(Ks, bics, "o-")
+    ax.set_xlabel("K (number of populations)")
+    ax.set_ylabel("BIC")
+    ax.set_title("GMM model selection")
+    k_star = Ks[int(np.argmin(bics))]
+    ax.axvline(k_star, color="r", ls="--", alpha=0.5, label=f"K* = {k_star}")
+    ax.legend()
+    return ax
+
+
+def plot_resampling(
+    results: dict[int, ResamplingResult],
+    baseline_acc: float,
+    ax=None,
+):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(width, height))
+    Ks = sorted(results.keys())
+    means = [results[k].acc_mean for k in Ks]
+    stds = [results[k].acc_std for k in Ks]
+    ax.errorbar(Ks, means, yerr=stds, fmt="o-", capsize=4, label="resampled")
+    ax.axhline(baseline_acc, color="k", ls="--", label=f"trained ({baseline_acc:.2f})")
+    ax.axhline(0.5, color="gray", ls=":", label="chance")
+    ax.set_xlabel("K (mixture components)")
+    ax.set_ylabel("Accuracy")
+    ax.set_ylim(0.4, 1.02)
+    ax.set_title("Resampling control")
+    ax.legend(fontsize=10)
+    return ax
+
+
+def plot_loading_clusters(
+    L: np.ndarray,
+    meta: dict,
+    labels: np.ndarray,
+    pairs: list[tuple[str, int, str, int]] = None,
+):
+    """
+    Scatter selected loading pairs, colored by cluster label.
+    pairs: list of (block_a, idx_a, block_b, idx_b).
+    Default: all (m_r, n_r) pairs.
+    """
+    off = meta["offsets"]
+    R = meta["sizes"]["m"]
+    if pairs is None:
+        pairs = [("m", r, "n", r) for r in range(R)]
+        pairs += [("m", 0, "n", 1), ("m", 1, "n", 0)]
+
+    n_pairs = len(pairs)
+    fig, axes = plt.subplots(1, n_pairs, figsize=(n_pairs * height, height))
+    if n_pairs == 1:
+        axes = [axes]
+
+    K = int(labels.max()) + 1
+    cmap = plt.get_cmap("tab10")
+
+    for ax, (ba, ia, bb, ib) in zip(axes, pairs):
+        xa = L[:, off[ba] + ia]
+        xb = L[:, off[bb] + ib]
+        for k in range(K):
+            mask = labels == k
+            ax.scatter(xa[mask], xb[mask], s=15, alpha=0.7,
+                       color=cmap(k), label=f"P{k} (n={mask.sum()})")
+        ax.set_xlabel(f"${ba}_{ia}$")
+        ax.set_ylabel(f"${bb}_{ib}$")
+    axes[0].legend(fontsize=9)
+    plt.tight_layout()
+    return fig, axes
+
+
+# ----------------------------------------------------------------------
+# 8. End-to-end driver
+# ----------------------------------------------------------------------
+
+def run_dubreuil_analysis(
+    model,
+    test_inputs: torch.Tensor,
+    test_targets: torch.Tensor,
+    K_range=range(1, 7),
+    n_resamples: int = 20,
+    rotate_input_dims: Optional[list[int]] = None,
+    seed: int = 0,
+):
+    """
+    Full pipeline:
+      1. Extract loadings.
+      2. (Optionally) rotate to input-aligned basis.
+      3. Fit GMMs across K_range, BIC.
+      4. Compute trained-model baseline accuracy.
+      5. Resample from each K, measure accuracy.
+      6. Plot BIC, resampling curve, and cluster scatter at K*.
+    """
+    L, meta = extract_loadings(model)
+
+    if rotate_input_dims is not None:
+        L, Q = rotate_loadings_to_input_basis(L, meta, rotate_input_dims)
+        print(f"Applied loading rotation; Q =\n{Q}")
+
+    fits, mu, sd = fit_gmms(L, K_range=K_range, random_state=seed)
+    bics = {f.K: f.bic for f in fits}
+    K_star = min(bics, key=bics.get)
+    print(f"BIC by K: {bics}")
+    print(f"K* (min BIC) = {K_star}")
+
+    baseline_acc = dpa_accuracy(model, test_inputs, test_targets)
+    print(f"Trained model accuracy: {baseline_acc:.3f}")
+
+    results = resampling_control(
+        model, fits, mu, sd, meta,
+        test_inputs, test_targets,
+        n_resamples=n_resamples, seed=seed,
+    )
+    for K in sorted(results):
+        r = results[K]
+        print(f"  K={K}: acc = {r.acc_mean:.3f} ± {r.acc_std:.3f}")
+
+    fig, axes = plt.subplots(1, 2, figsize=(2 * width, height))
+    plot_bic(fits, ax=axes[0])
+    plot_resampling(results, baseline_acc, ax=axes[1])
+    plt.tight_layout()
+    plt.show()
+
+    fit_star = next(f for f in fits if f.K == K_star)
+    plot_loading_clusters(L, meta, fit_star.labels)
+    plt.show()
+
+    return {
+        "L": L, "meta": meta, "fits": fits, "mu": mu, "sd": sd,
+        "K_star": K_star, "baseline_acc": baseline_acc,
+        "results": results,
+    }
+#+end_src
+
+#+RESULTS:
+
+**/ Usage on your DPA model
+
+#+begin_src jupyter-python
+# Make sure model is in eval mode and on the right device.
+model.eval()
+
+# Fresh test set (independent draw).
+test_inputs, test_targets = generate_dpa_trials(
+    N_BATCH, timing=dpa_timing, input_size=input_size, noise=noise,
+)
+
+analysis = run_dubreuil_analysis(
+    model,
+    test_inputs=test_inputs,
+    test_targets=test_targets,
+    K_range=range(1, 7),
+    n_resamples=10,
+    rotate_input_dims=[0, 2],  # sample (input 0) -> n1, test (input 2) -> n2
+    seed=0,
 )
 #+end_src
 
 #+RESULTS:
+:RESULTS:
+#+begin_example
+Applied loading rotation; Q =
+[[ 0.01911835  0.00476063]
+ [ 0.00128947 -0.00017139]]
+BIC by K: {1: 12638.554803094872, 2: 12433.35852349954, 3: 11042.92032089334, 4: 11267.432836765687, 5: 10945.629349979414, 6: 11353.166094925928}
+K* (min BIC) = 5
+Trained model accuracy: 1.000
+  K=1: acc = 0.542 ± 0.117
+  K=2: acc = 0.496 ± 0.113
+  K=3: acc = 0.533 ± 0.084
+  K=4: acc = 0.488 ± 0.116
+  K=5: acc = 0.489 ± 0.051
+  K=6: acc = 0.489 ± 0.070
+#+end_example
+[[file:./figures/figure_49.png]]
+[[file:./figures/figure_49.png]]
+:END:
+
+**/ How to read the output
+
+- /BIC plot/: location of the minimum suggests \(K^\star\). If BIC drops sharply from \(K=1\) to \(K=2\) and then plateaus, you have evidence for a
+two-population solution.
+- /Resampling plot/: the critical comparison.
+  - If \(K=1\) (single Gaussian) resampling collapses to chance (≈0.5) and \(K=2\) or higher recovers near-trained accuracy, the multi-population structure is /necessary/.
+  - If \(K=1\) already recovers near-trained performance, the network's effective solution is /unstructured/ — the apparent clusters in the scatter are not computationally required.
+  - Variance across resamples tells you how robust the mean-field solution is at each \(K\).
+- /Cluster scatter at K\*: gives you the population assignment to interpret each cluster's role (sign of \(m_r\), \(n_r\), input loadings).
+
+/Caveat:/ resampled networks have new \(W_i\) too, so reward feedback through =model.reward_channel= still operates; this is the same regime as training. If you want to isolate the recurrent contribution, set =targets=None= in =dpa_accuracy= (turns off reward feedback) — but then the trained baseline will also drop, so compare both.
+
+*** I would like to plot the gains of the different populations depending on the task epoch (delay, sample, test)
+
+/Mode: Implement./
+
+Population gain in the Dubreuil framework is the slope of the single-neuron transfer function evaluated at the population's mean input, weighted by the relevant overlap. The standard quantity is
+
+\[
+g_p(t) \;=\; \frac{1}{N_p}\sum_{i \in p} \phi'\!\big(u_i(t)\big), \qquad u_i(t)=\sum_r m_i^r \kappa_r(t)+\sum_k I_i^k x_k(t)+b_i,
+\]
+
+with \(\phi=\tanh\) so \(\phi'(u)=1-\tanh^2(u)\). This is the multiplicative factor that scales every effective overlap \(\sigma_{mn}, \sigma_{In}, \ldots\) contributed by population \(p\) at time \(t\). Plotting \(g_p\) across task epochs shows /when each population is engaged/. [cite:@dubreuil2022role]
+
+You can also plot, with the same machinery, the /effective recurrent overlap/ per population, \(\tilde\sigma^{(p)}_{m^a n^b}(t) = \frac{1}{N_p}\sum_{i\in p} \phi'(u_i(t))\, m_i^a n_i^b\), which is the quantity that actually enters the rank-reduced dynamics. The function below returns both.
 
 #+begin_src jupyter-python
-x_time = timing.x_time
-T_STIM_ON = timing.stim_on
-T_STIM_OFF = timing.stim_off
-T_STEPS = timing.t_steps
-N_STEPS = timing.n_steps
-N_STIM_ON = timing.n_stim_on
-N_STIM_OFF = timing.n_stim_off
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
+from dataclasses import dataclass
+
+
+@dataclass
+class PopulationGains:
+    time: np.ndarray                    # [T]
+    gain_mean: np.ndarray               # [K, T]      avg over trials of <phi'>_p
+    gain_sem:  np.ndarray               # [K, T]
+    gain_cond: dict[str, np.ndarray]    # cond -> [K, T]   per condition
+    eff_overlap_mn: np.ndarray          # [K, R, R, T]    <phi'·m^a n^b>_p, trial avg
+    labels: np.ndarray                  # [N] population label per neuron
+    sizes: np.ndarray                   # [K] neurons per population
+
+
+@torch.no_grad()
+def compute_population_gains(
+    model,
+    inputs: torch.Tensor,
+    labels: np.ndarray,
+    targets: torch.Tensor | None = None,
+    condition_idx: dict[str, torch.Tensor] | None = None,
+    dt: float | None = None,
+):
+    """
+    Compute per-population gain g_p(t) = <phi'(u_i(t))>_{i in p}, averaged over trials.
+
+    Parameters
+    ----------
+    model : trained LowRankModel
+    inputs : [B, T, Din]
+    labels : [N] integer cluster assignment from your GMM
+    targets : optional, passed to model.forward to keep reward-feedback on
+    condition_idx : dict name -> indices into the batch dim, for per-condition curves
+    dt : if provided, time axis is in seconds; else in steps
+
+    Returns
+    -------
+    PopulationGains
+    """
+    device = next(model.parameters()).device
+    inputs = inputs.to(device)
+    if targets is not None:
+        targets = targets.to(device)
+
+    # Get rates and rec_inputs trajectories.
+    _, rates, rec_inputs = model(inputs, targets, ret_rates=True)
+    # rates: [B, T, N]  (tanh activations -> we recover phi' = 1 - rates^2)
+    phi_prime = 1.0 - rates.pow(2)                  # [B, T, N]
+
+    B, T, N = phi_prime.shape
+    labels = np.asarray(labels)
+    K = int(labels.max()) + 1
+    sizes = np.array([(labels == k).sum() for k in range(K)])
+
+    # ---- per-population gain g_p(t), trial-averaged ----
+    gain_per_trial = torch.zeros(B, K, T, device=device, dtype=phi_prime.dtype)
+    for k in range(K):
+        idx = np.where(labels == k)[0]
+        if idx.size == 0:
+            continue
+        gain_per_trial[:, k, :] = phi_prime[:, :, idx].mean(dim=-1)
+
+    gain_mean = gain_per_trial.mean(dim=0).cpu().numpy()             # [K, T]
+    gain_sem = (gain_per_trial.std(dim=0)
+                / np.sqrt(B)).cpu().numpy()                          # [K, T]
+
+    # ---- per-condition gain curves ----
+    gain_cond = {}
+    if condition_idx is not None:
+        for name, idx in condition_idx.items():
+            idx = idx.to(device) if torch.is_tensor(idx) else torch.as_tensor(idx, device=device)
+            if idx.numel() == 0:
+                continue
+            gain_cond[name] = gain_per_trial[idx].mean(dim=0).cpu().numpy()  # [K, T]
+
+    # ---- effective recurrent overlap per population: <phi'·m^a n^b>_p ----
+    # rec dynamics: kappa^+ = ... + (1/N) sum_i phi'·m^a n^b · kappa^b (linearization)
+    # Per-population contribution: (N_p/N) <phi'·m^a n^b>_p
+    M = model.m.detach()        # [N, R]
+    Nv = (model.signed_n() if hasattr(model, "signed_n") else model.n).detach()  # [N, R]
+    R = M.shape[1]
+
+    eff_overlap = np.zeros((K, R, R, T))
+    # Compute on device, then move to CPU once.
+    for k in range(K):
+        idx = np.where(labels == k)[0]
+        if idx.size == 0:
+            continue
+        Mk = M[idx]                                 # [Nk, R]
+        Nk = Nv[idx]                                # [Nk, R]
+        # phi'_{b,t,i in k}: [B, T, Nk]
+        pp_k = phi_prime[:, :, idx]
+        # For each (a, b): mean over i of phi'_i * m_i^a * n_i^b
+        # einsum: 'bti, ia, ib -> bt ab'  then mean over b
+        mn = torch.einsum("bti,ip,iq->btpq", pp_k, Mk, Nk) / Mk.shape[0]  # [B, T, R, R]
+        eff_overlap[k] = mn.mean(dim=0).permute(1, 2, 0).cpu().numpy()    # [R, R, T]
+
+    time = np.arange(T) * (dt if dt is not None else 1.0)
+    return PopulationGains(
+        time=time,
+        gain_mean=gain_mean,
+        gain_sem=gain_sem,
+        gain_cond=gain_cond,
+        eff_overlap_mn=eff_overlap,
+        labels=labels,
+        sizes=sizes,
+    )
+
+
+# ---------------------------------------------------------------------
+# Plotting
+# ---------------------------------------------------------------------
+
+def plot_population_gains(
+    pg: PopulationGains,
+    epochs: list[tuple[float, float, str]] | None = None,
+    per_condition: bool = False,
+    figsize=(width, height),
+):
+    """
+    epochs: list of (t_on, t_off, label) shaded vertical bands.
+    per_condition: if True and pg.gain_cond is non-empty, plot one panel per condition.
+    """
+    K, T = pg.gain_mean.shape
+    cmap = plt.get_cmap("tab10")
+
+    if per_condition and pg.gain_cond:
+        conds = list(pg.gain_cond)
+        n_panels = len(conds)
+        fig, axes = plt.subplots(
+            1, n_panels, figsize=(n_panels * figsize[0], figsize[1]),
+            sharey=True, sharex=True,
+        )
+        axes = np.atleast_1d(axes).ravel()
+
+        for ax, name in zip(axes, conds):
+            curves = pg.gain_cond[name]   # [K, T]
+            for k in range(K):
+                ax.plot(pg.time, curves[k], color=cmap(k),
+                        label=f"P{k} (n={pg.sizes[k]})")
+            ax.set_title(name)
+            ax.set_xlabel("Time")
+            if epochs:
+                for t0, t1, lbl in epochs:
+                    ax.axvspan(t0, t1, alpha=0.15, color="gray")
+                    ax.text(0.5 * (t0 + t1), ax.get_ylim()[1] * 0.97,
+                            lbl, ha="center", va="top", fontsize=9, alpha=0.7)
+        axes[0].set_ylabel(r"$\langle\phi'(u)\rangle_p$")
+        axes[0].legend(fontsize=9, frameon=False)
+        plt.tight_layout()
+        return fig, axes
+
+    fig, ax = plt.subplots(figsize=figsize)
+    for k in range(K):
+        ax.plot(pg.time, pg.gain_mean[k], color=cmap(k),
+                label=f"P{k} (n={pg.sizes[k]})")
+        ax.fill_between(
+            pg.time,
+            pg.gain_mean[k] - pg.gain_sem[k],
+            pg.gain_mean[k] + pg.gain_sem[k],
+            color=cmap(k), alpha=0.2,
+        )
+    if epochs:
+        for t0, t1, lbl in epochs:
+            ax.axvspan(t0, t1, alpha=0.15, color="gray")
+            ax.text(0.5 * (t0 + t1), ax.get_ylim()[1] * 0.97,
+                    lbl, ha="center", va="top", fontsize=9, alpha=0.7)
+    ax.set_xlabel("Time (s)" if pg.time.max() < 100 else "Step")
+    ax.set_ylabel(r"Population gain $\langle\phi'(u)\rangle_p$")
+    ax.set_title("Per-population gain across task epochs")
+    ax.legend(frameon=False)
+    plt.tight_layout()
+    return fig, ax
+
+
+def plot_effective_overlap(
+    pg: PopulationGains,
+    a: int = 0, b: int = 0,
+    epochs=None,
+    figsize=(width, height),
+):
+    """Plot <phi'·m^a n^b>_p (trial-averaged) as function of time, per population."""
+    K, R, _, T = pg.eff_overlap_mn.shape
+    cmap = plt.get_cmap("tab10")
+    fig, ax = plt.subplots(figsize=figsize)
+    for k in range(K):
+        ax.plot(pg.time, pg.eff_overlap_mn[k, a, b],
+                color=cmap(k), label=f"P{k}")
+    ax.axhline(0, color="k", lw=0.5)
+    if epochs:
+        for t0, t1, lbl in epochs:
+            ax.axvspan(t0, t1, alpha=0.15, color="gray")
+    ax.set_xlabel("Time")
+    ax.set_ylabel(rf"$\langle\phi'\, m_{{{a+1}}} n_{{{b+1}}}\rangle_p$")
+    ax.set_title("Effective recurrent overlap per population")
+    ax.legend(frameon=False)
+    plt.tight_layout()
+    return fig, ax
+#+end_src
+
+#+RESULTS:
+
+/Usage on your trained DPA model./
+
+#+begin_src jupyter-python
+# labels from the K* GMM you already fit:
+labels = next(f for f in analysis["fits"] if f.K == analysis["K_star"]).labels
+
+# Per-condition split.
+cond_idx = condition_indices_for_task(test_inputs.cpu(), dpa_timing, task="dpa")
+
+# Epoch bands (seconds).
+epochs = [
+    (dpa_timing.stim_on[0],  dpa_timing.stim_off[0], "Sample"),
+    (dpa_timing.stim_off[0], dpa_timing.stim_on[1],  "Delay"),
+    (dpa_timing.stim_on[1],  dpa_timing.stim_off[1], "Test"),
+    (dpa_timing.stim_off[1], dpa_timing.t_steps,     "Response"),
+]
+
+pg = compute_population_gains(
+    model,
+    inputs=test_inputs,
+    labels=labels,
+    targets=test_targets,
+    condition_idx=cond_idx,
+    dt=dpa_timing.dt,
+)
+
+# 1. Overall per-population gain across the trial.
+plot_population_gains(pg, epochs=epochs)
+plt.show()
+
+# 2. Per-condition gain curves (one panel per condition).
+plot_population_gains(pg, epochs=epochs, per_condition=True,
+                      figsize=(width * 0.9, height))
+plt.show()
+
+# 3. Effective recurrent overlaps on the diagonal (m^r, n^r), per population.
+for r in range(model.rank):
+    plot_effective_overlap(pg, a=r, b=r, epochs=epochs)
+    plt.show()
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Unexpected exception formatting exception. Falling back to standard exception
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 3508, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/tmp/ipykernel_2606405/3448235384.py", line 15, in <module>
+    pg = compute_population_gains(
+        model,
+    ...<4 lines>...
+        dt=dpa_timing.dt,
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+    return func(*args, **kwargs)
+  File "/home/leon/tmp/ipykernel_2606405/3880906362.py", line 98, in compute_population_gains
+    mn = torch.einsum("bti,ia,ib->btab", pp_k, Mk, Nk) / Mk.shape[0]  # [B, T, R, R]
+         ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/torch/functional.py", line 373, in einsum
+    return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+RuntimeError: einsum(): output subscript b appears more than once in the output
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/interactiveshell.py", line 2105, in showtraceback
+    stb = self.InteractiveTB.structured_traceback(
+        etype, value, tb, tb_offset=tb_offset
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1428, in structured_traceback
+    return FormattedTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, evalue, etb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1319, in structured_traceback
+    return VerboseTB.structured_traceback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, etype, value, tb, tb_offset, number_of_lines_of_context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1172, in structured_traceback
+    formatted_exception = self.format_exception_as_a_whole(etype, evalue, etb, number_of_lines_of_context,
+                                                           tb_offset)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1062, in format_exception_as_a_whole
+    self.get_records(etb, number_of_lines_of_context, tb_offset) if etb else []
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/ultratb.py", line 1159, in get_records
+    res = list(stack_data.FrameInfo.stack_data(etb, options=options))[tb_offset:]
+          ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 597, in stack_data
+    yield from collapse_repeated(
+    ...<4 lines>...
+    )
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/utils.py", line 83, in collapse_repeated
+    yield from map(mapper, original_group)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 587, in mapper
+    return cls(f, options)
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/stack_data/core.py", line 551, in __init__
+    self.executing = Source.executing(frame_or_tb)
+                     ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 378, in executing
+    assert_(new_stmts <= stmts)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/leon/mambaforge/lib/python3.14/site-packages/executing/executing.py", line 154, in assert_
+    raise AssertionError(str(message))
+AssertionError
+#+end_example
+
+/What to look for/
+
+- Within each /task epoch/, the population whose curve rises is the one being /engaged/ — i.e. whose neurons are off-saturation and so contribute to the rank-reduced dynamics in that epoch.
+- Compare /Sample/ vs /Test/ epochs: populations that gate the sample memory should peak during Sample and Delay; populations that implement the sample×test comparison should peak during Test/Response.
+- Compare /per-condition/ curves: a population that flips its gain sign or amplitude across, e.g., AC vs AD trials, is the one carrying the conditional (XOR-like) computation.
+- The /effective overlap/ \(\langle\phi'\,m^r n^r\rangle_p(t)\) tells you not just whether a population is active, but how strongly it contributes to the self-coupling on rank dimension \(r\) — a value near zero means that population is currently saturated out of the recurrent loop, even if its neurons are firing.
+
+[CHECK]: with \(K^\star = 6\) chosen by BIC, some clusters may be spurious (BIC can over-split when loadings have heavy tails). I'd recommend also running with \(K = 2, 3, 4\) and comparing the gain plots — if e.g. \(K=2\) already gives two clearly anti-phase populations across Sample vs Test, that is the parsimonious story; the higher-\(K\) split refines but should not /change/ the qualitative picture.
+
+
+
+* GNG task
+** GNG trial
+
+ #+begin_src jupyter-python
+model_state_dict = torch.load('%s/dpa_%d.pth' % (PATH, seed))
+model.load_state_dict(model_state_dict)
+model.eval();
 #+end_src
 
 #+RESULTS:
 
 #+begin_src jupyter-python
-inputs, targets = generate_gng_trials(N_BATCH, timing=timing, input_size=input_size, noise=noise)
+gng_timing = TaskTiming(stim_on=[2.0, 4.0], stim_off=[3.0, 5.0], t_steps=6.0, dt=DT)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+gng_time = gng_timing.x_time
+T_STIM_ON = gng_timing.stim_on
+T_STIM_OFF = gng_timing.stim_off
+T_STEPS = gng_timing.t_steps
+N_STEPS = gng_timing.n_steps
+N_STIM_ON = gng_timing.n_stim_on
+N_STIM_OFF = gng_timing.n_stim_off
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+inputs, targets = generate_gng_trials(N_BATCH, timing=gng_timing, input_size=input_size, noise=noise)
 print(inputs.shape, targets.shape)
 #+end_src
 
@@ -2076,7 +3545,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_44.png]]
+[[file:./figures/figure_56.png]]
 
 #+begin_src jupyter-python
 idx_nogo = torch.argwhere((targets[:, -1] != 1)).reshape(-1)[:32]
@@ -2092,16 +3561,16 @@ print(idx_go.shape, idx_nogo.shape)
 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 
 if len(idx_nogo) > 0:
-    ax[0].plot(x_time, inputs[idx_nogo, :, 5].mT.cpu().numpy(), alpha=.2)
-    ax[0].plot(x_time, inputs[idx_nogo, :, 6].mT.cpu().numpy(), alpha=.2)
-    ax[0].plot(x_time, targets[idx_nogo[0]].cpu().numpy(), 'k', label='Target')
+    ax[0].plot(gng_time, inputs[idx_nogo, :, 5].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(gng_time, inputs[idx_nogo, :, 6].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(gng_time, targets[idx_nogo[0]].cpu().numpy(), 'k', label='Target')
 ax[0].set_title('Nogo trials')
 
 if len(idx_go) > 0:
-    ax[1].plot(x_time, inputs[idx_go, :, 4].mT.cpu().numpy(), alpha=.2)
-    ax[1].plot(x_time, inputs[idx_go, :, 6].mT.cpu().numpy(), alpha=.2)
+    ax[1].plot(gng_time, inputs[idx_go, :, 4].mT.cpu().numpy(), alpha=.2)
+    ax[1].plot(gng_time, inputs[idx_go, :, 6].mT.cpu().numpy(), alpha=.2)
 
-    ax[1].plot(x_time, targets[idx_go[0]].cpu().numpy(), 'k', label='Target')
+    ax[1].plot(gng_time, targets[idx_go[0]].cpu().numpy(), 'k', label='Target')
 ax[1].set_title('Go trials')
 
 for i in range(2):
@@ -2117,7 +3586,8 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_46.png]]
+[[file:./figures/figure_58.png]]
+
 
 #+begin_src jupyter-python
 predictions, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
@@ -2132,12 +3602,12 @@ print('inputs', inputs.shape, 'predictions', predictions.shape, 'rates', rates.s
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
 
-ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(x_time, predictions[..., -1][idx_nogo].T, alpha=.2)
+ax[0].plot(gng_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(gng_time, predictions[..., -1][idx_nogo].T, alpha=.2)
 ax[0].set_title('Nogo trials')
 
-ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(x_time, predictions[..., -1][idx_go].T, alpha=.2)
+ax[1].plot(gng_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(gng_time, predictions[..., -1][idx_go].T, alpha=.2)
 ax[1].set_title('Go trials')
 
 for i in range(2):
@@ -2153,7 +3623,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_48.png]]
+[[file:./figures/figure_60.png]]
 
 #+begin_src jupyter-python
 
@@ -2165,8 +3635,8 @@ plt.show()
 
 #+begin_src jupyter-python
 learning_rate = 0.01
-epochs = 25
-batch_size = 16
+epochs = 50
+batch_size = 64
 grad_clip_norm = None
 
 criterion = MaskedZeroLoss(criterion=torch.nn.MSELoss(), nonzero_weight=1.0, zero_weight=1.0)
@@ -2177,18 +3647,29 @@ scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=
 #+RESULTS:
 
 #+begin_src jupyter-python
+# model.Ai.requires_grad_(False)
+
 train_loader, val_loader = train_val_split(inputs.to(device), targets.to(device), batch_size)
-opt = Optimization(model, train_loader, val_loader, criterion, optimizer, scheduler, grad_clip_norm, num_epochs=epochs, zero_low_rank_grad=0, freeze_input_dims=[0, 1, 2, 3])
+# opt = Optimization(model, train_loader, val_loader, criterion, optimizer, scheduler, grad_clip_norm, num_epochs=epochs)
+
+opt = Optimization(model, train_loader, val_loader, criterion, optimizer, scheduler, grad_clip_norm, num_epochs=epochs, zero_low_rank_grad=0, freeze_input_dims=[0, 1, 2, 3, 7])
 train_losses, val_losses, learning_rates = opt.fit()
 torch.save(model.state_dict(), '%s/naive_%d.pth' % (PATH, seed))
 #+end_src
 
 #+RESULTS:
-: Epoch 005/25 | lr: 0.01000 | train: 0.0951 | val: 0.0828
-: Epoch 010/25 | lr: 0.01000 | train: 0.0648 | val: 0.0606
-: Epoch 015/25 | lr: 0.01000 | train: 0.0530 | val: 0.0523
-: Epoch 020/25 | lr: 0.01000 | train: 0.0441 | val: 0.0425
-: Epoch 025/25 | lr: 0.01000 | train: 0.0381 | val: 0.0390
+#+begin_example
+Epoch 005/50 | lr: 0.00250 | train: 0.1852 | val: 0.1884
+Epoch 010/50 | lr: 0.00250 | train: 0.1635 | val: 0.1331
+Epoch 015/50 | lr: 0.00250 | train: 0.1542 | val: 0.1489
+Epoch 020/50 | lr: 0.00250 | train: 0.1392 | val: 0.1208
+Epoch 025/50 | lr: 0.00250 | train: 0.1391 | val: 0.1279
+Epoch 030/50 | lr: 0.00250 | train: 0.1220 | val: 0.1082
+Epoch 035/50 | lr: 0.00125 | train: 0.1790 | val: 0.1613
+Epoch 040/50 | lr: 0.00125 | train: 0.1910 | val: 0.2035
+Epoch 045/50 | lr: 0.00063 | train: 0.1633 | val: 0.0947
+Epoch 050/50 | lr: 0.00063 | train: 0.1948 | val: 0.0874
+#+end_example
 
 #+begin_src jupyter-python
 plt.plot(train_losses)
@@ -2201,7 +3682,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_52.png]]
+[[file:./figures/figure_64.png]]
 
 #+begin_src jupyter-python
 
@@ -2224,20 +3705,8 @@ inputs, targets = generate_gng_trials(N_BATCH, timing=gng_timing, input_size=inp
 print(inputs.shape, targets.shape)
 #+end_src
 
-
 #+RESULTS:
 : torch.Size([516, 300, 8]) torch.Size([516, 300])
-
-#+begin_src jupyter-python
-plt.hist(targets[:, -1].reshape(-1), bins='auto')
-plt.xlabel('Targets')
-plt.ylabel('Count')
-plt.xticks([0, 1])
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./figures/figure_56.png]]
 
 #+begin_src jupyter-python
 idx_nogo = torch.argwhere((targets[:, -1] != 1)).reshape(-1)[:32]
@@ -2280,20 +3749,20 @@ print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
 
-ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(x_time, kappa_rec[idx_nogo, :, 0].T, alpha=.2)
+ax[0].plot(gng_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(gng_time, kappa_rec[idx_nogo, :, 0].T, alpha=.2)
 ax[0].set_title('Unpaired trial')
 
-ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(x_time, kappa_rec[idx_go, :, 0].T, alpha=.2)
+ax[1].plot(gng_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(gng_time, kappa_rec[idx_go, :, 0].T, alpha=.2)
 ax[1].set_title('Paired trial')
 
-ax[2].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
-ax[2].plot(x_time, kappa_rec[idx_nogo, :, 1].T, alpha=.2)
+ax[2].plot(gng_time, targets[idx_nogo][0], 'k', label='Target')
+ax[2].plot(gng_time, kappa_rec[idx_nogo, :, 1].T, alpha=.2)
 ax[2].set_title('Unpaired trial')
 
-ax[3].plot(x_time, targets[idx_go][0], 'k', label='Target')
-ax[3].plot(x_time, kappa_rec[idx_go, :, 1].T, alpha=.2)
+ax[3].plot(gng_time, targets[idx_go][0], 'k', label='Target')
+ax[3].plot(gng_time, kappa_rec[idx_go, :, 1].T, alpha=.2)
 ax[3].set_title('Paired trial')
 
 for i in range(4):
@@ -2308,25 +3777,25 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_61.png]]
+[[file:./figures/figure_72.png]]
 
-#+begin_src jupyter-python
+ #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
 
-ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(x_time, kappa[idx_nogo, :, 0].T, alpha=.2)
+ax[0].plot(gng_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(gng_time, kappa[idx_nogo, :, 0].T, alpha=.2)
 ax[0].set_title('NoGo trial')
 
-ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(x_time, kappa[idx_go, :, 0].T, alpha=.2)
+ax[1].plot(gng_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(gng_time, kappa[idx_go, :, 0].T, alpha=.2)
 ax[1].set_title('Go trial')
 
-ax[2].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
-ax[2].plot(x_time, kappa[idx_nogo, :, 1].T, alpha=.2)
+ax[2].plot(gng_time, targets[idx_nogo][0], 'k', label='Target')
+ax[2].plot(gng_time, kappa[idx_nogo, :, 1].T, alpha=.2)
 ax[2].set_title('NoGo trial')
 
-ax[3].plot(x_time, targets[idx_go][0], 'k', label='Target')
-ax[3].plot(x_time, kappa[idx_go, :, 1].T, alpha=.2)
+ax[3].plot(gng_time, targets[idx_go][0], 'k', label='Target')
+ax[3].plot(gng_time, kappa[idx_go, :, 1].T, alpha=.2)
 ax[3].set_title('Go trial')
 
 for i in range(4):
@@ -2341,17 +3810,17 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_62.png]]
+[[file:./figures/figure_73.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
 
-ax[0].plot(x_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(x_time, predictions[..., -1][idx_nogo].T, alpha=.2)
+ax[0].plot(gng_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(gng_time, predictions[..., -1][idx_nogo].T, alpha=.2)
 ax[0].set_title('Nogo trials')
 
-ax[1].plot(x_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(x_time, predictions[..., -1][idx_go].T, alpha=.2)
+ax[1].plot(gng_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(gng_time, predictions[..., -1][idx_go].T, alpha=.2)
 ax[1].set_title('Go trials')
 
 for i in range(2):
@@ -2367,7 +3836,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_63.png]]
+[[file:./figures/figure_74.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
@@ -2385,13 +3854,15 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_64.png]]
+[[file:./figures/figure_75.png]]
 
 #+begin_src jupyter-python
 # GNG
 fig, axes, field_cache = plot_task_flow_fields(
     model,
     inputs,
+    xlim=[-2, 2],
+    ylim=[-2, 2],
     timing=gng_timing,
     task="gng",
     targets=targets,
@@ -2400,7 +3871,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_65.png]]
+[[file:./figures/figure_76.png]]
 
 #+begin_src jupyter-python
 
@@ -2420,18 +3891,22 @@ dual_timing = TaskTiming(
 )
 #+end_src
 
-#+begin_src jupyter-python
-x_time = timing.x_time
-T_STIM_ON = timing.stim_on
-T_STIM_OFF = timing.stim_off
-T_STEPS = timing.t_steps
-N_STEPS = timing.n_steps
-N_STIM_ON = timing.n_stim_on
-N_STIM_OFF = timing.n_stim_off
-#+end_src
+#+RESULTS:
 
 #+begin_src jupyter-python
-inputs, targets, trial_type, condition_names = generate_dual_trials(N_BATCH, timing=timing, input_size=input_size, noise=noise)
+dual_time = dual_timing.x_time
+T_STIM_ON = dual_timing.stim_on
+T_STIM_OFF = dual_timing.stim_off
+T_STEPS = dual_timing.t_steps
+N_STEPS = dual_timing.n_steps
+N_STIM_ON = dual_timing.n_stim_on
+N_STIM_OFF = dual_timing.n_stim_off
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+inputs, targets, trial_type, condition_names = generate_dual_trials(N_BATCH, timing=dual_timing, input_size=input_size, noise=noise)
 print(inputs.shape, targets.shape, trial_type.shape)
 #+end_src
 
@@ -2548,7 +4023,7 @@ for row, (row_title, pair_status) in enumerate(row_specs.items()):
                 trace = inp[:, ch]
                 if trace.abs().max() > 0.25:
                     this_ax.plot(
-                        x_time,
+                        dual_time,
                         trace,
                         color=input_colors.get(ch, None),
                         ls=ls,
@@ -2560,7 +4035,7 @@ for row, (row_title, pair_status) in enumerate(row_specs.items()):
             # Plot targets once per concrete condition.
             # DPA target: black; GNG target: crimson.
             this_ax.plot(
-                x_time,
+                dual_time,
                 tgt,
                 color="k",
                 ls=ls,
@@ -2614,7 +4089,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_75.png]]
+[[file:./figures/figure_81.png]]
 
 #+begin_src jupyter-python
 from matplotlib.lines import Line2D
@@ -2655,7 +4130,7 @@ def plot_dual_kappa_targets(
         targets[..., 1] = GNG target
     condition_names : array-like of str
         Names like "A_C", "B_go_D", "A_nogo_C".
-    x_time : array-like
+    dual_time : array-like
         Time axis, shape [time].
     dim : int
         Which latent dimension to plot. dim=0 plots κ_1.
@@ -2747,7 +4222,7 @@ def plot_dual_kappa_targets(
 
                 # Targets on left axis.
                 this_ax.plot(
-                    x_time,
+                    dual_time,
                     tgt_mean,
                     color="k",
                     ls=ls,
@@ -2757,7 +4232,7 @@ def plot_dual_kappa_targets(
 
                 # Latent coordinate on right axis.
                 kax.plot(
-                    x_time,
+                    dual_time,
                     k_mean,
                     color=color,
                     ls=ls,
@@ -2860,89 +4335,69 @@ print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
 : rec torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa (516, 500, 2)
 
 #+begin_src jupyter-python
-fig, ax = plot_dual_kappa_targets(kappa=kappa, targets=targets,  condition_names=condition_names, x_time=x_time, dim=0, kappa_label=r"\kappa",  T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,  )
+fig, ax = plot_dual_kappa_targets(kappa=kappa, targets=targets,  condition_names=condition_names, x_time=dual_time, dim=0, kappa_label=r"\kappa",  T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,  )
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_81.png]]
+[[file:./figures/figure_87.png]]
 
 #+begin_src jupyter-python
-fig, ax = plot_dual_kappa_targets(kappa=kappa, targets=targets,  condition_names=condition_names, x_time=x_time, dim=1, kappa_label=r"\kappa",  T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,  )
+fig, ax = plot_dual_kappa_targets(kappa=kappa, targets=targets,  condition_names=condition_names, x_time=dual_time, dim=1, kappa_label=r"\kappa",  T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,  )
 plt.show()
 
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_82.png]]
+[[file:./figures/figure_88.png]]
 
 #+begin_src jupyter-python
 # Dual task
-fig, axes, field_cache = plot_task_flow_fields(
-    model,
-    inputs,
-    timing=dual_timing,
-    task="dual",
-    targets=targets,
-    condition_names=condition_names,
-)
+fig, axes, field_cache = plot_task_flow_fields(model, inputs, timing=dual_timing, task="dual", targets=targets, condition_names=condition_names)
 plt.show()
 #+end_src
 
 #+RESULTS:
-:RESULTS:
-: /home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/pylabtools.py:152: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
-:   fig.canvas.print_figure(bytes_io, **kw)
-[[file:./figures/figure_83.png]]
-:END:
+[[file:./figures/figure_89.png]]
+
+#+begin_src jupyter-python
+
+#+end_src
+
 ** Dual Training
 
 #+begin_src jupyter-python
 learning_rate = 0.01
-epochs = 25
-batch_size = 16
-# grad_clip_norm = 10.0
+epochs = 50
+batch_size = 64
+grad_clip_norm = None
 
 criterion = MaskedZeroLoss(criterion=torch.nn.MSELoss(), nonzero_weight=1.0, zero_weight=1.0)
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.9, threshold=0.001)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5, threshold=0.001)
 #+end_src
 
 #+RESULTS:
 
 #+begin_src jupyter-python
-train_loader, val_loader = train_val_split(inputs, targets, batch_size)
+train_loader, val_loader = train_val_split(inputs.to(device), targets.to(device), batch_size)
 opt = Optimization(model, train_loader, val_loader, criterion, optimizer, scheduler, grad_clip_norm, num_epochs=epochs)
 train_losses, val_losses, learning_rates = opt.fit()
+torch.save(model.state_dict(), '%s/expert_%d.pth' % (PATH, seed))
 #+end_src
 
 #+RESULTS:
 #+begin_example
-Epoch 001/25 | lr: 0.0100 | train: 0.1862 | val: 0.1503
-Epoch 002/25 | lr: 0.0100 | train: 0.1534 | val: 0.1462
-Epoch 003/25 | lr: 0.0100 | train: 0.1571 | val: 0.1378
-Epoch 004/25 | lr: 0.0100 | train: 0.1454 | val: 0.1346
-Epoch 005/25 | lr: 0.0100 | train: 0.1382 | val: 0.1266
-Epoch 006/25 | lr: 0.0100 | train: 0.1363 | val: 0.1252
-Epoch 007/25 | lr: 0.0100 | train: 0.1417 | val: 0.1257
-Epoch 008/25 | lr: 0.0100 | train: 0.1395 | val: 0.1319
-Epoch 009/25 | lr: 0.0100 | train: 0.1349 | val: 0.1263
-Epoch 010/25 | lr: 0.0100 | train: 0.1293 | val: 0.1201
-Epoch 011/25 | lr: 0.0100 | train: 0.1322 | val: 0.1166
-Epoch 012/25 | lr: 0.0100 | train: 0.1225 | val: 0.1126
-Epoch 013/25 | lr: 0.0100 | train: 0.1214 | val: 0.1148
-Epoch 014/25 | lr: 0.0100 | train: 0.1191 | val: 0.1055
-Epoch 015/25 | lr: 0.0100 | train: 0.1176 | val: 0.1101
-Epoch 016/25 | lr: 0.0100 | train: 0.1164 | val: 0.1075
-Epoch 017/25 | lr: 0.0100 | train: 0.1114 | val: 0.1064
-Epoch 018/25 | lr: 0.0100 | train: 0.1099 | val: 0.1132
-Epoch 019/25 | lr: 0.0100 | train: 0.1119 | val: 0.1038
-Epoch 020/25 | lr: 0.0100 | train: 0.1101 | val: 0.1013
-Epoch 021/25 | lr: 0.0100 | train: 0.1042 | val: 0.1015
-Epoch 022/25 | lr: 0.0100 | train: 0.1034 | val: 0.0964
-Epoch 023/25 | lr: 0.0100 | train: 0.1003 | val: 0.0975
-Epoch 024/25 | lr: 0.0100 | train: 0.0999 | val: 0.0908
-Epoch 025/25 | lr: 0.0100 | train: 0.1087 | val: 0.1038
+Epoch 005/50 | lr: 0.01000 | train: 0.7955 | val: 0.8060
+Epoch 010/50 | lr: 0.01000 | train: 0.7518 | val: 0.7764
+Epoch 015/50 | lr: 0.01000 | train: 0.7218 | val: 0.7529
+Epoch 020/50 | lr: 0.01000 | train: 0.6996 | val: 0.7294
+Epoch 025/50 | lr: 0.01000 | train: 0.6874 | val: 0.7139
+Epoch 030/50 | lr: 0.01000 | train: 0.6747 | val: 0.7007
+Epoch 035/50 | lr: 0.01000 | train: 0.6649 | val: 0.6863
+Epoch 040/50 | lr: 0.01000 | train: 0.6532 | val: 0.6749
+Epoch 045/50 | lr: 0.01000 | train: 0.6356 | val: 0.6577
+Epoch 050/50 | lr: 0.01000 | train: 0.6112 | val: 0.6434
 #+end_example
 
 #+begin_src jupyter-python
@@ -2956,10 +4411,10 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_94.png]]
+[[file:./figures/figure_87.png]]
 
 #+begin_src jupyter-python
-torch.save(model.state_dict(), '%s/expert_%d.pth' % (PATH, seed))
+
 #+end_src
 
 #+RESULTS:
@@ -2980,7 +4435,7 @@ print(inputs.shape, targets.shape, trial_type.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([516, 200, 8]) torch.Size([516, 200]) torch.Size([516])
+: torch.Size([516, 500, 8]) torch.Size([516, 500]) torch.Size([516])
 
 #+begin_src jupyter-python
 predictions, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
@@ -2991,7 +4446,7 @@ print('rec_inputs', rec_inputs.shape, 'predictions', predictions.shape, 'rates',
 #+end_src
 
 #+RESULTS:
-: rec_inputs torch.Size([516, 200, 512]) predictions torch.Size([516, 200, 2]) rates torch.Size([516, 200, 512])
+: rec_inputs torch.Size([516, 500, 512]) predictions torch.Size([516, 500, 2]) rates torch.Size([516, 500, 512])
 
 #+begin_src jupyter-python
 kappa_rec = (rates @ model.n)/ rates.shape[-1]
@@ -3000,7 +4455,7 @@ print('rates', rates.shape, 'm', model.n.shape, 'kappa_rec', kappa_rec.shape)
 #+end_src
 
 #+RESULTS:
-: rates torch.Size([516, 200, 512]) m torch.Size([512, 2]) kappa_rec (516, 200, 2)
+: rates torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa_rec (516, 500, 2)
 
 #+begin_src jupyter-python
 kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)**2
@@ -3009,24 +4464,24 @@ print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
 #+end_src
 
 #+RESULTS:
-: rec torch.Size([516, 200, 512]) m torch.Size([512, 2]) kappa (516, 200, 2)
+: rec torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa (516, 500, 2)
 
 #+begin_src jupyter-python
-fig, ax = plot_dual_kappa_targets(kappa=kappa_rec, targets=targets,  condition_names=condition_names, x_time=x_time, dim=0, kappa_label=r"\kappa",  T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,  )
+fig, ax = plot_dual_kappa_targets(kappa=kappa_rec, targets=targets,  condition_names=condition_names, x_time=dual_time, dim=0, kappa_label=r"\kappa",  T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,  )
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_101.png]]
+[[file:./figures/figure_94.png]]
 
 #+begin_src jupyter-python
-fig, ax = plot_dual_kappa_targets(kappa=kappa_rec, targets=targets,  condition_names=condition_names, x_time=x_time, dim=1, kappa_label=r"\kappa",  T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,  )
+fig, ax = plot_dual_kappa_targets(kappa=kappa_rec, targets=targets,  condition_names=condition_names, x_time=dual_time, dim=1, kappa_label=r"\kappa",  T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,  )
 plt.show()
 
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_102.png]]
+[[file:./figures/figure_95.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
@@ -3044,18 +4499,10 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_103.png]]
+[[file:./figures/figure_96.png]]
 
 #+begin_src jupyter-python
-# Dual task
-fig, axes, field_cache = plot_task_flow_fields(
-    model,
-    inputs,
-    timing=dual_timing,
-    task="dual",
-    condition_names=condition_names,
-    targets=targets,
-)
+fig, axes, field_cache = plot_task_flow_fields(model, inputs, timing=dual_timing, task="dual", condition_names=condition_names, targets=targets)
 plt.show()
 #+end_src
 
@@ -3063,7 +4510,7 @@ plt.show()
 :RESULTS:
 : /home/leon/mambaforge/lib/python3.14/site-packages/IPython/core/pylabtools.py:152: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
 :   fig.canvas.print_figure(bytes_io, **kw)
-[[file:./figures/figure_104.png]]
+[[file:./figures/figure_97.png]]
 :END:
 
 #+begin_src jupyter-python
