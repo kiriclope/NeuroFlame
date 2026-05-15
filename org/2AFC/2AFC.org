@@ -1,0 +1,2416 @@
+:PROPERTIES:
+:GPTEL_MODEL: deepseek-v4-pro
+:GPTEL_BACKEND: Deepseek
+:GPTEL_SYSTEM: You are a large language model living in Emacs and a helpful assistant. Respond concisely.
+:GPTEL_TOOLS:
+:GPTEL_BOUNDS: ((ignore (58237 71255)) (response (40795 41088) (44265 44557) (71273 76804)))
+:END:
+#+Startup: fold
+#+TITLE: Low Rank Recurrent Neural Networks
+#+PROPERTY: header-args:jupyter-python :session 2AFC :kernel python3 :exports results :output-dir ./figures/ :file (lc/org-babel-tangle-figure-filename)
+
+* Settings
+
+#+begin_src jupyter-python
+import sys
+import matplotlib
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
+print("Python exe")
+print(sys.executable)
+
+sns.set_context("notebook")
+sns.set_style("ticks")
+plt.rc("axes.spines", top=False, right=False)
+
+golden_ratio = (5**.5 - 1) / 2
+width = 6
+height = width * golden_ratio
+
+matplotlib.rcParams['figure.figsize'] = [width, height]
+matplotlib.rcParams['lines.markersize'] = 5
+matplotlib.rcParams['axes.labelsize'] = 18
+matplotlib.rcParams['axes.titlesize'] = 20
+matplotlib.rcParams['xtick.labelsize'] = 16
+matplotlib.rcParams['ytick.labelsize'] = 16
+matplotlib.rcParams['lines.linewidth'] = 3
+#+end_src
+
+#+RESULTS:
+: Python exe
+: /home/leon/mambaforge/bin/python
+
+* Imports
+
+#+begin_src jupyter-python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import matplotlib.pyplot as plt
+import numpy as np
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+torch.manual_seed(2)
+np.random.seed(2)
+#+end_src
+
+#+RESULTS:
+
+* Tasks
+** Timing
+
+#+begin_src jupyter-python
+from dataclasses import dataclass
+import numpy as np
+import torch
+
+
+@dataclass(frozen=True)
+class TaskTiming:
+    stim_on: list[float]
+    stim_off: list[float]
+    t_steps: float
+    dt: float
+
+    @property
+    def n_stim_on(self) -> torch.Tensor:
+        return torch.tensor([int(t / self.dt) for t in self.stim_on], dtype=torch.long)
+
+    @property
+    def n_stim_off(self) -> torch.Tensor:
+        return torch.tensor([int(t / self.dt) for t in self.stim_off], dtype=torch.long)
+
+    @property
+    def n_steps(self) -> int:
+        return int(self.t_steps / self.dt)
+
+    @property
+    def x_time(self) -> np.ndarray:
+        return np.linspace(0, self.n_steps * self.dt, self.n_steps)
+#+end_src
+
+#+RESULTS:
+
+** /2AFC generator/
+
+#+begin_src jupyter-python
+def generate_2AFC_trials(
+    n_trials: int,
+    timing: TaskTiming,
+    input_size: int = 4,
+    rank: int =2,
+    noise: float = 0.1,
+    baseline_value: float = 1e-3,
+):
+    n_steps = timing.n_steps
+    n_on = timing.n_stim_on
+    n_off = timing.n_stim_off
+
+    inputs = noise * torch.randn(n_trials, n_steps, input_size)
+    targets = torch.zeros(n_trials, n_steps, rank)
+
+    idx_go = torch.rand(n_trials) > 0.5
+    idx_nogo = ~idx_go
+
+    # Channels:
+    # 0 = Right  # 1 = Left  # 2 = Cue
+    inputs[idx_go, n_on[0]:n_off[0], 0] += 1.0
+    inputs[idx_nogo, n_on[0]:n_off[0], 1] += 1.0
+    inputs[:, n_on[1]:n_off[1], 2] += 1.0
+
+    targets[..., 0] = torch.nan
+    if baseline_value is not None:
+        targets[:, :n_on[0]] = baseline_value
+
+    targets[idx_go, n_off[1]:, -1] = 1.0
+    targets[idx_nogo, n_off[1]:, -1] = -1.0
+    targets[:, n_on[0]:n_off[1], -1] = torch.nan
+
+    return inputs, targets
+#+end_src
+
+#+RESULTS:
+
+* Training Utils
+
+#+begin_src jupyter-python
+import torch
+from torch.utils.data import TensorDataset, DataLoader, random_split
+
+def train_val_split(X, y, batch_size=32, frac=0.8):
+
+    # 1. Wrap tensors into a dataset
+    dataset = TensorDataset(X.float(), y.float())
+
+    # 2. Train/validation split
+    n_total = len(dataset)
+    n_train = int(frac * n_total)
+    n_val = n_total - n_train
+
+    generator = torch.Generator().manual_seed(0)
+    train_dataset, val_dataset = random_split(dataset, lengths=[n_train, n_val], generator=generator)
+
+    # 3. Create DataLoaders
+    train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size, shuffle=False)
+
+    return train_loader, val_loader
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+import math
+import copy
+from typing import Any, Optional
+
+import torch
+from torch.utils.data import DataLoader
+
+
+class Optimization:
+    """Small PyTorch train/validation loop."""
+
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        criterion: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        scheduler: Any | None = None,
+        grad_clip_norm: float | None = None,
+        num_epochs: int = 100,
+        warmup_epochs: int = 25,
+        stop_loss: float = 0.005,
+        max_val_loss: float = 100.0,
+        zero_low_rank_grad: Any | None = None,
+        freeze_input_dims: Any | None = None,
+        device: str | torch.device | None = None,
+        keep_best: bool = False,        # FIX: optional best-val checkpointing
+        verbose: bool = True,
+    ):
+        self.model = model
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.criterion = criterion
+        self.optimizer = optimizer
+        self.num_epochs = num_epochs
+        self.warmup_epochs = warmup_epochs
+        self.stop_loss = stop_loss
+        self.max_val_loss = max_val_loss
+        self.scheduler = scheduler
+        self.zero_low_rank_grad = zero_low_rank_grad
+        self.freeze_input_dims = freeze_input_dims
+        self.grad_clip_norm = grad_clip_norm
+        self.keep_best = keep_best
+        self.verbose = verbose
+
+        self.device = torch.device(device) if device is not None else self._infer_device()
+        self.model.to(self.device)
+        self.model.device = self.device
+
+        self.train_losses: list[float] = []
+        self.val_losses: list[float] = []
+        self.learning_rates: list[float] = []
+        self.learning_rate = self.optimizer.param_groups[0]["lr"]
+
+        self.best_val_loss = float("inf")
+        self.best_state_dict: dict | None = None
+
+        # Snapshot frozen input columns to restore after each optimizer.step().
+        self._frozen_wi_weight = None
+        if self.freeze_input_dims is not None:
+            self._frozen_wi_weight = self.model.wi.weight.detach().clone()
+
+    def _infer_device(self) -> torch.device:
+        if hasattr(self.model, "device") and isinstance(self.model.device, torch.device):
+            return self.model.device
+        return next(self.model.parameters()).device
+
+    def _predict(self, X: torch.Tensor, y: Optional[torch.Tensor] = None) -> torch.Tensor:
+        return self.model(X, y)
+
+    def _zero_low_rank_grads(self) -> None:
+        if self.zero_low_rank_grad is None:
+            return
+        for param in (self.model.m, self.model.n):
+            if param.grad is None:
+                continue
+            if self.zero_low_rank_grad == "all":
+                param.grad.zero_()
+            else:
+                param.grad[:, self.zero_low_rank_grad] = 0.0
+
+    def _zero_input_grads(self) -> None:
+        if self.freeze_input_dims is None:
+            return
+        if self.model.wi.weight.grad is not None:
+            self.model.wi.weight.grad[:, self.freeze_input_dims] = 0.0
+
+    def _restore_frozen_input_weights(self) -> None:
+        if self.freeze_input_dims is None:
+            return
+        with torch.no_grad():
+            self.model.wi.weight[:, self.freeze_input_dims] = (
+                self._frozen_wi_weight[:, self.freeze_input_dims]
+            )
+
+    def _run_epoch(self, loader: DataLoader, train: bool) -> float:
+        self.model.train(train)
+
+        total_loss = 0.0
+        total_examples = 0
+        context = torch.enable_grad() if train else torch.no_grad()
+
+        with context:
+            for X, y in loader:
+                X = X.to(self.device, non_blocking=True)
+                y = y.to(self.device, non_blocking=True)
+                batch_size = X.size(0)
+
+                if train:
+                    self.optimizer.zero_grad(set_to_none=True)
+
+                y_pred = self._predict(X, y)
+                loss = self.criterion(y_pred, y)
+
+                if not torch.isfinite(loss):
+                    return float("nan")
+
+                if train:
+                    loss.backward()
+                    self._zero_low_rank_grads()
+                    self._zero_input_grads()
+                    if self.grad_clip_norm is not None:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), self.grad_clip_norm
+                        )
+                    self.optimizer.step()
+                    self._restore_frozen_input_weights()
+
+                total_loss += loss.item() * batch_size
+                total_examples += batch_size
+
+        if total_examples == 0:
+            raise ValueError("Dataloader produced zero examples.")
+
+        return total_loss / total_examples
+
+    def _step_scheduler(self, val_loss: float) -> None:
+        if self.scheduler is None:
+            return
+        if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            self.scheduler.step(val_loss)
+        else:
+            self.scheduler.step()
+
+    def _current_lr(self) -> float:
+        # during warmup and across scheduler types.
+        return self.optimizer.param_groups[0]["lr"]
+
+    def fit(self) -> tuple[list[float], list[float], list[float]]:
+        self.train_losses.clear()
+        self.val_losses.clear()
+        self.learning_rates.clear()
+        self.best_val_loss = float("inf")
+        self.best_state_dict = None
+
+        for epoch in range(1, self.num_epochs + 1):
+            train_loss = self._run_epoch(self.train_loader, train=True)
+            val_loss = self._run_epoch(self.val_loader, train=False)
+
+            if epoch >= self.warmup_epochs:
+                self._step_scheduler(val_loss)
+
+            self.learning_rate = self._current_lr()
+
+            self.train_losses.append(train_loss)
+            self.val_losses.append(val_loss)
+            self.learning_rates.append(self.learning_rate)
+
+            # FIX: optional best-val checkpointing.
+            if self.keep_best and math.isfinite(val_loss) and val_loss < self.best_val_loss:
+                self.best_val_loss = val_loss
+                self.best_state_dict = copy.deepcopy(self.model.state_dict())
+
+            if self.verbose and (epoch % 5 == 0):
+                print(
+                    f"Epoch {epoch:03d}/{self.num_epochs} | "
+                    f"lr: {self.learning_rate:.5f} | "
+                    f"train: {train_loss:.4f} | val: {val_loss:.4f}"
+                )
+
+            if not math.isfinite(train_loss) or not math.isfinite(val_loss):
+                print("Stopping: non-finite loss.")
+                break
+
+            if train_loss < self.stop_loss and val_loss < self.stop_loss:
+                print(f"Stopping: losses below {self.stop_loss}.")
+                break
+
+            if val_loss > self.max_val_loss:
+                print(f"Stopping: validation loss above {self.max_val_loss}.")
+                break
+
+        # FIX: restore best model if requested.
+        if self.keep_best and self.best_state_dict is not None:
+            self.model.load_state_dict(self.best_state_dict)
+
+        return self.train_losses, self.val_losses, self.learning_rates
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+import torch
+import torch.nn as nn
+
+
+class MaskedZeroLoss(nn.Module):
+    """
+    Masked MSE with three regimes per trial:
+      - baseline:  y == baseline_value  -> target 0
+      - zero:      |y| <= zero_tol      -> target 0
+      - nonzero:   |y|  > zero_tol      -> target y
+      - Loss is applied to all the channels (recurrent latents and readout).
+      - Baseline term is summed across channels, so the
+        objective magnitude does depend on output dimensionality.
+      - NaNs in targets are treated as "ignore" everywhere.
+    """
+
+    def __init__(
+        self,
+        criterion: nn.Module | None = None,
+        nonzero_weight: float = 1.0,
+        zero_weight: float = 1.0,
+        baseline_weight: float = 1.0,
+        zero_tol: float = 0.0,
+        baseline_value: float = 1e-3,
+        task_channel: int = -1,
+    ):
+        super().__init__()
+        self.criterion = criterion or nn.MSELoss()
+        self.nonzero_weight = nonzero_weight
+        self.zero_weight = zero_weight
+        self.baseline_weight = baseline_weight
+        self.zero_tol = zero_tol
+        self.baseline_value = baseline_value
+        self.task_channel = task_channel
+
+    @staticmethod
+    def _masked_mse(pred, target, mask, criterion):
+        if mask.sum() == 0:
+            return pred.new_tensor(0.0)
+        return criterion(pred[mask], target[mask])
+
+    def forward(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        # def channel_loss(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """
+        y_pred: (B, T, C)  -- C output channels
+        y:      (B, T, C)     -- scalar target per time step and channel (NaN = ignore)
+        """
+
+        finite = torch.isfinite(y_pred) & torch.isfinite(y)
+        bl_mask = finite & (y == self.baseline_value)
+        nonzero_mask = finite & (~bl_mask) & (y.abs() >  self.zero_tol)
+        zero_mask = finite & (~bl_mask) & (y.abs() <= self.zero_tol)
+
+        zeros = torch.zeros_like(y)
+
+        loss_bl = self._masked_mse(y_pred, zeros, bl_mask, self.criterion)
+        loss_zero = self._masked_mse(y_pred, zeros, zero_mask, self.criterion)
+        loss_nonzero = self._masked_mse(y_pred, y, nonzero_mask, self.criterion)
+
+        return self.baseline_weight * loss_bl + self.zero_weight   * loss_zero + self.nonzero_weight * loss_nonzero
+
+    # def forward(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+
+    #     loss = 0.0
+    #     for i in range(1, y.shape[-1]):
+    #         loss = loss + self.channel_loss(y_pred[..., i], y[..., i])
+
+    #     return loss
+#+end_src
+
+#+RESULTS:
+
+* Low Rank RNNs
+** Description
+The Vanilla RNN updates its hidden state based on the previous hidden state and the current input:
+
+Let:
+- \( x_t \): feedforward input at time step \( t \)
+- \( h_t \): recurrent input at time \( t \)
+- \( r_t \): rate at time \( t \)
+- \( y_t \): output at time \( t \)
+
+\[h_t = (1-\alpha)h_{t-1} + \alpha \frac{1}{N} m n^\top r_{t-1}.\]
+
+\[
+r_t = \tanh(W_{ih} x_t + b_{ih} + h_{t-1})
+\]
+
+\[
+y_t = \sigma(W_{ho} r_t + b_o)
+\]
+
+** RNN Class
+
+#+begin_src jupyter-python
+class LowRankModel(nn.Module):
+    """
+    Low-rank RNN with optional reward-feedback input channel.
+
+    reward feedback is now teacher-forced during training
+
+        training (targets is not None):
+            rwd_next[b] = 1  if  target[b, t] == +1   else 0
+        eval (targets is None):
+            rwd_next[b] = 0
+
+    """
+
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        output_size,
+        rank=1,
+        gain=1.0,
+        alpha=0.01,
+        train_inputs=True,
+        train_outputs=True,
+        warmup_steps=500,
+        reward_channel=-1,
+        reward_threshold=0.5,
+        reward_target_value=1.0,
+        task_channel=-1,
+        device="cpu",
+    ):
+        super().__init__()
+        self.device = torch.device(device)
+        self.warmup_steps = warmup_steps
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.rank = rank
+        self.gain = gain
+
+        self.reward_channel = reward_channel
+        self.reward_threshold = reward_threshold
+        self.reward_target_value = reward_target_value
+        self.task_channel = task_channel
+
+        # input layer
+        self.wi = None
+        if input_size > 0:
+            self.Ai = 1.0
+            self.wi = nn.Linear(input_size, hidden_size, device=self.device)
+            with torch.no_grad():
+                nn.init.normal_(self.wi.weight, mean=0.0, std=1.0 / hidden_size**0.5)
+                nn.init.zeros_(self.wi.bias)
+
+            if not train_inputs:
+                self.Ai = nn.Parameter(torch.randn(1, device=self.device))
+                self.wi.weight.requires_grad_(False)
+                self.wi.bias.requires_grad_(False)
+
+        # low-rank recurrent layer
+        self.m = nn.Parameter(torch.randn(hidden_size, rank, device=self.device))
+        self.n = nn.Parameter(torch.randn(hidden_size, rank, device=self.device))
+
+        # output layer
+        self.wo = None
+        if output_size > 0:
+            self.Ao = 1.0
+            self.wo = nn.Linear(hidden_size, output_size, device=self.device)
+            with torch.no_grad():
+                nn.init.normal_(self.wo.weight, mean=0.0, std=1.0 / hidden_size**0.5)
+                nn.init.zeros_(self.wo.bias)
+
+            if not train_outputs:
+                self.Ao = nn.Parameter(torch.randn(1, device=self.device))
+                self.wo.weight.requires_grad_(False)
+                self.wo.bias.requires_grad_(False)
+
+        self.nonlinearity = torch.tanh
+        self.register_buffer("alpha", torch.tensor(float(alpha)))
+        self.register_buffer("exp_alpha", torch.exp(-torch.tensor(float(alpha))))
+
+    def get_readout(self, rates, rec_inputs):
+        rec = rates @ self.n / self.hidden_size
+        if self.wo is not None:
+            ext = self.Ao * self.wo(rates)
+            return torch.cat((rec, ext), dim=-1)
+        return rec
+
+    def update_dynamics(self, ff_inputs, rec_inputs, rates):
+        input_drive = self.Ai * self.wi(ff_inputs) if self.wi is not None else 0.0
+        hidden = (rates @ self.n) @ self.m.T / self.hidden_size
+        rec_inputs = self.exp_alpha * rec_inputs + (1.0 - self.exp_alpha) * hidden
+        rates = self.nonlinearity(self.gain * ( input_drive + rec_inputs))
+        return rates, rec_inputs
+
+    def _reward_signal(self, target_t, readout_t):
+        """
+        FIX: teacher-forced during training, model-driven at eval.
+        target_t: (B,) or None
+        readout_t: (B, C)
+        returns: (B,) float tensor in {0, 1}
+        """
+        if target_t is None:  # eval
+            sig = 0.0 * (readout_t[..., self.task_channel] > self.reward_threshold)
+        else:                 # train: teacher forcing
+            finite = torch.isfinite(target_t)
+            sig = finite & (target_t == self.reward_target_value)
+        return sig.to(dtype=readout_t.dtype)
+
+    def forward(self, ff_inputs, targets=None, ret_rates=False):
+        B, T = ff_inputs.shape[0], ff_inputs.shape[1]
+        N = self.hidden_size
+
+        rec_inputs = 0.1 * torch.randn(B, N, device=self.device)
+        rates = self.nonlinearity(self.gain * rec_inputs)
+
+        # warmup with zero input
+        zero_inputs = torch.zeros(B, max(self.input_size, 0), device=self.device)
+        with torch.no_grad():
+            for _ in range(self.warmup_steps):
+                rates, rec_inputs = self.update_dynamics(zero_inputs, rec_inputs, rates)
+        rates = rates.detach()
+        rec_inputs = rec_inputs.detach()
+
+        readout_list = []
+        rates_list = [] if ret_rates else None
+        inputs_list = [] if ret_rates else None
+
+        rwd_next = torch.zeros(B, device=self.device, dtype=ff_inputs.dtype)
+
+        for step in range(T):
+            x_t = ff_inputs[:, step]
+
+            if self.reward_channel is not None:
+                x_t = x_t.clone()
+                x_t[:, self.reward_channel] = x_t[:, self.reward_channel] + rwd_next
+
+            rates, rec_inputs = self.update_dynamics(x_t, rec_inputs, rates)
+            readout = self.get_readout(rates, rec_inputs)
+            readout_list.append(readout)
+
+            if ret_rates:
+                rates_list.append(rates)
+                inputs_list.append(rec_inputs)
+
+            target_t = targets[:, step, self.reward_channel] if targets is not None else None
+            rwd_next = self._reward_signal(target_t, readout)
+
+        readout_list = torch.stack(readout_list, dim=1)
+        if ret_rates:
+            return (
+                readout_list,
+                torch.stack(rates_list, dim=1),
+                torch.stack(inputs_list, dim=1),
+            )
+        return readout_list
+#+end_src
+
+#+RESULTS:
+
+** Multivariate Gaussian initialization
+
+#+begin_src jupyter-python
+import warnings
+import torch
+import torch.nn as nn
+from typing import Optional
+
+
+class LowRankInitializer:
+    """
+    Initialize a LowRankModel's loadings (m, n, wi, wo) as i.i.d. samples
+    from N(0, Sigma) across neurons.
+
+    Loading vector per neuron:
+        [ m_1..m_R, n_1..n_R, I_1..I_{D_in}, w_1..w_{D_out} ]
+    """
+
+    BLOCKS = ("m", "n", "in", "out")
+
+    def __init__(
+        self,
+        sigma: Optional[torch.Tensor] = None,
+        var_m: float | torch.Tensor = 1.0,
+        var_n: float | torch.Tensor = 1.0,
+        var_in: float | torch.Tensor = 1.0,
+        var_out: float | torch.Tensor = 1.0,
+        overlaps: Optional[dict] = None,
+        jitter: float = 1e-8,
+        zero_biases: bool = True,
+        auto_psd: bool = True,
+        psd_tol: float = 1e-8,
+        psd_warn_threshold: float = 1e-3,
+        preserve_diagonal: bool = True,
+    ):
+        self.sigma = sigma
+        self.var_m = var_m
+        self.var_n = var_n
+        self.var_in = var_in
+        self.var_out = var_out
+        self.overlaps = overlaps or {}
+        self.jitter = jitter
+        self.zero_biases = zero_biases
+        self.auto_psd = auto_psd
+        self.psd_tol = psd_tol
+        self.psd_warn_threshold = psd_warn_threshold
+        self.preserve_diagonal = preserve_diagonal
+
+    # ------------------------------------------------------------------
+    def _block_sizes(self, model) -> dict:
+        R = model.rank
+        D_in = model.input_size
+        D_out = model.wo.weight.shape[0] if model.wo is not None else 0
+        return {"m": R, "n": R, "in": D_in, "out": D_out}
+
+    def _block_offsets(self, sizes: dict) -> dict:
+        offsets, cur = {}, 0
+        for b in self.BLOCKS:
+            offsets[b] = cur
+            cur += sizes[b]
+        return offsets
+
+    def _expand_var(self, v, size: int) -> torch.Tensor:
+        if size == 0:
+            return torch.zeros(0)
+        if torch.is_tensor(v):
+            v = v.flatten().float()
+            assert v.numel() == size, f"Expected {size} variances, got {v.numel()}"
+            return v
+        return torch.full((size,), float(v))
+
+    # ------------------------------------------------------------------
+    def _project_psd(self, Sigma: torch.Tensor) -> torch.Tensor:
+        """
+        Project a symmetric matrix onto the PSD cone via eigenvalue clipping.
+
+        If preserve_diagonal=True, the diagonal of the projected matrix is
+        rescaled to match the input's diagonal (so user-specified variances
+        are preserved up to a final symmetric rescaling).
+        """
+        # Symmetrize defensively
+        S = 0.5 * (Sigma + Sigma.T)
+        d_orig = torch.diag(S).clone()
+
+        evals, evecs = torch.linalg.eigh(S)
+        evals_clipped = evals.clamp_min(self.psd_tol)
+        S_psd = (evecs * evals_clipped) @ evecs.T
+
+        if self.preserve_diagonal:
+            d_new = torch.diag(S_psd).clamp_min(self.psd_tol)
+            # Rescale so diag(S_psd) == d_orig, preserving correlation structure
+            scale = torch.sqrt(d_orig.clamp_min(0.0) / d_new)
+            S_psd = S_psd * scale.unsqueeze(0) * scale.unsqueeze(1)
+            # Diagonal is now exactly d_orig (up to fp), confirm PSD after rescale
+            # (rescaling by diag(s)·M·diag(s) preserves PSDness)
+
+        # Re-symmetrize against fp drift
+        S_psd = 0.5 * (S_psd + S_psd.T)
+        return S_psd, evals.min().item()
+
+    def _maybe_project(self, Sigma: torch.Tensor) -> torch.Tensor:
+        evals = torch.linalg.eigvalsh(Sigma)
+        min_ev = float(evals.min())
+
+        if min_ev >= -self.psd_tol:
+            return Sigma  # already PSD up to tol
+
+        if not self.auto_psd:
+            raise ValueError(
+                f"Sigma is not PSD (min eigenvalue = {min_ev:.3e}). "
+                "Pass auto_psd=True to project onto the PSD cone, or fix the spec."
+            )
+
+        Sigma_psd, _ = self._project_psd(Sigma)
+
+        # Quantify correction
+        delta = (Sigma_psd - Sigma)
+        rel_change = (
+            torch.linalg.matrix_norm(delta, ord="fro")
+            / torch.linalg.matrix_norm(Sigma, ord="fro").clamp_min(1e-12)
+        ).item()
+
+        msg = (
+            f"Sigma was not PSD (min eigval = {min_ev:.3e}); "
+            f"projected to nearest PSD (Frobenius rel. change = {rel_change:.3e})."
+        )
+        if rel_change > self.psd_warn_threshold:
+            msg += (
+                " Correction is large — consider reducing overlap magnitudes "
+                "or increasing the relevant variances."
+            )
+        warnings.warn(msg, stacklevel=3)
+
+        return Sigma_psd
+
+    # ------------------------------------------------------------------
+    def build_sigma(self, model) -> torch.Tensor:
+        sizes = self._block_sizes(model)
+        offsets = self._block_offsets(sizes)
+        P = sum(sizes.values())
+
+        if self.sigma is not None:
+            assert self.sigma.shape == (P, P), (
+                f"sigma must be ({P},{P}), got {tuple(self.sigma.shape)}"
+            )
+            return self._maybe_project(self.sigma.float().clone())
+
+        diag = torch.cat([
+            self._expand_var(self.var_m,   sizes["m"]),
+            self._expand_var(self.var_n,   sizes["n"]),
+            self._expand_var(self.var_in,  sizes["in"]),
+            self._expand_var(self.var_out, sizes["out"]),
+        ])
+        Sigma = torch.diag(diag)
+
+        for ((ba, ia), (bb, ib)), cov in self.overlaps.items():
+            assert ba in self.BLOCKS and bb in self.BLOCKS, (
+                f"Unknown block: {ba} or {bb}; must be in {self.BLOCKS}"
+            )
+            assert 0 <= ia < sizes[ba], f"Index {ia} out of range for block {ba}"
+            assert 0 <= ib < sizes[bb], f"Index {ib} out of range for block {bb}"
+            a = offsets[ba] + ia
+            b = offsets[bb] + ib
+            Sigma[a, b] = cov
+            Sigma[b, a] = cov
+
+        return self._maybe_project(Sigma)
+
+    # ------------------------------------------------------------------
+    def _sample_loadings(
+        self, Sigma: torch.Tensor, N: int, device, generator=None
+    ) -> torch.Tensor:
+        P = Sigma.shape[0]
+        Sigma_j = Sigma + self.jitter * torch.eye(P)
+
+        try:
+            L = torch.linalg.cholesky(Sigma_j)
+        except RuntimeError as e:
+            warnings.warn(
+                f"Cholesky failed even after PSD projection ({e}); "
+                "falling back to eigendecomposition."
+            )
+            evals, evecs = torch.linalg.eigh(Sigma_j)
+            evals = evals.clamp_min(0.0)
+            L = evecs * evals.sqrt().unsqueeze(0)
+
+        z = torch.randn(N, P, generator=generator)
+        return (z @ L.T).to(device)
+
+    @torch.no_grad()
+    def apply(self, model: nn.Module, seed: Optional[int] = None) -> torch.Tensor:
+        Sigma = self.build_sigma(model)
+        sizes = self._block_sizes(model)
+        offsets = self._block_offsets(sizes)
+        N = model.hidden_size
+        device = model.device
+
+        gen = None
+        if seed is not None:
+            gen = torch.Generator()
+            gen.manual_seed(seed)
+
+        X = self._sample_loadings(Sigma, N, device, generator=gen)
+
+        def slc(b):
+            return slice(offsets[b], offsets[b] + sizes[b])
+
+        model.m.copy_(X[:, slc("m")])
+        model.n.copy_(X[:, slc("n")])
+
+        if sizes["in"] > 0 and model.wi is not None:
+            model.wi.weight.copy_(X[:, slc("in")])
+            if self.zero_biases:
+                model.wi.bias.zero_()
+
+        if sizes["out"] > 0 and model.wo is not None:
+            model.wo.weight.copy_(X[:, slc("out")].T)
+            if self.zero_biases:
+                model.wo.bias.zero_()
+
+        return Sigma
+
+    # ------------------------------------------------------------------
+    def validate(self, model, raise_on_fail: bool = True) -> tuple[bool, float]:
+        """Build Sigma without projection and report PSD status."""
+        old = self.auto_psd
+        self.auto_psd = False
+        try:
+            try:
+                Sigma = self.build_sigma(model)
+                min_ev = float(torch.linalg.eigvalsh(Sigma).min())
+                return True, min_ev
+            except ValueError as e:
+                if raise_on_fail:
+                    raise
+                # Re-extract min eigenvalue
+                self.auto_psd = True  # to actually build it
+                Sigma = self.build_sigma(model)
+                min_ev = float(torch.linalg.eigvalsh(Sigma).min())
+                return False, min_ev
+        finally:
+            self.auto_psd = old
+#+end_src
+
+#+RESULTS:
+
+* Vector fields
+
+The low-rank recurrent state lives approximately on the manifold
+
+\[
+h = M \kappa,\qquad M = [m_1,m_2]\in \mathbb{R}^{N\times 2}.
+\]
+
+For a fixed feedforward input \(x\), the induced rank-coordinate dynamics are
+
+\[
+\kappa^{+}
+= (1-\alpha)\kappa + \alpha \Psi(\kappa; x),
+\]
+
+where
+
+\[
+\Psi(\kappa; x)
+= \frac{1}{N} n^\top \tanh(W_i x + b_i + M\kappa).
+\]
+
+Thus the phase portrait in the \((\kappa_1,\kappa_2)\) plane is given by the vector field
+
+\[
+\Delta \kappa
+= \kappa^{+}-\kappa
+= \alpha\left[\Psi(\kappa;x)-\kappa\right].
+\]
+
+Below I plot the autonomous / delay-period field using \(x=0\). During stimulus epochs the vector field is different because \(x_t\neq 0\).
+
+#+begin_src jupyter-python
+# Corrected low-rank flow-field plotting.
+#
+# Main fixes:
+# 1. Trajectories are projected with the same coordinate convention used by the
+#    vector field: h ≈ M κ, via least squares.
+# 2. The trajectory runner records the *effective* input used by LowRankModel,
+#    including the online reward feedback through the last input channel when
+#    targets are supplied.
+# 3. Autonomous trajectory overlays exclude time points where effective input is
+#    not actually zero. This prevents reward-driven segments from being plotted
+#    on the zero-input vector field.
+# 4. The field uses beta = 1 - exp(-alpha), matching the model update.
+
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
+from scipy.optimize import root
+
+
+def _model_device(model):
+    return next(model.parameters()).device
+
+
+def _model_dtype(model):
+    return next(model.parameters()).dtype
+
+
+def make_input(input_size, active_dims=None, value=1.0, device=None, dtype=None):
+    x = torch.zeros(input_size, device=device, dtype=dtype)
+    if active_dims is not None:
+        x[active_dims] = value
+    return x
+
+
+def low_rank_numpy_params(model):
+    alpha = (
+        float(model.alpha.detach().cpu())
+        if torch.is_tensor(model.alpha)
+        else float(model.alpha)
+    )
+
+    if hasattr(model, "signed_n"):
+        n_eff = model.signed_n()
+    else:
+        n_eff = model.n
+    try:
+        Ai = model.Ai.detach().cpu().numpy().astype(np.float64)
+    except:
+        Ai = model.Ai
+
+    return {
+        "M": model.m.detach().cpu().numpy().astype(np.float64),       # [N, R]
+        "Nvec": n_eff.detach().cpu().numpy().astype(np.float64),      # [N, R]
+        "Wi": model.wi.weight.detach().cpu().numpy().astype(np.float64),
+        "bi": model.wi.bias.detach().cpu().numpy().astype(np.float64),
+        "Ai": Ai,
+        "beta": 1.0 - np.exp(-alpha),
+    }
+
+
+def low_rank_field_np(params, kappa, ff_input=None, include_beta=False):
+    """
+    Vector field in coordinates h = Mκ.
+
+        F(κ; x) = Ψ(κ; x) - κ
+        Ψ(κ; x) = N^{-1} n^T tanh(W_i x + b_i + Mκ)
+
+    If include_beta=True, returns βF, exactly matching the discrete update
+    increment κ⁺ - κ for fixed x.
+    """
+    M = params["M"]
+    Nvec = params["Nvec"]
+    Wi = params["Wi"]
+    bi = params["bi"]
+    Ai = params["Ai"]
+
+    kappa = np.asarray(kappa, dtype=np.float64)
+    orig_shape = kappa.shape
+    rank = M.shape[1]
+    kappa_flat = kappa.reshape(-1, rank)
+
+    if ff_input is None:
+        ff_input = np.zeros(Wi.shape[1], dtype=np.float64)
+    else:
+        ff_input = np.asarray(ff_input, dtype=np.float64)
+
+    drive = Ai * (ff_input @ Wi.T + bi)                  # [N]
+    h = kappa_flat @ M.T                          # [B, N]
+    r = np.tanh(h + drive[None, :])               # [B, N]
+    psi = r @ Nvec / M.shape[0]                   # [B, R]
+
+    field = psi - kappa_flat
+    if include_beta:
+        field = params["beta"] * field
+
+    return field.reshape(orig_shape)
+
+
+def low_rank_jacobian_flow_np(params, kappa, ff_input=None):
+    """Jacobian of F(κ; x) = Ψ(κ; x) - κ."""
+    M = params["M"]
+    Nvec = params["Nvec"]
+    Wi = params["Wi"]
+    bi = params["bi"]
+    Ai = params["Ai"]
+
+    kappa = np.asarray(kappa, dtype=np.float64).reshape(-1)
+
+    if ff_input is None:
+        ff_input = np.zeros(Wi.shape[1], dtype=np.float64)
+    else:
+        ff_input = np.asarray(ff_input, dtype=np.float64)
+
+    u = M @ kappa + Ai * (ff_input @ Wi.T + bi)
+    phi_prime = 1.0 - np.tanh(u) ** 2
+
+    J = Nvec.T @ (phi_prime[:, None] * M) / M.shape[0]
+    J -= np.eye(M.shape[1])
+    return J
+
+
+def low_rank_jacobian_map_np(params, kappa, ff_input=None):
+    """Jacobian of κ⁺ = κ + βF(κ)."""
+    J_flow = low_rank_jacobian_flow_np(params, kappa, ff_input=ff_input)
+    return np.eye(J_flow.shape[0]) + params["beta"] * J_flow
+
+
+def project_rec_inputs_to_kappa(model, rec_inputs):
+    """
+    Least-squares coordinates for h ≈ Mκ.
+
+    This is the coordinate system used by low_rank_field_np. Do not replace this
+    by h@m/||m||^2 unless M columns are known orthogonal.
+    """
+    device = _model_device(model)
+    dtype = _model_dtype(model)
+
+    h = torch.as_tensor(rec_inputs, device=device, dtype=dtype)
+    orig_shape = h.shape
+    hidden_size = model.m.shape[0]
+
+    if orig_shape[-1] != hidden_size:
+        raise ValueError(f"Expected last dim {hidden_size}, got {orig_shape[-1]}.")
+
+    h_flat = h.reshape(-1, hidden_size)  # [B, N]
+
+    with torch.no_grad():
+        sol = torch.linalg.lstsq(model.m, h_flat.T).solution  # [R, B]
+        kappa = sol.T.reshape(*orig_shape[:-1], model.m.shape[1])
+
+    return kappa
+
+
+def run_low_rank_with_effective_inputs(
+    model, ff_inputs, targets=None,
+    use_reward_feedback=None, reward_readout_index=-1,
+):
+    """
+    Run a LowRankModel-like network while recording the actual input x_t used.
+
+    For your LowRankModel, this mirrors forward(), including online reward
+    feedback through the last input channel when targets is not None.
+
+    Returns
+    -------
+    readouts      : [B, T, R_or_output]
+    rates         : [B, T, N]
+    rec_inputs    : [B, T, N]
+    effective_x   : [B, T, input_size]
+    """
+    device = _model_device(model)
+    dtype = _model_dtype(model)
+
+    ff_inputs = ff_inputs.to(device=device, dtype=dtype)
+    if targets is not None:
+        targets = targets.to(device=device)
+
+    batch_size, T, input_size = ff_inputs.shape
+    hidden_size = model.m.shape[0]
+
+    rec_inputs = torch.randn(batch_size, hidden_size, device=device, dtype=dtype)
+    rates = model.nonlinearity(rec_inputs)
+
+    # Match LowRankModel warmup.
+    for _ in range(T):
+        rand_inputs = torch.randn(batch_size, input_size, device=device, dtype=dtype)
+        rates, rec_inputs = model.update_dynamics(rand_inputs, rec_inputs, rates)
+
+    readout_list = []
+    rates_list = []
+    rec_list = []
+    eff_input_list = []
+
+    rwd_next = torch.zeros(batch_size, device=device, dtype=dtype)
+    if use_reward_feedback is None:
+        use_reward_feedback = targets is not None and getattr(model, "reward_channel", None) is not None
+
+    for step in range(T):
+        x_t = ff_inputs[:, step].clone()
+
+        if use_reward_feedback:
+            x_t[:, model.reward_channel] = x_t[:, model.reward_channel] + rwd_next
+
+        rates, rec_inputs = model.update_dynamics(x_t, rec_inputs, rates)
+        readout = model.get_readout(rates, rec_inputs)
+
+        readout_list.append(readout)
+        rates_list.append(rates)
+        rec_list.append(rec_inputs)
+        eff_input_list.append(x_t)
+
+        if use_reward_feedback:
+            rwd_mask = (targets[:, step, model.reward_channel] == 1) & (readout[:, reward_readout_index] > 0.5)
+            rwd_next = rwd_mask.to(dtype=dtype)
+        else:
+            rwd_next.zero_()
+
+    return (
+        torch.stack(readout_list, dim=1),
+        torch.stack(rates_list, dim=1),
+        torch.stack(rec_list, dim=1),
+        torch.stack(eff_input_list, dim=1),
+    )
+
+
+def auto_limits_from_trajs(kappa_traj, qlo=1, qhi=99, pad=1.35, symmetric=True):
+    z = kappa_traj.reshape(-1, kappa_traj.shape[-1])
+    lo = np.percentile(z[:, :2], qlo, axis=0)
+    hi = np.percentile(z[:, :2], qhi, axis=0)
+
+    if symmetric:
+        lim = float(pad * np.max(np.abs(np.concatenate([lo, hi]))))
+        lim = max(lim, 1e-6)
+        return (-lim, lim), (-lim, lim)
+
+    center = 0.5 * (lo + hi)
+    half = 0.5 * (hi - lo) * pad
+    return (
+        (float(center[0] - half[0]), float(center[0] + half[0])),
+        (float(center[1] - half[1]), float(center[1] + half[1])),
+    )
+
+
+def make_vector_field_grid(
+    model,
+    ff_input,
+    xlim,
+    ylim,
+    n_grid=180,
+    include_beta=False,
+):
+    params = low_rank_numpy_params(model)
+    ff_input_np = torch.as_tensor(ff_input).detach().cpu().numpy().astype(np.float64)
+
+    k1 = np.linspace(xlim[0], xlim[1], n_grid)
+    k2 = np.linspace(ylim[0], ylim[1], n_grid)
+    K1, K2 = np.meshgrid(k1, k2)
+    K = np.stack([K1, K2], axis=-1)
+
+    field = low_rank_field_np(
+        params,
+        K,
+        ff_input=ff_input_np,
+        include_beta=include_beta,
+    )
+
+    U = field[..., 0]
+    V = field[..., 1]
+    speed = np.sqrt(U**2 + V**2)
+
+    return K1, K2, U, V, speed, params, ff_input_np
+
+
+def merge_roots(roots, residuals, merge_tol=5e-2):
+    if len(roots) == 0:
+        return np.empty((0, 2)), np.empty((0,))
+
+    roots = np.asarray(roots, dtype=np.float64)
+    residuals = np.asarray(residuals, dtype=np.float64)
+
+    order = np.argsort(residuals)
+    kept = []
+    kept_res = []
+
+    for idx in order:
+        r = roots[idx]
+        if all(np.linalg.norm(r - q) > merge_tol for q in kept):
+            kept.append(r)
+            kept_res.append(residuals[idx])
+
+    return np.stack(kept, axis=0), np.asarray(kept_res)
+
+
+def find_all_fixed_points(
+    model,
+    xlim,
+    ylim,
+    ff_input,
+    n_seeds=45,
+    residual_tol=1e-8,
+    merge_tol=5e-2,
+):
+    params = low_rank_numpy_params(model)
+    ff_input_np = torch.as_tensor(ff_input).detach().cpu().numpy().astype(np.float64)
+
+    def fun(k):
+        return low_rank_field_np(params, k, ff_input=ff_input_np).reshape(-1)
+
+    def jac(k):
+        return low_rank_jacobian_flow_np(params, k, ff_input=ff_input_np)
+
+    k1_seeds = np.linspace(xlim[0], xlim[1], n_seeds)
+    k2_seeds = np.linspace(ylim[0], ylim[1], n_seeds)
+
+    roots = []
+    residuals = []
+
+    for k1_0 in k1_seeds:
+        for k2_0 in k2_seeds:
+            sol = root(
+                fun,
+                np.array([k1_0, k2_0], dtype=np.float64),
+                jac=jac,
+                method="hybr",
+                options={"xtol": 1e-12, "maxfev": 1000},
+            )
+            if not sol.success:
+                continue
+
+            fp = sol.x
+            residual = np.linalg.norm(fun(fp))
+            in_bounds = xlim[0] <= fp[0] <= xlim[1] and ylim[0] <= fp[1] <= ylim[1]
+
+            if residual <= residual_tol and in_bounds:
+                roots.append(fp)
+                residuals.append(residual)
+
+    return merge_roots(roots, residuals, merge_tol=merge_tol)
+
+
+def classify_fixed_points(model, fixed_points, ff_input, eig_tol=1e-5):
+    params = low_rank_numpy_params(model)
+    ff_input_np = torch.as_tensor(ff_input).detach().cpu().numpy().astype(np.float64)
+
+    labels = []
+    eigvals = []
+
+    for fp in fixed_points:
+        J = low_rank_jacobian_map_np(params, fp, ff_input=ff_input_np)
+        ev = np.linalg.eigvals(J)
+        rad = np.abs(ev)
+
+        n_stable = np.sum(rad < 1.0 - eig_tol)
+        n_unstable = np.sum(rad > 1.0 + eig_tol)
+
+        if n_stable == len(rad):
+            label = "attractor"
+        elif n_unstable == len(rad):
+            label = "repeller"
+        elif n_stable > 0 and n_unstable > 0:
+            label = "saddle"
+        else:
+            label = "nonhyperbolic"
+
+        labels.append(label)
+        eigvals.append(ev)
+
+    if len(eigvals) == 0:
+        return np.asarray([], dtype=object), np.empty((0, 2), dtype=np.complex128)
+
+    return np.asarray(labels, dtype=object), np.stack(eigvals, axis=0)
+
+
+def condition_indices_for_task(inputs, timing, task, condition_names=None):
+    task = task.lower()
+    n_on = timing.n_stim_on
+    n_off = timing.n_stim_off
+
+    if task == "2afc":
+        stim_epoch = slice(int(n_on[0]), int(n_off[0]))
+        stim_drive = inputs[:, stim_epoch, :2].mean(dim=1)
+        is_go = stim_drive[:, 0] > stim_drive[:, 1]
+        is_nogo = ~is_go
+        return {"Go": torch.where(is_go)[0], "NoGo": torch.where(is_nogo)[0]}
+
+    if task == "dpa":
+        sample_epoch = slice(int(n_on[0]), int(n_off[0]))
+        test_epoch = slice(int(n_on[1]), int(n_off[1]))
+
+        sample_drive = inputs[:, sample_epoch, :2].mean(dim=1)
+        test_drive = inputs[:, test_epoch, 2:4].mean(dim=1)
+
+        is_A = sample_drive[:, 0] > sample_drive[:, 1]
+        is_B = ~is_A
+        is_C = test_drive[:, 0] > test_drive[:, 1]
+        is_D = ~is_C
+
+        return {
+            "AC": torch.where(is_A & is_C)[0],
+            "AD": torch.where(is_A & is_D)[0],
+            "BC": torch.where(is_B & is_C)[0],
+            "BD": torch.where(is_B & is_D)[0],
+        }
+
+    if task == "gng":
+        stim_epoch = slice(int(n_on[0]), int(n_off[0]))
+        stim_drive = inputs[:, stim_epoch, :2].mean(dim=1)
+
+        is_go = stim_drive[:, 0] > stim_drive[:, 1]
+        is_nogo = ~is_go
+
+        return {
+            "Go": torch.where(is_go)[0],
+            "NoGo": torch.where(is_nogo)[0],
+        }
+
+    if task == "dual":
+        if condition_names is not None:
+            names = np.asarray(condition_names).astype(str)
+            groups = {k: [] for k in ["AC", "AD", "BC", "BD", "Go", "NoGo", "DPAOnly"]}
+
+            for i, name in enumerate(names):
+                parts = name.split("_")
+                if len(parts) == 2:
+                    sample, test = parts
+                    gng = "none"
+                elif len(parts) == 3:
+                    sample, gng, test = parts
+                else:
+                    raise ValueError(f"Unexpected condition name: {name}")
+
+                pair = f"{sample}{test}"
+                if pair in groups:
+                    groups[pair].append(i)
+
+                if gng == "go":
+                    groups["Go"].append(i)
+                elif gng == "nogo":
+                    groups["NoGo"].append(i)
+                elif gng == "none":
+                    groups["DPAOnly"].append(i)
+
+            return {k: torch.as_tensor(v, dtype=torch.long) for k, v in groups.items()}
+
+        sample_epoch = slice(int(n_on[0]), int(n_off[0]))
+        gng_epoch = slice(int(n_on[1]), int(n_off[1]))
+        test_epoch = slice(int(n_on[3]), int(n_off[3]))
+
+        sample_drive = inputs[:, sample_epoch, :2].mean(dim=1)
+        gng_drive = inputs[:, gng_epoch, :2].mean(dim=1)
+        test_drive = inputs[:, test_epoch, 2:4].mean(dim=1)
+
+        is_A = sample_drive[:, 0] > sample_drive[:, 1]
+        is_B = ~is_A
+        is_C = test_drive[:, 0] > test_drive[:, 1]
+        is_D = ~is_C
+        is_go = gng_drive[:, 0] > 0.25
+        is_nogo = gng_drive[:, 1] > 0.25
+        is_dpa_only = ~(is_go | is_nogo)
+
+        return {
+            "AC": torch.where(is_A & is_C)[0],
+            "AD": torch.where(is_A & is_D)[0],
+            "BC": torch.where(is_B & is_C)[0],
+            "BD": torch.where(is_B & is_D)[0],
+            "Go": torch.where(is_go)[0],
+            "NoGo": torch.where(is_nogo)[0],
+            "DPAOnly": torch.where(is_dpa_only)[0],
+        }
+
+    raise ValueError(f"Unknown task: {task}")
+
+
+def flow_specs_for_task(timing, task):
+    task = task.lower()
+    n_on = [int(x) for x in timing.n_stim_on]
+    n_off = [int(x) for x in timing.n_stim_off]
+
+    if task == "2afc":
+        return [
+            dict(name="Autonomous", dims=None, conds=["Go", "NoGo"]),
+            dict(name="Go", dims=[0], conds=["Go"]),
+            dict(name="NoGo", dims=[1], conds=["NoGo"]),
+            dict(name="Cue", dims=[2], conds=["Go", "NoGo"]),
+        ]
+
+    if task == "dpa":
+        return [
+            dict(name="Autonomous", dims=None, conds=["AC", "AD", "BC", "BD"]),
+            dict(name="A", dims=[0], conds=["AC", "AD"]),
+            dict(name="B", dims=[1], conds=["BC", "BD"]),
+            dict(name="C", dims=[2], conds=["AC", "BC"]),
+            dict(name="D", dims=[3], conds=["AD", "BD"]),
+        ]
+
+    if task == "gng":
+        return [
+            dict(name="Autonomous", dims=None, conds=["Go", "NoGo"]),
+            dict(name="Go", dims=[4], conds=["Go"]),
+            dict(name="NoGo", dims=[5], conds=["NoGo"]),
+            dict(name="Cue", dims=[6], conds=["Go", "NoGo"]),
+        ]
+
+    if task == "dual":
+        return [
+            dict(name="Autonomous", dims=None, conds=["AC", "AD", "BC", "BD", "DPAOnly"]),
+            dict(name="A", dims=[0], conds=["AC", "AD"]),
+            dict(name="B", dims=[1], conds=["BC", "BD"]),
+            dict(name="Go", dims=[4], conds=["Go"]),
+            dict(name="NoGo", dims=[5], conds=["NoGo"]),
+            dict(name="Cue", dims=[6], conds=["Go", "NoGo"]),
+            dict(name="C", dims=[2], conds=["AC", "BC"]),
+            dict(name="D", dims=[3], conds=["AD", "BD"]),
+        ]
+
+    raise ValueError(f"Unknown task: {task}")
+
+
+def _canonical_input_mask(effective_x, dims, threshold=0.35, atol_inactive=0.35):
+    """
+    Boolean [B, T] mask selecting time points whose effective input matches a
+    frozen-input panel.
+
+    For dims=None, selects approximately zero-input points.
+    For dims=[k], selects points where channel k is active and all other task
+    channels are inactive. Noise is tolerated by thresholds.
+    """
+    x = effective_x.detach().cpu()
+
+    if dims is None:
+        return x.abs().amax(dim=-1) < atol_inactive
+
+    dims = list(dims)
+    active = torch.ones(x.shape[:2], dtype=torch.bool)
+    for d in dims:
+        active &= x[..., d] > threshold
+
+    inactive_dims = [d for d in range(x.shape[-1]) if d not in dims]
+    inactive = x[..., inactive_dims].abs().amax(dim=-1) < atol_inactive
+
+    return active & inactive
+
+
+def _segments_from_mask(mask_1d, min_len=2):
+    idx = np.where(mask_1d)[0]
+    if idx.size == 0:
+        return []
+
+    breaks = np.where(np.diff(idx) > 1)[0] + 1
+    chunks = np.split(idx, breaks)
+
+    out = []
+    for c in chunks:
+        if len(c) >= min_len:
+            out.append(slice(int(c[0]), int(c[-1]) + 1))
+    return out
+
+
+def default_arrow_times(T, n_arrows=4, arrow_step=3):
+    if T <= arrow_step + 1:
+        return np.array([], dtype=int)
+
+    lo = 1
+    hi = T - arrow_step - 1
+    n_arrows = min(n_arrows, max(1, hi - lo + 1))
+    return np.unique(np.linspace(lo, hi, n_arrows).astype(int))
+
+
+def add_time_arrows(
+    ax,
+    xy,
+    times=None,
+    color="k",
+    arrow_step=3,
+    mutation_scale=13,
+    lw=1.5,
+    alpha=0.95,
+    zorder=8,
+    min_length=1e-4,
+):
+    xy = np.asarray(xy, dtype=np.float64)
+    T = xy.shape[0]
+
+    if times is None:
+        times = default_arrow_times(T, n_arrows=4, arrow_step=arrow_step)
+
+    for t in times:
+        t = int(t)
+        if t < 0:
+            t += T
+        if t < 0 or t >= T - 1:
+            continue
+
+        j0 = t
+        j1 = min(t + arrow_step, T - 1)
+
+        while j1 < T and np.linalg.norm(xy[j1] - xy[j0]) < min_length:
+            j0 += 1
+            j1 = min(j0 + arrow_step, T - 1)
+            if j0 >= T - 1:
+                break
+
+        if j0 >= T - 1:
+            continue
+
+        p0 = xy[j0]
+        p1 = xy[j1]
+
+        if np.linalg.norm(p1 - p0) < min_length:
+            continue
+
+        ax.annotate(
+            "",
+            xy=p1,
+            xytext=p0,
+            arrowprops=dict(
+                arrowstyle="-|>",
+                color=color,
+                lw=lw,
+                alpha=alpha,
+                shrinkA=0,
+                shrinkB=0,
+                mutation_scale=mutation_scale,
+            ),
+            zorder=zorder,
+        )
+
+ #+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+
+def plot_task_flow_fields(
+    model,
+    inputs,
+    timing,
+    task,
+    targets=None,
+    condition_names=None,
+    xlim=None,
+    ylim=None,
+    n_grid=180,
+    n_fp_seeds=45,
+    include_beta_in_field=False,
+    qlo=1,
+    qhi=99,
+    pad=1.35,
+    symmetric_auto=True,
+    speed_percentile=98,
+    figsize_per_panel=5.0,
+    input_threshold=0.35,
+    inactive_atol=0.35,
+):
+    """
+    Plot low-rank vector fields with correctly matched trajectory segments.
+
+    Notes
+    -----
+    - Pass targets=targets if LowRankModel.forward uses target-gated reward
+      feedback in the last input channel.
+    - Layout is fully manual (no tight/constrained layout) to keep the
+      colorbar axis from triggering matplotlib's tight_layout warning.
+    """
+    task = task.lower()
+
+    if model.m.shape[1] < 2:
+        raise ValueError("Flow-field plotting requires rank >= 2.")
+
+    model.eval()
+    device = _model_device(model)
+    dtype = _model_dtype(model)
+    input_size = inputs.shape[-1]
+
+    specs = flow_specs_for_task(timing, task)
+
+    max_dim = max(
+        [d for spec in specs if spec["dims"] is not None for d in spec["dims"]],
+        default=-1,
+    )
+    if input_size <= max_dim:
+        raise ValueError(
+            f"Task {task} requires input_size > {max_dim}, got {input_size}."
+        )
+
+    with torch.no_grad():
+        readouts, rates, rec_inputs, effective_x = run_low_rank_with_effective_inputs(
+            model,
+            inputs,
+            targets=targets,
+        )
+
+    kappa_traj = (
+        project_rec_inputs_to_kappa(model, rec_inputs)
+        .detach()
+        .cpu()
+        .numpy()
+    )
+
+    if xlim is None or ylim is None:
+        auto_xlim, auto_ylim = auto_limits_from_trajs(
+            kappa_traj[..., :2],
+            qlo=qlo,
+            qhi=qhi,
+            pad=pad,
+            symmetric=symmetric_auto,
+        )
+        xlim = auto_xlim if xlim is None else xlim
+        ylim = auto_ylim if ylim is None else ylim
+
+    cond_idx = condition_indices_for_task(
+        inputs.detach().cpu(),
+        timing=timing,
+        task=task,
+        condition_names=condition_names,
+    )
+
+    colors = {
+        "AC": "tab:blue",
+        "AD": "tab:orange",
+        "BC": "tab:green",
+        "BD": "tab:purple",
+        "Go": "tab:red",
+        "NoGo": "tab:brown",
+        "DPAOnly": "tab:gray",
+    }
+
+    field_cache = {}
+    all_speeds = []
+
+    for spec in specs:
+        ff_input = make_input(
+            input_size,
+            active_dims=spec["dims"],
+            value=1.0,
+            device=device,
+            dtype=dtype,
+        )
+
+        K1, K2, U, V, speed, params, ff_input_np = make_vector_field_grid(
+            model,
+            ff_input=ff_input,
+            xlim=xlim,
+            ylim=ylim,
+            n_grid=n_grid,
+            include_beta=include_beta_in_field,
+        )
+
+        fixed_points, fixed_residuals = find_all_fixed_points(
+            model,
+            xlim=xlim,
+            ylim=ylim,
+            ff_input=ff_input,
+            n_seeds=n_fp_seeds,
+            residual_tol=1e-8,
+            merge_tol=5e-2,
+        )
+
+        fp_labels, fp_eigvals = classify_fixed_points(
+            model,
+            fixed_points,
+            ff_input=ff_input,
+            eig_tol=1e-5,
+        )
+
+        panel_mask = _canonical_input_mask(
+            effective_x,
+            dims=spec["dims"],
+            threshold=input_threshold,
+            atol_inactive=inactive_atol,
+        )
+
+        field_cache[spec["name"]] = dict(
+            spec=spec,
+            ff_input=ff_input,
+            K1=K1,
+            K2=K2,
+            U=U,
+            V=V,
+            speed=speed,
+            fixed_points=fixed_points,
+            fp_labels=fp_labels,
+            fp_eigvals=fp_eigvals,
+            fixed_residuals=fixed_residuals,
+            panel_mask=panel_mask.detach().cpu().numpy(),
+        )
+
+        all_speeds.append(speed[np.isfinite(speed)].reshape(-1))
+
+    speed_vmax = np.percentile(np.concatenate(all_speeds), speed_percentile)
+
+    n_panels = len(specs)
+    fig, axes = plt.subplots(
+        1,
+        n_panels,
+        figsize=(n_panels * figsize_per_panel, figsize_per_panel),
+        sharex=True,
+        sharey=True,
+    )
+    # FIX: prevent tight/constrained layout from trying to manage a manually
+    # placed colorbar inset axis, which produced the
+    # "Axes that are not compatible with tight_layout" warning.
+    fig.set_layout_engine("none")
+
+    axes = np.atleast_1d(axes).ravel()
+
+    last_hm = None
+
+    for ax, spec in zip(axes, specs):
+        cache = field_cache[spec["name"]]
+
+        K1 = cache["K1"]
+        K2 = cache["K2"]
+        U = cache["U"]
+        V = cache["V"]
+        speed = cache["speed"]
+
+        k1 = K1[0, :]
+        k2 = K2[:, 0]
+
+        last_hm = ax.pcolormesh(
+            K1,
+            K2,
+            speed,
+            shading="auto",
+            cmap="magma",
+            vmax=speed_vmax,
+            rasterized=True,
+            zorder=0,
+        )
+
+        ax.streamplot(
+            k1,
+            k2,
+            U,
+            V,
+            color="white",
+            density=1.15,
+            linewidth=0.7,
+            arrowsize=0.8,
+            zorder=2,
+        )
+
+        fixed_points = cache["fixed_points"]
+        fp_labels = cache["fp_labels"]
+
+        for label, marker in [
+            ("attractor", "o"),
+            ("saddle", "x"),
+            ("repeller", "^"),
+            ("nonhyperbolic", "D"),
+        ]:
+            mask = fp_labels == label
+            if not np.any(mask):
+                continue
+
+            pts = fixed_points[mask]
+
+            if label == "saddle":
+                ax.scatter(
+                    pts[:, 0],
+                    pts[:, 1],
+                    s=55,
+                    marker="x",
+                    c="cyan",
+                    linewidths=1.3,
+                    zorder=10,
+                    label=label,
+                )
+            else:
+                ax.scatter(
+                    pts[:, 0],
+                    pts[:, 1],
+                    s=60,
+                    marker=marker,
+                    facecolors="cyan" if label == "attractor" else "none",
+                    edgecolors="cyan",
+                    linewidths=1.0,
+                    zorder=10,
+                    label=label,
+                )
+
+        panel_mask = cache["panel_mask"]
+
+        for cond in spec["conds"]:
+            if cond not in cond_idx or len(cond_idx[cond]) == 0:
+                continue
+
+            idx = cond_idx[cond].detach().cpu().numpy()
+            cond_mask = panel_mask[idx].mean(axis=0) > 0.5
+            segments = _segments_from_mask(cond_mask, min_len=2)
+
+            if len(segments) == 0:
+                continue
+
+            traj_mean = kappa_traj[idx].mean(axis=0)
+            color = colors.get(cond, "tab:gray")
+
+            for seg_slice in segments:
+                seg = traj_mean[seg_slice, :2]
+                if seg.shape[0] < 2:
+                    continue
+
+                ax.plot(
+                    seg[:, 0],
+                    seg[:, 1],
+                    color=color,
+                    lw=2.5,
+                    alpha=0.95,
+                    zorder=5,
+                    label=cond,
+                )
+
+                add_time_arrows(
+                    ax,
+                    seg,
+                    times=default_arrow_times(seg.shape[0], n_arrows=4, arrow_step=3),
+                    color=color,
+                    arrow_step=3,
+                    mutation_scale=13,
+                    lw=1.5,
+                    alpha=0.95,
+                    zorder=8,
+                )
+
+                ax.scatter(
+                    seg[0, 0],
+                    seg[0, 1],
+                    marker="o",
+                    s=36,
+                    c=color,
+                    edgecolors="white",
+                    linewidths=0.6,
+                    zorder=9,
+                )
+                ax.scatter(
+                    seg[-1, 0],
+                    seg[-1, 1],
+                    marker="X",
+                    s=45,
+                    c=color,
+                    edgecolors="white",
+                    linewidths=0.6,
+                    zorder=9,
+                )
+
+        ax.set_title(spec["name"])
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_xlabel(r"$\kappa_1$")
+
+    axes[0].set_ylabel(r"$\kappa_2$")
+
+    handles, labels = [], []
+    for ax in axes:
+        h, l = ax.get_legend_handles_labels()
+        handles.extend(h)
+        labels.extend(l)
+
+    unique = dict(zip(labels, handles))
+    axes[0].legend(
+        unique.values(),
+        unique.keys(),
+        frameon=False,
+        fontsize=8,
+        loc="upper left",
+        handlelength=1.1,
+    )
+
+    # FIX: manual layout — no tight/constrained layout, no canvas.draw dance.
+    fig.subplots_adjust(left=0.04, right=0.93, top=0.92, bottom=0.12, wspace=0.16)
+
+    # FIX: colorbar via inset_axes anchored to the last panel.
+    cax = inset_axes(
+        axes[-1],
+        width="3.5%",
+        height="100%",
+        loc="lower left",
+        bbox_to_anchor=(1.04, 0.0, 1.0, 1.0),
+        bbox_transform=axes[-1].transAxes,
+        borderpad=0.0,
+    )
+
+    cbar = fig.colorbar(last_hm, cax=cax)
+    if include_beta_in_field:
+        cbar.set_label(r"$\beta\|\Psi(\kappa;x)-\kappa\|$")
+    else:
+        cbar.set_label(r"$\|\Psi(\kappa;x)-\kappa\|$")
+
+    return fig, axes, field_cache
+#+end_src
+
+#+RESULTS:
+
+* Initialization
+
+#+begin_src jupyter-python
+PATH = '../../results/dual/vanilla'
+seed = 0
+device = "cuda:1" if torch.cuda.is_available() else "cpu"
+# device = "cpu"
+print(device)
+#+end_src
+
+#+RESULTS:
+: cuda:1
+
+ #+begin_src jupyter-python
+torch.manual_seed(seed)
+np.random.seed(seed)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(seed)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+N_BATCH = 516
+TAU = 0.2
+DT = 0.02
+alpha = DT / TAU
+
+# 4 input dimensions: for 2 stimuli, 1 Cue, 1 reward
+input_size = 4
+hidden_size = 512
+output_size = 0
+rank = 2
+
+model = LowRankModel(input_size, hidden_size, output_size, rank, alpha, train_inputs=True, device=device)
+# model = EILowRankRNN(input_size, hidden_size, output_size, rank, alpha, fraction_exc=0.8)
+
+model.to(device)
+# model = torch.compile(model)
+
+noise = 0.1 * torch.sqrt(1.0 - torch.exp(torch.tensor(-alpha))**2)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+readout = ("n", 1)
+overlaps = {
+    (("m", 0), ("n", 0)): 0.8,
+    (("m", 1), readout): 0.8,
+
+    # Sample loads readout direction 0
+    (("in", 0), ("n", 0)):  0.8,
+    (("in", 1), ("n", 0)): -0.8,
+
+    # Go/NoGo/Cue/Lick on readout 1
+    # (("in", 2), readout):  0.8,
+    (("in", 3), readout): 0.8,
+}
+
+# overlaps = None
+
+init = LowRankInitializer(
+    overlaps=overlaps,
+    auto_psd=True,             # default; projects to nearest PSD with warning
+    psd_warn_threshold=1e-1,   # warn loudly if correction > 0.1%
+)
+
+Sigma = init.apply(model, seed)
+print(f"min eigval after projection: {torch.linalg.eigvalsh(Sigma).min().item():.3e}")
+print(f"diag (should match var_*): {torch.diag(Sigma).numpy()}")
+#+end_src
+
+#+RESULTS:
+: min eigval after projection: 1.338e-07
+: diag (should match var_*): [1.        1.        1.        1.0000001 0.9999999 0.9999999 1.
+:  1.       ]
+: /home/leon/tmp/ipykernel_1748963/4005516315.py:189: UserWarning: Sigma was not PSD (min eigval = -3.856e-01); projected to nearest PSD (Frobenius rel. change = 1.355e-01). Correction is large — consider reducing overlap magnitudes or increasing the relevant variances.
+:   Sigma = self.build_sigma(model)
+: /home/leon/tmp/ipykernel_1748963/4005516315.py:176: UserWarning: Cholesky failed even after PSD projection (linalg.cholesky: The factorization could not be completed because the input is not positive-definite (the leading minor of order 6 is not positive-definite).); falling back to eigendecomposition.
+:   warnings.warn(
+
+
+#+begin_src jupyter-python
+import numpy as np
+
+# Compare requested vs. realized overlaps
+labels = (['m0','m1','n0', readout[0]+'0'] + [f'in{i}' for i in range(4)])
+
+print(f"{'pair':>12}  {'requested':>10}  {'realized':>10}")
+for (ba, ia), (bb, ib) in init.overlaps.keys():
+    sizes = init._block_sizes(model)
+    offs = init._block_offsets(sizes)
+    i = offs[ba] + ia
+    j = offs[bb] + ib
+    req = init.overlaps[((ba, ia), (bb, ib))]
+    real = Sigma[i, j].item()
+    print(f"{labels[i]:>5}-{labels[j]:<5}  {req:+10.3f}  {real:+10.3f}")
+#+end_src
+
+#+RESULTS:
+:         pair   requested    realized
+:    m0-n0         +0.800      +0.611
+:    m1-n0         +0.800      +0.718
+:   in0-n0         +0.800      +0.611
+:   in1-n0         -0.800      -0.611
+:   in3-n0         +0.800      +0.718
+
+#+begin_src jupyter-python
+
+#+end_src
+
+#+RESULTS:
+
+* 2AFC task
+** 2AFC trial
+
+#+begin_src jupyter-python
+timing = TaskTiming(stim_on=[2.0, 4.0], stim_off=[3.0, 5.0], t_steps=6.0, dt=DT)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+x_time = timing.x_time
+T_STIM_ON = timing.stim_on
+T_STIM_OFF = timing.stim_off
+T_STEPS = timing.t_steps
+N_STEPS = timing.n_steps
+N_STIM_ON = timing.n_stim_on
+N_STIM_OFF = timing.n_stim_off
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+inputs, targets = generate_2AFC_trials(N_BATCH, timing=timing, input_size=input_size, noise=noise)
+print(inputs.shape, targets.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([516, 300, 4]) torch.Size([516, 300, 2])
+
+#+begin_src jupyter-python
+plt.hist(targets[:, -1, -1].reshape(-1), bins='auto')
+plt.xlabel('Targets')
+plt.ylabel('Count')
+plt.xticks([0, 1])
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_21.png]]
+
+#+begin_src jupyter-python
+idx_nogo = torch.argwhere((targets[:, -1, -1] != 1)).reshape(-1)[:32]
+idx_go   = torch.argwhere(targets[:, -1, -1] == 1).reshape(-1)[:32]
+
+print(idx_go.shape, idx_nogo.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([32]) torch.Size([32])
+
+#+begin_src jupyter-python
+fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+if len(idx_nogo) > 0:
+    ax[0].plot(x_time, inputs[idx_nogo, :, 0].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(x_time, inputs[idx_nogo, :, 1].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(x_time, targets[idx_nogo[0],:, -1].cpu().numpy(), 'k', label='Target')
+ax[0].set_title('Nogo trials')
+
+if len(idx_go) > 0:
+    ax[1].plot(x_time, inputs[idx_go, :, 0].mT.cpu().numpy(), alpha=.2)
+    ax[1].plot(x_time, inputs[idx_go, :, 1].mT.cpu().numpy(), alpha=.2)
+
+    ax[1].plot(x_time, targets[idx_go[0],: ,-1].cpu().numpy(), 'k', label='Target')
+ax[1].set_title('Go trials')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Target')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_23.png]]
+
+#+begin_src jupyter-python
+overlaps, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
+overlaps = overlaps.detach().cpu()
+print('inputs', inputs.shape, 'overlaps', overlaps.shape, 'rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: inputs torch.Size([516, 300, 4]) overlaps torch.Size([516, 300, 2]) rates torch.Size([516, 300, 512])
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo,:,-1][0], 'k', label='Target')
+ax[0].plot(x_time, overlaps[..., -1][idx_nogo].T, alpha=.2)
+ax[0].set_title('Nogo trials')
+
+ax[1].plot(x_time, targets[idx_go, :, -1][0], 'k', label='Target')
+ax[1].plot(x_time, overlaps[..., -1][idx_go].T, alpha=.2)
+ax[1].set_title('Go trials')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Readout')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_25.png]]
+
+#+begin_src jupyter-python
+
+#+end_src
+
+#+RESULTS:
+
+** 2AFC Training
+
+#+begin_src jupyter-python
+learning_rate = 0.01
+epochs = 50
+batch_size = 64
+grad_clip_norm = None
+
+criterion = MaskedZeroLoss(criterion=torch.nn.MSELoss(), nonzero_weight=1.0, zero_weight=1.0)
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5, threshold=0.001, min_lr=0.0001)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+train_loader, val_loader = train_val_split(inputs.to(device), targets.to(device), batch_size)
+opt = Optimization(model, train_loader, val_loader, criterion, optimizer, scheduler, grad_clip_norm, num_epochs=epochs)
+
+train_losses, val_losses, learning_rates = opt.fit()
+torch.save(model.state_dict(), '%s/2AFC_%d.pth' % (PATH, seed))
+#+end_src
+
+
+#+begin_src jupyter-python
+plt.plot(train_losses)
+plt.plot(val_losses)
+# plt.plot(learning_rates)
+
+plt.xlabel('epoch')
+plt.ylabel('Loss')
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_29.png]]
+
+#+begin_src jupyter-python
+
+#+end_src
+
+#+RESULTS:
+
+** 2AFC Testing
+
+ #+begin_src jupyter-python
+model_state_dict = torch.load('%s/2AFC_%d.pth' % (PATH, seed))
+model.load_state_dict(model_state_dict)
+model.eval();
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+inputs, targets = generate_2AFC_trials(N_BATCH, timing=timing, input_size=input_size, noise=noise)
+print(inputs.shape, targets.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([516, 300, 4]) torch.Size([516, 300, 2])
+
+#+begin_src jupyter-python
+idx_nogo = torch.argwhere((targets[:, -1, -1] != 1)).reshape(-1)[:32]
+idx_go   = torch.argwhere(targets[:, -1, -1] == 1).reshape(-1)[:32]
+
+print(idx_go.shape, idx_nogo.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([32]) torch.Size([32])
+
+#+begin_src jupyter-python
+fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+if len(idx_nogo) > 0:
+    ax[0].plot(x_time, inputs[idx_nogo, :, 0].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(x_time, inputs[idx_nogo, :, 1].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(x_time, targets[idx_nogo[0],:, -1].cpu().numpy(), 'k', label='Target')
+ax[0].set_title('Nogo trials')
+
+if len(idx_go) > 0:
+    ax[1].plot(x_time, inputs[idx_go, :, 0].mT.cpu().numpy(), alpha=.2)
+    ax[1].plot(x_time, inputs[idx_go, :, 1].mT.cpu().numpy(), alpha=.2)
+
+    ax[1].plot(x_time, targets[idx_go[0],: ,-1].cpu().numpy(), 'k', label='Target')
+ax[1].set_title('Go trials')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Target')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_34.png]]
+
+#+begin_src jupyter-python
+overlaps, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
+overlaps = overlaps.detach().cpu()
+print('inputs', inputs.shape, 'overlaps', overlaps.shape, 'rates', rates.shape)
+#+end_src
+
+#+RESULTS:
+: inputs torch.Size([516, 300, 4]) overlaps torch.Size([516, 300, 2]) rates torch.Size([516, 300, 512])
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo,:,-1][0], 'k', label='Target')
+ax[0].plot(x_time, overlaps[..., -1][idx_nogo].T, alpha=.2)
+ax[0].set_title('Nogo trials')
+
+ax[1].plot(x_time, targets[idx_go, :, -1][0], 'k', label='Target')
+ax[1].plot(x_time, overlaps[..., -1][idx_go].T, alpha=.2)
+ax[1].set_title('Go trials')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Readout')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_36.png]]
+
+
+#+begin_src jupyter-python
+kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)**2
+kappa = kappa.cpu().detach().numpy()
+print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
+#+end_src
+
+#+RESULTS:
+: rec torch.Size([516, 300, 512]) m torch.Size([512, 2]) kappa (516, 300, 2)
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo, :, 0][0], 'k', label='Target')
+ax[0].plot(x_time, overlaps[idx_nogo, :, 0].T, alpha=.2)
+ax[0].set_title('Unpaired trial')
+
+ax[1].plot(x_time, targets[idx_go, :, 0][0], 'k', label='Target')
+ax[1].plot(x_time, overlaps[idx_go, :, 0].T, alpha=.2)
+ax[1].set_title('Paired trial')
+
+ax[2].plot(x_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
+ax[2].plot(x_time, overlaps[idx_nogo, :, 1].T, alpha=.2)
+ax[2].set_title('Unpaired trial')
+
+ax[3].plot(x_time, targets[idx_go,:, -1][0], 'k', label='Target')
+ax[3].plot(x_time, overlaps[idx_go, :, 1].T, alpha=.2)
+ax[3].set_title('Paired trial')
+
+for i in range(4):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('$ \\kappa^{rec}_%d$' % (i//2+1))
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_38.png]]
+
+ #+begin_src jupyter-python
+fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo, :, 0][0], 'k', label='Target')
+ax[0].plot(x_time, kappa[idx_nogo, :, 0].T, alpha=.2)
+ax[0].set_title('NoGo trial')
+
+ax[1].plot(x_time, targets[idx_go, :, 0][0], 'k', label='Target')
+ax[1].plot(x_time, kappa[idx_go, :, 0].T, alpha=.2)
+ax[1].set_title('Go trial')
+
+ax[2].plot(x_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
+ax[2].plot(x_time, kappa[idx_nogo, :, 1].T, alpha=.2)
+ax[2].set_title('NoGo trial')
+
+ax[3].plot(x_time, targets[idx_go, :, -1][0], 'k', label='Target')
+ax[3].plot(x_time, kappa[idx_go, :, 1].T, alpha=.2)
+ax[3].set_title('Go trial')
+
+for i in range(4):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('$ \\kappa_%d$' % (i//2+1))
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_39.png]]
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
+
+ax[0].plot(x_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
+ax[0].plot(x_time, overlaps[..., -1][idx_nogo].T, alpha=.2)
+ax[0].set_title('Nogo trials')
+
+ax[1].plot(x_time, targets[idx_go, :, -1][0], 'k', label='Target')
+ax[1].plot(x_time, overlaps[..., -1][idx_go].T, alpha=.2)
+ax[1].set_title('Go trials')
+
+for i in range(2):
+    for j in range(2):
+        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
+    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
+    ax[i].set_ylim([-1.5, 1.5])
+    ax[i].set_xlabel('Time (s)')
+    ax[i].set_ylabel('Readout')
+    ax[i].legend(fontsize=14)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_40.png]]
+
+#+begin_src jupyter-python
+fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
+
+m_ = model.m.cpu().detach().numpy().T
+n_ = model.n.cpu().detach().numpy().T
+
+for i in range(2):
+    for j in range(2):
+        ax[i+2*j].scatter(m_[j], n_[i])
+        ax[i+2*j].set_xlabel('$m_%d$' % j)
+        ax[i+2*j].set_ylabel('$n_%d$' % i)
+
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_41.png]]
+
+#+begin_src jupyter-python
+# 2AFC
+fig, axes, field_cache = plot_task_flow_fields(
+    model,
+    inputs,
+    xlim=[-5, 5],
+    ylim=[-5, 5],
+    timing=timing,
+    task="2afc",
+    targets=targets,
+)
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[file:./figures/figure_42.png]]
+
+#+begin_src jupyter-python
+
+#+end_src
+
+#+RESULTS:

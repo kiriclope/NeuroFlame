@@ -1,9 +1,9 @@
 :PROPERTIES:
-:GPTEL_MODEL: claude-opus-4-7
-:GPTEL_BACKEND: Anthropic
+:GPTEL_MODEL: deepseek-v4-pro
+:GPTEL_BACKEND: Deepseek
 :GPTEL_SYSTEM: You are a large language model embedded in Emacs, serving as a research assistant to an expert in machine learning and computational neuroscience. You support the full research loop: reading and synthesizing literature, developing ideas, deriving math, designing experiments, implementing and debugging code, analyzing data, and preparing results for communication.  # Core principles  - Be concise and precise; avoid redundancy. Prefer information density   over hedging and restatement. - Think step-by-step before answering. Share the reasoning the user   needs to verify the result; hide the rest. - State assumptions explicitly. If a question is ambiguous or   underspecified, ask one focused clarifying question rather than   guessing. - Calibrate confidence. Distinguish established results from plausible   conjecture; flag uncertainty and cite sources (papers, docs, RFCs)   for non-obvious claims. - Never fabricate. No invented citations, numbers, APIs, datasets, or   experimental results. Use `[CITE: topic]` / `[CHECK: claim]` /   `[TODO: ...]` placeholders when information is missing.  # Research workflow support  ## Literature and synthesis - When summarizing a paper: (1) problem and gap, (2) key idea in one   sentence, (3) method sketch, (4) main results with one quantitative   anchor, (5) limitations, (6) how it relates to the user's context. - When comparing papers: organize by dimension (assumption, method,   data, metric, result), not by paper. Use a table when ≥3 items. - Distinguish what a paper *shows* from what it *claims*.  ## Ideation and critique - When brainstorming: generate 3–5 distinct options spanning the   design space, not variants of one. Note trade-offs. - When critiquing an idea: give the strongest version of the idea   first, then failure modes, then concrete tests that would   discriminate. - Prefer falsifiable predictions over vague intuitions.  ## Math and derivations - Define all symbols on first use; keep notation consistent across a   session. Specify tensor shapes and domains. - Show derivation steps with a short justification per step. Mark   approximations (`≈`), limits, and regimes of validity. - Sanity-check results: units, limiting cases, dimensions, symmetry,   sign. - Use `\[ ... \]` / `$...$` in Org; `align` inside `#+begin_src latex`   for multi-line.  ## Experiment design and analysis - Before running: state hypothesis, independent/dependent variables,   controls, expected effect size, required n, and the analysis plan. - Prefer pre-registered analyses; mark post-hoc analyses as such. - Report effect sizes and uncertainty (CIs, SEM, bootstrap) with   sample size, not just p-values. Name the statistical test and its   assumptions; note multiple-comparison corrections. - In ML: specify splits, seeds, baselines matched for compute/data,   and metric definitions. Distinguish tuning from test performance. - In neuroscience: state the level of abstraction (biophysical, rate,   spiking, normative), the data modality, and the link between model   and measurement. Distinguish "fits" from "predicts held-out".  # Code and computation  - Write clean, idiomatic, minimal code. Prefer standard libraries and   well-maintained packages; note version assumptions. - Comment the *why*, not the *what*. Include type hints in Python and   docstrings for non-trivial functions. - Make examples self-contained and runnable; show expected output   when useful. - For numerical/ML code: seed RNGs, annotate tensor shapes, prefer   vectorized ops, and guard against silent broadcasting bugs. - For data analysis: show the pipeline (load → clean → transform →   model → evaluate → visualize) and state what each step assumes   about the data. - When debugging: ask for the exact error, the minimal reproducer, and   the environment before proposing fixes.  # Output format (Emacs-native)  - Default to Org-mode: headings (`*`, `**`), source blocks   (`#+begin_src ... #+end_src`), LaTeX math, and tables. - Use `jupyter-python` blocks for runnable Python; `emacs-lisp` for   Emacs configuration; `sh`/`bash` for shell (mark destructive   commands). - Use Org-cite (`[cite:@key]`) for references when available. - For file or code edits, return a minimal diff or the specific edited   region rather than the full file, unless asked.  # Interaction modes (state which you are in when relevant)  1. **Explain**: teach a concept at the requested level; give a worked    example and a pointer to a canonical reference. 2. **Summarize**: condense a paper, thread, or notes using the    structure above. 3. **Brainstorm**: generate diverse options with trade-offs. 4. **Critique**: steelman then stress-test; propose discriminating    experiments. 5. **Derive**: produce step-by-step math with sanity checks. 6. **Implement**: write code to spec, with assumptions listed. 7. **Debug**: diagnose from a minimal reproducer; propose the smallest    fix first. 8. **Analyze**: run/describe a statistical or ML analysis with    explicit assumptions and uncertainty.  # Guardrails  - Do not invent citations, authors, years, DOIs, dataset statistics,   benchmark numbers, or API signatures. - Do not soften honest limitations or known failure modes. - If asked to produce claims stronger than evidence supports, push   back once and then comply, marking the passage `[OVERCLAIM?]`. - If a task requires external information you don't have (paper   contents, dataset details, library version), say so and ask.
 :GPTEL_TOOLS:
-:GPTEL_BOUNDS: ((response (7775 15039) (28082 33747) (33836 43064) (97586 104529) (104579 114214) (114215 122384) (122519 137638) (141458 141489)))
+:GPTEL_BOUNDS: ((response (13676 20940) (28005 33669) (33758 70137) (94991 95081) (125810 132753) (132803 142438) (142439 150608) (150743 165862) (169682 169713)))
 :END:
 #+Startup: fold
 #+TITLE: Low Rank Recurrent Neural Networks
@@ -63,6 +63,240 @@ np.random.seed(2)
 
 #+RESULTS:
 
+* Tasks
+** Timing
+
+#+begin_src jupyter-python
+from dataclasses import dataclass
+import numpy as np
+import torch
+
+
+@dataclass(frozen=True)
+class TaskTiming:
+    stim_on: list[float]
+    stim_off: list[float]
+    t_steps: float
+    dt: float
+
+    @property
+    def n_stim_on(self) -> torch.Tensor:
+        return torch.tensor([int(t / self.dt) for t in self.stim_on], dtype=torch.long)
+
+    @property
+    def n_stim_off(self) -> torch.Tensor:
+        return torch.tensor([int(t / self.dt) for t in self.stim_off], dtype=torch.long)
+
+    @property
+    def n_steps(self) -> int:
+        return int(self.t_steps / self.dt)
+
+    @property
+    def x_time(self) -> np.ndarray:
+        return np.linspace(0, self.n_steps * self.dt, self.n_steps)
+#+end_src
+
+#+RESULTS:
+
+** /DPA generator/
+
+#+begin_src jupyter-python
+def generate_dpa_trials(
+    n_trials: int,
+    timing: TaskTiming,
+    input_size: int = 8,
+    rank: int = 2,
+    noise: float = 0.1,
+    baseline_value: float = 1e-3,
+):
+    n_steps = timing.n_steps
+    n_on = timing.n_stim_on
+    n_off = timing.n_stim_off
+
+    inputs = noise * torch.randn(n_trials, n_steps, input_size)
+    targets = torch.zeros(n_trials, n_steps, rank)
+
+    # First cue: A vs B.
+    idx_A = torch.rand(n_trials) > 0.5
+    idx_B = ~idx_A
+
+    # Second cue: C vs D.
+    idx_C = torch.rand(n_trials) > 0.5
+    idx_D = ~idx_C
+
+    # sample input
+    inputs[idx_A, n_on[0]:n_off[0], 0] += 1.0
+    inputs[idx_B, n_on[0]:n_off[0], 1] += 1.0
+
+    # test input
+    inputs[idx_C, n_on[1]:n_off[1], 2] += 1.0
+    inputs[idx_D, n_on[1]:n_off[1], 3] += 1.0
+
+    # Paired: AC or BD.
+    idx_pair = (idx_A & idx_C) | (idx_B & idx_D)
+
+    targets[..., 0] = torch.nan
+    if baseline_value is not None:
+        targets[:, :n_on[0]] = baseline_value
+
+    targets[idx_pair, n_on[1]:, -1] = 1.0
+    targets[~idx_pair, n_on[1]:, -1] = -1.0
+    # targets[:, n_on[1]:n_off[1], -1] = torch.nan
+
+    return inputs, targets
+#+end_src
+
+#+RESULTS:
+
+** /GNG generator/
+
+#+begin_src jupyter-python
+def generate_gng_trials(
+    n_trials: int,
+    timing: TaskTiming,
+    input_size: int = 8,
+    rank: int =2,
+    noise: float = 0.1,
+    baseline_value: float = 1e-3,
+):
+    n_steps = timing.n_steps
+    n_on = timing.n_stim_on
+    n_off = timing.n_stim_off
+
+    inputs = noise * torch.randn(n_trials, n_steps, input_size)
+    targets = torch.zeros(n_trials, n_steps, rank)
+
+    idx_go = torch.rand(n_trials) > 0.5
+    idx_nogo = ~idx_go
+
+    # Channels:
+    # 4 = Go  # 5 = NoGo  # 6 = Cue
+    inputs[idx_go, n_on[0]:n_off[0], 4] += 1.0
+    inputs[idx_nogo, n_on[0]:n_off[0], 5] += 1.0
+    inputs[:, n_on[1]:n_off[1], 6] += 1.0
+
+    targets[..., 0] = torch.nan
+    if baseline_value is not None:
+        targets[:, :n_on[0]] = baseline_value
+
+    targets[idx_go, n_off[1]:, -1] = 1.0
+    targets[idx_nogo, n_off[1]:, -1] = -1.0
+    targets[:, n_on[0]:n_off[1], -1] = torch.nan
+
+    # impose zero readout on AB before test
+    targets[:, :n_on[1], 0] = 0.0
+
+    return inputs, targets
+#+end_src
+
+#+RESULTS:
+
+** /Dual-task generator/
+
+#+begin_src jupyter-python
+def generate_dual_trials(
+    n_trials: int,
+    timing: TaskTiming,
+    input_size: int = 8,
+    rank : int = 2,
+    noise: float = 0.1,
+    baseline_value: float = 1e-3,
+):
+    n_steps = timing.n_steps
+    n_on = timing.n_stim_on
+    n_off = timing.n_stim_off
+
+    s_sample = slice(int(n_on[0]), int(n_off[0]))
+    s_gng    = slice(int(n_on[1]), int(n_off[1]))
+
+    # gng period
+    s_is_gng    = slice(int(n_on[1]), int(n_on[3]))
+
+    s_cue    = slice(int(n_on[2]), int(n_off[2]))
+    # s_rwd    = slice(int(n_off[2]), int(n_off[2] + (n_on[3] - n_off[2]) /2))
+    s_rwd    = slice(int(n_off[2]), int(n_on[3]))
+    s_test   = slice(int(n_on[3]), int(n_off[3]))
+
+    specs = []
+    for sample in ["A", "B"]:
+        for gng in ["none", "go", "nogo"]:
+            for test in ["C", "D"]:
+                specs.append((sample, gng, test))
+
+    n_types = len(specs)
+
+    reps = int(np.ceil(n_trials / n_types))
+    trial_type = torch.arange(n_types).repeat(reps)[:n_trials]
+    trial_type = trial_type[torch.randperm(n_trials)]
+
+    sample_code = torch.tensor(
+        [0 if s == "A" else 1 for s, _, _ in specs],
+        dtype=torch.long,
+    )
+    gng_code = torch.tensor(
+        [0 if g == "none" else 1 if g == "go" else 2 for _, g, _ in specs],
+        dtype=torch.long,
+    )
+    test_code = torch.tensor(
+        [0 if t == "C" else 1 for _, _, t in specs],
+        dtype=torch.long,
+    )
+
+    sample = sample_code[trial_type]
+    gng = gng_code[trial_type]
+    test = test_code[trial_type]
+
+    idx_A = sample == 0
+    idx_B = sample == 1
+    idx_C = test == 0
+    idx_D = test == 1
+
+    idx_none = gng == 0
+    idx_go = gng == 1
+    idx_nogo = gng == 2
+    idx_gng = idx_go | idx_nogo
+
+    inputs = noise * torch.randn(n_trials, n_steps, input_size)
+    targets = torch.zeros(n_trials, n_steps, rank)
+
+    # DPA sample.
+    inputs[idx_A, s_sample, 0] += 1.0
+    inputs[idx_B, s_sample, 1] += 1.0
+
+    # GNG stimulus.
+    inputs[idx_go, s_gng, 4] += 1.0
+    inputs[idx_nogo, s_gng, 5] += 1.0
+
+    # Cue only on GNG trials.
+    inputs[idx_gng, s_cue, 6] += 1.0
+
+    # DPA test.
+    inputs[idx_C, s_test, 2] += 1.0
+    inputs[idx_D, s_test, 3] += 1.0
+
+    targets[..., 0] = torch.nan
+    if baseline_value is not None:
+        targets[:, :s_sample.start] = baseline_value
+
+    # DPA final target.
+    idx_pair = (idx_A & idx_C) | (idx_B & idx_D)
+    targets[idx_pair, s_test.stop:, -1] = 1.0
+    targets[~idx_pair, s_test.stop:, -1] = -1.0
+
+    # GNG cue-period target.
+    targets[idx_go, s_rwd, -1] = 1.0
+    targets[idx_nogo, s_rwd, -1] = -1.0
+
+    condition_names = np.array([
+        f"{s}_{g}_{t}" if g != "none" else f"{s}_{t}"
+        for s, g, t in specs
+    ])[trial_type.numpy()]
+
+    return inputs, targets, trial_type, condition_names
+#+end_src
+
+#+RESULTS:
+
 * Training Utils
 
 #+begin_src jupyter-python
@@ -70,6 +304,7 @@ import torch
 from torch.utils.data import TensorDataset, DataLoader, random_split
 
 def train_val_split(X, y, batch_size=32, frac=0.8):
+
     # 1. Wrap tensors into a dataset
     dataset = TensorDataset(X.float(), y.float())
 
@@ -304,8 +539,6 @@ class MaskedZeroLoss(nn.Module):
       - baseline:  y == baseline_value  -> target 0
       - zero:      |y| <= zero_tol      -> target 0
       - nonzero:   |y|  > zero_tol      -> target y
-
-    FIX vs. previous version:
       - Loss is applied to all the channels (recurrent latents and readout).
       - Baseline term is summed across channels, so the
         objective magnitude does depend on output dimensionality.
@@ -338,259 +571,32 @@ class MaskedZeroLoss(nn.Module):
         return criterion(pred[mask], target[mask])
 
     def forward(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        # def channel_loss(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """
         y_pred: (B, T, C)  -- C output channels
-        y:      (B, T)     -- scalar target per time step (NaN = ignore)
+        y:      (B, T, C)     -- scalar target per time step and channel (NaN = ignore)
         """
-        pred = y_pred[..., self.task_channel]  # (B, T)
 
-        finite = torch.isfinite(pred) & torch.isfinite(y)
+        finite = torch.isfinite(y_pred) & torch.isfinite(y)
         bl_mask = finite & (y == self.baseline_value)
         nonzero_mask = finite & (~bl_mask) & (y.abs() >  self.zero_tol)
-        zero_mask    = finite & (~bl_mask) & (y.abs() <= self.zero_tol)
+        zero_mask = finite & (~bl_mask) & (y.abs() <= self.zero_tol)
 
         zeros = torch.zeros_like(y)
 
-        loss_bl = 0.0
-        for i in range(y_pred.shape[-1]):
-            loss_bl = loss_bl + self._masked_mse(y_pred[..., i], zeros, bl_mask,      self.criterion) / 3.0
+        loss_bl = self._masked_mse(y_pred, zeros, bl_mask, self.criterion)
+        loss_zero = self._masked_mse(y_pred, zeros, zero_mask, self.criterion)
+        loss_nonzero = self._masked_mse(y_pred, y, nonzero_mask, self.criterion)
 
-        loss_zero    = self._masked_mse(pred, zeros, zero_mask,    self.criterion)
-        loss_nonzero = self._masked_mse(pred, y,     nonzero_mask, self.criterion)
+        return self.baseline_weight * loss_bl + self.zero_weight   * loss_zero + self.nonzero_weight * loss_nonzero
 
-        return (
-            self.baseline_weight * loss_bl
-            + self.zero_weight   * loss_zero
-            + self.nonzero_weight * loss_nonzero
-        )
-#+end_src
+    # def forward(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 
-#+RESULTS:
+    #     loss = 0.0
+    #     for i in range(1, y.shape[-1]):
+    #         loss = loss + self.channel_loss(y_pred[..., i], y[..., i])
 
-* Tasks
-** Timing
-
-#+begin_src jupyter-python
-from dataclasses import dataclass
-import numpy as np
-import torch
-
-
-@dataclass(frozen=True)
-class TaskTiming:
-    stim_on: list[float]
-    stim_off: list[float]
-    t_steps: float
-    dt: float
-
-    @property
-    def n_stim_on(self) -> torch.Tensor:
-        return torch.tensor([int(t / self.dt) for t in self.stim_on], dtype=torch.long)
-
-    @property
-    def n_stim_off(self) -> torch.Tensor:
-        return torch.tensor([int(t / self.dt) for t in self.stim_off], dtype=torch.long)
-
-    @property
-    def n_steps(self) -> int:
-        return int(self.t_steps / self.dt)
-
-    @property
-    def x_time(self) -> np.ndarray:
-        return np.linspace(0, self.n_steps * self.dt, self.n_steps)
-#+end_src
-
-#+RESULTS:
-
-** /DPA generator/
-
-#+begin_src jupyter-python
-def generate_dpa_trials(
-    n_trials: int,
-    timing: TaskTiming,
-    input_size: int = 8,
-    noise: float = 0.1,
-    baseline_value: float = 1e-3,
-):
-    n_steps = timing.n_steps
-    n_on = timing.n_stim_on
-    n_off = timing.n_stim_off
-
-    inputs = noise * torch.randn(n_trials, n_steps, input_size)
-    targets = torch.zeros(n_trials, n_steps)
-
-    # First cue: A vs B.
-    idx_A = torch.rand(n_trials) > 0.5
-    idx_B = ~idx_A
-
-    # Second cue: C vs D.
-    idx_C = torch.rand(n_trials) > 0.5
-    idx_D = ~idx_C
-
-    # sample input
-    inputs[idx_A, n_on[0]:n_off[0], 0] += 1.0
-    inputs[idx_B, n_on[0]:n_off[0], 1] += 1.0
-
-    # test input
-    inputs[idx_C, n_on[1]:n_off[1], 2] += 1.0
-    inputs[idx_D, n_on[1]:n_off[1], 3] += 1.0
-
-    # Paired: AC or BD.
-    idx_pair = (idx_A & idx_C) | (idx_B & idx_D)
-
-    if baseline_value is not None:
-        targets[:, :n_on[0]] = baseline_value
-
-    targets[idx_pair, n_on[1]:] = 1.0
-    targets[~idx_pair, n_on[1]:] = -1.0
-    # targets[:, n_on[1]:n_off[1]] = torch.nan
-
-    return inputs, targets
-#+end_src
-
-#+RESULTS:
-
-** /GNG generator/
-
-#+begin_src jupyter-python
-def generate_gng_trials(
-    n_trials: int,
-    timing: TaskTiming,
-    input_size: int = 8,
-    noise: float = 0.1,
-    baseline_value: float = 1e-3,
-):
-    n_steps = timing.n_steps
-    n_on = timing.n_stim_on
-    n_off = timing.n_stim_off
-
-    inputs = noise * torch.randn(n_trials, n_steps, input_size)
-    targets = torch.zeros(n_trials, n_steps)
-
-    idx_go = torch.rand(n_trials) > 0.5
-    idx_nogo = ~idx_go
-
-    # Channels:
-    # 4 = Go
-    # 5 = NoGo
-    # 6 = Cue
-    inputs[idx_go, n_on[0]:n_off[0], 4] += 1.0
-    inputs[idx_nogo, n_on[0]:n_off[0], 5] += 1.0
-    inputs[:, n_on[1]:n_off[1], 6] += 1.0
-
-    if baseline_value is not None:
-        targets[:, :n_on[0]] = baseline_value
-
-    targets[idx_go, n_off[1]:] = 1.0
-    targets[idx_nogo, n_off[1]:] = -1.0
-    targets[:, n_on[0]:n_off[1]] = torch.nan
-
-    return inputs, targets
-#+end_src
-
-#+RESULTS:
-
-** /Dual-task generator/
-
-#+begin_src jupyter-python
-def generate_dual_trials(
-    n_trials: int,
-    timing: TaskTiming,
-    input_size: int = 8,
-    noise: float = 0.1,
-    baseline_value: float = 1e-3,
-):
-    n_steps = timing.n_steps
-    n_on = timing.n_stim_on
-    n_off = timing.n_stim_off
-
-    s_sample = slice(int(n_on[0]), int(n_off[0]))
-    s_gng    = slice(int(n_on[1]), int(n_off[1]))
-
-    # gng period
-    s_is_gng    = slice(int(n_on[1]), int(n_on[3]))
-
-    s_cue    = slice(int(n_on[2]), int(n_off[2]))
-    # s_rwd    = slice(int(n_off[2]), int(n_off[2] + (n_on[3] - n_off[2]) /2))
-    s_rwd    = slice(int(n_off[2]), int(n_on[3]))
-    s_test   = slice(int(n_on[3]), int(n_off[3]))
-
-    specs = []
-    for sample in ["A", "B"]:
-        for gng in ["none", "go", "nogo"]:
-            for test in ["C", "D"]:
-                specs.append((sample, gng, test))
-
-    n_types = len(specs)
-
-    reps = int(np.ceil(n_trials / n_types))
-    trial_type = torch.arange(n_types).repeat(reps)[:n_trials]
-    trial_type = trial_type[torch.randperm(n_trials)]
-
-    sample_code = torch.tensor(
-        [0 if s == "A" else 1 for s, _, _ in specs],
-        dtype=torch.long,
-    )
-    gng_code = torch.tensor(
-        [0 if g == "none" else 1 if g == "go" else 2 for _, g, _ in specs],
-        dtype=torch.long,
-    )
-    test_code = torch.tensor(
-        [0 if t == "C" else 1 for _, _, t in specs],
-        dtype=torch.long,
-    )
-
-    sample = sample_code[trial_type]
-    gng = gng_code[trial_type]
-    test = test_code[trial_type]
-
-    idx_A = sample == 0
-    idx_B = sample == 1
-    idx_C = test == 0
-    idx_D = test == 1
-
-    idx_none = gng == 0
-    idx_go = gng == 1
-    idx_nogo = gng == 2
-    idx_gng = idx_go | idx_nogo
-
-    inputs = noise * torch.randn(n_trials, n_steps, input_size)
-    targets = torch.zeros(n_trials, n_steps)
-
-    if baseline_value is not None:
-        targets[:, :s_sample.start] = baseline_value
-
-    # DPA sample.
-    inputs[idx_A, s_sample, 0] += 1.0
-    inputs[idx_B, s_sample, 1] += 1.0
-
-    # GNG stimulus.
-    inputs[idx_go, s_gng, 4] += 1.0
-    inputs[idx_nogo, s_gng, 5] += 1.0
-
-    # Cue only on GNG trials.
-    inputs[idx_gng, s_cue, 6] += 1.0
-
-    # DPA test.
-    inputs[idx_C, s_test, 2] += 1.0
-    inputs[idx_D, s_test, 3] += 1.0
-
-    # DPA final target.
-    idx_pair = (idx_A & idx_C) | (idx_B & idx_D)
-    targets[idx_pair, s_test.stop:] = 1.0
-    targets[~idx_pair, s_test.stop:] = -1.0
-
-    # GNG cue-period target.
-    targets[idx_go, s_rwd] = 1.0
-    targets[idx_nogo, s_rwd] = -1.0
-    targets[idx_gng, s_is_gng] = torch.nan
-
-    condition_names = np.array([
-        f"{s}_{g}_{t}" if g != "none" else f"{s}_{t}"
-        for s, g, t in specs
-    ])[trial_type.numpy()]
-
-    return inputs, targets, trial_type, condition_names
+    #     return loss
 #+end_src
 
 #+RESULTS:
@@ -619,160 +625,16 @@ y_t = \sigma(W_{ho} r_t + b_o)
 
 #+begin_src jupyter-python
 class LowRankModel(nn.Module):
-    def __init__(
-        self,
-        input_size,
-        hidden_size,
-        output_size,
-        rank=1,
-        gain=1.0,
-        alpha=0.01,
-        train_inputs=True,
-        train_outputs=True,
-        warmup_steps=500,
-        reward_channel=-1,
-        reward_threshold=0.5,
-        device="cpu",
-    ):
-        super().__init__()
-
-        self.device = torch.device(device)
-        self.warmup_steps = warmup_steps
-
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-
-        self.rank = rank
-        self.gain = gain
-
-        self.reward_channel = reward_channel
-        self.reward_threshold = reward_threshold
-
-        # --- Input layer -------------------------------------------------
-        self.wi = None
-        if input_size > 0:
-            self.Ai = 1.0
-            self.wi = nn.Linear(input_size, hidden_size, device=self.device)
-
-            # with torch.no_grad():
-            #     nn.init.normal_(self.wi.weight, mean=0.0, std=1.0)
-            #     nn.init.zeros_(self.wi.bias)
-
-            if not train_inputs:
-                self.Ai = nn.Parameter(torch.randn(1, device=self.device))
-                self.wi.weight.requires_grad_(False)
-                self.wi.bias.requires_grad_(False)
-
-        # --- Low-rank recurrent layer -----------------------------------
-        self.m = nn.Parameter(torch.randn(hidden_size, rank, device=self.device))
-        self.n = nn.Parameter(torch.randn(hidden_size, rank, device=self.device))
-
-        # with torch.no_grad():
-        #     nn.init.normal_(self.m, mean=0.0, std=1.0)
-        #     nn.init.normal_(self.n, mean=0.0, std=1.0)
-
-        # --- Output layer ------------------------------------------------
-        self.wo = None
-        if output_size > 0:
-            self.Ao = 1.0
-            self.wo = nn.Linear(hidden_size, output_size, device=self.device)
-
-            # with torch.no_grad():
-            #     nn.init.normal_(self.wo.weight, mean=0.0, std=1.0)
-            #     nn.init.zeros_(self.wo.bias)
-
-            if not train_outputs:
-                self.Ao = nn.Parameter(torch.randn(1, device=self.device))
-                self.wo.weight.requires_grad_(False)
-                self.wo.bias.requires_grad_(False)
-
-        self.nonlinearity = torch.tanh
-
-        self.register_buffer("alpha", torch.tensor(float(alpha)))
-        self.register_buffer("exp_alpha", torch.exp(-torch.tensor(float(alpha))))
-
-    def get_readout(self, rates, rec_inputs):
-        rec = rates @ self.n / self.hidden_size
-        if self.wo is not None:
-            ext = self.Ao * self.wo(rates)
-            return torch.cat((rec, ext), dim=-1)
-        return rec
-
-    def update_dynamics(self, ff_inputs, rec_inputs, rates):
-        input_drive = self.Ai * self.wi(ff_inputs) if self.wi is not None else 0.0
-        hidden = (rates @ self.n) @ self.m.T / self.hidden_size
-        rec_inputs = self.exp_alpha * rec_inputs + (1.0 - self.exp_alpha) * hidden
-        rates = self.nonlinearity(input_drive + rec_inputs)
-        return rates, rec_inputs
-
-    def forward(self, ff_inputs, targets=None, ret_rates=False):
-        batch_size, T = ff_inputs.shape[0], ff_inputs.shape[1]
-        hidden_size = self.m.shape[0]
-
-        rec_inputs = 0.1 * torch.randn(batch_size, hidden_size, device=self.device)
-        rates = self.nonlinearity(self.gain * rec_inputs)
-
-        # Warmup with zero input.
-        zero_inputs = torch.zeros(batch_size, max(self.input_size, 0), device=self.device)
-        with torch.no_grad():
-            for _ in range(self.warmup_steps):
-                rates, rec_inputs = self.update_dynamics(zero_inputs, rec_inputs, rates)
-        rates = rates.detach()
-        rec_inputs = rec_inputs.detach()
-
-        readout_list = []
-        rates_list = [] if ret_rates else None
-        inputs_list = [] if ret_rates else None
-
-        rwd_next = torch.zeros(batch_size, device=self.device, dtype=ff_inputs.dtype)
-
-        for step in range(T):
-            x_t = ff_inputs[:, step]
-
-            if targets is not None and self.reward_channel is not None:
-                x_t = x_t.clone()
-                x_t[:, self.reward_channel] = x_t[:, self.reward_channel] + rwd_next
-
-            rates, rec_inputs = self.update_dynamics(x_t, rec_inputs, rates)
-            readout = self.get_readout(rates, rec_inputs)
-
-            readout_list.append(readout)
-
-            if ret_rates:
-                rates_list.append(rates)
-                inputs_list.append(rec_inputs)
-
-            if targets is not None:
-                rwd_mask = (targets[:, step] == 1) & (readout[..., -1] > self.reward_threshold)
-                rwd_next = rwd_mask.to(dtype=ff_inputs.dtype)
-            else:
-                rwd_next = torch.zeros_like(rwd_next)
-
-        readout_list = torch.stack(readout_list, dim=1)
-
-        if ret_rates:
-            return readout_list, torch.stack(rates_list, dim=1), torch.stack(inputs_list, dim=1)
-        return readout_list
-#+end_src
-
-#+RESULTS:
-
-#+begin_src jupyter-python
-class LowRankModel(nn.Module):
     """
     Low-rank RNN with optional reward-feedback input channel.
 
-    FIX: reward feedback is now teacher-forced during training and
-    model-driven at evaluation.
+    reward feedback is now teacher-forced during training
 
         training (targets is not None):
             rwd_next[b] = 1  if  target[b, t] == +1   else 0
         eval (targets is None):
-            rwd_next[b] = 1  if  readout[b, t, task_channel] > thr else 0
+            rwd_next[b] = 0
 
-    This decouples early-training dynamics from an untrained readout,
-    which otherwise injects ~50% random reward pulses and prevents
-    convergence of the external-readout variant.
     """
 
     def __init__(
@@ -788,8 +650,8 @@ class LowRankModel(nn.Module):
         warmup_steps=500,
         reward_channel=-1,
         reward_threshold=0.5,
-        reward_target_value=1.0,        # FIX: which target value means "reward"
-        task_channel=-1,                # FIX: which readout drives eval-time reward
+        reward_target_value=1.0,
+        task_channel=-1,
         device="cpu",
     ):
         super().__init__()
@@ -810,6 +672,10 @@ class LowRankModel(nn.Module):
         if input_size > 0:
             self.Ai = 1.0
             self.wi = nn.Linear(input_size, hidden_size, device=self.device)
+            with torch.no_grad():
+                nn.init.normal_(self.wi.weight, mean=0.0, std=1.0 / hidden_size**0.5)
+                nn.init.zeros_(self.wi.bias)
+
             if not train_inputs:
                 self.Ai = nn.Parameter(torch.randn(1, device=self.device))
                 self.wi.weight.requires_grad_(False)
@@ -824,10 +690,10 @@ class LowRankModel(nn.Module):
         if output_size > 0:
             self.Ao = 1.0
             self.wo = nn.Linear(hidden_size, output_size, device=self.device)
-            # FIX: small init so untrained readout doesn't dominate early loss
             with torch.no_grad():
                 nn.init.normal_(self.wo.weight, mean=0.0, std=1.0 / hidden_size**0.5)
                 nn.init.zeros_(self.wo.bias)
+
             if not train_outputs:
                 self.Ao = nn.Parameter(torch.randn(1, device=self.device))
                 self.wo.weight.requires_grad_(False)
@@ -848,7 +714,7 @@ class LowRankModel(nn.Module):
         input_drive = self.Ai * self.wi(ff_inputs) if self.wi is not None else 0.0
         hidden = (rates @ self.n) @ self.m.T / self.hidden_size
         rec_inputs = self.exp_alpha * rec_inputs + (1.0 - self.exp_alpha) * hidden
-        rates = self.nonlinearity(input_drive + rec_inputs)
+        rates = self.nonlinearity(self.gain * ( input_drive + rec_inputs))
         return rates, rec_inputs
 
     def _reward_signal(self, target_t, readout_t):
@@ -901,8 +767,7 @@ class LowRankModel(nn.Module):
                 rates_list.append(rates)
                 inputs_list.append(rec_inputs)
 
-            # FIX: build next-step reward from teacher signal during training
-            target_t = targets[:, step] if targets is not None else None
+            target_t = targets[:, step, self.reward_channel] if targets is not None else None
             rwd_next = self._reward_signal(target_t, readout)
 
         readout_list = torch.stack(readout_list, dim=1)
@@ -1163,6 +1028,479 @@ class LowRankInitializer:
 
 #+RESULTS:
 
+** Provide a RNN class with gaussian mixture populations as in Dubreuil et al.
+
+You’re right: there’s no need for a special model class—the same =LowRankModel= can be used; you only need an initializer that samples =m= and =n= from a Gaussian mixture. Below is a drop‑in replacement for =LowRankInitializer= that does exactly that.
+
+#+begin_src jupyter-python
+import torch
+import torch.nn as nn
+from typing import Optional, List
+
+class MixtureLowRankInitializer:
+    """
+    Initialize a LowRankModel's m and n loadings from a Gaussian mixture
+    with K components, independently for each neuron.
+
+    Neuron i is assigned to population k ~ Categorical(pop_probs).
+    Then (m_i, n_i) ~ N(mu_k, Sigma_k) where mu_k, Sigma_k are
+    provided per population.
+    """
+
+    def __init__(
+        self,
+        n_populations: int = 1,
+        pop_means: Optional[List[torch.Tensor]] = None,
+        pop_covs: Optional[List[torch.Tensor]] = None,
+        pop_probs: Optional[torch.Tensor] = None,
+        jitter: float = 1e-6,
+        zero_biases: bool = True,
+        # Optional: input/output weight handling if desired
+        input_init: Optional[dict] = None,   # e.g. {"var": 1.0}
+        output_init: Optional[dict] = None,  # e.g. {"var": 1.0}
+    ):
+        self.n_populations = n_populations
+        self.jitter = jitter
+        self.zero_biases = zero_biases
+        self.input_init = input_init or {}
+        self.output_init = output_init or {}
+
+        # Validate / set defaults for mixture parameters
+        if pop_means is None:
+            pop_means = [torch.zeros(1) for _ in range(n_populations)]  # dummy, will be replaced
+        if pop_covs is None:
+            pop_covs = [torch.eye(pop_means[0].numel()) for _ in range(n_populations)]
+        if pop_probs is None:
+            pop_probs = torch.ones(n_populations) / n_populations
+
+        assert len(pop_means) == n_populations
+        assert len(pop_covs) == n_populations
+        self.p_means = [m.flatten() for m in pop_means]
+        self.p_covs = [c for c in pop_covs]  # assume 2D square
+        self.p_probs = pop_probs.float()
+        # dimensionality of concatenated (m, n)
+        self.loading_dim = self.p_means[0].numel()
+
+    @torch.no_grad()
+    def apply(self, model: LowRankModel, seed: Optional[int] = None) -> None:
+        N = model.hidden_size
+        R = model.rank
+        device = model.device
+
+        if seed is not None:
+            gen = torch.Generator(device=device)
+            gen.manual_seed(seed)
+        else:
+            gen = None
+
+        # 1. Assign populations
+        pop_ids = torch.multinomial(
+            self.p_probs, N, replacement=True, generator=gen
+        ).to(device)   # (N,)
+
+        # 2. Sample from each component
+        samples = torch.zeros(N, self.loading_dim, device=device)
+        for k in range(self.n_populations):
+            idx = (pop_ids == k)
+            n_k = idx.sum().item()
+            if n_k == 0:
+                continue
+            mu_k = self.p_means[k].to(device)
+            cov_k = self.p_covs[k].to(device)
+            # Cholesky with jitter
+            L = torch.linalg.cholesky(cov_k + self.jitter * torch.eye(cov_k.shape[0], device=device))
+            z = torch.randn(n_k, self.loading_dim, device=device, generator=gen)
+            samples[idx] = mu_k + (z @ L.T)
+
+        # Split into m and n
+        assert samples.shape[1] == 2 * R, (
+            f"Loading dimension {samples.shape[1]} != 2*rank {2*R}"
+        )
+        model.m.copy_(samples[:, :R])
+        model.n.copy_(samples[:, R:])
+
+        # 3. Optional input/output weights (default: standard normal)
+        if model.wi is not None:
+            wi_var = self.input_init.get("var", 1.0 / model.hidden_size**0.5)
+            nn.init.normal_(model.wi.weight, mean=0.0, std=wi_var)
+            if self.zero_biases:
+                nn.init.zeros_(model.wi.bias)
+        if model.wi is not None and "mean" in self.input_init:
+            model.wi.weight.add_(self.input_init["mean"])
+
+        if model.wo is not None:
+            wo_var = self.output_init.get("var", 1.0 / model.hidden_size**0.5)
+            nn.init.normal_(model.wo.weight, mean=0.0, std=wo_var)
+            if self.zero_biases:
+                nn.init.zeros_(model.wo.bias)
+#+end_src
+
+/Usage example (two populations, opposite encoding)/
+
+#+begin_src jupyter-python
+# Model
+model = LowRankModel(
+    input_size=8, hidden_size=200, output_size=3, rank=2,
+    alpha=0.05, reward_channel=None, task_channel=-1,
+)
+
+# Mixture specification
+init = MixtureLowRankInitializer(
+    n_populations=2,
+    pop_means=[torch.tensor([1.0, 0.0, 0.0, 0.0]),   # (m1,m2, n1,n2)
+               torch.tensor([-1.0, 0.0, 0.0, 0.0])],
+    pop_covs=[torch.eye(4)*0.1] * 2,
+    pop_probs=[0.5, 0.5],
+)
+init.apply(model)
+
+# Now train as usual
+# ...
+#+end_src
+
+This replaces the =MixtureLowRankRNN= class entirely—the =LowRankModel= is all you need, and the mixture structure is imprinted at initialization time. During training, =m= and =n= are free to evolve; if you want to keep the mixture structure frozen, you can simply not pass =m= and =n= as trainable parameters (but that would limit learning). The approach above follows Dubreuil et al.’s philosophy: start from a structured prior, then fine‑tune.
+
+** Provide a RNN class that has one Excitatory and one Inhibitory population that respect dales law
+
+#+begin_reasoning
+We need to provide a RNN class that respects Dale's law: one excitatory population with non-negative outgoing weights, one inhibitory population with non-positive outgoing weights, both can receive both signs of inputs. The existing `LowRankModel` doesn't constrain weight signs; we need a new model that enforces Dale's law. The user likely wants to build on the existing low-rank structure but with E/I separation. We can design a model where the recurrent weight matrix is low-rank but constructed from separate E and I populations, ensuring sign constraints. Or we can use existing `LowRankModel` with appropriate parameterization: split neurons into E and I groups; the low-rank matrix m and n could have sign constraints: e.g., m for excitatory neurons has non-negative rows, inhibitory non-positive rows? But m and n are multiplied as m n.T, so the effective sign of outgoing weights from neuron i to j is determined by the signs of m_i and n_j. Dale's law means that a neuron's outgoing connections are all of the same sign. So we can enforce that for neuron i, the vector m_i (its recurrent output weights) must be either all non-negative (if excitatory) or all non-positive (if inhibitory). Since m is (hidden_size x rank), each row corresponds to a neuron. So we can define a mask: E_mask (bool), I_mask (bool). Then after each optimization step, we can clamp m to be non-negative for E rows, non-positive for I rows. This can be done via a post-hook or by using a parameterization with ReLU/negated ReLU? E.g., store raw parameters m_raw, and define m = m_raw * sign_mask. However, signs can't change if we just clamp; we can also allow plasticity of sign by using parameterization like m = softplus(raw) for E, and m = -softplus(raw) for I. So we can modify `LowRankModel` to incorporate E/I structure.
+
+Alternatively, we could provide a separate class `EILowRankModel` that inherits from LowRankModel and overrides the initialization and forward to enforce sign constraints. Simpler: give a code snippet that wraps the model's `m` parameter with a sign mask and applies a post-optimization clamping function, and add to the training loop (or use `register_post_accumulate_grad_hook`). We'll present a clean implementation.
+
+The user asked: "Provide a RNN class that has one Excitatory and one Inhibitory population that respect dales law". So we'll write a new class `EILowRankRNN` that builds on `LowRankModel` but enforces E/I separation and Dale's law.
+
+We'll output: a subclass that:
+
+- Splits neurons into E and I populations (e.g., half each).
+- Parameterizes m using raw parameters m_E_raw for E neurons, m_I_raw for I neurons, and defines m_E = softplus(m_E_raw), m_I = -softplus(m_I_raw) to ensure non-neg/pos.
+- Similarly for n? Dale's law governs outgoing connections, which are from neuron i to j via m_i * n_j^T? Actually the recurrent term is (r @ n) @ m.T. So output weights from neuron i (its impact on h) are given by row i of m? Let's revisit dynamics: h_t = (1-alpha)h_{t-1} + alpha * (r_{t-1} @ n) @ m.T / N. So the recurrent input to neuron j at time t is alpha * sum_i r_i (n_i^T m_j) / N. So the effective weight from presynaptic neuron i to postsynaptic neuron j is proportional to (n_i^T m_j), which is inner product of two vectors. To enforce Dale's law on presynaptic neuron i: for a given i, the vector of its outgoing weights to all j is proportional to n_i (since m_j changes). Wait: (n_i^T m_j) depends on both i and j. If we want all outgoing connections from neuron i to have the same sign, that would require n_i to be all non-negative or all non-positive (since m_j can be arbitrary). Actually outgoing sign from i is determined by n_i (presynaptic) because it appears as factor multiplying m_j? The term in h_j is sum_i r_i (n_i^T m_j) = m_j^T (sum_i r_i n_i). So the influence of neuron i on the network is through the vector n_i, which is added to a cumulative 'input' to all postsynaptic neurons after being scaled by r_i. So the sign of n_i determines the sign of its contribution to the downstream neurons. If n_i is all non-negative, then neuron i's firing adds a non-negative drive to the input of all postsynaptic neurons (excitatory effect). If n_i is all non-positive, then it's inhibitory. So Dale's law can be enforced on n_i: excitatory neurons have n_i >= 0; inhibitory have n_i <= 0. The rows of m (postsynaptic) can have any sign because they scale how the aggregated input (via n) is mapped to h_j; they don't determine the sign of a single neuron's output. So we enforce Dale's law via non-negativity / non-positivity of n rows.
+
+Thus: we split neurons into E/I groups, and for E neurons, n[E,:] >= 0; for I, n[I,:] <= 0. m can be unrestricted, or could also be constrained if we want to model something else.
+
+We'll implement this by parameterizing n raw, and during forward (or via a hook) we compute n = mask_E * softplus(n_raw) + mask_I * (-softplus(n_raw)). Smooth so gradients flow. We can also allow separate ranks for E and I, but let's keep rank same.
+
+Now, the current `LowRankModel` has m and n as parameters. We'll override __init__ to set up masks, and override update_dynamics to use constrained n. We'll also need to modify initialization to set n accordingly. Alternatively, we could simply modify the existing `LowRankModel` to accept an optional E/I split and use a forward hook to enforce constraints on n. But it's cleaner to provide a subclass.
+
+We'll write:
+
+```python
+class EILowRankRNN(LowRankModel):
+    def __init__(self, ..., fraction_exc=0.8):
+        super().__init__(...)
+        self.fraction_exc = fraction_exc
+        self.hidden_size = hidden_size
+        self.n_exc = int(hidden_size * fraction_exc)
+        self.n_inh = hidden_size - self.n_exc
+        # create masks for E and I rows of n
+        self.register_buffer("exc_mask", torch.zeros(hidden_size, dtype=torch.bool))
+        self.exc_mask[:self.n_exc] = True
+        # n_raw will be stored as the parameter; we will override n property
+        # Actually, we'll override the forward to use n_constrained computed on the fly.
+        # We'll keep n as the raw parameter, but rename it n_raw.
+        # Simpler: we can use nn.Parameter for n_raw and create n via a method.
+        # Let's just override update_dynamics to compute n_constrained from self.n (raw) using softplus.
+        self.n_raw = nn.Parameter(torch.randn(hidden_size, rank, device=device))
+        # And register self.n as a property? But self.n is already a Parameter in super; we could replace it.
+        # Easiest: after super().__init__, replace self.n with n_raw and define a property n that applies mask.
+```
+
+But nn.Parameter isn't a property easily. We can use `nn.Module` to manage parameters; we can have `self.n_raw` and then define `self.n = property(...)`. But that may cause issues with state_dict. Better: store n_raw and then use a forward_pre_hook or just compute n_constrained in forward. We'll have both `n_raw` (Parameter) and `n` (no grad, computed). In forward we compute `n_constr = torch.where(exc_mask.unsqueeze(1), F.softplus(self.n_raw), -F.softplus(self.n_raw))`. Then use n_constr in the dynamics.
+
+We'll modify `update_dynamics` accordingly. We'll also need to ensure that when saving/loading, only `n_raw` is saved, and `n` (if still a buffer) is not saved. We'll rename `self.n` to `self.n_raw` and adjust all references. So we override __init__ and update_dynamics.
+
+Let's produce a clean class with docstring. Also ensure backward compat: we'll make fraction_exc=0.8.
+
+We'll also add a method to set masks randomly (currently it's first n_exc neurons; we could also assign randomly). We'll keep it simple: first n_exc neurons are E, rest I.
+
+Now, produce the final answer with the code and explanation.
+#+end_reasoning
+
+
+The existing =LowRankModel= already implements the low‑rank dynamics, but without any sign constraint on the recurrent coupling vectors.  To obtain a network that respects Dale’s law (one excitatory and one inhibitory population) while keeping the low‑rank structure, we can enforce the following:
+
+- Each neuron belongs to either the excitatory (E) or inhibitory (I) population (e.g. the first 80% are E, the rest I).
+- The presynaptic “output” vector *n_i* (which determines the influence of neuron =i= onto all postsynaptic neurons) must be element‑wise non‑negative for E neurons and non‑positive for I neurons.
+- The postsynaptic “input” vectors *m_j* can remain unconstrained (since they scale the aggregated synaptic current, not the sign of individual connections).
+
+Below is a drop‑in subclass =EILowRankRNN= that re‑parameterises =n= with smooth sign‑preserving functions (=softplus= / =-softplus=), ensuring that Dale’s law is satisfied while keeping the gradients well‑behaved.  The mask that assigns neurons to E/I is fixed at construction.
+
+#+begin_src jupyter-python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class EILowRankRNN(LowRankModel):
+    """
+    Low-rank RNN with excitatory/inhibitory separation obeying Dale's law.
+
+    The first `n_exc` neurons are excitatory (n >= 0), the rest inhibitory (n <= 0).
+    The constraint is enforced via a smooth reparameterisation:
+        n_E = softplus(n_raw),  n_I = -softplus(n_raw)
+    so that n is always non-negative for E and non-positive for I.
+
+    Parameters
+    ----------
+    All parameters of LowRankModel, plus:
+
+    fraction_exc : float, optional (default=0.8)
+        Fraction of neurons that are excitatory.
+    """
+
+    def __init__(self, *args, fraction_exc: float = 0.8, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.hidden_size = self.hidden_size  # already set by super
+        self.fraction_exc = fraction_exc
+        self.n_exc = max(1, int(self.hidden_size * fraction_exc))
+        self.n_inh = self.hidden_size - self.n_exc
+
+        # Fixed mask: True for E neurons, False for I
+        self.register_buffer(
+            "exc_mask",
+            torch.cat([
+                torch.ones(self.n_exc, dtype=torch.bool),
+                torch.zeros(self.n_inh, dtype=torch.bool)
+            ])
+        )
+
+        # Replace the unconstrained n parameter with a raw version.
+        # The original self.n (from LowRankModel) is deleted; we keep only self.n_raw.
+        raw = self.n.data.clone()
+        del self.n  # remove the old Parameter from the module
+        self.n_raw = nn.Parameter(raw.to(self.device))
+
+    def _constrained_n(self):
+        """Return n such that E rows >= 0 and I rows <= 0."""
+        pos = F.softplus(self.n_raw)  # always >= 0
+        # For I neurons, flip the sign
+        n_con = torch.where(self.exc_mask.unsqueeze(1), pos, -pos)
+        return n_con
+
+    def update_dynamics(self, ff_inputs, rec_inputs, rates):
+        """Dynamics with Dale's law enforced through constrained n."""
+        input_drive = self.Ai * self.wi(ff_inputs) if self.wi is not None else 0.0
+        n_con = self._constrained_n()
+        hidden = (rates @ n_con) @ self.m.T / self.hidden_size
+        rec_inputs = self.exp_alpha * rec_inputs + (1.0 - self.exp_alpha) * hidden
+        rates = self.nonlinearity(input_drive + rec_inputs)
+        return rates, rec_inputs
+
+    # Override get_readout if you need n_con there as well (it uses self.n)
+    def get_readout(self, rates, rec_inputs):
+        n_con = self._constrained_n()
+        rec = rates @ n_con / self.hidden_size
+        if self.wo is not None:
+            ext = self.Ao * self.wo(rates)
+            return torch.cat((rec, ext), dim=-1)
+        return rec
+#+end_src
+
+#+begin_src jupyter-python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class EILowRankRNN(LowRankModel):
+    """
+    Low-rank RNN with excitatory/inhibitory separation obeying Dale's law.
+
+    The first `n_exc` neurons are excitatory (n >= 0), the rest inhibitory (n <= 0).
+    The constraint is enforced via a smooth reparameterisation:
+        n_E = softplus(n_raw),  n_I = -softplus(n_raw)
+    so that n is always non-negative for E and non-positive for I.
+
+    Parameters
+    ----------
+    All parameters of LowRankModel, plus:
+
+    fraction_exc : float, optional (default=0.8)
+        Fraction of neurons that are excitatory.
+    """
+
+    def __init__(self, *args, fraction_exc: float = 0.8, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.hidden_size = self.hidden_size  # already set by super
+        self.fraction_exc = fraction_exc
+        self.n_exc = max(1, int(self.hidden_size * fraction_exc))
+        self.n_inh = self.hidden_size - self.n_exc
+
+        # Fixed mask: True for E neurons, False for I
+        self.register_buffer(
+            "exc_mask",
+            torch.cat([
+                torch.ones(self.n_exc, dtype=torch.bool),
+                torch.zeros(self.n_inh, dtype=torch.bool)
+            ])
+        )
+
+
+    def _constrained_n(self):
+        """Return n such that E rows >= 0 and I rows <= 0."""
+        pos = F.softplus(self.n)  # always >= 0
+        # For I neurons, flip the sign
+        n_con = torch.where(self.exc_mask.unsqueeze(1), pos, -pos)
+        return n_con
+
+    def update_dynamics(self, ff_inputs, rec_inputs, rates):
+        """Dynamics with Dale's law enforced through constrained n."""
+        input_drive = self.Ai * self.wi(ff_inputs) if self.wi is not None else 0.0
+        n_con = self._constrained_n()
+        hidden = (rates @ n_con) @ self.m.T / self.hidden_size
+        rec_inputs = self.exp_alpha * rec_inputs + (1.0 - self.exp_alpha) * hidden
+        rates = self.nonlinearity(input_drive + rec_inputs)
+        return rates, rec_inputs
+
+    # Override get_readout if you need n_con there as well (it uses self.n)
+    def get_readout(self, rates, rec_inputs):
+        n_con = self._constrained_n()
+        rec = rates @ n_con / self.hidden_size
+        if self.wo is not None:
+            ext = self.Ao * self.wo(rates)
+            return torch.cat((rec, ext), dim=-1)
+        return rec
+#+end_src
+
+
+#+RESULTS:
+
+*Usage example*
+#+begin_src python
+model = EILowRankRNN(
+    input_size=8, hidden_size=200, output_size=3, rank=2,
+    alpha=0.05, fraction_exc=0.8
+)
+# Use a standard initializer for the raw n and m, e.g.:
+init = LowRankInitializer(var_n=1.0, var_m=1.0)
+init.apply(model)   # initializes m and n_raw with Gaussian i.i.d.
+# Now train normally – the sign constraints are built into the forward pass.
+#+end_src
+
+*What changes under the hood*
+- The original =n= parameter is replaced by =n_raw=; during every forward pass =_constrained_n()= produces the effective =n= that respects Dale’s law.
+- Gradients flow through the softplus transformation, so learning can adjust the strength of connections while respecting the sign constraint.
+- The mask =exc_mask= is a buffer, thus it is saved/loaded with =state_dict()= but not trained.
+
+This design keeps all the flexibility of the low‑rank recurrent network (multiple latent dimensions, input/output weights, reward feedback) while guaranteeing that every neuron’s action on the network is either purely excitatory or purely inhibitory.
+
+*** it complains that tensors are not on the same devices
+
+#+begin_reasoning
+We need to address the user's implicit issue: "it complains that tensors are not on the same devices". The user previously provided code for `EILowRankRNN` as a subclass of `LowRankModel`. They likely encountered a device mismatch when using this subclass. The error could arise because the `exc_mask` buffer is created on CPU (or in __init__) while the model might be moved to a different device later, and the buffer might not automatically move with nn.Module.to()? Actually, PyTorch automatically moves buffers when you call `model.to(device)`, but only if the buffers are created before the call. In the subclass, `exc_mask` is registered via `self.register_buffer(...)` in __init__, so it should move with model.to(). However, if the device argument is passed to super().__init__ and the model is initialized on a specific device, and then `exc_mask` is created on CPU, it will be on CPU. Then calling `model.to('cuda')` will move both parameters and buffers. So that shouldn't cause a mismatch. But the user might be creating `exc_mask` without specifying device, so it's on CPU by default. That's fine as long as the model moves later.
+
+But maybe the problem is in `_constrained_n()`: it uses `self.exc_mask` which should be on same device as `self.n_raw` after `model.to(device)`. But if they call `model.to(device)` and then `model.n_raw` is on that device, `self.exc_mask` will also be on that device. So no mismatch. Could be that they are not using `.to()` and relying on the device argument? The base class `LowRankModel.__init__` does `self.device = torch.device(device)` and then calls `self.to(self.device)`? No, looking at the original `LowRankModel.__init__`, it doesn't call `self.to()`; it just stores `self.device`. But it creates parameters via `self.wi = nn.Linear(input_size, hidden_size, device=self.device)` etc. So the parameters are created on the specified device. But then `exc_mask` in the subclass is created using `torch.ones(...)`, which by default is on CPU. So if `device` is something like 'cuda:0', then `self.n_raw` (after replacing `self.n`) is on 'cuda:0', but `self.exc_mask` is on CPU. Then if they later call `model.to('cuda')`, it will fix that, but if they don't, they get a device mismatch. The typical usage from the optimization code: `self.model.to(self.device)` is called in `Optimization.__init__`, which would move the mask. So maybe they are experiencing the mismatch because they are not calling `model.to(device)` after construction. But in the original `LowRankModel`, parameters are created on the specified device, but buffers like `exc_mask` in the subclass are not created on that device. So if the user constructs `EILowRankRNN(device='cuda')`, the super().__init__ creates `self.n` on 'cuda', then the subclass replaces it with `self.n_raw = nn.Parameter(raw.to(self.device))` which is on 'cuda', but `exc_mask` is still on CPU. If they then do inference directly on the 'cuda' device without calling `.to()`, the mask is CPU and the error occurs. The fix is to create the mask on the model's device.
+
+Thus, we need to fix `EILowRankRNN.__init__` to create `exc_mask` on `self.device`. I'll provide the corrected code.
+
+Also note that in the provided subclass, they used `self.n` instead of `self.n_raw` in `_constrained_n()`, which is a bug: they deleted `self.n` and replaced with `self.n_raw`, but in the later methods they still reference `self.n`. I'll correct that too.
+
+So, I'll present a revised `EILowRankRNN` that fixes these issues.
+
+Let's produce a concise answer with the corrected class and explanation.
+#+end_reasoning
+
+
+The device mismatch happens because the buffer =exc_mask= is created on CPU by default, even when the rest of the model resides on another device.  The fix is to place it on =self.device= during construction.  Additionally, the earlier version referenced =self.n= instead of =self.n_raw= in =_constrained_n()=, which would cause an =AttributeError= – that is now corrected.
+
+Here is the corrected, ready‑to‑use class:
+
+#+begin_src python
+class EILowRankRNN(LowRankModel):
+    """
+    Low-rank RNN with excitatory/inhibitory separation obeying Dale's law.
+
+    The first `n_exc` neurons are excitatory (n >= 0), the rest inhibitory (n <= 0).
+    The constraint is enforced via a smooth reparameterisation:
+        n_E = softplus(n_raw),  n_I = -softplus(n_raw)
+    so that n is always non-negative for E and non-positive for I.
+
+    Parameters
+    ----------
+    All parameters of LowRankModel, plus:
+
+    fraction_exc : float, optional (default=0.8)
+        Fraction of neurons that are excitatory.
+    """
+    def __init__(self, *args, fraction_exc: float = 0.8, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.hidden_size = self.hidden_size
+        self.fraction_exc = fraction_exc
+        self.n_exc = max(1, int(self.hidden_size * fraction_exc))
+        self.n_inh = self.hidden_size - self.n_exc
+
+        # Fixed mask: True for E neurons, False for I.
+        # Place it on the model's device to avoid device mismatches later.
+        self.register_buffer(
+            "exc_mask",
+            torch.cat([
+                torch.ones(self.n_exc, dtype=torch.bool),
+                torch.zeros(self.n_inh, dtype=torch.bool)
+            ]).to(self.device)
+        )
+
+        # Replace the original unconstrained n parameter with n_raw.
+        raw = self.n.data.clone()
+        del self.n
+        self.n_raw = nn.Parameter(raw.to(self.device))
+
+    def _constrained_n(self):
+        """Return n such that E rows >= 0 and I rows <= 0."""
+        pos = F.softplus(self.n_raw)          # always >= 0
+        n_con = torch.where(self.exc_mask.unsqueeze(1), pos, -pos)
+        return n_con
+
+    def update_dynamics(self, ff_inputs, rec_inputs, rates):
+        """Dynamics with Dale's law enforced through constrained n."""
+        input_drive = self.Ai * self.wi(ff_inputs) if self.wi is not None else 0.0
+        n_con = self._constrained_n()
+        hidden = (rates @ n_con) @ self.m.T / self.hidden_size
+        rec_inputs = self.exp_alpha * rec_inputs + (1.0 - self.exp_alpha) * hidden
+        rates = self.nonlinearity(input_drive + rec_inputs)
+        return rates, rec_inputs
+
+    def get_readout(self, rates, rec_inputs):
+        n_con = self._constrained_n()
+        rec = rates @ n_con / self.hidden_size
+        if self.wo is not None:
+            ext = self.Ao * self.wo(rates)
+            return torch.cat((rec, ext), dim=-1)
+        return rec
+#+end_src
+
+The key changes:
+
+- Added =.to(self.device)= when creating =exc_mask=.
+- Corrected =_constrained_n()= to use =self.n_raw= consistently.
+- Made sure =n_raw= is also placed on =self.device= explicitly.
+
+Now the mask will always be on the same physical device as the parameters, avoiding the runtime error.  If you still call =model.to(new_device)= after construction, the buffer moves automatically as well.
+
+*** why do you delete self.n
+
+#+begin_reasoning
+We need to explain why `self.n` was deleted and replaced with `self.n_raw` in the EILowRankRNN subclass. The user is asking: "why do you delete self.n". The previous code had:
+
+```python
+raw = self.n.data.clone()
+del self.n
+self.n_raw = nn.Parameter(raw.to(self.device))
+```
+
+We need to explain the rationale: because `LowRankModel.__init__` already creates `self.nn.Parameter(torch.randn(...))` as `self.n`. If we keep it, we'd have two parameters representing the same thing, and the optimiser would see both. We replace the unconstrained `n` with a raw version that will be passed through a softplus to enforce sign constraints. So we delete to avoid parameter duplication and to maintain the expected interface (only one set of weights). Also note we could have simply overridden `self.n` but it's safer to delete and provide `n_raw`. Also, we can't just overwrite `self.n` with a new Parameter because the old one would still be in `self._parameters`. So we delete first.
+
+Also, we might want to mention that we could keep `self.n` as the raw parameter and just use `_constrained_n()` on it, but then we'd have to handle the constraint differently. The reason for renaming is clarity: the raw parameter has unconstrained sign, while the effective `n` is derived on the fly. So we delete the old `self.n` to avoid confusion.
+
+We'll provide a short, clear answer.
+#+end_reasoning
+
+
+
+The =LowRankModel= constructor already creates =self.n= as an unconstrained =nn.Parameter=. If we kept it and merely added a new =n_raw=, the optimizer would track both (and they’d appear separately in =state_dict=), leading to confusion and wasted parameters.
+
+By deleting the original =self.n= and registering a fresh =self.n_raw=, we make it explicit that the only trainable weights are the /unconstrained/ ones (=n_raw=). The effective, sign‑constrained =n= is then computed on the fly via =_constrained_n()=. This avoids any ambiguity about which parameter is the “real” one and keeps the module’s parameter collection clean.
+
+(Technically, overwriting =self.n= with a new =Parameter= would also work, but the old entry would still linger in =self._parameters= unless we explicitly remove it – deleting is the safest way to guarantee a clean swap.)
+
+***
+
 * Vector fields
 
 The low-rank recurrent state lives approximately on the manifold
@@ -1408,7 +1746,7 @@ def run_low_rank_with_effective_inputs(
         eff_input_list.append(x_t)
 
         if use_reward_feedback:
-            rwd_mask = (targets[:, step] == 1) & (readout[:, reward_readout_index] > 0.5)
+            rwd_mask = (targets[:, step, model.reward_channel] == 1) & (readout[:, reward_readout_index] > 0.5)
             rwd_next = rwd_mask.to(dtype=dtype)
         else:
             rwd_next.zero_()
@@ -2212,7 +2550,9 @@ hidden_size = 512
 output_size = 0
 rank = 2
 
-model = LowRankModel(input_size, hidden_size, output_size, rank, alpha, train_inputs=False, device=device)
+model = LowRankModel(input_size, hidden_size, output_size, rank, alpha, train_inputs=True, device=device)
+# model = EILowRankRNN(input_size, hidden_size, output_size, rank, alpha, fraction_exc=0.8)
+
 model.to(device)
 # model = torch.compile(model)
 
@@ -2259,8 +2599,9 @@ print(f"diag (should match var_*): {torch.diag(Sigma).numpy()}")
 : min eigval after projection: 2.216e-07
 : diag (should match var_*): [1.         1.0000001  1.         1.         1.         1.
 :  0.99999994 0.9999999  1.         1.0000001  1.         1.        ]
-: /home/leon/tmp/ipykernel_2112731/4005516315.py:189: UserWarning: Sigma was not PSD (min eigval = -6.000e-01); projected to nearest PSD (Frobenius rel. change = 1.947e-01). Correction is large — consider reducing overlap magnitudes or increasing the relevant variances.
+: /home/leon/tmp/ipykernel_1786775/4005516315.py:189: UserWarning: Sigma was not PSD (min eigval = -6.000e-01); projected to nearest PSD (Frobenius rel. change = 1.947e-01). Correction is large — consider reducing overlap magnitudes or increasing the relevant variances.
 :   Sigma = self.build_sigma(model)
+
 
 #+begin_src jupyter-python
 import numpy as np
@@ -2327,10 +2668,10 @@ print(inputs.shape, targets.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([516, 500, 8]) torch.Size([516, 500])
+: torch.Size([516, 500, 8]) torch.Size([516, 500, 2])
 
 #+begin_src jupyter-python
-plt.hist(targets[:, -1].reshape(-1), bins='auto')
+plt.hist(targets[:, -1, -1].reshape(-1), bins='auto')
 plt.xlabel('Targets')
 plt.ylabel('Count')
 plt.xticks([0, 1])
@@ -2338,11 +2679,11 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_24.png]]
+[[file:./figures/figure_28.png]]
 
 #+begin_src jupyter-python
-idx_nogo = torch.argwhere(targets[:, -1] != 1).reshape(-1)[:32]
-idx_go   = torch.argwhere(targets[:, -1] == 1).reshape(-1)[:32]
+idx_nogo = torch.argwhere(targets[ :, -1, -1] != 1).reshape(-1)[:32]
+idx_go   = torch.argwhere(targets[ :, -1, -1] == 1).reshape(-1)[:32]
 
 print(idx_go.shape, idx_nogo.shape)
 #+end_src
@@ -2356,14 +2697,14 @@ fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 if len(idx_nogo) > 0:
     ax[0].plot(dpa_time, inputs[idx_nogo, :, 1].mT.cpu().numpy(), alpha=.2)
     ax[0].plot(dpa_time, inputs[idx_nogo, :, 3].mT.cpu().numpy(), alpha=.2)
-    ax[0].plot(dpa_time, targets[idx_nogo[0]].cpu().numpy(), 'k', label='Target')
+    ax[0].plot(dpa_time, targets[idx_nogo[0], :, -1].cpu().numpy(), 'k', label='Target')
 ax[0].set_title('Unpaired trials')
 
 if len(idx_go) > 0:
     ax[1].plot(dpa_time, inputs[idx_go, :, 0].mT.cpu().numpy(), alpha=.2)
     ax[1].plot(dpa_time, inputs[idx_go, :, 2].mT.cpu().numpy(), alpha=.2)
 
-    ax[1].plot(dpa_time, targets[idx_go[0]].cpu().numpy(), 'k', label='Target')
+    ax[1].plot(dpa_time, targets[idx_go[0], :, -1].cpu().numpy(), 'k', label='Target')
 ax[1].set_title('Paired trials')
 
 for i in range(2):
@@ -2379,25 +2720,13 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_26.png]]
+[[file:./figures/figure_30.png]]
 
 #+begin_src jupyter-python
-predictions, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
-predictions = predictions.detach().cpu()
-print('rec_inputs', rec_inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+overlaps, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
+overlaps = overlaps.detach().cpu().numpy()
+print('rec_inputs', rec_inputs.shape, 'overlaps', overlaps.shape, 'rates', rates.shape)
 #+end_src
-
-#+RESULTS:
-: rec_inputs torch.Size([516, 500, 512]) predictions torch.Size([516, 500, 2]) rates torch.Size([516, 500, 512])
-
-#+begin_src jupyter-python
-kappa_rec = (rates @ model.n)/ rates.shape[-1]
-kappa_rec = kappa_rec.cpu().detach().numpy()
-print('rates', rates.shape, 'm', model.n.shape, 'kappa_rec', kappa_rec.shape)
-#+end_src
-
-#+RESULTS:
-: rates torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa_rec (516, 500, 2)
 
 #+begin_src jupyter-python
 kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)**2
@@ -2405,26 +2734,23 @@ kappa = kappa.cpu().detach().numpy()
 print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
 #+end_src
 
-#+RESULTS:
-: rec torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa (516, 500, 2)
-
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
 
-ax[0].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(dpa_time, kappa_rec[idx_nogo, :, 0].T, alpha=.2)
+ax[0].plot(dpa_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
+ax[0].plot(dpa_time, overlaps[idx_nogo, :, 0].T, alpha=.2)
 ax[0].set_title('Unpaired trial')
 
-ax[1].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(dpa_time, kappa_rec[idx_go, :, 0].T, alpha=.2)
+ax[1].plot(dpa_time, targets[idx_go, :, -1][0], 'k', label='Target')
+ax[1].plot(dpa_time, overlaps[idx_go, :, 0].T, alpha=.2)
 ax[1].set_title('Paired trial')
 
-ax[2].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
-ax[2].plot(dpa_time, kappa_rec[idx_nogo, :, 1].T, alpha=.2)
+ax[2].plot(dpa_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
+ax[2].plot(dpa_time, overlaps[idx_nogo, :, 1].T, alpha=.2)
 ax[2].set_title('Unpaired trial')
 
-ax[3].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
-ax[3].plot(dpa_time, kappa_rec[idx_go, :, 1].T, alpha=.2)
+ax[3].plot(dpa_time, targets[idx_go, :, -1][0], 'k', label='Target')
+ax[3].plot(dpa_time, overlaps[idx_go, :, 1].T, alpha=.2)
 ax[3].set_title('Paired trial')
 
 for i in range(4):
@@ -2438,51 +2764,16 @@ for i in range(4):
 plt.show()
 #+end_src
 
-#+RESULTS:
-[[file:./figures/figure_30.png]]
 
-#+begin_src jupyter-python
-fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
-
-ax[0].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(dpa_time, kappa[idx_nogo, :, 0].T, alpha=.2)
-ax[0].set_title('Unpaired trial')
-
-ax[1].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(dpa_time, kappa[idx_go, :, 0].T, alpha=.2)
-ax[1].set_title('Paired trial')
-
-ax[2].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
-ax[2].plot(dpa_time, kappa[idx_nogo, :, 1].T, alpha=.2)
-ax[2].set_title('Unpaired trial')
-
-ax[3].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
-ax[3].plot(dpa_time, kappa[idx_go, :, 1].T, alpha=.2)
-ax[3].set_title('Paired trial')
-
-for i in range(4):
-    for j in range(2):
-        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
-    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
-    ax[i].set_xlabel('Time (s)')
-    ax[i].set_ylabel('$ \\kappa_%d$' % (i//2+1))
-    ax[i].legend(fontsize=14)
-
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./figures/figure_31.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
-
-ax[0].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(dpa_time, predictions[..., -1][idx_nogo].T, alpha=.2)
+ax[0].plot(dpa_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
+ax[0].plot(dpa_time, overlaps[..., -1][idx_nogo].T, alpha=.2)
 ax[0].set_title('Unpaired trial')
 
-ax[1].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(dpa_time, predictions[..., -1][idx_go].T, alpha=.2)
+ax[1].plot(dpa_time, targets[idx_go, :, -1][0], 'k', label='Target')
+ax[1].plot(dpa_time, overlaps[..., -1][idx_go].T, alpha=.2)
 ax[1].set_title('Paired trial')
 
 for i in range(2):
@@ -2497,7 +2788,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_32.png]]
+[[file:./figures/figure_30.png]]
 
 #+begin_src jupyter-python
 
@@ -2509,7 +2800,7 @@ plt.show()
 
 #+begin_src jupyter-python
 learning_rate = 0.01
-epochs = 50
+epochs = 25
 batch_size = 64
 grad_clip_norm = None
 
@@ -2528,18 +2819,23 @@ torch.save(model.state_dict(), '%s/dpa_%d.pth' % (PATH, seed))
 #+end_src
 
 #+RESULTS:
-#+begin_example
-Epoch 005/50 | lr: 0.01000 | train: 0.9996 | val: 0.9982
-Epoch 010/50 | lr: 0.01000 | train: 0.9926 | val: 0.9942
-Epoch 015/50 | lr: 0.01000 | train: 0.9607 | val: 0.9483
-Epoch 020/50 | lr: 0.01000 | train: 0.8877 | val: 0.9264
-Epoch 025/50 | lr: 0.01000 | train: 0.8378 | val: 0.8596
-Epoch 030/50 | lr: 0.01000 | train: 0.7829 | val: 0.8015
-Epoch 035/50 | lr: 0.01000 | train: 0.7504 | val: 0.7397
-Epoch 040/50 | lr: 0.01000 | train: 0.7332 | val: 0.7333
-Epoch 045/50 | lr: 0.01000 | train: 0.7330 | val: 0.7310
-Epoch 050/50 | lr: 0.01000 | train: 0.7207 | val: 0.7098
-#+end_example
+: Epoch 005/25 | lr: 0.01000 | train: 0.1572 | val: 0.1600
+: Epoch 010/25 | lr: 0.01000 | train: 0.1518 | val: 0.1549
+: Epoch 015/25 | lr: 0.01000 | train: 0.1419 | val: 0.1482
+: Epoch 020/25 | lr: 0.01000 | train: 0.1355 | val: 0.1405
+: Epoch 025/25 | lr: 0.01000 | train: 0.1302 | val: 0.1311
+
+#+begin_src jupyter-python
+epochs = 25
+train_loader, val_loader = train_val_split(inputs.to(device), targets.to(device), batch_size)
+opt = Optimization(model, train_loader, val_loader, criterion, optimizer, scheduler, grad_clip_norm, num_epochs=epochs, stop_loss=0.001)
+train_losses, val_losses, learning_rates = opt.fit()
+torch.save(model.state_dict(), '%s/dpa_%d.pth' % (PATH, seed))
+#+end_src
+
+#+RESULTS:
+: Epoch 005/25 | lr: 0.01000 | train: 0.2332 | val: 0.2706
+: Epoch 010/25 | lr: 0.01000 | train: 0.2148 | val: 0.2200
 
 #+begin_src jupyter-python
 plt.plot(train_losses)
@@ -2550,7 +2846,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_36.png]]
+[[file:./figures/figure_39.png]]
 
 #+begin_src jupyter-python
 
@@ -2564,6 +2860,7 @@ plt.show()
 model_state_dict = torch.load('%s/dpa_%d.pth' % (PATH, seed))
 model.load_state_dict(model_state_dict)
 model.eval();
+model.gain = 1.0
 #+end_src
 
 #+RESULTS:
@@ -2586,35 +2883,16 @@ print(inputs.shape, targets.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([516, 500, 8]) torch.Size([516, 500])
+: torch.Size([516, 500, 8]) torch.Size([516, 500, 2])
 
 #+begin_src jupyter-python
-predictions, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
-predictions = predictions.detach().cpu()
-print('rec_inputs', rec_inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+overlaps, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
+overlaps = overlaps.detach().cpu().numpy()
+print('rec_inputs', rec_inputs.shape, 'overlaps', overlaps.shape, 'rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rec_inputs torch.Size([516, 500, 512]) predictions torch.Size([516, 500, 2]) rates torch.Size([516, 500, 512])
-
-#+begin_src jupyter-python
-idx_nogo = torch.argwhere(targets[:, -1] != 1).reshape(-1)[:32]
-idx_go   = torch.argwhere(targets[:, -1] == 1).reshape(-1)[:32]
-
-print(idx_go.shape, idx_nogo.shape)
-#+end_src
-
-#+RESULTS:
-: torch.Size([32]) torch.Size([32])
-
-#+begin_src jupyter-python
-kappa_rec = (rates @ model.n)/ rates.shape[-1]
-kappa_rec = kappa_rec.cpu().detach().numpy()
-print('rates', rates.shape, 'm', model.n.shape, 'kappa_rec', kappa_rec.shape)
-#+end_src
-
-#+RESULTS:
-: rates torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa_rec (516, 500, 2)
+: rec_inputs torch.Size([516, 500, 512]) overlaps (516, 500, 2) rates torch.Size([516, 500, 512])
 
 #+begin_src jupyter-python
 kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)**2
@@ -2626,22 +2904,50 @@ print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
 : rec torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa (516, 500, 2)
 
 #+begin_src jupyter-python
+idx_nogo = torch.argwhere(targets[ :, -1, -1] != 1).reshape(-1)[:32]
+idx_go   = torch.argwhere(targets[ :, -1, -1] == 1).reshape(-1)[:32]
+
+print(idx_go.shape, idx_nogo.shape)
+#+end_src
+
+#+RESULTS:
+: torch.Size([32]) torch.Size([32])
+
+#+begin_src jupyter-python
+for i in range(5):
+    plt.plot(dpa_time, rates[0, :, i].T.detach().cpu(), alpha=.2)
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: /home/leon/tmp/ipykernel_1786775/3011348355.py:2: UserWarning: The use of `x.T` on tensors of dimension other than 2 to reverse their shape is deprecated and it will throw an error in a future release. Consider `x.mT` to transpose batches of matrices or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse the dimensions of a tensor. (Triggered internally at /pytorch/aten/src/ATen/native/TensorShape.cpp:4480.)
+:   plt.plot(dpa_time, rates[0, :, i].T.detach().cpu(), alpha=.2)
+[[file:./figures/figure_48.png]]
+:END:
+#+RESULTS:
+[[file:./figures/figure_47.png]]
+| <matplotlib.lines.Line2D | at | 0x7ff1cc107620> | <matplotlib.lines.Line2D | at | 0x7ff1cc1074d0> | <matplotlib.lines.Line2D | at | 0x7ff1cc106f90> | <matplotlib.lines.Line2D | at | 0x7ff1cc106e40> | <matplotlib.lines.Line2D | at | 0x7ff1cc106cf0> | <matplotlib.lines.Line2D | at | 0x7ff01bd64050> | <matplotlib.lines.Line2D | at | 0x7ff01bd641a0> | <matplotlib.lines.Line2D | at | 0x7ff01bd642f0> | <matplotlib.lines.Line2D | at | 0x7ff01bd64440> | <matplotlib.lines.Line2D | at | 0x7ff01bd64590> | <matplotlib.lines.Line2D | at | 0x7ff01bd646e0> | <matplotlib.lines.Line2D | at | 0x7ff01bd64830> | <matplotlib.lines.Line2D | at | 0x7ff01bd64980> | <matplotlib.lines.Line2D | at | 0x7ff01bd64ad0> | <matplotlib.lines.Line2D | at | 0x7ff01bd64c20> | <matplotlib.lines.Line2D | at | 0x7ff01bd64d70> | <matplotlib.lines.Line2D | at | 0x7ff01bd64ec0> | <matplotlib.lines.Line2D | at | 0x7ff01bd65010> | <matplotlib.lines.Line2D | at | 0x7ff01bd65160> | <matplotlib.lines.Line2D | at | 0x7ff01bd652b0> | <matplotlib.lines.Line2D | at | 0x7ff01bd65400> | <matplotlib.lines.Line2D | at | 0x7ff01bd65550> | <matplotlib.lines.Line2D | at | 0x7ff01bd656a0> | <matplotlib.lines.Line2D | at | 0x7ff01bd657f0> | <matplotlib.lines.Line2D | at | 0x7ff01bd65940> | <matplotlib.lines.Line2D | at | 0x7ff01bd65a90> | <matplotlib.lines.Line2D | at | 0x7ff01bd65be0> | <matplotlib.lines.Line2D | at | 0x7ff01bd65d30> | <matplotlib.lines.Line2D | at | 0x7ff01bd65e80> | <matplotlib.lines.Line2D | at | 0x7ff01bd65fd0> | <matplotlib.lines.Line2D | at | 0x7ff01bd66120> | <matplotlib.lines.Line2D | at | 0x7ff01bd66270> |
+| <matplotlib.lines.Line2D | at | 0x7ff2a044d550> | <matplotlib.lines.Line2D | at | 0x7ff2a044da90> | <matplotlib.lines.Line2D | at | 0x7ff2a044dbe0> | <matplotlib.lines.Line2D | at | 0x7ff2a044dd30> | <matplotlib.lines.Line2D | at | 0x7ff2a044de80> | <matplotlib.lines.Line2D | at | 0x7ff2a044dfd0> | <matplotlib.lines.Line2D | at | 0x7ff2a044e120> | <matplotlib.lines.Line2D | at | 0x7ff2a044d6a0> | <matplotlib.lines.Line2D | at | 0x7ff2a044d7f0> | <matplotlib.lines.Line2D | at | 0x7ff2a044d940> | <matplotlib.lines.Line2D | at | 0x7ff2a044cad0> | <matplotlib.lines.Line2D | at | 0x7ff2a044cc20> | <matplotlib.lines.Line2D | at | 0x7ff2a044cd70> | <matplotlib.lines.Line2D | at | 0x7ff2a044e7b0> | <matplotlib.lines.Line2D | at | 0x7ff2a044e660> | <matplotlib.lines.Line2D | at | 0x7ff2a044ea50> | <matplotlib.lines.Line2D | at | 0x7ff2a044c830> | <matplotlib.lines.Line2D | at | 0x7ff2a044c980> | <matplotlib.lines.Line2D | at | 0x7ff2a044ee40> | <matplotlib.lines.Line2D | at | 0x7ff2a044ecf0> | <matplotlib.lines.Line2D | at | 0x7ff2a044eba0> | <matplotlib.lines.Line2D | at | 0x7ff2a044f230> | <matplotlib.lines.Line2D | at | 0x7ff2a044f0e0> | <matplotlib.lines.Line2D | at | 0x7ff2a044ef90> | <matplotlib.lines.Line2D | at | 0x7ff2a044f620> | <matplotlib.lines.Line2D | at | 0x7ff2a044f4d0> | <matplotlib.lines.Line2D | at | 0x7ff2a044f380> | <matplotlib.lines.Line2D | at | 0x7ff2a044fa10> | <matplotlib.lines.Line2D | at | 0x7ff2a044f8c0> | <matplotlib.lines.Line2D | at | 0x7ff2a044f770> | <matplotlib.lines.Line2D | at | 0x7ff2a044fe00> | <matplotlib.lines.Line2D | at | 0x7ff2a044fcb0> |
+| <matplotlib.lines.Line2D | at | 0x7ff29a0a2120> |
+
+
+#+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
 
-ax[0].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(dpa_time, kappa_rec[idx_nogo, :, 0].T, alpha=.2)
+ax[0].plot(dpa_time, targets[idx_nogo, :, 0][0], 'k', label='Target')
+ax[0].plot(dpa_time, overlaps[idx_nogo, :, 0].T, alpha=.2)
 ax[0].set_title('Unpaired trial')
 
-ax[1].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(dpa_time, kappa_rec[idx_go, :, 0].T, alpha=.2)
+ax[1].plot(dpa_time, targets[idx_go, :, 0][0], 'k', label='Target')
+ax[1].plot(dpa_time, overlaps[idx_go, :, 0].T, alpha=.2)
 ax[1].set_title('Paired trial')
 
-ax[2].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
-ax[2].plot(dpa_time, kappa_rec[idx_nogo, :, 1].T, alpha=.2)
+ax[2].plot(dpa_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
+ax[2].plot(dpa_time, overlaps[idx_nogo, :, 1].T, alpha=.2)
 ax[2].set_title('Unpaired trial')
 
-ax[3].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
-ax[3].plot(dpa_time, kappa_rec[idx_go, :, 1].T, alpha=.2)
+ax[3].plot(dpa_time, targets[idx_go, :, -1][0], 'k', label='Target')
+ax[3].plot(dpa_time, overlaps[idx_go, :, 1].T, alpha=.2)
 ax[3].set_title('Paired trial')
 
 for i in range(4):
@@ -2656,24 +2962,24 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_45.png]]
+[[file:./figures/figure_49.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
 
-ax[0].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(dpa_time, targets[idx_nogo, :, 0][0], 'k', label='Target')
 ax[0].plot(dpa_time, kappa[idx_nogo, :, 0].T, alpha=.2)
 ax[0].set_title('Unpaired trial')
 
-ax[1].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(dpa_time, targets[idx_go, :, 0][0], 'k', label='Target')
 ax[1].plot(dpa_time, kappa[idx_go, :, 0].T, alpha=.2)
 ax[1].set_title('Paired trial')
 
-ax[2].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
+ax[2].plot(dpa_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
 ax[2].plot(dpa_time, kappa[idx_nogo, :, 1].T, alpha=.2)
 ax[2].set_title('Unpaired trial')
 
-ax[3].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
+ax[3].plot(dpa_time, targets[idx_go, :, -1][0], 'k', label='Target')
 ax[3].plot(dpa_time, kappa[idx_go, :, 1].T, alpha=.2)
 ax[3].set_title('Paired trial')
 
@@ -2682,24 +2988,23 @@ for i in range(4):
         ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
     ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
     ax[i].set_xlabel('Time (s)')
-    ax[i].set_ylabel('$ \\kappa_%d$' % (i//2+1))
+    ax[i].set_ylabel('$ \\kappa^{rec}_%d$' % (i//2+1))
     ax[i].legend(fontsize=14)
 
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_46.png]]
+[[file:./figures/figure_50.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
-
-ax[0].plot(dpa_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(dpa_time, predictions[..., -1][idx_nogo].T, alpha=.2)
+ax[0].plot(dpa_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
+ax[0].plot(dpa_time, overlaps[..., -1][idx_nogo].T, alpha=.2)
 ax[0].set_title('Unpaired trial')
 
-ax[1].plot(dpa_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(dpa_time, predictions[..., -1][idx_go].T, alpha=.2)
+ax[1].plot(dpa_time, targets[idx_go, :, -1][0], 'k', label='Target')
+ax[1].plot(dpa_time, overlaps[..., -1][idx_go].T, alpha=.2)
 ax[1].set_title('Paired trial')
 
 for i in range(2):
@@ -2714,7 +3019,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_47.png]]
+[[file:./figures/figure_51.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
@@ -2732,7 +3037,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_48.png]]
+[[file:./figures/figure_52.png]]
 
 #+begin_src jupyter-python
 fig, axes, field_cache = plot_task_flow_fields(model, inputs, timing=dpa_timing, task="dpa", targets=targets, xlim=[-2, 2], ylim=[-2, 2])
@@ -2740,7 +3045,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_49.png]]
+[[file:./figures/figure_53.png]]
 
 #+begin_src jupyter-python
 
@@ -2783,10 +3088,10 @@ print(inputs.shape, targets.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([516, 300, 8]) torch.Size([516, 300])
+: torch.Size([516, 300, 8]) torch.Size([516, 300, 2])
 
 #+begin_src jupyter-python
-plt.hist(targets[:, -1].reshape(-1), bins='auto')
+plt.hist(targets[:, -1, -1].reshape(-1), bins='auto')
 plt.xlabel('Targets')
 plt.ylabel('Count')
 plt.xticks([0, 1])
@@ -2794,11 +3099,11 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_55.png]]
+[[file:./figures/figure_52.png]]
 
 #+begin_src jupyter-python
-idx_nogo = torch.argwhere((targets[:, -1] != 1)).reshape(-1)[:32]
-idx_go   = torch.argwhere(targets[:, -1] == 1).reshape(-1)[:32]
+idx_nogo = torch.argwhere((targets[:, -1, -1] != 1)).reshape(-1)[:32]
+idx_go   = torch.argwhere(targets[:, -1, -1] == 1).reshape(-1)[:32]
 
 print(idx_go.shape, idx_nogo.shape)
 #+end_src
@@ -2812,14 +3117,14 @@ fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 if len(idx_nogo) > 0:
     ax[0].plot(gng_time, inputs[idx_nogo, :, 5].mT.cpu().numpy(), alpha=.2)
     ax[0].plot(gng_time, inputs[idx_nogo, :, 6].mT.cpu().numpy(), alpha=.2)
-    ax[0].plot(gng_time, targets[idx_nogo[0]].cpu().numpy(), 'k', label='Target')
+    ax[0].plot(gng_time, targets[idx_nogo[0],:, -1].cpu().numpy(), 'k', label='Target')
 ax[0].set_title('Nogo trials')
 
 if len(idx_go) > 0:
     ax[1].plot(gng_time, inputs[idx_go, :, 4].mT.cpu().numpy(), alpha=.2)
     ax[1].plot(gng_time, inputs[idx_go, :, 6].mT.cpu().numpy(), alpha=.2)
 
-    ax[1].plot(gng_time, targets[idx_go[0]].cpu().numpy(), 'k', label='Target')
+    ax[1].plot(gng_time, targets[idx_go[0],: ,-1].cpu().numpy(), 'k', label='Target')
 ax[1].set_title('Go trials')
 
 for i in range(2):
@@ -2835,28 +3140,26 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_57.png]]
-
+[[file:./figures/figure_54.png]]
 
 #+begin_src jupyter-python
-predictions, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
-predictions = predictions.detach().cpu()
-rates = rates.squeeze((0, -1)).detach().cpu()
-print('inputs', inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+overlaps, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
+overlaps = overlaps.detach().cpu()
+print('inputs', inputs.shape, 'overlaps', overlaps.shape, 'rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: inputs torch.Size([516, 300, 8]) predictions torch.Size([516, 300, 2]) rates torch.Size([516, 300, 512])
+: inputs torch.Size([516, 300, 8]) overlaps torch.Size([516, 300, 2]) rates torch.Size([516, 300, 512])
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
 
-ax[0].plot(gng_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(gng_time, predictions[..., -1][idx_nogo].T, alpha=.2)
+ax[0].plot(gng_time, targets[idx_nogo,:,-1][0], 'k', label='Target')
+ax[0].plot(gng_time, overlaps[..., -1][idx_nogo].T, alpha=.2)
 ax[0].set_title('Nogo trials')
 
-ax[1].plot(gng_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(gng_time, predictions[..., -1][idx_go].T, alpha=.2)
+ax[1].plot(gng_time, targets[idx_go, :, -1][0], 'k', label='Target')
+ax[1].plot(gng_time, overlaps[..., -1][idx_go].T, alpha=.2)
 ax[1].set_title('Go trials')
 
 for i in range(2):
@@ -2872,7 +3175,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_59.png]]
+[[file:./figures/figure_56.png]]
 
 #+begin_src jupyter-python
 
@@ -2908,16 +3211,16 @@ torch.save(model.state_dict(), '%s/naive_%d.pth' % (PATH, seed))
 
 #+RESULTS:
 #+begin_example
-Epoch 005/50 | lr: 0.00250 | train: 0.1140 | val: 0.0981
-Epoch 010/50 | lr: 0.00250 | train: 0.0326 | val: 0.0322
-Epoch 015/50 | lr: 0.00250 | train: 0.0389 | val: 0.0401
-Epoch 020/50 | lr: 0.00250 | train: 0.0461 | val: 0.0466
-Epoch 025/50 | lr: 0.00250 | train: 0.0496 | val: 0.0498
-Epoch 030/50 | lr: 0.00250 | train: 0.0516 | val: 0.0518
-Epoch 035/50 | lr: 0.00250 | train: 0.0533 | val: 0.0537
-Epoch 040/50 | lr: 0.00125 | train: 0.0544 | val: 0.0547
-Epoch 045/50 | lr: 0.00125 | train: 0.0550 | val: 0.0548
-Epoch 050/50 | lr: 0.00063 | train: 0.0551 | val: 0.0548
+Epoch 005/50 | lr: 0.01000 | train: 0.7065 | val: 0.5153
+Epoch 010/50 | lr: 0.01000 | train: 0.4414 | val: 0.2220
+Epoch 015/50 | lr: 0.01000 | train: 0.5048 | val: 0.4358
+Epoch 020/50 | lr: 0.01000 | train: 0.1747 | val: 0.3912
+Epoch 025/50 | lr: 0.01000 | train: 0.2364 | val: 0.3358
+Epoch 030/50 | lr: 0.01000 | train: 0.4022 | val: 0.2564
+Epoch 035/50 | lr: 0.01000 | train: 0.2202 | val: 0.3882
+Epoch 040/50 | lr: 0.00500 | train: 0.2350 | val: 0.3831
+Epoch 045/50 | lr: 0.00500 | train: 0.1627 | val: 0.2308
+Epoch 050/50 | lr: 0.00250 | train: 0.0934 | val: 0.0826
 #+end_example
 
 #+begin_src jupyter-python
@@ -2929,14 +3232,15 @@ plt.xlabel('epoch')
 plt.ylabel('Loss')
 plt.show()
 #+end_src
+
 #+RESULTS:
-[[file:./figures/figure_68.png]]
 
 #+begin_src jupyter-python
 
 #+end_src
 
 #+RESULTS:
+: c411bad0-1284-4116-9f29-b45bd3a27171
 
 ** GNG Testing
 
@@ -2954,7 +3258,7 @@ print(inputs.shape, targets.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([516, 300, 8]) torch.Size([516, 300])
+: torch.Size([516, 300, 8]) torch.Size([516, 300, 2])
 
 #+begin_src jupyter-python
 idx_nogo = torch.argwhere((targets[:, -1] != 1)).reshape(-1)[:32]
@@ -2967,23 +3271,13 @@ print(idx_go.shape, idx_nogo.shape)
 : torch.Size([32]) torch.Size([32])
 
 #+begin_src jupyter-python
-predictions, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
-predictions = predictions.detach().cpu()
-rates = rates.squeeze((0, -1))
-print('inputs', inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+overlaps, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
+overlaps = overlaps.detach().cpu()
+print('inputs', inputs.shape, 'overlaps', overlaps.shape, 'rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: inputs torch.Size([516, 300, 8]) predictions torch.Size([516, 300, 2]) rates torch.Size([516, 300, 512])
-
-#+begin_src jupyter-python
-kappa_rec = (rates @ model.n)/ rates.shape[-1]
-kappa_rec = kappa_rec.cpu().detach().numpy()
-print('rates', rates.shape, 'm', model.n.shape, 'kappa_rec', kappa_rec.shape)
-#+end_src
-
-#+RESULTS:
-: rates torch.Size([516, 300, 512]) m torch.Size([512, 2]) kappa_rec (516, 300, 2)
+: inputs torch.Size([516, 300, 8]) overlaps torch.Size([516, 300, 2]) rates torch.Size([516, 300, 512])
 
 #+begin_src jupyter-python
 kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)**2
@@ -2997,20 +3291,20 @@ print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
 
-ax[0].plot(gng_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(gng_time, kappa_rec[idx_nogo, :, 0].T, alpha=.2)
+ax[0].plot(gng_time, targets[idx_nogo, :, 0][0], 'k', label='Target')
+ax[0].plot(gng_time, overlaps[idx_nogo, :, 0].T, alpha=.2)
 ax[0].set_title('Unpaired trial')
 
-ax[1].plot(gng_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(gng_time, kappa_rec[idx_go, :, 0].T, alpha=.2)
+ax[1].plot(gng_time, targets[idx_go, :, 0][0], 'k', label='Target')
+ax[1].plot(gng_time, overlaps[idx_go, :, 0].T, alpha=.2)
 ax[1].set_title('Paired trial')
 
-ax[2].plot(gng_time, targets[idx_nogo][0], 'k', label='Target')
-ax[2].plot(gng_time, kappa_rec[idx_nogo, :, 1].T, alpha=.2)
+ax[2].plot(gng_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
+ax[2].plot(gng_time, overlaps[idx_nogo, :, 1].T, alpha=.2)
 ax[2].set_title('Unpaired trial')
 
-ax[3].plot(gng_time, targets[idx_go][0], 'k', label='Target')
-ax[3].plot(gng_time, kappa_rec[idx_go, :, 1].T, alpha=.2)
+ax[3].plot(gng_time, targets[idx_go,:, -1][0], 'k', label='Target')
+ax[3].plot(gng_time, overlaps[idx_go, :, 1].T, alpha=.2)
 ax[3].set_title('Paired trial')
 
 for i in range(4):
@@ -3025,24 +3319,24 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_71.png]]
+[[file:./figures/figure_67.png]]
 
  #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
 
-ax[0].plot(gng_time, targets[idx_nogo][0], 'k', label='Target')
+ax[0].plot(gng_time, targets[idx_nogo, :, 0][0], 'k', label='Target')
 ax[0].plot(gng_time, kappa[idx_nogo, :, 0].T, alpha=.2)
 ax[0].set_title('NoGo trial')
 
-ax[1].plot(gng_time, targets[idx_go][0], 'k', label='Target')
+ax[1].plot(gng_time, targets[idx_go, :, 0][0], 'k', label='Target')
 ax[1].plot(gng_time, kappa[idx_go, :, 0].T, alpha=.2)
 ax[1].set_title('Go trial')
 
-ax[2].plot(gng_time, targets[idx_nogo][0], 'k', label='Target')
+ax[2].plot(gng_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
 ax[2].plot(gng_time, kappa[idx_nogo, :, 1].T, alpha=.2)
 ax[2].set_title('NoGo trial')
 
-ax[3].plot(gng_time, targets[idx_go][0], 'k', label='Target')
+ax[3].plot(gng_time, targets[idx_go, :, -1][0], 'k', label='Target')
 ax[3].plot(gng_time, kappa[idx_go, :, 1].T, alpha=.2)
 ax[3].set_title('Go trial')
 
@@ -3058,17 +3352,17 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_72.png]]
+[[file:./figures/figure_68.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
 
-ax[0].plot(gng_time, targets[idx_nogo][0], 'k', label='Target')
-ax[0].plot(gng_time, predictions[..., -1][idx_nogo].T, alpha=.2)
+ax[0].plot(gng_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
+ax[0].plot(gng_time, overlaps[..., -1][idx_nogo].T, alpha=.2)
 ax[0].set_title('Nogo trials')
 
-ax[1].plot(gng_time, targets[idx_go][0], 'k', label='Target')
-ax[1].plot(gng_time, predictions[..., -1][idx_go].T, alpha=.2)
+ax[1].plot(gng_time, targets[idx_go, :, -1][0], 'k', label='Target')
+ax[1].plot(gng_time, overlaps[..., -1][idx_go].T, alpha=.2)
 ax[1].set_title('Go trials')
 
 for i in range(2):
@@ -3084,7 +3378,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_73.png]]
+[[file:./figures/figure_69.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
@@ -3102,7 +3396,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_74.png]]
+[[file:./figures/figure_70.png]]
 
 #+begin_src jupyter-python
 # GNG
@@ -3119,7 +3413,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_75.png]]
+[[file:./figures/figure_71.png]]
 
 #+begin_src jupyter-python
 
@@ -3129,6 +3423,14 @@ plt.show()
 
 * Dual Task
 ** Dual Task Trial
+
+ #+begin_src jupyter-python
+model_state_dict = torch.load('%s/naive_%d.pth' % (PATH, seed))
+model.load_state_dict(model_state_dict)
+model.eval();
+#+end_src
+
+#+RESULTS:
 
 #+begin_src jupyter-python
 dual_timing = TaskTiming(
@@ -3159,7 +3461,7 @@ print(inputs.shape, targets.shape, trial_type.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([516, 500, 8]) torch.Size([516, 500]) torch.Size([516])
+: torch.Size([516, 500, 8]) torch.Size([516, 500, 2]) torch.Size([516])
 
 #+RESULTS:
 
@@ -3337,7 +3639,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_80.png]]
+[[file:./figures/figure_77.png]]
 
 #+begin_src jupyter-python
 from matplotlib.lines import Line2D
@@ -3463,7 +3765,7 @@ def plot_dual_kappa_targets(
                     continue
 
                 k_mean = kappa_np[idxs, :, dim].mean(axis=0)
-                tgt_mean = targets_np[idxs].mean(axis=0)
+                tgt_mean = targets_np[idxs, :, dim].mean(axis=0)
 
                 ls = condition_styles[cond_i]
                 color = condition_colors[cond_i]
@@ -3554,24 +3856,13 @@ model.eval();
 #+RESULTS:
 
  #+begin_src jupyter-python
-predictions, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
-predictions = predictions.squeeze((0, -1)).detach().cpu()
-rates = rates.squeeze((0, -1))
-
-print('rec_inputs', rec_inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+overlaps, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
+overlaps = overlaps.detach().cpu().numpy()
+print('rec_inputs', rec_inputs.shape, 'overlaps', overlaps.shape, 'rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rec_inputs torch.Size([516, 500, 512]) predictions torch.Size([516, 500, 2]) rates torch.Size([516, 500, 512])
-
-#+begin_src jupyter-python
-kappa_rec = (rates @ model.n)/ rates.shape[-1]
-kappa_rec = kappa_rec.cpu().detach().numpy()
-print('rates', rates.shape, 'm', model.n.shape, 'kappa_rec', kappa_rec.shape)
-#+end_src
-
-#+RESULTS:
-: rates torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa_rec (516, 500, 2)
+: rec_inputs torch.Size([516, 500, 512]) overlaps (516, 500, 2) rates torch.Size([516, 500, 512])
 
 #+begin_src jupyter-python
 kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)**2
@@ -3588,7 +3879,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_86.png]]
+[[file:./figures/figure_82.png]]
 
 #+begin_src jupyter-python
 fig, ax = plot_dual_kappa_targets(kappa=kappa, targets=targets,  condition_names=condition_names, x_time=dual_time, dim=1, kappa_label=r"\kappa",  T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,  )
@@ -3597,7 +3888,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_87.png]]
+[[file:./figures/figure_83.png]]
 
 #+begin_src jupyter-python
 fig, axes, field_cache = plot_task_flow_fields(model, inputs, timing=dual_timing, task="dual", targets=targets, condition_names=condition_names)
@@ -3605,7 +3896,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_88.png]]
+[[file:./figures/figure_84.png]]
 
 #+begin_src jupyter-python
 
@@ -3629,22 +3920,24 @@ scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=
 #+begin_src jupyter-python
 train_loader, val_loader = train_val_split(inputs.to(device), targets.to(device), batch_size)
 opt = Optimization(model, train_loader, val_loader, criterion, optimizer, scheduler, grad_clip_norm, num_epochs=epochs)
+opt = Optimization(model, train_loader, val_loader, criterion, optimizer, scheduler, grad_clip_norm, num_epochs=epochs, zero_low_rank_grad=0, freeze_input_dims=[0, 1, 2, 3, 7])
+
 train_losses, val_losses, learning_rates = opt.fit()
 torch.save(model.state_dict(), '%s/expert_%d.pth' % (PATH, seed))
 #+end_src
 
 #+RESULTS:
 #+begin_example
-Epoch 005/50 | lr: 0.01000 | train: 0.1810 | val: 0.2096
-Epoch 010/50 | lr: 0.01000 | train: 0.1761 | val: 0.1720
-Epoch 015/50 | lr: 0.01000 | train: 0.1570 | val: 0.1827
-Epoch 020/50 | lr: 0.01000 | train: 0.1419 | val: 0.1959
-Epoch 025/50 | lr: 0.01000 | train: 0.1351 | val: 0.1401
-Epoch 030/50 | lr: 0.01000 | train: 0.1271 | val: 0.1493
-Epoch 035/50 | lr: 0.01000 | train: 0.1216 | val: 0.1239
-Epoch 040/50 | lr: 0.01000 | train: 0.1158 | val: 0.1224
-Epoch 045/50 | lr: 0.01000 | train: 0.1206 | val: 0.1179
-Epoch 050/50 | lr: 0.01000 | train: 0.1000 | val: 0.1359
+Epoch 005/50 | lr: 0.01000 | train: 0.2280 | val: 0.2163
+Epoch 010/50 | lr: 0.01000 | train: 0.2248 | val: 0.2146
+Epoch 015/50 | lr: 0.01000 | train: 0.2230 | val: 0.2131
+Epoch 020/50 | lr: 0.01000 | train: 0.2192 | val: 0.2093
+Epoch 025/50 | lr: 0.01000 | train: 0.2166 | val: 0.2046
+Epoch 030/50 | lr: 0.01000 | train: 0.2109 | val: 0.2037
+Epoch 035/50 | lr: 0.01000 | train: 0.2106 | val: 0.2010
+Epoch 040/50 | lr: 0.01000 | train: 0.2096 | val: 0.2003
+Epoch 045/50 | lr: 0.01000 | train: 0.2075 | val: 0.1975
+Epoch 050/50 | lr: 0.01000 | train: 0.2062 | val: 0.2005
 #+end_example
 
 #+begin_src jupyter-python
@@ -3658,7 +3951,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_92.png]]
+[[file:./figures/figure_88.png]]
 
 #+begin_src jupyter-python
 
@@ -3682,25 +3975,16 @@ print(inputs.shape, targets.shape, trial_type.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([516, 500, 8]) torch.Size([516, 500]) torch.Size([516])
+: torch.Size([516, 500, 8]) torch.Size([516, 500, 2]) torch.Size([516])
 
 #+begin_src jupyter-python
-predictions, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
-predictions = predictions.detach().cpu()
-print('rec_inputs', rec_inputs.shape, 'predictions', predictions.shape, 'rates', rates.shape)
+overlaps, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
+overlaps = overlaps.detach().cpu()
+print('rec_inputs', rec_inputs.shape, 'overlaps', overlaps.shape, 'rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rec_inputs torch.Size([516, 500, 512]) predictions torch.Size([516, 500, 2]) rates torch.Size([516, 500, 512])
-
-#+begin_src jupyter-python
-kappa_rec = (rates @ model.n)/ rates.shape[-1]
-kappa_rec = kappa_rec.cpu().detach().numpy()
-print('rates', rates.shape, 'm', model.n.shape, 'kappa_rec', kappa_rec.shape)
-#+end_src
-
-#+RESULTS:
-: rates torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa_rec (516, 500, 2)
+: rec_inputs torch.Size([516, 500, 512]) overlaps torch.Size([516, 500, 2]) rates torch.Size([516, 500, 512])
 
 #+begin_src jupyter-python
 kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)**2
@@ -3712,21 +3996,21 @@ print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
 : rec torch.Size([516, 500, 512]) m torch.Size([512, 2]) kappa (516, 500, 2)
 
 #+begin_src jupyter-python
-fig, ax = plot_dual_kappa_targets(kappa=kappa_rec, targets=targets,  condition_names=condition_names, x_time=dual_time, dim=0, kappa_label=r"\kappa",  T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,  )
+fig, ax = plot_dual_kappa_targets(kappa=kappa, targets=targets,  condition_names=condition_names, x_time=dual_time, dim=0, kappa_label=r"\kappa",  T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,  )
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_99.png]]
+[[file:./figures/figure_94.png]]
 
 #+begin_src jupyter-python
-fig, ax = plot_dual_kappa_targets(kappa=kappa_rec, targets=targets,  condition_names=condition_names, x_time=dual_time, dim=1, kappa_label=r"\kappa",  T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,  )
+fig, ax = plot_dual_kappa_targets(kappa=kappa, targets=targets,  condition_names=condition_names, x_time=dual_time, dim=1, kappa_label=r"\kappa",  T_STIM_ON=T_STIM_ON, T_STIM_OFF=T_STIM_OFF,  )
 plt.show()
 
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_100.png]]
+[[file:./figures/figure_95.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
@@ -3744,15 +4028,15 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_101.png]]
+[[file:./figures/figure_96.png]]
 
 #+begin_src jupyter-python
-fig, axes, field_cache = plot_task_flow_fields(model, inputs, timing=dual_timing, task="dual", condition_names=condition_names, targets=targets)
+fig, axes, field_cache = plot_task_flow_fields(model, inputs, xlim=[-2, 2], ylim=[-2, 2], timing=dual_timing, task="dual", condition_names=condition_names, targets=targets)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_102.png]]
+[[file:./figures/figure_97.png]]
 
 #+begin_src jupyter-python
 
