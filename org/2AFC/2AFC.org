@@ -1,9 +1,9 @@
 :PROPERTIES:
 :GPTEL_MODEL: deepseek-v4-pro
-:GPTEL_BACKEND: Deepseek
+:GPTEL_BACKEND: OpenAI
 :GPTEL_SYSTEM: You are a large language model living in Emacs and a helpful assistant. Respond concisely.
 :GPTEL_TOOLS:
-:GPTEL_BOUNDS: ((ignore (58237 71255)) (response (40795 41088) (44265 44557) (71273 76804)))
+:GPTEL_BOUNDS: ((response (4659 4897) (4898 4925) (4926 4927) (4928 8320) (8359 8598) (8599 8626) (8627 8628) (8629 10388) (46752 47045) (50222 50514)) (ignore (54850 77634)))
 :END:
 #+Startup: fold
 #+TITLE: Low Rank Recurrent Neural Networks
@@ -125,15 +125,233 @@ def generate_2AFC_trials(
     inputs[idx_nogo, n_on[0]:n_off[0], 1] += 1.0
     inputs[:, n_on[1]:n_off[1], 2] += 1.0
 
+    # 2D targets
+    # not imposing anything on readout 1
+    if rank>1:
+        targets[..., 0] = torch.nan
+
+    if baseline_value is not None:
+        targets[:, :n_on[0]] = baseline_value
+
+    targets[idx_go, n_off[1]:, -1] = 1.0
+    targets[idx_nogo, n_off[1]:, -1] = -1.0
+
+    # allow ramping on readout
+    targets[:, n_on[0]:n_off[1], -1] = torch.nan
+
+    return inputs, targets, idx_go
+#+end_src
+
+#+RESULTS:
+
+** /2AFCE generator/
+
+#+begin_src jupyter-python
+def generate_2AFCE_trials(
+    n_trials: int,
+    timing: TaskTiming,
+    input_size: int = 5,
+    rank: int =2,
+    noise: float = 0.1,
+    baseline_value: float = 1e-3,
+):
+    n_steps = timing.n_steps
+    n_on = timing.n_stim_on
+    n_off = timing.n_stim_off
+
+    inputs = noise * torch.randn(n_trials, n_steps, input_size)
+    targets = torch.zeros(n_trials, n_steps, rank)
+
+    idx_go = torch.rand(n_trials) > 0.5
+    idx_nogo = ~idx_go
+    idx_engaged = torch.rand(n_trials) > 0.5
+
+    # Channels:
+    # 0 = Right  # 1 = Left  # 2 = Cue
+    inputs[idx_go, n_on[0]:n_off[0], 0] += 1.0
+    inputs[idx_nogo, n_on[0]:n_off[0], 1] += 1.0
+    inputs[:, n_on[1]:n_off[1], 2] += 1.0
+
+    # 3 = attention
+    inputs[:, n_on[0]:, 3] += 1.0
+
     targets[..., 0] = torch.nan
     if baseline_value is not None:
         targets[:, :n_on[0]] = baseline_value
 
     targets[idx_go, n_off[1]:, -1] = 1.0
     targets[idx_nogo, n_off[1]:, -1] = -1.0
-    targets[:, n_on[0]:n_off[1], -1] = torch.nan
 
-    return inputs, targets
+    # no target constrain if disengaged
+    targets[~idx_engaged, n_off[1]:, -1] = torch.nan
+
+    # ramping
+    targets[:, n_on[0]:n_off[1], -1] = 0.0 #  torch.nan
+
+    return inputs, targets, idx_engaged
+#+end_src
+
+#+RESULTS:
+
+** /2AFC_RD generator/
+
+#+begin_src jupyter-python
+import torch
+
+def generate_2AFC_RD_trials(
+    n_trials: int,
+    timing: TaskTiming,
+    input_size: int = 2,
+    rank: int = 2,
+    noise: float = 0.1,
+    baseline_value: float = 1e-3,
+    delay_min: float = 2.0,
+    delay_max: float = 6.0,
+):
+    """
+    Generate trials for a Random‑Delay 2AFC task.
+
+    Two stimuli (left/right) are presented. The first appears at a fixed time
+    (`timing.stim_on[0]`), the second at a randomly delayed time
+    (`timing.stim_on[1] + delay`). The network must output +1 during the second
+    stimulus period when the right cue was shown, and -1 when the left cue was shown.
+
+    Parameters
+    ----------
+    n_trials : int
+        Number of trials.
+    timing : TaskTiming
+        Task timing definition. `timing.stim_on` and `timing.stim_off` must have at
+        least two entries. The first entry controls the fixed first stimulus, the
+        second entry the delay‑shifted second stimulus.
+    input_size : int, optional (default=2)
+        Number of input channels. Only channels 0 and 1 are used.
+    rank : int, optional (default=2)
+        Output dimension. The first channel receives baseline values early in the
+        trial; the last channel holds the decision target.
+    noise : float, optional (default=0.1)
+        Standard deviation of Gaussian input noise.
+    baseline_value : float, optional (default=1e-3)
+        Value to fill the first output channel before the first stimulus onset.
+    delay_min, delay_max : float, optional
+        Uniform range (in seconds) from which the delay of the second stimulus is
+        drawn.
+
+    Returns
+    -------
+    inputs : torch.Tensor, shape (n_trials, n_steps, input_size)
+    targets : torch.Tensor, shape (n_trials, n_steps, rank)
+        Contains NaNs where no target is specified.
+    is_right : torch.Tensor, shape (n_trials,)
+        Boolean tensor indicating whether the trial requires +1 output (True) or -1.
+    """
+    n_steps = timing.n_steps
+    dt = timing.dt
+
+    # Convert timing to step indices
+    n_stim_on = torch.tensor([int(t / dt) for t in timing.stim_on], dtype=torch.long)
+    n_stim_off = torch.tensor([int(t / dt) for t in timing.stim_off], dtype=torch.long)
+
+    # Fixed first stimulus, random delay for the second
+    delays = torch.rand(n_trials) * (delay_max - delay_min) + delay_min
+    delay_steps = (delays / dt).long()          # shape (n_trials,)
+
+    start_0 = n_stim_on[0].expand(n_trials)     # fixed
+    end_0   = n_stim_off[0].expand(n_trials)    # fixed
+    start_1 = n_stim_on[1] + delay_steps        # (n_trials,)
+    end_1   = n_stim_off[1] + delay_steps       # (n_trials,)
+
+    # Allocate tensors
+    inputs  = noise * torch.randn(n_trials, n_steps, input_size)
+    targets = torch.full((n_trials, n_steps, rank), torch.nan)
+
+    # Decide whether it's a Right (+) or Left (-) trial
+    is_right = torch.rand(n_trials) > 0.5
+
+    # First stimulus (channel 0 = right, 1 = left)
+    for i in range(n_trials):
+        # Right/left cue during first stimulus
+        if is_right[i]:
+            inputs[i, start_0[i]:end_0[i], 0] += 1.0   # right channel active
+        else:
+            inputs[i, start_0[i]:end_0[i], 1] += 1.0   # left channel active
+
+        inputs[i, start_1[i]:end_1[i], 1] += 1.0
+
+        # Decision target: +1 for right, -1 for left during the second stimulus
+        val = 1.0 if is_right[i] else -1.0
+        targets[i, start_1[i]:end_1[i], -1] = val
+
+    # First output channel: baseline until the first stimulus
+    first_stim_on_step = n_stim_on[0].item()
+    targets[:, :first_stim_on_step, 0] = baseline_value
+
+    return inputs, targets, is_right
+#+end_src
+
+#+RESULTS:
+
+** /2AFCE_RD generator/
+
+#+begin_src jupyter-python
+import torch
+
+def generate_2AFCE_RD_trials(
+    n_trials: int,
+    timing: TaskTiming,
+    input_size: int = 2,
+    rank: int = 2,
+    noise: float = 0.1,
+    baseline_value: float = 1e-3,
+    delay_min: float = 2.0,
+    delay_max: float = 6.0,
+):
+    n_steps = timing.n_steps
+    dt = timing.dt
+
+    # Convert timing to step indices
+    n_stim_on = torch.tensor([int(t / dt) for t in timing.stim_on], dtype=torch.long)
+    n_stim_off = torch.tensor([int(t / dt) for t in timing.stim_off], dtype=torch.long)
+
+    # Fixed first stimulus, random delay for the second
+    delays = torch.rand(n_trials) * (delay_max - delay_min) + delay_min
+    delay_steps = (delays / dt).long()          # shape (n_trials,)
+
+    start_0 = n_stim_on[0].expand(n_trials)     # fixed
+    end_0   = n_stim_off[0].expand(n_trials)    # fixed
+    start_1 = n_stim_on[1] + delay_steps        # (n_trials,)
+    end_1   = n_stim_off[1] + delay_steps       # (n_trials,)
+    rwd_1   = end_1 + int(1.0/dt)       # (n_trials,)
+
+    # Allocate tensors
+    inputs  = noise * torch.randn(n_trials, n_steps, input_size)
+    targets = torch.full((n_trials, n_steps, rank), torch.nan)
+
+    # Decide whether it's a Right (+) or Left (-) trial
+    is_right = torch.rand(n_trials) > 0.5
+    is_engaged = torch.rand(n_trials) > 0.5
+
+    # First stimulus (channel 0 = right, 1 = left)
+    for i in range(n_trials):
+        # Right/left cue during first stimulus
+        if is_right[i]:
+            inputs[i, start_0[i]:end_0[i], 0] += 1.0   # right channel active
+        else:
+            inputs[i, start_0[i]:end_0[i], 1] += 1.0   # left channel active
+
+        inputs[i, start_1[i]:end_1[i], 1] += 1.0
+
+        # Decision target: +1 for right, -1 for left during the second stimulus
+        val = 1.0 if is_right[i] else -1.0
+        targets[i, start_1[i]:rwd_1[i], -1] = val
+        targets[i, :start_1[i], -1] = 0.0
+        targets[~is_engaged, start_1[i]:rwd_1[i], -1] = torch.nan
+
+    # First output channel: baseline until the first stimulus
+    first_stim_on_step = n_stim_on[0].item()
+    targets[:, :first_stim_on_step, 0] = baseline_value
+
+    return inputs, targets, is_right
 #+end_src
 
 #+RESULTS:
@@ -360,7 +578,6 @@ class Optimization:
                 print(f"Stopping: validation loss above {self.max_val_loss}.")
                 break
 
-        # FIX: restore best model if requested.
         if self.keep_best and self.best_state_dict is not None:
             self.model.load_state_dict(self.best_state_dict)
 
@@ -370,22 +587,7 @@ class Optimization:
 #+RESULTS:
 
 #+begin_src jupyter-python
-import torch
-import torch.nn as nn
-
-
 class MaskedZeroLoss(nn.Module):
-    """
-    Masked MSE with three regimes per trial:
-      - baseline:  y == baseline_value  -> target 0
-      - zero:      |y| <= zero_tol      -> target 0
-      - nonzero:   |y|  > zero_tol      -> target y
-      - Loss is applied to all the channels (recurrent latents and readout).
-      - Baseline term is summed across channels, so the
-        objective magnitude does depend on output dimensionality.
-      - NaNs in targets are treated as "ignore" everywhere.
-    """
-
     def __init__(
         self,
         criterion: nn.Module | None = None,
@@ -394,7 +596,7 @@ class MaskedZeroLoss(nn.Module):
         baseline_weight: float = 1.0,
         zero_tol: float = 0.0,
         baseline_value: float = 1e-3,
-        task_channel: int = -1,
+        verbose: int = 0,
     ):
         super().__init__()
         self.criterion = criterion or nn.MSELoss()
@@ -403,41 +605,57 @@ class MaskedZeroLoss(nn.Module):
         self.baseline_weight = baseline_weight
         self.zero_tol = zero_tol
         self.baseline_value = baseline_value
-        self.task_channel = task_channel
+        self.verbose = verbose
 
     @staticmethod
     def _masked_mse(pred, target, mask, criterion):
         if mask.sum() == 0:
-            return pred.new_tensor(0.0)
+            return pred.sum() * 0.0
         return criterion(pred[mask], target[mask])
 
     def forward(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        # def channel_loss(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """
-        y_pred: (B, T, C)  -- C output channels
-        y:      (B, T, C)     -- scalar target per time step and channel (NaN = ignore)
+        y_pred: (B, T, C_pred)
+        y:      (B, T, C_target), NaN = ignore
         """
 
-        finite = torch.isfinite(y_pred) & torch.isfinite(y)
-        bl_mask = finite & (y == self.baseline_value)
-        nonzero_mask = finite & (~bl_mask) & (y.abs() >  self.zero_tol)
-        zero_mask = finite & (~bl_mask) & (y.abs() <= self.zero_tol)
+        if y.ndim != 3:
+            raise ValueError(f"Expected y to have shape (B, T, C), got {y.shape}")
+
+        if y.shape[-1] != y_pred.shape[-1]:
+            pred = y_pred[..., -1:].clone()
+        else:
+            pred = y_pred
 
         zeros = torch.zeros_like(y)
 
-        loss_bl = self._masked_mse(y_pred, zeros, bl_mask, self.criterion)
-        loss_zero = self._masked_mse(y_pred, zeros, zero_mask, self.criterion)
-        loss_nonzero = self._masked_mse(y_pred, y, nonzero_mask, self.criterion)
+        baseline_value = torch.tensor(
+            self.baseline_value, device=y.device, dtype=y.dtype
+        )
 
-        return self.baseline_weight * loss_bl + self.zero_weight   * loss_zero + self.nonzero_weight * loss_nonzero
+        finite = torch.isfinite(pred) & torch.isfinite(y)
 
-    # def forward(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        bl_mask = finite & torch.isclose(y, baseline_value)
+        nonzero_mask = finite & (~bl_mask) & (y.abs() > self.zero_tol)
+        zero_mask = finite & (~bl_mask) & (y.abs() <= self.zero_tol)
 
-    #     loss = 0.0
-    #     for i in range(1, y.shape[-1]):
-    #         loss = loss + self.channel_loss(y_pred[..., i], y[..., i])
+        loss_zero = self._masked_mse(pred, zeros, zero_mask, self.criterion)
+        loss_nonzero = self._masked_mse(pred, y, nonzero_mask, self.criterion)
 
-    #     return loss
+        loss_bl = y_pred.sum() * 0.0
+        for i in range(y_pred.shape[-1]):
+            pred_i = y_pred[..., i:i+1]
+            finite_i = torch.isfinite(pred_i) & torch.isfinite(y)
+            bl_mask_i = finite_i & torch.isclose(y, baseline_value)
+            loss_bl = loss_bl + self._masked_mse(
+                pred_i, zeros, bl_mask_i, self.criterion
+            )
+
+        return (
+            self.baseline_weight * loss_bl
+            + self.zero_weight * loss_zero
+            + self.nonzero_weight * loss_nonzero
+        )
 #+end_src
 
 #+RESULTS:
@@ -467,15 +685,8 @@ y_t = \sigma(W_{ho} r_t + b_o)
 #+begin_src jupyter-python
 class LowRankModel(nn.Module):
     """
-    Low-rank RNN with optional reward-feedback input channel.
-
-    reward feedback is now teacher-forced during training
-
-        training (targets is not None):
-            rwd_next[b] = 1  if  target[b, t] == +1   else 0
-        eval (targets is None):
-            rwd_next[b] = 0
-
+    Low-rank RNN with optional rwd-feedback input channel.
+    rwd feedback is teacher-forced.
     """
 
     def __init__(
@@ -489,10 +700,9 @@ class LowRankModel(nn.Module):
         train_inputs=True,
         train_outputs=True,
         warmup_steps=500,
-        reward_channel=-1,
-        reward_threshold=0.5,
-        reward_target_value=1.0,
-        task_channel=-1,
+        rwd_channel=-1,
+        rwd_thresh=0.5,
+        rwd=True,
         device="cpu",
     ):
         super().__init__()
@@ -501,12 +711,11 @@ class LowRankModel(nn.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.rank = rank
-        self.gain = gain
+        self.gain = torch.tensor(gain, device=self.device)
 
-        self.reward_channel = reward_channel
-        self.reward_threshold = reward_threshold
-        self.reward_target_value = reward_target_value
-        self.task_channel = task_channel
+        self.rwd = rwd
+        self.rwd_channel = rwd_channel
+        self.rwd_thresh = rwd_thresh
 
         # input layer
         self.wi = None
@@ -514,7 +723,7 @@ class LowRankModel(nn.Module):
             self.Ai = 1.0
             self.wi = nn.Linear(input_size, hidden_size, device=self.device)
             with torch.no_grad():
-                nn.init.normal_(self.wi.weight, mean=0.0, std=1.0 / hidden_size**0.5)
+                nn.init.normal_(self.wi.weight, mean=0.0, std=1.0)
                 nn.init.zeros_(self.wi.bias)
 
             if not train_inputs:
@@ -526,13 +735,16 @@ class LowRankModel(nn.Module):
         self.m = nn.Parameter(torch.randn(hidden_size, rank, device=self.device))
         self.n = nn.Parameter(torch.randn(hidden_size, rank, device=self.device))
 
+        nn.init.normal_(self.m, mean=0.0, std=1.0)
+        nn.init.normal_(self.n, mean=0.0, std=1.0)
+
         # output layer
         self.wo = None
         if output_size > 0:
             self.Ao = 1.0
             self.wo = nn.Linear(hidden_size, output_size, device=self.device)
             with torch.no_grad():
-                nn.init.normal_(self.wo.weight, mean=0.0, std=1.0 / hidden_size**0.5)
+                nn.init.normal_(self.wo.weight, mean=0.0, std=1.0)
                 nn.init.zeros_(self.wo.bias)
 
             if not train_outputs:
@@ -558,21 +770,8 @@ class LowRankModel(nn.Module):
         rates = self.nonlinearity(self.gain * ( input_drive + rec_inputs))
         return rates, rec_inputs
 
-    def _reward_signal(self, target_t, readout_t):
-        """
-        FIX: teacher-forced during training, model-driven at eval.
-        target_t: (B,) or None
-        readout_t: (B, C)
-        returns: (B,) float tensor in {0, 1}
-        """
-        if target_t is None:  # eval
-            sig = 0.0 * (readout_t[..., self.task_channel] > self.reward_threshold)
-        else:                 # train: teacher forcing
-            finite = torch.isfinite(target_t)
-            sig = finite & (target_t == self.reward_target_value)
-        return sig.to(dtype=readout_t.dtype)
-
     def forward(self, ff_inputs, targets=None, ret_rates=False):
+        "ff is (B, T, input_size)"
         B, T = ff_inputs.shape[0], ff_inputs.shape[1]
         N = self.hidden_size
 
@@ -594,11 +793,10 @@ class LowRankModel(nn.Module):
         rwd_next = torch.zeros(B, device=self.device, dtype=ff_inputs.dtype)
 
         for step in range(T):
-            x_t = ff_inputs[:, step]
+            x_t = ff_inputs[:, step].clone()
 
-            if self.reward_channel is not None:
-                x_t = x_t.clone()
-                x_t[:, self.reward_channel] = x_t[:, self.reward_channel] + rwd_next
+            if torch.any(rwd_next) & self.rwd:
+                x_t[:, self.rwd_channel] = x_t[:, self.rwd_channel] + rwd_next
 
             rates, rec_inputs = self.update_dynamics(x_t, rec_inputs, rates)
             readout = self.get_readout(rates, rec_inputs)
@@ -608,8 +806,11 @@ class LowRankModel(nn.Module):
                 rates_list.append(rates)
                 inputs_list.append(rec_inputs)
 
-            target_t = targets[:, step, self.reward_channel] if targets is not None else None
-            rwd_next = self._reward_signal(target_t, readout)
+            if targets is not None:
+                rwd_mask = (targets[:, step, self.rwd_channel]==1) & (readout[:, self.rwd_channel]>0.5)
+                rwd_next = rwd_mask.to(dtype=ff_inputs.dtype)
+            else:
+                rwd_next.zero_()
 
         readout_list = torch.stack(readout_list, dim=1)
         if ret_rates:
@@ -796,7 +997,11 @@ class LowRankInitializer:
         self, Sigma: torch.Tensor, N: int, device, generator=None
     ) -> torch.Tensor:
         P = Sigma.shape[0]
-        Sigma_j = Sigma + self.jitter * torch.eye(P)
+
+        Sigma = Sigma.to(device)
+        Sigma_j = Sigma + self.jitter * torch.eye(
+            P, device=device, dtype=Sigma.dtype
+        )
 
         try:
             L = torch.linalg.cholesky(Sigma_j)
@@ -809,8 +1014,14 @@ class LowRankInitializer:
             evals = evals.clamp_min(0.0)
             L = evecs * evals.sqrt().unsqueeze(0)
 
-        z = torch.randn(N, P, generator=generator)
-        return (z @ L.T).to(device)
+        z = torch.randn(
+            N, P,
+            device=device,
+            dtype=Sigma.dtype,
+            generator=generator,
+        )
+
+        return z @ L.T
 
     @torch.no_grad()
     def apply(self, model: nn.Module, seed: Optional[int] = None) -> torch.Tensor:
@@ -822,7 +1033,7 @@ class LowRankInitializer:
 
         gen = None
         if seed is not None:
-            gen = torch.Generator()
+            gen = torch.Generator(device=device)
             gen.manual_seed(seed)
 
         X = self._sample_loadings(Sigma, N, device, generator=gen)
@@ -1386,6 +1597,7 @@ def flow_specs_for_task(timing, task):
             dict(name="Go", dims=[0], conds=["Go"]),
             dict(name="NoGo", dims=[1], conds=["NoGo"]),
             dict(name="Cue", dims=[2], conds=["Go", "NoGo"]),
+            dict(name="Attention", dims=[3], conds=["Go", "NoGo"]),
         ]
 
     if task == "dpa":
@@ -1927,17 +2139,16 @@ TAU = 0.2
 DT = 0.02
 alpha = DT / TAU
 
-# 4 input dimensions: for 2 stimuli, 1 Cue, 1 reward
+# 5 input dimensions: for 2 stimuli, 1 Cue, 1 attention, 1 reward
+warmup_steps = 10
 input_size = 4
 hidden_size = 512
 output_size = 0
 rank = 2
+gain = 1.0
 
-model = LowRankModel(input_size, hidden_size, output_size, rank, alpha, train_inputs=True, device=device)
-# model = EILowRankRNN(input_size, hidden_size, output_size, rank, alpha, fraction_exc=0.8)
-
+model = LowRankModel(input_size, hidden_size, output_size, rank, gain, alpha, train_inputs=True, warmup_steps=warmup_steps, device=device)
 model.to(device)
-# model = torch.compile(model)
 
 noise = 0.1 * torch.sqrt(1.0 - torch.exp(torch.tensor(-alpha))**2)
 #+end_src
@@ -1950,11 +2161,11 @@ overlaps = {
     (("m", 0), ("n", 0)): 0.8,
     (("m", 1), readout): 0.8,
 
-    # Sample loads readout direction 0
+    # Stimulus loads readout direction 0
     (("in", 0), ("n", 0)):  0.8,
     (("in", 1), ("n", 0)): -0.8,
 
-    # Go/NoGo/Cue/Lick on readout 1
+    # Cue/Lick on readout 1
     # (("in", 2), readout):  0.8,
     (("in", 3), readout): 0.8,
 }
@@ -1967,6 +2178,8 @@ init = LowRankInitializer(
     psd_warn_threshold=1e-1,   # warn loudly if correction > 0.1%
 )
 
+# init = LowRankInitializer(var_m=0.1, var_n=0.1, var_in=0.1, var_out=0.1, zero_biases=True)
+
 Sigma = init.apply(model, seed)
 print(f"min eigval after projection: {torch.linalg.eigvalsh(Sigma).min().item():.3e}")
 print(f"diag (should match var_*): {torch.diag(Sigma).numpy()}")
@@ -1976,9 +2189,9 @@ print(f"diag (should match var_*): {torch.diag(Sigma).numpy()}")
 : min eigval after projection: 1.338e-07
 : diag (should match var_*): [1.        1.        1.        1.0000001 0.9999999 0.9999999 1.
 :  1.       ]
-: /home/leon/tmp/ipykernel_1748963/4005516315.py:189: UserWarning: Sigma was not PSD (min eigval = -3.856e-01); projected to nearest PSD (Frobenius rel. change = 1.355e-01). Correction is large — consider reducing overlap magnitudes or increasing the relevant variances.
+: /home/leon/tmp/ipykernel_754211/2477346011.py:199: UserWarning: Sigma was not PSD (min eigval = -3.856e-01); projected to nearest PSD (Frobenius rel. change = 1.355e-01). Correction is large — consider reducing overlap magnitudes or increasing the relevant variances.
 :   Sigma = self.build_sigma(model)
-: /home/leon/tmp/ipykernel_1748963/4005516315.py:176: UserWarning: Cholesky failed even after PSD projection (linalg.cholesky: The factorization could not be completed because the input is not positive-definite (the leading minor of order 6 is not positive-definite).); falling back to eigendecomposition.
+: /home/leon/tmp/ipykernel_754211/2477346011.py:180: UserWarning: Cholesky failed even after PSD projection (linalg.cholesky: The factorization could not be completed because the input is not positive-definite (the leading minor of order 6 is not positive-definite).); falling back to eigendecomposition.
 :   warnings.warn(
 
 
@@ -2017,7 +2230,7 @@ for (ba, ia), (bb, ib) in init.overlaps.keys():
 ** 2AFC trial
 
 #+begin_src jupyter-python
-timing = TaskTiming(stim_on=[2.0, 4.0], stim_off=[3.0, 5.0], t_steps=6.0, dt=DT)
+timing = TaskTiming(stim_on=[2.0, 4.0], stim_off=[3.0, 5.0], t_steps=6.0, dt=DT,)
 #+end_src
 
 #+RESULTS:
@@ -2035,12 +2248,13 @@ N_STIM_OFF = timing.n_stim_off
 #+RESULTS:
 
 #+begin_src jupyter-python
-inputs, targets = generate_2AFC_trials(N_BATCH, timing=timing, input_size=input_size, noise=noise)
+target_rank=1
+inputs, targets, idx_go = generate_2AFC_trials(N_BATCH, timing=timing, input_size=input_size, noise=noise, rank=target_rank)
 print(inputs.shape, targets.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([516, 300, 4]) torch.Size([516, 300, 2])
+: torch.Size([516, 300, 4]) torch.Size([516, 300, 1])
 
 #+begin_src jupyter-python
 plt.hist(targets[:, -1, -1].reshape(-1), bins='auto')
@@ -2051,7 +2265,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_21.png]]
+[[file:./figures/figure_24.png]]
 
 #+begin_src jupyter-python
 idx_nogo = torch.argwhere((targets[:, -1, -1] != 1)).reshape(-1)[:32]
@@ -2067,13 +2281,14 @@ print(idx_go.shape, idx_nogo.shape)
 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 
 if len(idx_nogo) > 0:
-    ax[0].plot(x_time, inputs[idx_nogo, :, 0].mT.cpu().numpy(), alpha=.2)
-    ax[0].plot(x_time, inputs[idx_nogo, :, 1].mT.cpu().numpy(), alpha=.2)
+    for i in range(inputs.shape[-1]):
+        ax[0].plot(x_time, inputs[idx_nogo, :, i].mT.cpu().numpy(), alpha=.2)
     ax[0].plot(x_time, targets[idx_nogo[0],:, -1].cpu().numpy(), 'k', label='Target')
 ax[0].set_title('Nogo trials')
 
 if len(idx_go) > 0:
-    ax[1].plot(x_time, inputs[idx_go, :, 0].mT.cpu().numpy(), alpha=.2)
+    for i in range(inputs.shape[-1]):
+        ax[1].plot(x_time, inputs[idx_go, :, i].mT.cpu().numpy(), alpha=.2)
     ax[1].plot(x_time, inputs[idx_go, :, 1].mT.cpu().numpy(), alpha=.2)
 
     ax[1].plot(x_time, targets[idx_go[0],: ,-1].cpu().numpy(), 'k', label='Target')
@@ -2092,7 +2307,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_23.png]]
+[[file:./figures/figure_26.png]]
 
 #+begin_src jupyter-python
 overlaps, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
@@ -2102,6 +2317,23 @@ print('inputs', inputs.shape, 'overlaps', overlaps.shape, 'rates', rates.shape)
 
 #+RESULTS:
 : inputs torch.Size([516, 300, 4]) overlaps torch.Size([516, 300, 2]) rates torch.Size([516, 300, 512])
+
+#+begin_src jupyter-python
+criterion = MaskedZeroLoss(criterion=torch.nn.MSELoss(), nonzero_weight=1.0, zero_weight=1.0, verbose=1)
+print(overlaps.shape, targets.shape)
+loss = criterion(overlaps, targets)
+print(loss)
+#+end_src
+
+#+RESULTS:
+: torch.Size([516, 300, 2]) torch.Size([516, 300, 1])
+: y_pred torch.Size([516, 300, 1]) y torch.Size([516, 300, 1])
+: finite torch.Size([516, 300, 1]) tensor(0.5000)
+: bl torch.Size([516, 300, 1]) tensor(0.3333)
+: nonzero torch.Size([516, 300, 1]) tensor(0.1667)
+: zero torch.Size([516, 300, 1]) tensor(0.)
+: loss_bl tensor(0.0024) loss_zero 0.0 loss_nonzero tensor(1.0041)
+: tensor(1.0066)
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -2127,7 +2359,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_25.png]]
+[[file:./figures/figure_29.png]]
 
 #+begin_src jupyter-python
 
@@ -2138,12 +2370,12 @@ plt.show()
 ** 2AFC Training
 
 #+begin_src jupyter-python
-learning_rate = 0.01
+learning_rate = 0.001
 epochs = 50
-batch_size = 64
+batch_size = 128
 grad_clip_norm = None
 
-criterion = MaskedZeroLoss(criterion=torch.nn.MSELoss(), nonzero_weight=1.0, zero_weight=1.0)
+criterion = MaskedZeroLoss(criterion=torch.nn.MSELoss(), nonzero_weight=1.0, zero_weight=0.1)
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5, threshold=0.001, min_lr=0.0001)
 #+end_src
@@ -2158,6 +2390,19 @@ train_losses, val_losses, learning_rates = opt.fit()
 torch.save(model.state_dict(), '%s/2AFC_%d.pth' % (PATH, seed))
 #+end_src
 
+#+RESULTS:
+#+begin_example
+Epoch 005/50 | lr: 0.00100 | train: 0.2182 | val: 0.2071
+Epoch 010/50 | lr: 0.00100 | train: 0.1785 | val: 0.1701
+Epoch 015/50 | lr: 0.00100 | train: 0.1600 | val: 0.1563
+Epoch 020/50 | lr: 0.00100 | train: 0.1488 | val: 0.1441
+Epoch 025/50 | lr: 0.00100 | train: 0.1381 | val: 0.1313
+Epoch 030/50 | lr: 0.00100 | train: 0.1306 | val: 0.1265
+Epoch 035/50 | lr: 0.00100 | train: 0.1218 | val: 0.1162
+Epoch 040/50 | lr: 0.00100 | train: 0.1150 | val: 0.1089
+Epoch 045/50 | lr: 0.00100 | train: 0.1096 | val: 0.0992
+Epoch 050/50 | lr: 0.00100 | train: 0.1011 | val: 0.0949
+#+end_example
 
 #+begin_src jupyter-python
 plt.plot(train_losses)
@@ -2170,7 +2415,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_29.png]]
+[[file:./figures/figure_33.png]]
 
 #+begin_src jupyter-python
 
@@ -2189,12 +2434,12 @@ model.eval();
 #+RESULTS:
 
 #+begin_src jupyter-python
-inputs, targets = generate_2AFC_trials(N_BATCH, timing=timing, input_size=input_size, noise=noise)
+inputs, targets, idx_go = generate_2AFC_trials(N_BATCH, timing=timing, input_size=input_size, noise=noise, rank=target_rank)
 print(inputs.shape, targets.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([516, 300, 4]) torch.Size([516, 300, 2])
+: torch.Size([516, 300, 4]) torch.Size([516, 300, 1])
 
 #+begin_src jupyter-python
 idx_nogo = torch.argwhere((targets[:, -1, -1] != 1)).reshape(-1)[:32]
@@ -2210,16 +2455,17 @@ print(idx_go.shape, idx_nogo.shape)
 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 
 if len(idx_nogo) > 0:
-    ax[0].plot(x_time, inputs[idx_nogo, :, 0].mT.cpu().numpy(), alpha=.2)
-    ax[0].plot(x_time, inputs[idx_nogo, :, 1].mT.cpu().numpy(), alpha=.2)
+    for i in range(inputs.shape[-1]):
+        ax[0].plot(x_time, inputs[idx_nogo, :, i].mT.cpu().numpy(), alpha=.2)
+
     ax[0].plot(x_time, targets[idx_nogo[0],:, -1].cpu().numpy(), 'k', label='Target')
 ax[0].set_title('Nogo trials')
 
 if len(idx_go) > 0:
-    ax[1].plot(x_time, inputs[idx_go, :, 0].mT.cpu().numpy(), alpha=.2)
-    ax[1].plot(x_time, inputs[idx_go, :, 1].mT.cpu().numpy(), alpha=.2)
-
+    for i in range(inputs.shape[-1]):
+        ax[1].plot(x_time, inputs[idx_go, :, i].mT.cpu().numpy(), alpha=.2)
     ax[1].plot(x_time, targets[idx_go[0],: ,-1].cpu().numpy(), 'k', label='Target')
+
 ax[1].set_title('Go trials')
 
 for i in range(2):
@@ -2235,7 +2481,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_34.png]]
+[[file:./figures/figure_38.png]]
 
 #+begin_src jupyter-python
 overlaps, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
@@ -2270,8 +2516,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_36.png]]
-
+[[file:./figures/figure_40.png]]
 
 #+begin_src jupyter-python
 kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)**2
@@ -2313,7 +2558,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_38.png]]
+[[file:./figures/figure_42.png]]
 
  #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
@@ -2346,7 +2591,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_39.png]]
+[[file:./figures/figure_43.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -2372,7 +2617,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_40.png]]
+[[file:./figures/figure_44.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
@@ -2390,15 +2635,15 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_41.png]]
+[[file:./figures/figure_45.png]]
 
 #+begin_src jupyter-python
 # 2AFC
 fig, axes, field_cache = plot_task_flow_fields(
     model,
     inputs,
-    xlim=[-5, 5],
-    ylim=[-5, 5],
+    xlim=[-2, 2],
+    ylim=[-2, 2],
     timing=timing,
     task="2afc",
     targets=targets,
@@ -2407,10 +2652,12 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_42.png]]
+[[file:./figures/figure_46.png]]
 
 #+begin_src jupyter-python
 
 #+end_src
 
 #+RESULTS:
+
+***
