@@ -1,3 +1,4 @@
+
 :PROPERTIES:
 :GPTEL_MODEL: deepseek-v4-pro
 :GPTEL_BACKEND: OpenAI
@@ -104,10 +105,10 @@ class TaskTiming:
 def generate_2AFC_trials(
     n_trials: int,
     timing: TaskTiming,
-    input_size: int = 4,
+    input_size: int = 5,
     rank: int =2,
     noise: float = 0.1,
-    baseline_value: float = 1e-3,
+    baseline_value: float = 0.5,
 ):
     n_steps = timing.n_steps
     n_on = timing.n_stim_on
@@ -116,30 +117,33 @@ def generate_2AFC_trials(
     inputs = noise * torch.randn(n_trials, n_steps, input_size)
     targets = torch.zeros(n_trials, n_steps, rank)
 
-    idx_go = torch.rand(n_trials) > 0.5
-    idx_nogo = ~idx_go
+    idx_right = torch.rand(n_trials) > 0.5
+    idx_left = ~idx_right
 
     # Channels:
     # 0 = Right  # 1 = Left  # 2 = Cue
-    inputs[idx_go, n_on[0]:n_off[0], 0] += 1.0
-    inputs[idx_nogo, n_on[0]:n_off[0], 1] += 1.0
+    inputs[idx_right, n_on[0]:n_off[0], 0] += 1.0
+    inputs[idx_left, n_on[0]:n_off[0], 1] += 1.0
     inputs[:, n_on[1]:n_off[1], 2] += 1.0
+
+    # 3 = attention
+    inputs[:, n_on[0]:, 3] += 1.0
 
     # 2D targets
     # not imposing anything on readout 1
-    if rank>1:
-        targets[..., 0] = torch.nan
+    # if rank>1:
+    #     targets[..., 0] = torch.nan
 
     if baseline_value is not None:
         targets[:, :n_on[0]] = baseline_value
 
-    targets[idx_go, n_off[1]:, -1] = 1.0
-    targets[idx_nogo, n_off[1]:, -1] = -1.0
+    targets[idx_right, n_off[1]:, -1] = 1.0
+    targets[idx_left, n_off[1]:, -1] = -1.0
 
     # allow ramping on readout
-    targets[:, n_on[0]:n_off[1], -1] = torch.nan
+    # targets[:, n_on[0]:n_off[1], -1] = 2.0
 
-    return inputs, targets, idx_go
+    return inputs, targets, idx_right
 #+end_src
 
 #+RESULTS:
@@ -151,9 +155,9 @@ def generate_2AFCE_trials(
     n_trials: int,
     timing: TaskTiming,
     input_size: int = 5,
-    rank: int =2,
+    rank: int =1,
     noise: float = 0.1,
-    baseline_value: float = 1e-3,
+    baseline_value: float = 0.5,
 ):
     n_steps = timing.n_steps
     n_on = timing.n_stim_on
@@ -162,31 +166,30 @@ def generate_2AFCE_trials(
     inputs = noise * torch.randn(n_trials, n_steps, input_size)
     targets = torch.zeros(n_trials, n_steps, rank)
 
-    idx_go = torch.rand(n_trials) > 0.5
-    idx_nogo = ~idx_go
+    idx_right = torch.rand(n_trials) > 0.5
+    idx_left = ~idx_right
     idx_engaged = torch.rand(n_trials) > 0.5
 
     # Channels:
     # 0 = Right  # 1 = Left  # 2 = Cue
-    inputs[idx_go, n_on[0]:n_off[0], 0] += 1.0
-    inputs[idx_nogo, n_on[0]:n_off[0], 1] += 1.0
+    inputs[idx_right, n_on[0]:n_off[0], 0] += 1.0
+    inputs[idx_left, n_on[0]:n_off[0], 1] += 1.0
     inputs[:, n_on[1]:n_off[1], 2] += 1.0
 
     # 3 = attention
-    inputs[:, n_on[0]:, 3] += 1.0
+    inputs[idx_engaged, n_on[0]:, 3] += 1.0
 
-    targets[..., 0] = torch.nan
     if baseline_value is not None:
         targets[:, :n_on[0]] = baseline_value
 
-    targets[idx_go, n_off[1]:, -1] = 1.0
-    targets[idx_nogo, n_off[1]:, -1] = -1.0
+    targets[idx_right, n_off[1]:, -1] = 1.0
+    targets[idx_left, n_off[1]:, -1] = -1.0
 
     # no target constrain if disengaged
-    targets[~idx_engaged, n_off[1]:, -1] = torch.nan
+    targets[~idx_engaged, n_off[1]:, -1] = 2.0
 
     # ramping
-    targets[:, n_on[0]:n_off[1], -1] = 0.0 #  torch.nan
+    targets[:, n_on[0]:n_off[1], -1] = 2.0 #  torch.nan
 
     return inputs, targets, idx_engaged
 #+end_src
@@ -406,13 +409,13 @@ class Optimization:
         scheduler: Any | None = None,
         grad_clip_norm: float | None = None,
         num_epochs: int = 100,
-        warmup_epochs: int = 25,
+        warmup_epochs: int = 0,
         stop_loss: float = 0.005,
         max_val_loss: float = 100.0,
         zero_low_rank_grad: Any | None = None,
         freeze_input_dims: Any | None = None,
         device: str | torch.device | None = None,
-        keep_best: bool = False,        # FIX: optional best-val checkpointing
+        keep_best: bool = False,
         verbose: bool = True,
     ):
         self.model = model
@@ -453,34 +456,6 @@ class Optimization:
             return self.model.device
         return next(self.model.parameters()).device
 
-    def _predict(self, X: torch.Tensor, y: Optional[torch.Tensor] = None) -> torch.Tensor:
-        return self.model(X, y)
-
-    def _zero_low_rank_grads(self) -> None:
-        if self.zero_low_rank_grad is None:
-            return
-        for param in (self.model.m, self.model.n):
-            if param.grad is None:
-                continue
-            if self.zero_low_rank_grad == "all":
-                param.grad.zero_()
-            else:
-                param.grad[:, self.zero_low_rank_grad] = 0.0
-
-    def _zero_input_grads(self) -> None:
-        if self.freeze_input_dims is None:
-            return
-        if self.model.wi.weight.grad is not None:
-            self.model.wi.weight.grad[:, self.freeze_input_dims] = 0.0
-
-    def _restore_frozen_input_weights(self) -> None:
-        if self.freeze_input_dims is None:
-            return
-        with torch.no_grad():
-            self.model.wi.weight[:, self.freeze_input_dims] = (
-                self._frozen_wi_weight[:, self.freeze_input_dims]
-            )
-
     def _run_epoch(self, loader: DataLoader, train: bool) -> float:
         self.model.train(train)
 
@@ -490,37 +465,24 @@ class Optimization:
 
         with context:
             for X, y in loader:
-                X = X.to(self.device, non_blocking=True)
-                y = y.to(self.device, non_blocking=True)
                 batch_size = X.size(0)
 
                 if train:
                     self.optimizer.zero_grad(set_to_none=True)
 
-                y_pred = self._predict(X, y)
+                y_pred = self.model(X, y)
                 loss = self.criterion(y_pred, y)
-
-                if not torch.isfinite(loss):
-                    return float("nan")
 
                 if train:
                     loss.backward()
-                    self._zero_low_rank_grads()
-                    self._zero_input_grads()
                     if self.grad_clip_norm is not None:
-                        torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(), self.grad_clip_norm
-                        )
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
                     self.optimizer.step()
-                    self._restore_frozen_input_weights()
 
                 total_loss += loss.item() * batch_size
                 total_examples += batch_size
 
-        if total_examples == 0:
-            raise ValueError("Dataloader produced zero examples.")
-
-        return total_loss / total_examples
+        return total_loss  / total_examples
 
     def _step_scheduler(self, val_loss: float) -> None:
         if self.scheduler is None:
@@ -554,11 +516,6 @@ class Optimization:
             self.val_losses.append(val_loss)
             self.learning_rates.append(self.learning_rate)
 
-            # FIX: optional best-val checkpointing.
-            if self.keep_best and math.isfinite(val_loss) and val_loss < self.best_val_loss:
-                self.best_val_loss = val_loss
-                self.best_state_dict = copy.deepcopy(self.model.state_dict())
-
             if self.verbose and (epoch % 5 == 0):
                 print(
                     f"Epoch {epoch:03d}/{self.num_epochs} | "
@@ -578,9 +535,6 @@ class Optimization:
                 print(f"Stopping: validation loss above {self.max_val_loss}.")
                 break
 
-        if self.keep_best and self.best_state_dict is not None:
-            self.model.load_state_dict(self.best_state_dict)
-
         return self.train_losses, self.val_losses, self.learning_rates
 #+end_src
 
@@ -593,25 +547,16 @@ class MaskedZeroLoss(nn.Module):
         criterion: nn.Module | None = None,
         nonzero_weight: float = 1.0,
         zero_weight: float = 1.0,
-        baseline_weight: float = 1.0,
-        zero_tol: float = 0.0,
-        baseline_value: float = 1e-3,
+        bl_weight: float = 0.1,
         verbose: int = 0,
     ):
         super().__init__()
-        self.criterion = criterion or nn.MSELoss()
-        self.nonzero_weight = nonzero_weight
-        self.zero_weight = zero_weight
-        self.baseline_weight = baseline_weight
-        self.zero_tol = zero_tol
-        self.baseline_value = baseline_value
-        self.verbose = verbose
 
-    @staticmethod
-    def _masked_mse(pred, target, mask, criterion):
-        if mask.sum() == 0:
-            return pred.sum() * 0.0
-        return criterion(pred[mask], target[mask])
+        self.criterion = criterion or nn.MSELoss(reduction='none')
+        self.target_weight = nonzero_weight
+        self.zero_weight = zero_weight
+        self.bl_weight = bl_weight
+        self.verbose = verbose
 
     def forward(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """
@@ -619,43 +564,43 @@ class MaskedZeroLoss(nn.Module):
         y:      (B, T, C_target), NaN = ignore
         """
 
-        if y.ndim != 3:
-            raise ValueError(f"Expected y to have shape (B, T, C), got {y.shape}")
+        target = y[..., -1].clone()
+        pred = y_pred[...,-1].clone()
+        zeros = torch.zeros_like(target)
 
-        if y.shape[-1] != y_pred.shape[-1]:
-            pred = y_pred[..., -1:].clone()
-        else:
-            pred = y_pred
+        finite = torch.isfinite(pred) & torch.isfinite(target)
+        if self.verbose:
+            print('finite', finite.shape, finite.float().mean())
 
-        zeros = torch.zeros_like(y)
+        zero_mask = ((target==0) & finite) .float()
+        if self.verbose:
+            print('zero_mask', zero_mask.shape, zero_mask.mean())
 
-        baseline_value = torch.tensor(
-            self.baseline_value, device=y.device, dtype=y.dtype
-        )
+        target_mask = ((target.abs() == 1) & finite).float()
+        if self.verbose:
+            print('target_mask', target_mask.shape, target_mask.mean())
 
-        finite = torch.isfinite(pred) & torch.isfinite(y)
+        bl_mask = ((target==0.5) & finite).float()
+        if self.verbose:
+            print('bl_mask', bl_mask.shape, bl_mask.mean())
 
-        bl_mask = finite & torch.isclose(y, baseline_value)
-        nonzero_mask = finite & (~bl_mask) & (y.abs() > self.zero_tol)
-        zero_mask = finite & (~bl_mask) & (y.abs() <= self.zero_tol)
-
-        loss_zero = self._masked_mse(pred, zeros, zero_mask, self.criterion)
-        loss_nonzero = self._masked_mse(pred, y, nonzero_mask, self.criterion)
-
-        loss_bl = y_pred.sum() * 0.0
+        bl_loss = 0.0
         for i in range(y_pred.shape[-1]):
-            pred_i = y_pred[..., i:i+1]
-            finite_i = torch.isfinite(pred_i) & torch.isfinite(y)
-            bl_mask_i = finite_i & torch.isclose(y, baseline_value)
-            loss_bl = loss_bl + self._masked_mse(
-                pred_i, zeros, bl_mask_i, self.criterion
-            )
+            bl_i = (self.criterion(y_pred[..., i].clone(), zeros) * bl_mask).sum() / bl_mask.sum() if bl_mask.sum()!=0 else zeros.sum()
+            bl_loss = bl_loss + bl_i # / y_pred.shape[-1]
 
-        return (
-            self.baseline_weight * loss_bl
-            + self.zero_weight * loss_zero
-            + self.nonzero_weight * loss_nonzero
-        )
+        if self.verbose:
+            print('bl_loss', bl_loss)
+
+        zero_loss = (self.criterion(pred, zeros) * zero_mask).sum() / zero_mask.sum() if zero_mask.sum()!=0 else zeros.sum()
+        if self.verbose:
+            print('zero_loss', zero_loss)
+
+        target_loss = (self.criterion(pred, target) * target_mask).sum() / target_mask.sum() if target_mask.sum()!=0 else zeros.sum()
+        if self.verbose:
+            print('target_loss', target_loss)
+
+        return self.zero_weight * zero_loss + self.target_weight * target_loss + self.bl_weight * bl_loss
 #+end_src
 
 #+RESULTS:
@@ -699,15 +644,14 @@ class LowRankModel(nn.Module):
         alpha=0.01,
         train_inputs=True,
         train_outputs=True,
-        warmup_steps=500,
         rwd_channel=-1,
         rwd_thresh=0.5,
-        rwd=True,
+        rwd=False,
         device="cpu",
     ):
         super().__init__()
         self.device = torch.device(device)
-        self.warmup_steps = warmup_steps
+
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.rank = rank
@@ -767,7 +711,7 @@ class LowRankModel(nn.Module):
         input_drive = self.Ai * self.wi(ff_inputs) if self.wi is not None else 0.0
         hidden = (rates @ self.n) @ self.m.T / self.hidden_size
         rec_inputs = self.exp_alpha * rec_inputs + (1.0 - self.exp_alpha) * hidden
-        rates = self.nonlinearity(self.gain * ( input_drive + rec_inputs))
+        rates = self.nonlinearity(( input_drive + rec_inputs))
         return rates, rec_inputs
 
     def forward(self, ff_inputs, targets=None, ret_rates=False):
@@ -775,16 +719,8 @@ class LowRankModel(nn.Module):
         B, T = ff_inputs.shape[0], ff_inputs.shape[1]
         N = self.hidden_size
 
-        rec_inputs = 0.1 * torch.randn(B, N, device=self.device)
-        rates = self.nonlinearity(self.gain * rec_inputs)
-
-        # warmup with zero input
-        zero_inputs = torch.zeros(B, max(self.input_size, 0), device=self.device)
-        with torch.no_grad():
-            for _ in range(self.warmup_steps):
-                rates, rec_inputs = self.update_dynamics(zero_inputs, rec_inputs, rates)
-        rates = rates.detach()
-        rec_inputs = rec_inputs.detach()
+        rec_inputs = torch.zeros(B, N, device=self.device)
+        rates = torch.zeros(B, N, device=self.device)
 
         readout_list = []
         rates_list = [] if ret_rates else None
@@ -806,11 +742,12 @@ class LowRankModel(nn.Module):
                 rates_list.append(rates)
                 inputs_list.append(rec_inputs)
 
-            if targets is not None:
-                rwd_mask = (targets[:, step, self.rwd_channel]==1) & (readout[:, self.rwd_channel]>0.5)
-                rwd_next = rwd_mask.to(dtype=ff_inputs.dtype)
-            else:
-                rwd_next.zero_()
+            if self.rwd:
+                if (targets is not None):
+                    rwd_mask = (targets[:, step, self.rwd_channel]==1) & (readout[:, self.rwd_channel]>0.5)
+                    rwd_next = rwd_mask.to(dtype=ff_inputs.dtype)
+                else:
+                    rwd_next.zero_()
 
         readout_list = torch.stack(readout_list, dim=1)
         if ret_rates:
@@ -1494,9 +1431,9 @@ def condition_indices_for_task(inputs, timing, task, condition_names=None):
     if task == "2afc":
         stim_epoch = slice(int(n_on[0]), int(n_off[0]))
         stim_drive = inputs[:, stim_epoch, :2].mean(dim=1)
-        is_go = stim_drive[:, 0] > stim_drive[:, 1]
-        is_nogo = ~is_go
-        return {"Go": torch.where(is_go)[0], "NoGo": torch.where(is_nogo)[0]}
+        is_right = stim_drive[:, 0] > stim_drive[:, 1]
+        is_left = ~is_right
+        return {"Right": torch.where(is_right)[0], "Left": torch.where(is_left)[0]}
 
     if task == "dpa":
         sample_epoch = slice(int(n_on[0]), int(n_off[0]))
@@ -1521,18 +1458,18 @@ def condition_indices_for_task(inputs, timing, task, condition_names=None):
         stim_epoch = slice(int(n_on[0]), int(n_off[0]))
         stim_drive = inputs[:, stim_epoch, :2].mean(dim=1)
 
-        is_go = stim_drive[:, 0] > stim_drive[:, 1]
-        is_nogo = ~is_go
+        is_right = stim_drive[:, 0] > stim_drive[:, 1]
+        is_left = ~is_right
 
         return {
-            "Go": torch.where(is_go)[0],
-            "NoGo": torch.where(is_nogo)[0],
+            "Right": torch.where(is_right)[0],
+            "Left": torch.where(is_left)[0],
         }
 
     if task == "dual":
         if condition_names is not None:
             names = np.asarray(condition_names).astype(str)
-            groups = {k: [] for k in ["AC", "AD", "BC", "BD", "Go", "NoGo", "DPAOnly"]}
+            groups = {k: [] for k in ["AC", "AD", "BC", "BD", "Right", "Left", "DPAOnly"]}
 
             for i, name in enumerate(names):
                 parts = name.split("_")
@@ -1548,10 +1485,10 @@ def condition_indices_for_task(inputs, timing, task, condition_names=None):
                 if pair in groups:
                     groups[pair].append(i)
 
-                if gng == "go":
-                    groups["Go"].append(i)
-                elif gng == "nogo":
-                    groups["NoGo"].append(i)
+                if gng == "right":
+                    groups["Right"].append(i)
+                elif gng == "left":
+                    groups["Left"].append(i)
                 elif gng == "none":
                     groups["DPAOnly"].append(i)
 
@@ -1569,17 +1506,17 @@ def condition_indices_for_task(inputs, timing, task, condition_names=None):
         is_B = ~is_A
         is_C = test_drive[:, 0] > test_drive[:, 1]
         is_D = ~is_C
-        is_go = gng_drive[:, 0] > 0.25
-        is_nogo = gng_drive[:, 1] > 0.25
-        is_dpa_only = ~(is_go | is_nogo)
+        is_right = gng_drive[:, 0] > 0.25
+        is_left = gng_drive[:, 1] > 0.25
+        is_dpa_only = ~(is_right | is_left)
 
         return {
             "AC": torch.where(is_A & is_C)[0],
             "AD": torch.where(is_A & is_D)[0],
             "BC": torch.where(is_B & is_C)[0],
             "BD": torch.where(is_B & is_D)[0],
-            "Go": torch.where(is_go)[0],
-            "NoGo": torch.where(is_nogo)[0],
+            "Right": torch.where(is_right)[0],
+            "Left": torch.where(is_left)[0],
             "DPAOnly": torch.where(is_dpa_only)[0],
         }
 
@@ -1593,11 +1530,11 @@ def flow_specs_for_task(timing, task):
 
     if task == "2afc":
         return [
-            dict(name="Autonomous", dims=None, conds=["Go", "NoGo"]),
-            dict(name="Go", dims=[0], conds=["Go"]),
-            dict(name="NoGo", dims=[1], conds=["NoGo"]),
-            dict(name="Cue", dims=[2], conds=["Go", "NoGo"]),
-            dict(name="Attention", dims=[3], conds=["Go", "NoGo"]),
+            dict(name="Autonomous", dims=None, conds=["Right", "Left"]),
+            dict(name="Right", dims=[0], conds=["Right"]),
+            dict(name="Left", dims=[1], conds=["Left"]),
+            dict(name="Cue", dims=[2], conds=["Right", "Left"]),
+            dict(name="Attention", dims=[3], conds=["Right", "Left"]),
         ]
 
     if task == "dpa":
@@ -1611,10 +1548,10 @@ def flow_specs_for_task(timing, task):
 
     if task == "gng":
         return [
-            dict(name="Autonomous", dims=None, conds=["Go", "NoGo"]),
-            dict(name="Go", dims=[4], conds=["Go"]),
-            dict(name="NoGo", dims=[5], conds=["NoGo"]),
-            dict(name="Cue", dims=[6], conds=["Go", "NoGo"]),
+            dict(name="Autonomous", dims=None, conds=["Right", "Left"]),
+            dict(name="Right", dims=[4], conds=["Right"]),
+            dict(name="Left", dims=[5], conds=["Left"]),
+            dict(name="Cue", dims=[6], conds=["Right", "Left"]),
         ]
 
     if task == "dual":
@@ -1622,9 +1559,9 @@ def flow_specs_for_task(timing, task):
             dict(name="Autonomous", dims=None, conds=["AC", "AD", "BC", "BD", "DPAOnly"]),
             dict(name="A", dims=[0], conds=["AC", "AD"]),
             dict(name="B", dims=[1], conds=["BC", "BD"]),
-            dict(name="Go", dims=[4], conds=["Go"]),
-            dict(name="NoGo", dims=[5], conds=["NoGo"]),
-            dict(name="Cue", dims=[6], conds=["Go", "NoGo"]),
+            dict(name="Right", dims=[4], conds=["Right"]),
+            dict(name="Left", dims=[5], conds=["Left"]),
+            dict(name="Cue", dims=[6], conds=["Right", "Left"]),
             dict(name="C", dims=[2], conds=["AC", "BC"]),
             dict(name="D", dims=[3], conds=["AD", "BD"]),
         ]
@@ -1798,7 +1735,7 @@ def plot_task_flow_fields(
     )
     if input_size <= max_dim:
         raise ValueError(
-            f"Task {task} requires input_size > {max_dim}, got {input_size}."
+            f"Task {task} requires input_size > {max_dim}, rightt {input_size}."
         )
 
     with torch.no_grad():
@@ -1838,8 +1775,8 @@ def plot_task_flow_fields(
         "AD": "tab:orange",
         "BC": "tab:green",
         "BD": "tab:purple",
-        "Go": "tab:red",
-        "NoGo": "tab:brown",
+        "Right": "tab:red",
+        "Left": "tab:brown",
         "DPAOnly": "tab:gray",
     }
 
@@ -2135,19 +2072,19 @@ if torch.cuda.is_available():
 
 #+begin_src jupyter-python
 N_BATCH = 516
-TAU = 0.2
+TAU = 0.3
 DT = 0.02
 alpha = DT / TAU
 
 # 5 input dimensions: for 2 stimuli, 1 Cue, 1 attention, 1 reward
-warmup_steps = 10
-input_size = 4
+input_size = 5
 hidden_size = 512
 output_size = 0
 rank = 2
 gain = 1.0
+rwd = True
 
-model = LowRankModel(input_size, hidden_size, output_size, rank, gain, alpha, train_inputs=True, warmup_steps=warmup_steps, device=device)
+model = LowRankModel(input_size, hidden_size, output_size, rank, gain, alpha, rwd=True, train_inputs=True, device=device)
 model.to(device)
 
 noise = 0.1 * torch.sqrt(1.0 - torch.exp(torch.tensor(-alpha))**2)
@@ -2165,9 +2102,14 @@ overlaps = {
     (("in", 0), ("n", 0)):  0.8,
     (("in", 1), ("n", 0)): -0.8,
 
+    # Stimulus loads readout direction 0
+    # (("in", 0), ("m", 0)):  0.8,
+    # (("in", 1), ("m", 0)): -0.8,
+
     # Cue/Lick on readout 1
     # (("in", 2), readout):  0.8,
-    (("in", 3), readout): 0.8,
+    (("in", 4), readout): 0.8,
+    # (("in", 4), ("m", 1)): 0.8,
 }
 
 # overlaps = None
@@ -2178,7 +2120,7 @@ init = LowRankInitializer(
     psd_warn_threshold=1e-1,   # warn loudly if correction > 0.1%
 )
 
-# init = LowRankInitializer(var_m=0.1, var_n=0.1, var_in=0.1, var_out=0.1, zero_biases=True)
+# init = LowRankInitializer(var_m=1.0, var_n=1.0, var_in=1.0, var_out=1.0, zero_biases=True)
 
 Sigma = init.apply(model, seed)
 print(f"min eigval after projection: {torch.linalg.eigvalsh(Sigma).min().item():.3e}")
@@ -2186,20 +2128,19 @@ print(f"diag (should match var_*): {torch.diag(Sigma).numpy()}")
 #+end_src
 
 #+RESULTS:
-: min eigval after projection: 1.338e-07
+: min eigval after projection: -1.490e-08
 : diag (should match var_*): [1.        1.        1.        1.0000001 0.9999999 0.9999999 1.
-:  1.       ]
-: /home/leon/tmp/ipykernel_754211/2477346011.py:199: UserWarning: Sigma was not PSD (min eigval = -3.856e-01); projected to nearest PSD (Frobenius rel. change = 1.355e-01). Correction is large — consider reducing overlap magnitudes or increasing the relevant variances.
+:  1.        1.       ]
+: /home/leon/tmp/ipykernel_1550004/2477346011.py:199: UserWarning: Sigma was not PSD (min eigval = -3.856e-01); projected to nearest PSD (Frobenius rel. change = 1.310e-01). Correction is large — consider reducing overlap magnitudes or increasing the relevant variances.
 :   Sigma = self.build_sigma(model)
-: /home/leon/tmp/ipykernel_754211/2477346011.py:180: UserWarning: Cholesky failed even after PSD projection (linalg.cholesky: The factorization could not be completed because the input is not positive-definite (the leading minor of order 6 is not positive-definite).); falling back to eigendecomposition.
+: /home/leon/tmp/ipykernel_1550004/2477346011.py:180: UserWarning: Cholesky failed even after PSD projection (linalg.cholesky: The factorization could not be completed because the input is not positive-definite (the leading minor of order 6 is not positive-definite).); falling back to eigendecomposition.
 :   warnings.warn(
-
 
 #+begin_src jupyter-python
 import numpy as np
 
 # Compare requested vs. realized overlaps
-labels = (['m0','m1','n0', readout[0]+'0'] + [f'in{i}' for i in range(4)])
+labels = (['m0','m1','n0', readout[0]+'0'] + [f'in{i}' for i in range(5)])
 
 print(f"{'pair':>12}  {'requested':>10}  {'realized':>10}")
 for (ba, ia), (bb, ib) in init.overlaps.keys():
@@ -2218,7 +2159,7 @@ for (ba, ia), (bb, ib) in init.overlaps.keys():
 :    m1-n0         +0.800      +0.718
 :   in0-n0         +0.800      +0.611
 :   in1-n0         -0.800      -0.611
-:   in3-n0         +0.800      +0.718
+:   in4-n0         +0.800      +0.718
 
 #+begin_src jupyter-python
 
@@ -2230,7 +2171,7 @@ for (ba, ia), (bb, ib) in init.overlaps.keys():
 ** 2AFC trial
 
 #+begin_src jupyter-python
-timing = TaskTiming(stim_on=[2.0, 4.0], stim_off=[3.0, 5.0], t_steps=6.0, dt=DT,)
+timing = TaskTiming(stim_on=[2.0, 6.0], stim_off=[3.0, 7.0], t_steps=8.0, dt=DT,)
 #+end_src
 
 #+RESULTS:
@@ -2249,12 +2190,12 @@ N_STIM_OFF = timing.n_stim_off
 
 #+begin_src jupyter-python
 target_rank=1
-inputs, targets, idx_go = generate_2AFC_trials(N_BATCH, timing=timing, input_size=input_size, noise=noise, rank=target_rank)
+inputs, targets, idx_right = generate_2AFC_trials(N_BATCH, timing=timing, input_size=input_size, noise=noise, rank=target_rank)
 print(inputs.shape, targets.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([516, 300, 4]) torch.Size([516, 300, 1])
+: torch.Size([516, 400, 5]) torch.Size([516, 400, 1])
 
 #+begin_src jupyter-python
 plt.hist(targets[:, -1, -1].reshape(-1), bins='auto')
@@ -2268,10 +2209,10 @@ plt.show()
 [[file:./figures/figure_24.png]]
 
 #+begin_src jupyter-python
-idx_nogo = torch.argwhere((targets[:, -1, -1] != 1)).reshape(-1)[:32]
-idx_go   = torch.argwhere(targets[:, -1, -1] == 1).reshape(-1)[:32]
+idx_left = torch.argwhere((targets[:, -1, -1] != 1)).reshape(-1)[:32]
+idx_right   = torch.argwhere(targets[:, -1, -1] == 1).reshape(-1)[:32]
 
-print(idx_go.shape, idx_nogo.shape)
+print(idx_right.shape, idx_left.shape)
 #+end_src
 
 #+RESULTS:
@@ -2280,19 +2221,19 @@ print(idx_go.shape, idx_nogo.shape)
 #+begin_src jupyter-python
 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 
-if len(idx_nogo) > 0:
+if len(idx_left) > 0:
     for i in range(inputs.shape[-1]):
-        ax[0].plot(x_time, inputs[idx_nogo, :, i].mT.cpu().numpy(), alpha=.2)
-    ax[0].plot(x_time, targets[idx_nogo[0],:, -1].cpu().numpy(), 'k', label='Target')
-ax[0].set_title('Nogo trials')
+        ax[0].plot(x_time, inputs[idx_left, :, i].mT.cpu().numpy(), alpha=.2)
+    ax[0].plot(x_time, targets[idx_left[0],:, -1].cpu().numpy(), 'k', label='Target')
+ax[0].set_title('Left trials')
 
-if len(idx_go) > 0:
+if len(idx_right) > 0:
     for i in range(inputs.shape[-1]):
-        ax[1].plot(x_time, inputs[idx_go, :, i].mT.cpu().numpy(), alpha=.2)
-    ax[1].plot(x_time, inputs[idx_go, :, 1].mT.cpu().numpy(), alpha=.2)
+        ax[1].plot(x_time, inputs[idx_right, :, i].mT.cpu().numpy(), alpha=.2)
+    ax[1].plot(x_time, inputs[idx_right, :, 1].mT.cpu().numpy(), alpha=.2)
 
-    ax[1].plot(x_time, targets[idx_go[0],: ,-1].cpu().numpy(), 'k', label='Target')
-ax[1].set_title('Go trials')
+    ax[1].plot(x_time, targets[idx_right[0],: ,-1].cpu().numpy(), 'k', label='Target')
+ax[1].set_title('Right trials')
 
 for i in range(2):
     for j in range(2):
@@ -2316,35 +2257,36 @@ print('inputs', inputs.shape, 'overlaps', overlaps.shape, 'rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: inputs torch.Size([516, 300, 4]) overlaps torch.Size([516, 300, 2]) rates torch.Size([516, 300, 512])
+: inputs torch.Size([516, 400, 5]) overlaps torch.Size([516, 400, 2]) rates torch.Size([516, 400, 512])
 
 #+begin_src jupyter-python
-criterion = MaskedZeroLoss(criterion=torch.nn.MSELoss(), nonzero_weight=1.0, zero_weight=1.0, verbose=1)
+criterion = MaskedZeroLoss(verbose=1)
 print(overlaps.shape, targets.shape)
 loss = criterion(overlaps, targets)
-print(loss)
+print('loss', loss)
 #+end_src
 
 #+RESULTS:
-: torch.Size([516, 300, 2]) torch.Size([516, 300, 1])
-: y_pred torch.Size([516, 300, 1]) y torch.Size([516, 300, 1])
-: finite torch.Size([516, 300, 1]) tensor(0.5000)
-: bl torch.Size([516, 300, 1]) tensor(0.3333)
-: nonzero torch.Size([516, 300, 1]) tensor(0.1667)
-: zero torch.Size([516, 300, 1]) tensor(0.)
-: loss_bl tensor(0.0024) loss_zero 0.0 loss_nonzero tensor(1.0041)
-: tensor(1.0066)
+: torch.Size([516, 400, 2]) torch.Size([516, 400, 1])
+: finite torch.Size([516, 400]) tensor(1.)
+: zero_mask torch.Size([516, 400]) tensor(0.6250)
+: target_mask torch.Size([516, 400]) tensor(0.1250)
+: bl_mask torch.Size([516, 400]) tensor(0.2500)
+: bl_loss tensor(0.0017)
+: zero_loss tensor(0.0009)
+: target_loss tensor(1.0051)
+: loss tensor(1.0062)
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
 
-ax[0].plot(x_time, targets[idx_nogo,:,-1][0], 'k', label='Target')
-ax[0].plot(x_time, overlaps[..., -1][idx_nogo].T, alpha=.2)
-ax[0].set_title('Nogo trials')
+ax[0].plot(x_time, targets[idx_left,:,-1][0], 'k', label='Target')
+ax[0].plot(x_time, overlaps[..., -1][idx_left].T, alpha=.2)
+ax[0].set_title('Left trials')
 
-ax[1].plot(x_time, targets[idx_go, :, -1][0], 'k', label='Target')
-ax[1].plot(x_time, overlaps[..., -1][idx_go].T, alpha=.2)
-ax[1].set_title('Go trials')
+ax[1].plot(x_time, targets[idx_right, :, -1][0], 'k', label='Target')
+ax[1].plot(x_time, overlaps[..., -1][idx_right].T, alpha=.2)
+ax[1].set_title('Right trials')
 
 for i in range(2):
     for j in range(2):
@@ -2370,14 +2312,16 @@ plt.show()
 ** 2AFC Training
 
 #+begin_src jupyter-python
-learning_rate = 0.001
+learning_rate = 0.01
+weight_decay =1e-2
 epochs = 50
-batch_size = 128
-grad_clip_norm = None
+batch_size = 64
+grad_clip_norm = 1.0
 
-criterion = MaskedZeroLoss(criterion=torch.nn.MSELoss(), nonzero_weight=1.0, zero_weight=0.1)
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5, threshold=0.001, min_lr=0.0001)
+criterion = MaskedZeroLoss(criterion=torch.nn.MSELoss(reduction='none'), bl_weight=1.0)
+# optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5, min_lr=1e-5, mode="min")
 #+end_src
 
 #+RESULTS:
@@ -2392,16 +2336,16 @@ torch.save(model.state_dict(), '%s/2AFC_%d.pth' % (PATH, seed))
 
 #+RESULTS:
 #+begin_example
-Epoch 005/50 | lr: 0.00100 | train: 0.2182 | val: 0.2071
-Epoch 010/50 | lr: 0.00100 | train: 0.1785 | val: 0.1701
-Epoch 015/50 | lr: 0.00100 | train: 0.1600 | val: 0.1563
-Epoch 020/50 | lr: 0.00100 | train: 0.1488 | val: 0.1441
-Epoch 025/50 | lr: 0.00100 | train: 0.1381 | val: 0.1313
-Epoch 030/50 | lr: 0.00100 | train: 0.1306 | val: 0.1265
-Epoch 035/50 | lr: 0.00100 | train: 0.1218 | val: 0.1162
-Epoch 040/50 | lr: 0.00100 | train: 0.1150 | val: 0.1089
-Epoch 045/50 | lr: 0.00100 | train: 0.1096 | val: 0.0992
-Epoch 050/50 | lr: 0.00100 | train: 0.1011 | val: 0.0949
+Epoch 005/50 | lr: 0.01000 | train: 0.9954 | val: 1.0001
+Epoch 010/50 | lr: 0.01000 | train: 0.9944 | val: 0.9993
+Epoch 015/50 | lr: 0.01000 | train: 0.9934 | val: 0.9986
+Epoch 020/50 | lr: 0.01000 | train: 0.9927 | val: 0.9987
+Epoch 025/50 | lr: 0.00500 | train: 0.9918 | val: 0.9999
+Epoch 030/50 | lr: 0.00250 | train: 0.9909 | val: 0.9981
+Epoch 035/50 | lr: 0.00125 | train: 0.9904 | val: 0.9986
+Epoch 040/50 | lr: 0.00125 | train: 0.9902 | val: 0.9984
+Epoch 045/50 | lr: 0.00063 | train: 0.9902 | val: 0.9984
+Epoch 050/50 | lr: 0.00031 | train: 0.9903 | val: 0.9987
 #+end_example
 
 #+begin_src jupyter-python
@@ -2434,18 +2378,18 @@ model.eval();
 #+RESULTS:
 
 #+begin_src jupyter-python
-inputs, targets, idx_go = generate_2AFC_trials(N_BATCH, timing=timing, input_size=input_size, noise=noise, rank=target_rank)
+inputs, targets, idx_right = generate_2AFC_trials(N_BATCH, timing=timing, input_size=input_size, noise=noise, rank=target_rank)
 print(inputs.shape, targets.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([516, 300, 4]) torch.Size([516, 300, 1])
+: torch.Size([516, 300, 5]) torch.Size([516, 300, 1])
 
 #+begin_src jupyter-python
-idx_nogo = torch.argwhere((targets[:, -1, -1] != 1)).reshape(-1)[:32]
-idx_go   = torch.argwhere(targets[:, -1, -1] == 1).reshape(-1)[:32]
+idx_left = torch.argwhere((targets[:, -1, -1] != 1)).reshape(-1)[:32]
+idx_right   = torch.argwhere(targets[:, -1, -1] == 1).reshape(-1)[:32]
 
-print(idx_go.shape, idx_nogo.shape)
+print(idx_right.shape, idx_left.shape)
 #+end_src
 
 #+RESULTS:
@@ -2454,19 +2398,19 @@ print(idx_go.shape, idx_nogo.shape)
 #+begin_src jupyter-python
 fig, ax = plt.subplots(1, 2, figsize=(2*width, height))
 
-if len(idx_nogo) > 0:
+if len(idx_left) > 0:
     for i in range(inputs.shape[-1]):
-        ax[0].plot(x_time, inputs[idx_nogo, :, i].mT.cpu().numpy(), alpha=.2)
+        ax[0].plot(x_time, inputs[idx_left, :, i].mT.cpu().numpy(), alpha=.2)
 
-    ax[0].plot(x_time, targets[idx_nogo[0],:, -1].cpu().numpy(), 'k', label='Target')
-ax[0].set_title('Nogo trials')
+    ax[0].plot(x_time, targets[idx_left[0],:, -1].cpu().numpy(), 'k', label='Target')
+ax[0].set_title('Left trials')
 
-if len(idx_go) > 0:
+if len(idx_right) > 0:
     for i in range(inputs.shape[-1]):
-        ax[1].plot(x_time, inputs[idx_go, :, i].mT.cpu().numpy(), alpha=.2)
-    ax[1].plot(x_time, targets[idx_go[0],: ,-1].cpu().numpy(), 'k', label='Target')
+        ax[1].plot(x_time, inputs[idx_right, :, i].mT.cpu().numpy(), alpha=.2)
+    ax[1].plot(x_time, targets[idx_right[0],: ,-1].cpu().numpy(), 'k', label='Target')
 
-ax[1].set_title('Go trials')
+ax[1].set_title('Right trials')
 
 for i in range(2):
     for j in range(2):
@@ -2490,33 +2434,7 @@ print('inputs', inputs.shape, 'overlaps', overlaps.shape, 'rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: inputs torch.Size([516, 300, 4]) overlaps torch.Size([516, 300, 2]) rates torch.Size([516, 300, 512])
-
-#+begin_src jupyter-python
-fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
-
-ax[0].plot(x_time, targets[idx_nogo,:,-1][0], 'k', label='Target')
-ax[0].plot(x_time, overlaps[..., -1][idx_nogo].T, alpha=.2)
-ax[0].set_title('Nogo trials')
-
-ax[1].plot(x_time, targets[idx_go, :, -1][0], 'k', label='Target')
-ax[1].plot(x_time, overlaps[..., -1][idx_go].T, alpha=.2)
-ax[1].set_title('Go trials')
-
-for i in range(2):
-    for j in range(2):
-        ax[i].axvspan(T_STIM_ON[j], T_STIM_OFF[j], alpha=0.3)
-    ax[i].axvspan(T_STIM_OFF[1], T_STEPS, alpha=0.3, color='y')
-    ax[i].set_ylim([-1.5, 1.5])
-    ax[i].set_xlabel('Time (s)')
-    ax[i].set_ylabel('Readout')
-    ax[i].legend(fontsize=14)
-
-plt.show()
-#+end_src
-
-#+RESULTS:
-[[file:./figures/figure_40.png]]
+: inputs torch.Size([516, 300, 5]) overlaps torch.Size([516, 300, 2]) rates torch.Size([516, 300, 512])
 
 #+begin_src jupyter-python
 kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)**2
@@ -2530,21 +2448,21 @@ print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
 
-ax[0].plot(x_time, targets[idx_nogo, :, 0][0], 'k', label='Target')
-ax[0].plot(x_time, overlaps[idx_nogo, :, 0].T, alpha=.2)
-ax[0].set_title('Unpaired trial')
+ax[0].plot(x_time, targets[idx_left, :, 0][0], 'k', label='Target')
+ax[0].plot(x_time, overlaps[idx_left, :, 0].T, alpha=.2)
+ax[0].set_title('Left trial')
 
-ax[1].plot(x_time, targets[idx_go, :, 0][0], 'k', label='Target')
-ax[1].plot(x_time, overlaps[idx_go, :, 0].T, alpha=.2)
-ax[1].set_title('Paired trial')
+ax[1].plot(x_time, targets[idx_right, :, 0][0], 'k', label='Target')
+ax[1].plot(x_time, overlaps[idx_right, :, 0].T, alpha=.2)
+ax[1].set_title('Right trial')
 
-ax[2].plot(x_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
-ax[2].plot(x_time, overlaps[idx_nogo, :, 1].T, alpha=.2)
-ax[2].set_title('Unpaired trial')
+ax[2].plot(x_time, targets[idx_left, :, -1][0], 'k', label='Target')
+ax[2].plot(x_time, overlaps[idx_left, :, 1].T, alpha=.2)
+ax[2].set_title('Left trial')
 
-ax[3].plot(x_time, targets[idx_go,:, -1][0], 'k', label='Target')
-ax[3].plot(x_time, overlaps[idx_go, :, 1].T, alpha=.2)
-ax[3].set_title('Paired trial')
+ax[3].plot(x_time, targets[idx_right,:, -1][0], 'k', label='Target')
+ax[3].plot(x_time, overlaps[idx_right, :, 1].T, alpha=.2)
+ax[3].set_title('Right trial')
 
 for i in range(4):
     for j in range(2):
@@ -2558,26 +2476,26 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_42.png]]
+[[file:./figures/figure_41.png]]
 
  #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
 
-ax[0].plot(x_time, targets[idx_nogo, :, 0][0], 'k', label='Target')
-ax[0].plot(x_time, kappa[idx_nogo, :, 0].T, alpha=.2)
-ax[0].set_title('NoGo trial')
+ax[0].plot(x_time, targets[idx_left, :, 0][0], 'k', label='Target')
+ax[0].plot(x_time, kappa[idx_left, :, 0].T, alpha=.2)
+ax[0].set_title('Left trial')
 
-ax[1].plot(x_time, targets[idx_go, :, 0][0], 'k', label='Target')
-ax[1].plot(x_time, kappa[idx_go, :, 0].T, alpha=.2)
-ax[1].set_title('Go trial')
+ax[1].plot(x_time, targets[idx_right, :, 0][0], 'k', label='Target')
+ax[1].plot(x_time, kappa[idx_right, :, 0].T, alpha=.2)
+ax[1].set_title('Right trial')
 
-ax[2].plot(x_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
-ax[2].plot(x_time, kappa[idx_nogo, :, 1].T, alpha=.2)
-ax[2].set_title('NoGo trial')
+ax[2].plot(x_time, targets[idx_left, :, -1][0], 'k', label='Target')
+ax[2].plot(x_time, kappa[idx_left, :, 1].T, alpha=.2)
+ax[2].set_title('Left trial')
 
-ax[3].plot(x_time, targets[idx_go, :, -1][0], 'k', label='Target')
-ax[3].plot(x_time, kappa[idx_go, :, 1].T, alpha=.2)
-ax[3].set_title('Go trial')
+ax[3].plot(x_time, targets[idx_right, :, -1][0], 'k', label='Target')
+ax[3].plot(x_time, kappa[idx_right, :, 1].T, alpha=.2)
+ax[3].set_title('Right trial')
 
 for i in range(4):
     for j in range(2):
@@ -2591,18 +2509,18 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_43.png]]
+[[file:./figures/figure_42.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
 
-ax[0].plot(x_time, targets[idx_nogo, :, -1][0], 'k', label='Target')
-ax[0].plot(x_time, overlaps[..., -1][idx_nogo].T, alpha=.2)
-ax[0].set_title('Nogo trials')
+ax[0].plot(x_time, targets[idx_left, :, -1][0], 'k', label='Target')
+ax[0].plot(x_time, overlaps[..., -1][idx_left].T, alpha=.2)
+ax[0].set_title('Left trials')
 
-ax[1].plot(x_time, targets[idx_go, :, -1][0], 'k', label='Target')
-ax[1].plot(x_time, overlaps[..., -1][idx_go].T, alpha=.2)
-ax[1].set_title('Go trials')
+ax[1].plot(x_time, targets[idx_right, :, -1][0], 'k', label='Target')
+ax[1].plot(x_time, overlaps[..., -1][idx_right].T, alpha=.2)
+ax[1].set_title('Right trials')
 
 for i in range(2):
     for j in range(2):
@@ -2617,7 +2535,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_44.png]]
+[[file:./figures/figure_43.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
@@ -2635,29 +2553,18 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_45.png]]
+[[file:./figures/figure_44.png]]
 
 #+begin_src jupyter-python
-# 2AFC
-fig, axes, field_cache = plot_task_flow_fields(
-    model,
-    inputs,
-    xlim=[-2, 2],
-    ylim=[-2, 2],
-    timing=timing,
-    task="2afc",
-    targets=targets,
-)
+fig, axes, field_cache = plot_task_flow_fields(model, inputs, xlim=[-2, 2], ylim=[-2, 2], timing=timing, task="2afc", targets=targets,)
 plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_46.png]]
+[[file:./figures/figure_45.png]]
 
 #+begin_src jupyter-python
 
 #+end_src
 
 #+RESULTS:
-
-***

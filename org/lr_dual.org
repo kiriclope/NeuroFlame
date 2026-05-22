@@ -96,7 +96,6 @@ class TaskTiming:
 #+end_src
 
 #+RESULTS:
-: 5062c4b1-c971-4308-9a3e-313a8d9a5073
 
 #+RESULTS:
 
@@ -147,12 +146,13 @@ def generate_dpa_trials(
     targets[~idx_pair, n_on[1]:, -1] = -1.0
 
     # no force licks during test
-    # targets[:, n_on[1]:n_off[1], -1] = torch.nan
+    targets[:, n_on[1]:n_off[1], -1] = 2.0
 
     return inputs, targets
 #+end_src
 
 #+RESULTS:
+: 1d3d2b02-7324-496f-8bb8-80f18defbf55
 
 ** /GNG generator/
 
@@ -199,7 +199,6 @@ def generate_gng_trials(
 #+end_src
 
 #+RESULTS:
-: 1a814207-d788-496e-b1f5-254ea4bbd9fb
 
 ** /Dual-task generator/
 
@@ -307,7 +306,6 @@ def generate_dual_trials(
 #+end_src
 
 #+RESULTS:
-: 1ffa9e58-674c-4366-85ad-27f3483c5a23
 
 * Training Utils
 
@@ -546,7 +544,7 @@ class MaskedZeroLoss(nn.Module):
         self,
         criterion: nn.Module | None = None,
         nonzero_weight: float = 1.0,
-        zero_weight: float = 0.1,
+        zero_weight: float = 1.0,
         baseline_weight: float = 0.1,
         zero_tol: float = 0.0,
         baseline_value: float = 1e-3,
@@ -791,21 +789,155 @@ class MaskedZeroLoss(nn.Module):
         pred = y_pred[...,-1].clone()
         zeros = torch.zeros_like(target)
 
-        zero_mask = (target==0).float()
-        target_mask = (target.abs() == 1).float()
-        bl_mask = (target==0.5).float()
+        finite = torch.isfinite(pred) & torch.isfinite(target)
+        if self.verbose:
+            print('finite', finite.shape, finite.float().mean())
 
-        bl_loss = 0.0
+        zero_mask = ((target==0) & finite) .float()
+        if self.verbose:
+            print('zero_mask', zero_mask.shape, zero_mask.mean())
+
+        target_mask = ((target.abs() == 1) & finite).float()
+        if self.verbose:
+            print('target_mask', target_mask.shape, target_mask.mean())
+
+        bl_mask = ((target==0.5) & finite).float()
+        if self.verbose:
+            print('bl_mask', bl_mask.shape, bl_mask.mean())
+
+        bl_loss = pred.sum() * 0.0
         for i in range(y_pred.shape[-1]):
-            bl_loss = bl_loss + (self.criterion(y_pred[..., i].clone(), zeros) * bl_mask).sum() / bl_mask.sum() / y_pred.shape[-1]
+            bl_i = (self.criterion(y_pred[..., i].clone(), zeros) * bl_mask).sum() / bl_mask.sum() if bl_mask.sum()!=0 else zeros.sum()
+            bl_loss = bl_loss + bl_i / y_pred.shape[-1]
 
-        zero_loss = (self.criterion(pred, zeros) * zero_mask).sum() / zero_mask.sum()
-        target_loss = (self.criterion(pred, target) * target_mask).sum() / target_mask.sum()
+        if self.verbose:
+            print('bl_loss', bl_loss)
+
+        zero_loss = (self.criterion(pred, zeros) * zero_mask).sum() / zero_mask.sum() if zero_mask.sum()!=0 else zeros.sum()
+        if self.verbose:
+            print('zero_loss', zero_loss)
+
+        target_loss = (self.criterion(pred, target) * target_mask).sum() / target_mask.sum() if target_mask.sum()!=0 else zeros.sum()
+        if self.verbose:
+            print('target_loss', target_loss)
 
         return self.zero_weight * zero_loss + self.target_weight * target_loss + self.bl_weight * bl_loss
 #+end_src
 
 #+RESULTS:
+
+#+begin_src jupyter-python
+import torch
+from torch import nn
+
+
+class MaskedZeroLoss(nn.Module):
+    def __init__(
+        self,
+        criterion: nn.Module | None = None,
+        nonzero_weight: float = 1.0,
+        zero_weight: float = 1.0,
+        bl_weight: float = 0.1,
+        verbose: int = 0,
+    ):
+        super().__init__()
+
+        self.criterion = criterion or nn.MSELoss(reduction="none")
+        self.target_weight = nonzero_weight
+        self.zero_weight = zero_weight
+        self.bl_weight = bl_weight
+        self.verbose = verbose
+
+    @staticmethod
+    def masked_mean(loss: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """
+        Non-branching masked mean.
+
+        If mask is empty, returns 0.
+        Assumes `loss` does not contain NaNs.
+        """
+        mask = mask.to(dtype=loss.dtype)
+        return (loss * mask).sum() / mask.sum().clamp_min(1.0)
+
+    def forward(self, y_pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """
+        y_pred: (B, T, C_pred)
+        y:      (B, T, C_target), NaN = ignore
+
+        Uses y[..., -1] as target label.
+
+        target == 0:
+            penalize y_pred[..., -1] toward 0
+
+        abs(target) == 1:
+            penalize y_pred[..., -1] toward target
+
+        target == 0.5:
+            penalize all y_pred channels toward 0
+        """
+
+        target = y[..., -1]
+        pred = y_pred[..., -1]
+
+        finite = torch.isfinite(pred) & torch.isfinite(target)
+
+        # Sanitize before criterion, because NaN * 0 = NaN.
+        safe_target = torch.where(finite, target, torch.zeros_like(target))
+        safe_pred = torch.where(finite, pred, torch.zeros_like(pred))
+
+        zero_mask = finite & (safe_target == 0)
+        target_mask = finite & (safe_target.abs() == 1)
+        bl_mask = finite & (safe_target == 0.5)
+
+        if self.verbose:
+            print("finite", finite.shape, finite.float().mean())
+            print("zero_mask", zero_mask.shape, zero_mask.float().mean())
+            print("target_mask", target_mask.shape, target_mask.float().mean())
+            print("bl_mask", bl_mask.shape, bl_mask.float().mean())
+
+        zeros = torch.zeros_like(safe_pred)
+
+        zero_loss = self.masked_mean(
+            self.criterion(safe_pred, zeros),
+            zero_mask,
+        )
+
+        target_loss = self.masked_mean(
+            self.criterion(safe_pred, safe_target),
+            target_mask,
+        )
+
+        # Baseline/background loss:
+        # For target == 0.5, push all output channels toward 0.
+        #
+        # Need to sanitize all y_pred channels independently.
+        finite_all = torch.isfinite(y_pred) & torch.isfinite(target).unsqueeze(-1)
+
+        safe_y_pred = torch.where(
+            finite_all,
+            y_pred,
+            torch.zeros_like(y_pred),
+        )
+
+        bl_mask_all = bl_mask.unsqueeze(-1).expand_as(y_pred) & finite_all
+
+        bl_loss = self.masked_mean(
+            self.criterion(safe_y_pred, torch.zeros_like(safe_y_pred)),
+            bl_mask_all,
+        )
+
+        if self.verbose:
+            print("zero_loss", zero_loss)
+            print("target_loss", target_loss)
+            print("bl_loss", bl_loss)
+
+        return (
+            self.zero_weight * zero_loss
+            + self.target_weight * target_loss
+            + self.bl_weight * bl_loss
+        )
+#+end_src
+
 
 * Low Rank RNNs
 ** Description
@@ -846,7 +978,6 @@ class LowRankModel(nn.Module):
         alpha=0.01,
         train_inputs=True,
         train_outputs=True,
-        warmup_steps=500,
         rwd_channel=-1,
         rwd_thresh=0.5,
         rwd=False,
@@ -854,11 +985,12 @@ class LowRankModel(nn.Module):
     ):
         super().__init__()
         self.device = torch.device(device)
-        self.warmup_steps = warmup_steps
+
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.rank = rank
         self.gain = torch.tensor(gain, device=self.device)
+        # self.gain = nn.Parameter(torch.tensor(gain, device=self.device))
 
         self.rwd = rwd
         self.rwd_channel = rwd_channel
@@ -914,7 +1046,7 @@ class LowRankModel(nn.Module):
         input_drive = self.Ai * self.wi(ff_inputs) if self.wi is not None else 0.0
         hidden = (rates @ self.n) @ self.m.T / self.hidden_size
         rec_inputs = self.exp_alpha * rec_inputs + (1.0 - self.exp_alpha) * hidden
-        rates = self.nonlinearity(( input_drive + rec_inputs))
+        rates = self.nonlinearity(( input_drive + self.gain * rec_inputs))
         return rates, rec_inputs
 
     def forward(self, ff_inputs, targets=None, ret_rates=False):
@@ -923,18 +1055,7 @@ class LowRankModel(nn.Module):
         N = self.hidden_size
 
         rec_inputs = torch.zeros(B, N, device=self.device)
-        rates = self.nonlinearity(self.gain * rec_inputs)
-
-        # rec_inputs = torch.randn(B, N, device=self.device)
-        # rates = self.nonlinearity(self.gain * rec_inputs)
-
-        # warmup with zero input
-        # zero_inputs = torch.zeros(B, max(self.input_size, 0), device=self.device)
-        # with torch.no_grad():
-        #     for _ in range(self.warmup_steps):
-        #         rates, rec_inputs = self.update_dynamics(zero_inputs, rec_inputs, rates)
-        # rates = rates.detach()
-        # rec_inputs = rec_inputs.detach()
+        rates = torch.zeros(B, N, device=self.device)
 
         readout_list = []
         rates_list = [] if ret_rates else None
@@ -1229,8 +1350,6 @@ class LowRankInitializer:
             self.auto_psd = old
 #+end_src
 
-
-
 #+RESULTS:
 
 #+begin_src jupyter-python
@@ -1404,7 +1523,7 @@ init.apply(model)
 # [goto error]
 : ---------------------------------------------------------------------------
 : TypeError                                 Traceback (most recent call last)
-: Cell In[17], line 2
+: Cell In[15], line 2
 :       1 # Model
 : ----> 2 model = LowRankModel(
 :       3     input_size=8, hidden_size=200, output_size=3, rank=2,
@@ -2838,20 +2957,18 @@ And update the loop that iterates over =specs= to use this local variable.
 
 With these changes the code is robust, respects Dale‑law constraints, and can be easily extended: to support a new task simply add entries to =flow_specs_for_task= and =condition_indices_for_task=.
 
-***
-
 * Initialization
 
 #+begin_src jupyter-python
 PATH = '../results/dual/vanilla'
-seed = 0
+seed = 2
 device = "cuda:1" if torch.cuda.is_available() else "cpu"
 # device = "cpu"
 print(device)
 #+end_src
 
 #+RESULTS:
-: bb4de260-9398-48bb-a541-7cfff82b68ff
+: cuda:1
 
  #+begin_src jupyter-python
 torch.manual_seed(seed)
@@ -2864,19 +2981,22 @@ if torch.cuda.is_available():
 
 #+begin_src jupyter-python
 N_BATCH = 516*2
-TAU = 0.3
+TAU = 0.2
 DT = 0.02
 alpha = DT / TAU
 
 # 8 input dimensions: for 2 samples, 2 tests, 2 distractors, 1 cue, 1 reward
-warmup_steps = 500
-input_size = 8
 hidden_size = 512
 output_size = 0
 rank = 2
 gain=1.0
+rwd=False
 
-model = LowRankModel(input_size, hidden_size, output_size, rank, gain, alpha, train_inputs=True, warmup_steps=warmup_steps, device=device)
+input_size = 7
+if rwd:
+    input_size = 8
+
+model = LowRankModel(input_size, hidden_size, output_size, rank, gain, alpha, rwd=rwd, train_inputs=True, device=device)
 # model = EILowRankRNN(input_size, hidden_size, output_size, rank, alpha, fraction_exc=0.8)
 model.to(device)
 
@@ -2886,62 +3006,50 @@ noise = 0.1 * torch.sqrt(1.0 - torch.exp(torch.tensor(-alpha))**2)
 #+RESULTS:
 
 #+begin_src jupyter-python
-readout = ("n", 1)
+c = 0.8
+
 overlaps = {
-    (("m", 0), ("n", 0)): 0.8,
-    (("m", 1), readout): 0.8,
+    # Group 1: m0, n0, in0 positive; in1 negative
+    (("m", 0), ("n", 0)): c,
+    (("in", 0), ("n", 0)): c,
+    (("in", 0), ("m", 0)): c,
 
-    # Sample loads readout direction 0
-    (("in", 0), ("n", 0)):  0.8,
-    (("in", 1), ("n", 0)): -0.8,
+    (("in", 1), ("n", 0)): -c,
+    (("in", 1), ("m", 0)): -c,
+    (("in", 0), ("in", 1)): -c,
 
-    (("in", 0), ("m", 0)):  0.8,
-    (("in", 1), ("m", 0)): -0.8,
+    # Group 2: m1, n1, in4 positive; in5 negative
+    (("m", 1), ("n", 1)): c,
+    (("in", 4), ("n", 1)): c,
+    (("in", 4), ("m", 1)): c,
 
-    # Test loads readout direction 1
-    # (("in", 2), readout):  0.5,
-    # (("in", 3), readout): -0.5,
-
-    # Go/NoGo/Cue/Lick on readout 1
-    (("in", 4), readout):  0.8,
-    (("in", 5), readout): -0.8,
-    # (("in", 6), readout):  0.8,
-    (("in", 4),  ("m", 1)):  0.8,
-    (("in", 5), ("m", 1)): -0.8,
-    # (("in", 6), readout):  0.8,
-
-
-    # lick
-    (("in", 7), readout):  0.8,
-    (("in", 7), ("m", 1)):  0.8,
+    (("in", 5), ("n", 1)): -c,
+    (("in", 5), ("m", 1)): -c,
+    (("in", 4), ("in", 5)): -c,
 }
+#+end_src
 
-# overlaps = None
+#+RESULTS:
 
+#+begin_src jupyter-python
+readout = ("n", 1)
 init = LowRankInitializer(
     overlaps=overlaps,
-    auto_psd=True,             # default; projects to nearest PSD with warning
-    psd_warn_threshold=1e-1,   # warn loudly if correction > 0.1%
+    var_m=1.0,
+    var_n=1.0,
+    var_in=1.0,
+    var_out=1.0,
+    auto_psd=True,
 )
 
-# init = LowRankInitializer(var_m=0.1, var_n=0.1, var_in=0.1, var_out=0.1, zero_biases=True)
 Sigma = init.apply(model, seed)
 print(f"min eigval after projection: {torch.linalg.eigvalsh(Sigma).min().item():.3e}")
 print(f"diag (should match var_*): {torch.diag(Sigma).numpy()}")
 #+end_src
 
 #+RESULTS:
-: min eigval after projection: 2.355e-09
-: diag (should match var_*): [1.         0.99999994 1.         1.         1.         1.
-:  0.9999999  0.9999999  1.         1.         1.         1.        ]
-: /home/leon/tmp/ipykernel_2380150/2477346011.py:199: UserWarning: Sigma was not PSD (min eigval = -6.000e-01); projected to nearest PSD (Frobenius rel. change = 1.497e-01). Correction is large — consider reducing overlap magnitudes or increasing the relevant variances.
-:   Sigma = self.build_sigma(model)
-
-#+begin_src jupyter-python
-# set_lowrank_spectral_radius(model, target_radius=0.99)
-#+end_src
-
-#+RESULTS:
+: min eigval after projection: 2.000e-01
+: diag (should match var_*): [1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1.]
 
 #+begin_src jupyter-python
 import numpy as np
@@ -2963,18 +3071,18 @@ for (ba, ia), (bb, ib) in init.overlaps.keys():
 #+RESULTS:
 #+begin_example
         pair   requested    realized
-   m0-n0         +0.800      +0.809
-   m1-n0         +0.800      +0.821
-  in0-n0         +0.800      +0.696
-  in1-n0         -0.800      -0.696
-  in0-m0         +0.800      +0.696
-  in1-m0         -0.800      -0.696
-  in4-n0         +0.800      +0.607
-  in5-n0         -0.800      -0.607
-  in4-m1         +0.800      +0.607
-  in5-m1         -0.800      -0.607
-  in7-n0         +0.800      +0.607
-  in7-m1         +0.800      +0.607
+   m0-n0         +0.800      +0.800
+  in0-n0         +0.800      +0.800
+  in0-m0         +0.800      +0.800
+  in1-n0         -0.800      -0.800
+  in1-m0         -0.800      -0.800
+  in0-in1        -0.800      -0.800
+   m1-n0         +0.800      +0.800
+  in4-n0         +0.800      +0.800
+  in4-m1         +0.800      +0.800
+  in5-n0         -0.800      -0.800
+  in5-m1         -0.800      -0.800
+  in4-in5        -0.800      -0.800
 #+end_example
 
 #+begin_src jupyter-python
@@ -2993,7 +3101,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_30.png]]
+[[file:./figures/figure_31.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
@@ -3011,7 +3119,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_31.png]]
+[[file:./figures/figure_34.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
@@ -3029,13 +3137,14 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_32.png]]
+: a744d023-acaa-45d6-a48f-48a81d3851ea
 
 #+begin_src jupyter-python
 
 #+end_src
 
 #+RESULTS:
+: 1d2d45f6-7e79-4653-b67b-0d1ef719940e
 
 * DPA task
 ** DPA trials
@@ -3065,7 +3174,7 @@ print(inputs.shape, targets.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([1032, 500, 8]) torch.Size([1032, 500, 1])
+: torch.Size([1032, 500, 7]) torch.Size([1032, 500, 1])
 
 #+begin_src jupyter-python
 plt.hist(targets[:, -1, -1].reshape(-1), bins='auto')
@@ -3076,7 +3185,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_37.png]]
+[[file:./figures/figure_40.png]]
 
 #+begin_src jupyter-python
 idx_nogo = torch.argwhere(targets[ :, -1, -1] != 1).reshape(-1)[:32]
@@ -3117,16 +3226,16 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_39.png]]
+[[file:./figures/figure_42.png]]
 
 #+begin_src jupyter-python
 overlaps, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
-overlaps = overlaps.detach().cpu().numpy()
+overlaps = overlaps.detach().cpu()
 print('rec_inputs', rec_inputs.shape, 'overlaps', overlaps.shape, 'rates', rates.shape)
 #+end_src
 
 #+RESULTS:
-: rec_inputs torch.Size([1032, 500, 512]) overlaps (1032, 500, 2) rates torch.Size([1032, 500, 512])
+: rec_inputs torch.Size([1032, 500, 512]) overlaps torch.Size([1032, 500, 2]) rates torch.Size([1032, 500, 512])
 
 #+begin_src jupyter-python
 kappa = (rec_inputs @ model.m) / torch.norm(model.m, dim=0)**2
@@ -3136,6 +3245,24 @@ print('rec', rec_inputs.shape, 'm', model.m.shape, 'kappa', kappa.shape)
 
 #+RESULTS:
 : rec torch.Size([1032, 500, 512]) m torch.Size([512, 2]) kappa (1032, 500, 2)
+
+#+begin_src jupyter-python
+criterion = MaskedZeroLoss(verbose=1)
+print(overlaps.shape, targets.shape)
+loss = criterion(overlaps, targets)
+print('loss', loss)
+#+end_src
+
+#+RESULTS:
+: torch.Size([1032, 500, 2]) torch.Size([1032, 500, 1])
+: finite torch.Size([1032, 500]) tensor(1.)
+: zero_mask torch.Size([1032, 500]) tensor(0.6000)
+: target_mask torch.Size([1032, 500]) tensor(0.1000)
+: bl_mask torch.Size([1032, 500]) tensor(0.2000)
+: bl_loss tensor(0.0028)
+: zero_loss tensor(0.0028)
+: target_loss tensor(1.0044)
+: loss tensor(1.0074)
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
@@ -3168,7 +3295,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_42.png]]
+[[file:./figures/figure_46.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -3192,7 +3319,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_43.png]]
+[[file:./figures/figure_47.png]]
 
 #+begin_src jupyter-python
 
@@ -3203,13 +3330,26 @@ plt.show()
 ** DPA Training
 
 #+begin_src jupyter-python
+for name, param in model.named_parameters():
+    if param.requires_grad:
+        print(name, param.shape)
+#+end_src
+
+#+RESULTS:
+: m torch.Size([512, 2])
+: n torch.Size([512, 2])
+: wi.weight torch.Size([512, 7])
+: wi.bias torch.Size([512])
+
+#+begin_src jupyter-python
 learning_rate = 0.01
-weight_decay =1e-2
+weight_decay = 1e-2
 epochs = 50
 batch_size = 64
 grad_clip_norm = 1.0
 
-criterion = MaskedZeroLoss(criterion=torch.nn.MSELoss(reduction='none'), bl_weight=1.0)
+criterion = MaskedZeroLoss(criterion=torch.nn.MSELoss(reduction='none'), bl_weight=0.1)
+# optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5, min_lr=1e-5, mode="min")
 #+end_src
@@ -3224,15 +3364,18 @@ torch.save(model.state_dict(), '%s/dpa_%d.pth' % (PATH, seed))
 #+end_src
 
 #+RESULTS:
-: Epoch 005/50 | lr: 0.01000 | train: 0.9995 | val: 0.9990
-: Epoch 010/50 | lr: 0.01000 | train: 0.9985 | val: 0.9985
-: Epoch 015/50 | lr: 0.01000 | train: 0.9981 | val: 0.9979
-: Epoch 020/50 | lr: 0.01000 | train: 0.9979 | val: 0.9993
-: Epoch 025/50 | lr: 0.01000 | train: 0.9981 | val: 0.9990
-: Epoch 030/50 | lr: 0.01000 | train: 0.9976 | val: 0.9985
-: Epoch 035/50 | lr: 0.00500 | train: 0.9977 | val: 1.0002
-: Epoch 040/50 | lr: 0.00250 | train: 0.9975 | val: 0.9991
-: Epoch 045/50 | lr: 0.00250 | train: 0.9974 | val: 0.9988
+#+begin_example
+Epoch 005/50 | lr: 0.01000 | train: 0.9579 | val: 0.9103
+Epoch 010/50 | lr: 0.01000 | train: 0.3031 | val: 0.2453
+Epoch 015/50 | lr: 0.01000 | train: 0.1482 | val: 0.1425
+Epoch 020/50 | lr: 0.01000 | train: 0.0360 | val: 0.0342
+Epoch 025/50 | lr: 0.01000 | train: 0.0342 | val: 0.0348
+Epoch 030/50 | lr: 0.01000 | train: 0.0328 | val: 0.0302
+Epoch 035/50 | lr: 0.01000 | train: 0.2201 | val: 0.0635
+Epoch 040/50 | lr: 0.00500 | train: 0.0212 | val: 0.0190
+Epoch 045/50 | lr: 0.00500 | train: 0.0148 | val: 0.0143
+Epoch 050/50 | lr: 0.00500 | train: 0.0121 | val: 0.0105
+#+end_example
 
  #+begin_src jupyter-python
 plt.plot(train_losses)
@@ -3243,7 +3386,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_47.png]]
+[[file:./figures/figure_50.png]]
 
 #+begin_src jupyter-python
 
@@ -3286,8 +3429,7 @@ print(inputs.shape, targets.shape)
 #+end_src
 
 #+RESULTS:
-: torch.Size([1032, 500, 8]) torch.Size([1032, 500, 1])
-
+: torch.Size([1032, 500, 7]) torch.Size([1032, 500, 1])
 
 #+begin_src jupyter-python
 overlaps, rates, rec_inputs = model(inputs.to(device), targets.to(device), ret_rates=True)
@@ -3348,7 +3490,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_56.png]]
+[[file:./figures/figure_59.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*width, height))
@@ -3381,7 +3523,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_57.png]]
+[[file:./figures/figure_60.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 2, figsize=(2*width, height))
@@ -3405,7 +3547,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_58.png]]
+[[file:./figures/figure_61.png]]
 
 #+begin_src jupyter-python
 fig , ax = plt.subplots(1, 4, figsize=(4*height,  height))
@@ -3423,7 +3565,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_59.png]]
+[[file:./figures/figure_62.png]]
 
 #+begin_src jupyter-python
 fig, axes, field_cache = plot_task_flow_fields(model, inputs, timing=dpa_timing, task="dpa", targets=targets, xlim=[-2, 2], ylim=[-2, 2])
@@ -3431,7 +3573,7 @@ plt.show()
 #+end_src
 
 #+RESULTS:
-[[file:./figures/figure_60.png]]
+[[file:./figures/figure_63.png]]
 
 #+begin_src jupyter-python
 
